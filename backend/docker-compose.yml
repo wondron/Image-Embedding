@@ -1,0 +1,38 @@
+x-common-healthcheck: &hc
+  healthcheck:
+    test: ["CMD", "curl", "-sf", "http://127.0.0.1:8320/api/healthz"]
+    interval: 3600s
+    timeout: 5s
+    start_period: 10s
+    retries: 3
+
+x-common-logging: &logs
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-gpu: &gpu
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: ["gpu"]
+
+services:
+  api:
+    image: aliyun-docker-harbor-registry.cn-hangzhou.cr.aliyuncs.com/roki-ai/roki-ai-image-embedding:2026081001
+    container_name: roki-imageembedding
+    environment:
+      # Set NACOS_ENV=test to use test; unset or empty defaults to prod.
+      NACOS_ENV: ${NACOS_ENV:-test}
+    volumes:
+      - ./save_images:/app/save_imagesoutput
+      - ./output:/app/output
+    ports:
+      - "8319:8319"
+    <<: [*hc, *logs, *gpu]
+    restart: unless-stopped

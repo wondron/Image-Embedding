@@ -1,0 +1,13 @@
+backend/alembic/versions/
+__pycache__/
+*.pyc
+redis/
+process/
+.venv/
+*.pyo
+backup/*
+frontend/node_modules/
+backend/logs/
+frontend/dist/
+logs/
+backend/config
