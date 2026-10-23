@@ -1,0 +1,44 @@
+.batch-search-panel { display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 16px; font-size: 14px; }
+.batch-upload { border: 1px dashed #c8d4e6; background: #fbfcfe; border-radius: 10px; transition: background .15s, border-color .15s; }
+.batch-upload.is-dragging { background: #edf4ff; border-color: #7396cf; }
+.batch-upload>button { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 7px; width: 100%; min-height: 190px; padding: 20px 12px; }
+.batch-upload>button:hover:not(:disabled) { background: #f2f6fc; }
+.batch-upload-icon { width: 46px; height: 46px; display: grid; place-items: center; border: 1px solid #dee6f2; border-radius: 10px; background: #f2f5fa; color: #6e89b3; margin-bottom: 5px; }
+.batch-upload b { color: #334155; font-size: 15px; font-weight: 600; }
+.batch-upload button>span:not(.batch-upload-icon) { font-size: 12px; color: #6b7280; }
+.batch-messages { color: #8b642d; background: #fffaf1; border: 1px solid #f0e3cd; border-radius: 8px; padding: 10px; max-height: 150px; overflow: auto; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.batch-run-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.batch-run-actions .btn { flex: 1; padding-inline: 10px; }
+.batch-explanation { font-size: 12px; line-height: 1.9; color: #6b7280; }
+.batch-progress { border: 1px solid #e4e9f0; border-radius: 8px; padding: 12px; background: #fafbfd; }
+.batch-progress>div { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
+.batch-progress b { font-size: 14px; font-weight: 600; color: #334155; }
+.batch-progress>div>span, .batch-progress p { font-size: 12px; color: #6b7280; font-variant-numeric: tabular-nums; }
+.batch-progress progress { display: block; width: 100%; height: 5px; appearance: none; border: 0; border-radius: 99px; overflow: hidden; background: #e9edf3; accent-color: #6f96d2; }
+.batch-progress progress::-webkit-progress-bar { background: #e9edf3; border-radius: 99px; }
+.batch-progress progress::-webkit-progress-value { background: #6f96d2; border-radius: 99px; }
+.batch-progress progress::-moz-progress-bar { background: #6f96d2; border-radius: 99px; }
+.batch-progress p { margin-top: 8px; }
+.batch-queue-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 3px; }
+.batch-queue-heading h3 { display: flex; align-items: center; gap: 6px; color: #334155; font-size: 14px; font-weight: 600; }
+.batch-queue-heading h3>span { color: #7b8899; font-size: 12px; font-weight: 400; }
+.batch-queue-heading .text-button { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.batch-queue { display: flex; flex-direction: column; gap: 8px; padding: 0; margin: 0; list-style: none; }
+.batch-job { display: flex; align-items: flex-start; position: relative; min-width: 0; padding: 10px; gap: 10px; border: 1px solid #e6eaf0; border-radius: 8px; background: #fff; }
+.batch-job.is-viewed { border-color: #b8cfee; background: #f8faff; }
+.batch-job-running { border-color: #c6d7ef; }
+.batch-job-preview { width: 48px; height: 48px; flex-shrink: 0; object-fit: contain; border: 1px solid #e6eaf0; background: #f6f7f9; border-radius: 5px; }
+.batch-job-info { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding-right: 16px; }
+.batch-job-info>b { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; color: #334155; }
+.batch-job-status { display: inline-flex; align-items: center; gap: 4px; color: #778292; font-size: 12px; }
+.batch-job-success .batch-job-status { color: #4f8874; }
+.batch-job-error .batch-job-status { color: #b56059; }
+.batch-job-running .batch-job-status { color: #4f75ad; }
+.batch-job-meta { font-size: 12px; color: #7b8899; }
+.batch-job-error, .batch-job-message { font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.batch-job-error { color: #a85e58; }
+.batch-job-message { color: #8b7149; }
+.batch-view-result.text-button { padding: 2px 0; font-size: 12px; }
+.batch-remove { position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; }
+.batch-empty { display: flex; align-items: center; gap: 7px; color: #7b8899; font-size: 12px; padding: 8px 0; }
+@media (max-width: 650px) { .batch-upload>button { min-height: 160px; } }

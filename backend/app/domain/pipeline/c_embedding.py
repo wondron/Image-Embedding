@@ -7,6 +7,7 @@ from typing import Any, Dict
 import numpy as np
 
 from app.domain.common.embedding import OnnxEmbedding
+from app.domain.common.image_utils import resolve_image_bgr
 
 logger = logging.getLogger("embedding")
 
@@ -38,10 +39,21 @@ class GlobalFilter:
             started_at = time.perf_counter()
             similarity = None
             try:
-                similarity = self.get_similar(embedd_vect, item.get("image_bgr"))
+                refer_bgr = item.get("image_bgr")
+                resolved_url = item.get("image_url")
+                downloaded = refer_bgr is None
+                if downloaded:
+                    resolved_url, refer_bgr = resolve_image_bgr(item)
+                    if refer_bgr is None:
+                        logger.warning("Skipping candidate with no usable image: %s", item.get("image_url"))
+                        continue
+                similarity = self.get_similar(embedd_vect, refer_bgr)
                 item["similarity"] = similarity
                 if similarity > self.threshold:
-                    final_data.append({key: value for key, value in item.items() if key != "image_bgr"})
+                    result = {key: value for key, value in item.items() if key != "image_bgr"}
+                    if downloaded:
+                        result["image_url"] = resolved_url
+                    final_data.append(result)
             except (TypeError, ValueError) as exc:
                 logger.warning("Skipping invalid candidate image %s: %s", item.get("image_url"), exc)
                 continue

@@ -25,8 +25,31 @@ export function safeHttpUrl(value: unknown): string | null {
   }
 }
 
-function thumbnail(value: unknown): string | null {
-  return safeHttpUrl(value) ?? safeHttpUrl(object(value).large);
+function thumbnailSources(raw: ObjectValue): unknown[] {
+  const details = object(raw.details);
+  const images = Array.isArray(details.images) ? details.images.map(object) : [];
+  const thumbnails = [object(raw.image_url), raw.thumbnail_url, ...images.map(image => image.thumbnail_url)];
+  const sizes = ['large', 'medium', 'small'];
+  const sources: unknown[] = [];
+  // Rank sizes across every thumbnail collection before trying a smaller variant.
+  for (const size of sizes) {
+    for (const value of thumbnails) {
+      sources.push(typeof value === 'string' && size === 'large' ? value : object(value)[size]);
+    }
+  }
+  for (const value of thumbnails) {
+    sources.push(...Object.entries(object(value)).filter(([key]) => !sizes.includes(key)).map(([, url]) => url));
+  }
+  return sources;
+}
+
+function uniqueImageUrls(values: unknown[]): string[] {
+  return [...new Set(values.map(safeHttpUrl).filter((url): url is string => url !== null))];
+}
+
+/** Candidate URLs only: availability is checked when the image is displayed or downloaded. */
+export function getImageSources(item: Pick<SearchImage, 'imageUrl' | 'thumbnailUrl' | 'raw'>): string[] {
+  return uniqueImageUrls([item.imageUrl, item.raw.image_url, ...thumbnailSources(item.raw), item.thumbnailUrl]);
 }
 
 function positiveNumber(value: unknown): number | null {
@@ -45,11 +68,7 @@ function normalizeItem(raw: ObjectValue, index: number): SearchImage {
   const images = Array.isArray(details.images) ? details.images.map(object) : [];
   const primaryImage = images.find(image => safeHttpUrl(image.image_url)) ?? images[0] ?? {};
   const imageUrl = safeHttpUrl(raw.image_url) ?? safeHttpUrl(primaryImage.image_url);
-  const thumbnailUrl = thumbnail(raw.thumbnail_url)
-    ?? safeHttpUrl(object(raw.image_url).large)
-    ?? thumbnail(primaryImage.thumbnail_url)
-    ?? images.map(image => thumbnail(image.thumbnail_url)).find(Boolean)
-    ?? null;
+  const thumbnailUrl = uniqueImageUrls(thumbnailSources(raw))[0] ?? null;
   const site = object(details.site);
   const pageUrl = safeHttpUrl(details.page_url);
   return {
@@ -172,14 +191,19 @@ function downloadName(item: SearchImage, type: string, source: string): string {
 }
 
 /** A successful resolution means the browser was asked to save a downloaded blob. */
-export async function downloadImage(item: SearchImage): Promise<void> {
-  const sources = [...new Set([safeHttpUrl(item.imageUrl), safeHttpUrl(item.thumbnailUrl)])]
-    .filter((source): source is string => source !== null);
+export async function downloadImage(item: SearchImage, apiBase?: string): Promise<void> {
+  const sources = getImageSources(item);
   if (!sources.length) throw new Error('这张图片没有有效的下载地址。');
   let downloaded: { blob: Blob; source: string } | null = null;
-  for (const source of sources) {
+  const attempts = sources.flatMap(source => [
+    { source, requestUrl: source },
+    ...(apiBase !== undefined ? [{ source,
+      requestUrl: `${apiBase.replace(/\/+$/, '')}/api/images/download?url=${encodeURIComponent(source)}`,
+    }] : []),
+  ]);
+  for (const { source, requestUrl } of attempts) {
     try {
-      const response = await fetch(source, {
+      const response = await fetch(requestUrl, {
         mode: 'cors', credentials: 'omit', signal: AbortSignal.timeout(30_000),
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -190,7 +214,7 @@ export async function downloadImage(item: SearchImage): Promise<void> {
       downloaded = { blob, source };
       break;
     } catch {
-      // Retry a distinct large thumbnail, including when the original rejects CORS.
+      // Try the configured download service, then the next thumbnail size.
     }
   }
   if (!downloaded) {

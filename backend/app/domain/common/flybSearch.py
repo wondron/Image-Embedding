@@ -96,7 +96,11 @@ class FlyBSearch:
         
         headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json",}
         response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError:
+            logger.warning("Global search upstream HTTP error | status=%s | request_id=%s", response.status_code, response.headers.get("X-Request-Id"),)
+            raise
         data = response.json()
         return self.parse_results(data)
 
@@ -162,9 +166,3 @@ class FlyBSearch:
                 },
             })
         return documents
-        # return {
-        #     "request_id": metadata.get("RequestId"),
-        #     "total_doc_count": result.get("TotalDocCount", 0),
-        #     "result_count": len(documents),
-        #     "results": documents,
-        # }

@@ -91,6 +91,25 @@ test('图片链接搜索显示结果、缺失分数与缩略图回退', async ({
   await screenshot(page, info, 'desktop-results')
 })
 
+test('使用图片时逐级回退到 medium，成功后不请求 small', async ({ page }) => {
+  const requested: string[] = []
+  await page.route('https://images.test/fallback-*.png', route => {
+    const filename = new URL(route.request().url()).pathname
+    requested.push(filename)
+    return filename.endsWith('original.png') || filename.endsWith('large.png')
+      ? route.fulfill({ status: 404, body: 'Controlled unavailable image' })
+      : route.fulfill({ contentType: 'image/png', body: png })
+  })
+  await mockSearch(page, { result: [{ title: '逐级回退图片', image_url: 'https://images.test/fallback-original.png',
+    thumbnail_url: { large: 'https://images.test/fallback-large.png', medium: 'https://images.test/fallback-medium.png', small: 'https://images.test/fallback-small.png' },
+  }] })
+  await search(page)
+  const image = page.locator('.result-card').getByRole('img', { name: '逐级回退图片', exact: true })
+  await expect(image).toHaveAttribute('src', 'https://images.test/fallback-medium.png')
+  await expect.poll(() => image.evaluate(element => (element as HTMLImageElement).naturalWidth)).toBe(1)
+  expect(requested).toEqual(['/fallback-original.png', '/fallback-large.png', '/fallback-medium.png'])
+})
+
 test('查询文件以 multipart file 字段提交', async ({ page }) => {
   await mockSearch(page)
   await page.getByLabel('选择查询图片').setInputFiles(upload())
@@ -379,4 +398,72 @@ test('390px 窄屏搜索与管理页面不横向溢出', async ({ page }, info) 
     await noHorizontalOverflow(page)
   }
   await screenshot(page, info, 'mobile-management')
+})
+
+test('结果多选跨页和视图保留并在新查询时清空', async ({ page }, info) => {
+  await mockSearch(page)
+  await search(page)
+  const download = page.getByRole('button', { name: /^批量下载/ })
+  await expect(download).toBeDisabled()
+  await page.getByRole('checkbox', { name: '选择图片：测试食材01', exact: true }).check()
+  await expect(page.getByText('已选择 1 张', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '下一页', exact: true }).click()
+  await page.getByRole('checkbox', { name: '选择图片：测试食材13', exact: true }).check()
+  await expect(page.getByText('已选择 2 张', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '上一页', exact: true }).click()
+  await expect(page.getByRole('checkbox', { name: '选择图片：测试食材01', exact: true })).toBeChecked()
+  await page.getByRole('button', { name: '列表展示结果', exact: true }).click()
+  await expect(page.getByRole('checkbox', { name: '选择图片：测试食材01', exact: true })).toBeChecked()
+  await expect(download).toBeEnabled()
+  await page.getByRole('button', { name: '选择全部结果', exact: true }).click()
+  await expect(page.getByText('已选择 15 张', { exact: true })).toBeVisible()
+  await expect(page.getByRole('checkbox', { name: '选择本页', exact: true })).toBeChecked()
+  await screenshot(page, info, 'desktop-selection')
+  await page.getByRole('button', { name: '清空选择', exact: true }).click()
+  await expect(download).toBeDisabled()
+  await page.getByRole('checkbox', { name: '选择本页', exact: true }).check()
+  await expect(page.getByText('已选择 12 张', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '开始搜索', exact: true }).click()
+  await expect(page.locator('.result-table tbody tr')).toHaveCount(12)
+  await expect(download).toBeDisabled()
+  await expect(page.getByRole('checkbox', { name: '选择图片：测试食材01', exact: true })).not.toBeChecked()
+})
+
+test('批量图片查询逐项提交且失败不影响后续查询与结果切换', async ({ page }, info) => {
+  const filenames: string[] = []
+  let releaseLast: () => void = () => {}
+  const gate = new Promise<void>(resolve => { releaseLast = resolve })
+  await page.route('**/api/predict/embedding_file', async route => {
+    const body = route.request().postDataBuffer()?.toString() ?? ''
+    const filename = /filename="([^"]+)"/.exec(body)?.[1] ?? ''
+    filenames.push(filename)
+    if (filename === 'failure.png') {
+      await route.fulfill({ status: 503, json: { detail: 'Controlled batch query failure' } })
+      return
+    }
+    if (filename === 'last.png') await gate
+    await route.fulfill({ json: { result: [{ ...rows[1], title: filename === 'first.png' ? '第一张查询结果' : '第三张查询结果' }] } }).catch(() => {})
+  })
+  try {
+    await page.getByRole('button', { name: '批量搜索', exact: true }).click()
+    await page.getByLabel('选择批量查询图片').setInputFiles([upload('first.png'), upload('failure.png'), upload('last.png')])
+    await page.getByRole('button', { name: '开始批量搜索', exact: true }).click()
+    await expect(page.locator('.result-card')).toHaveCount(1)
+    await expect(page.locator('.result-card').first()).toContainText('第一张查询结果')
+    await expect.poll(() => filenames).toEqual(['first.png', 'failure.png', 'last.png'])
+    await expect(page.getByText(/Controlled batch query failure/)).toBeVisible()
+    await page.getByRole('checkbox', { name: '选择图片：第一张查询结果', exact: true }).check()
+    releaseLast()
+    await expect(page.getByRole('button', { name: '查看结果：last.png', exact: true })).toBeEnabled()
+    await expect(page.locator('.result-card').first()).toContainText('第一张查询结果')
+    await page.getByRole('button', { name: '查看结果：last.png', exact: true }).click()
+    await expect(page.locator('.result-card')).toHaveCount(1)
+    await expect(page.locator('.result-card').first()).toContainText('第三张查询结果')
+    await expect(page.getByRole('button', { name: /^批量下载/ })).toBeDisabled()
+    await page.getByRole('button', { name: '查看结果：first.png', exact: true }).click()
+    await expect(page.locator('.result-card').first()).toContainText('第一张查询结果')
+    await expect(page.getByRole('checkbox', { name: '选择图片：第一张查询结果', exact: true })).not.toBeChecked()
+    await noHorizontalOverflow(page)
+    await screenshot(page, info, 'desktop-batch-query')
+  } finally { releaseLast() }
 })

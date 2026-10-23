@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { downloadImage, normalizeSearchResponse, readableApiError, safeHttpUrl, searchImages } from './search';
+import { downloadImage, getImageSources, normalizeSearchResponse, readableApiError, safeHttpUrl, searchImages } from './search';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -85,6 +85,44 @@ describe('safeHttpUrl', () => {
   });
 });
 
+describe('image candidate sources', () => {
+  it('ranks sizes globally, keeps the chosen original first, rejects unsafe variants and deduplicates URLs', () => {
+    const item = normalizeSearchResponse({ result: [{
+      image_url: { large: 'https://img.example/original-large.png', medium: 'https://img.example/shared.png', tiny: 'https://img.example/tiny.png' },
+      thumbnail_url: { large: 'javascript:alert(1)', medium: 'https://img.example/medium.png', small: 'https://img.example/small.png' },
+      details: { images: [
+        { image_url: 'https://img.example/original.png', thumbnail_url: { large: 'https://img.example/detail-large.png', medium: 'https://img.example/shared.png', small: 'file:///secret', other: { invalid: 'nested' } } },
+        { thumbnail_url: '//img.example/plain.png' },
+      ] },
+    }] }).items[0];
+    expect(getImageSources(item)).toEqual([
+      'https://img.example/original.png', 'https://img.example/original-large.png',
+      'https://img.example/detail-large.png', 'https://img.example/plain.png',
+      'https://img.example/shared.png', 'https://img.example/medium.png',
+      'https://img.example/small.png', 'https://img.example/tiny.png',
+    ]);
+  });
+
+  it('preserves unverified original URLs without fetching, and exposes medium-only thumbnails', () => {
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    const raw = { image_url: 'https://img.example/not-yet-checked.png', thumbnail_url: { medium: 'https://img.example/medium.png', small: 'https://img.example/small.png' } };
+    const item = normalizeSearchResponse({ result: [raw] }).items[0];
+    expect(item.imageUrl).toBe(raw.image_url);
+    expect(item.thumbnailUrl).toBe('https://img.example/medium.png');
+    expect(getImageSources(item)).toEqual([raw.image_url, 'https://img.example/medium.png', 'https://img.example/small.png']);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(raw).toEqual({ image_url: 'https://img.example/not-yet-checked.png', thumbnail_url: { medium: 'https://img.example/medium.png', small: 'https://img.example/small.png' } });
+  });
+
+  it('retains manually constructed image and thumbnail URLs with empty raw metadata', () => {
+    expect(getImageSources({ imageUrl: 'https://img.example/original.png', thumbnailUrl: 'https://img.example/thumbnail.png', raw: {} }))
+      .toEqual(['https://img.example/original.png', 'https://img.example/thumbnail.png']);
+    expect(getImageSources({ imageUrl: null, thumbnailUrl: 'https://img.example/thumbnail.png', raw: {} }))
+      .toEqual(['https://img.example/thumbnail.png']);
+  });
+});
+
 describe('API requests and failures', () => {
   it('sends URL requests to the configured server and passes cancellation', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ result: [] }), { status: 200 }));
@@ -140,6 +178,68 @@ describe('API requests and failures', () => {
 });
 
 describe('downloads', () => {
+  it('tries original then large then medium and stops before requesting small after a successful download', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(new Response('image-data', { headers: { 'Content-Type': 'image/png' } }));
+    vi.stubGlobal('fetch', fetcher);
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:medium');
+    const anchor = { href: '', download: '', click: vi.fn(), remove: vi.fn() };
+    vi.stubGlobal('document', { createElement: vi.fn().mockReturnValue(anchor), body: { appendChild: vi.fn() } });
+    vi.stubGlobal('window', { setTimeout: vi.fn() });
+    const item = normalizeSearchResponse({ result: [{
+      image_url: 'https://img.example/original.png', thumbnail_url: {
+        large: 'https://img.example/large.png', medium: 'https://img.example/medium.png', small: 'https://img.example/small.png',
+      },
+    }] }).items[0];
+    await downloadImage(item);
+    expect(fetcher.mock.calls.map(call => call[0])).toEqual([
+      'https://img.example/original.png', 'https://img.example/large.png', 'https://img.example/medium.png',
+    ]);
+    expect(anchor.click).toHaveBeenCalledOnce();
+  });
+
+  it('uses the configured server proxy after CORS failure and retains the original source for filename fallback', async () => {
+    const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError('CORS'))
+      .mockResolvedValueOnce(new Response(new Uint8Array([1, 2, 3])));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:proxy-image');
+    const anchor = { href: '', download: '', click: vi.fn(), remove: vi.fn() };
+    vi.stubGlobal('document', { createElement: vi.fn().mockReturnValue(anchor), body: { appendChild: vi.fn() } });
+    vi.stubGlobal('window', { setTimeout: vi.fn() });
+    const item = normalizeSearchResponse({ result: [{
+      title: 'food', image_url: 'https://example.com/original.webp', thumbnail_url: 'https://example.com/large.png',
+    }] }).items[0];
+    await downloadImage(item, 'http://localhost:8319/');
+    expect(fetchMock.mock.calls.map(call => call[0])).toEqual([
+      'https://example.com/original.webp',
+      'http://localhost:8319/api/images/download?url=https%3A%2F%2Fexample.com%2Foriginal.webp',
+    ]);
+    expect(anchor.download).toBe('food.webp');
+    expect(anchor.click).toHaveBeenCalledOnce();
+  });
+
+  it('tries a distinct thumbnail after both original downloads fail, including same-origin proxy configuration', async () => {
+    const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError('CORS'))
+      .mockResolvedValueOnce(new Response(null, { status: 422 }))
+      .mockResolvedValueOnce(new Response('image-data', { headers: { 'Content-Type': 'image/png' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:proxy-image');
+    const anchor = { href: '', download: '', click: vi.fn(), remove: vi.fn() };
+    vi.stubGlobal('document', { createElement: vi.fn().mockReturnValue(anchor), body: { appendChild: vi.fn() } });
+    vi.stubGlobal('window', { setTimeout: vi.fn() });
+    const item = normalizeSearchResponse({ result: [{
+      title: 'food', image_url: 'https://example.com/original.jpg', thumbnail_url: 'https://example.com/large.png',
+    }] }).items[0];
+    await downloadImage(item, '');
+    expect(fetchMock.mock.calls.map(call => call[0])).toEqual([
+      'https://example.com/original.jpg',
+      '/api/images/download?url=https%3A%2F%2Fexample.com%2Foriginal.jpg',
+      'https://example.com/large.png',
+    ]);
+    expect(anchor.download).toBe('food.png');
+  });
+
   it('saves the actual image blob with a safe filename and releases the temporary URL', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('image-bytes', { headers: { 'Content-Type': 'image/png' } })));
     const createObjectUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test-image');

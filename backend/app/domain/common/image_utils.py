@@ -1,10 +1,73 @@
 import os, random, cv2, io
 import numpy as np
+import requests
 from PIL import Image, ImageDraw, ImageFont
-from typing import Tuple, Literal
+from typing import Any, Iterator, Mapping, Tuple, Literal
 import logging
 
 logger = logging.getLogger('imageutils')
+
+
+def iter_image_urls(item: Mapping[str, Any]) -> Iterator[str]:
+    """按原图、large、medium、small、其他缩略图的顺序返回不重复的地址，不发起请求。"""
+    original = item.get('image_url')
+    candidates = [original]
+    # 上游没有原图时，image_url 也可能是缩略图字典。
+    thumbnails = [original] if isinstance(original, Mapping) else []
+    thumbnails.append(item.get('thumbnail_url'))
+    details = item.get('details')
+    images = details.get('images') if isinstance(details, Mapping) else None
+    if isinstance(images, (list, tuple)):
+        thumbnails.extend(image.get('thumbnail_url') for image in images if isinstance(image, Mapping))
+
+    sizes = ('large', 'medium', 'small')
+    for size in sizes:
+        for thumbnail in thumbnails:
+            if isinstance(thumbnail, Mapping):
+                candidates.append(thumbnail.get(size))
+            elif size == 'large':
+                candidates.append(thumbnail)
+    for thumbnail in thumbnails:
+        if isinstance(thumbnail, Mapping):
+            candidates.extend(url for size, url in thumbnail.items() if size not in sizes)
+
+    seen = set()
+    for url in candidates:
+        if not isinstance(url, str):
+            continue
+        url = url.strip()
+        if url and url not in seen:
+            seen.add(url)
+            yield url
+
+
+def download_image_bgr(url: str, timeout: float = 10) -> np.ndarray | None:
+    """按需下载并解码为 uint8 HWC BGR；请求或解码失败时返回 None。"""
+    if not isinstance(url, str) or not url.strip():
+        return None
+    try:
+        with requests.get(url.strip(), timeout=timeout) as response:
+            response.raise_for_status()
+            data = response.content
+        if not data:
+            return None
+        image = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+        return image if image is not None and image.size else None
+    except (requests.RequestException, OSError, ValueError, cv2.error) as exc:
+        logger.warning('Failed to download image %s: %s', url, exc)
+        return None
+
+
+def resolve_image_bgr(item: Mapping[str, Any], timeout: float = 10) -> tuple[str | None, np.ndarray | None]:
+    """按需尝试原图和缩略图，返回 (可用 URL, BGR)，全部失败返回 (None, None)。
+
+    不修改 item；调用方决定是否将验证后的 URL 写回结果。
+    """
+    for url in iter_image_urls(item):
+        image = download_image_bgr(url, timeout=timeout)
+        if image is not None:
+            return url, image
+    return None, None
 
 
 def normalize_to_u8(x: np.ndarray) -> np.ndarray:
