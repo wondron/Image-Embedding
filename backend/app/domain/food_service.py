@@ -1,16 +1,11 @@
-import os, logging, cv2, shutil
-import traceback, string, json
+import logging, cv2
 import numpy as np
-import app.domain.common.image_utils as ImageUtils
-import app.domain.common.timer_utils as utils
-import app.domain.common.gen_foodtree as foodTree
 import app.domain.common.timer_utils as timerUtils
-from datetime import datetime
 from app.core.config.settings import settings
 from app.core.observability.log_helper import show_text
 from app.domain.pipeline.b_getGlobalData import GetGlobalData
-from PIL import Image
-import time, uuid
+from app.domain.pipeline.c_embedding import GlobalFilter
+import uuid
 
 
 logger = logging.getLogger("food_service")
@@ -31,6 +26,7 @@ def is_uuid(value: str) -> bool:
 class FoodService:
     def __init__(self, cfg):
         self.searchTool = GetGlobalData(cfg)
+        self.searchFilter = GlobalFilter(cfg)
 
 
     def detect(self, image_data: bytes, machine_info: str = "", trace_id: str = "", save_result: bool = False):
@@ -44,11 +40,19 @@ class FoodService:
 
         res = self.searchTool.detect(image_data)
         timer_tools.mark('global_search')
+
+        documents = res['results'] if isinstance(res, dict) else res
+        filtered = self.searchFilter.detect(img_bgr, documents)
+        if isinstance(res, dict):
+            res['results'] = filtered
+            res['result_count'] = len(filtered)
+        else:
+            res = filtered
         timer_tools.mark('clip_dtct')
+
         timer_summary = timer_tools.summary()
         logger.info(timer_summary)
         show_text(timer_summary, trace_id)
-        save_datas = {}
         return res
     
 

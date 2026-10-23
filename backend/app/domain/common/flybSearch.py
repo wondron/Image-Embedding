@@ -151,6 +151,7 @@ class FlyBSearch:
             documents.append({
                 "title": doc.get("Title"),
                 "image_url": image_url,
+                "similiar": None,
                 "details": {
                     "rank": doc.get("Rank"),
                     "page_url": doc.get("Url"),
