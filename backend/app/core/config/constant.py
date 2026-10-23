@@ -34,7 +34,7 @@ NACOS_CONFIG_PROFILES: tuple[NacosProfile, ...] = (
         "username": "roki-ai-prod",
         "password": "IsAbprjbEGj2ME77jxiOR",
         "group": "ROKI_AI_GROUP",
-        "data_id_list": ["main_food"],
+        "data_id_list": ["roki-ai-image-search"],
     },
     {
         "profile": "test",
@@ -43,6 +43,6 @@ NACOS_CONFIG_PROFILES: tuple[NacosProfile, ...] = (
         "username": "roki-ai-test",
         "password": "Q65ILEBfsAmqnPbJqcSig",
         "group": "ROKI_AI_GROUP",
-        "data_id_list": ["main_food"],
+        "data_id_list": ["roki-ai-image-search"],
     },
 )

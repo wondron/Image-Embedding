@@ -4,11 +4,11 @@ import numpy as np
 import app.domain.common.image_utils as ImageUtils
 import app.domain.common.timer_utils as utils
 import app.domain.common.gen_foodtree as foodTree
-from app.domain.pipeline.a_onnx_segment import OnnxSegmentPy
 import app.domain.common.timer_utils as timerUtils
 from datetime import datetime
 from app.core.config.settings import settings
 from app.core.observability.log_helper import show_text
+from app.domain.pipeline.b_getGlobalData import GetGlobalData
 from PIL import Image
 import time, uuid
 
@@ -30,9 +30,7 @@ def is_uuid(value: str) -> bool:
 
 class FoodService:
     def __init__(self, cfg):
-        # self.segmentor = OnnxSegmentPy(cfg)
-        # self.iniDetectRange()
-        pass
+        self.searchTool = GetGlobalData(cfg)
 
 
     def detect(self, image_data: bytes, machine_info: str = "", trace_id: str = "", save_result: bool = False):
@@ -43,14 +41,15 @@ class FoodService:
         if isinstance(image_data, bytes):
             buf = np.frombuffer(image_data, dtype=np.uint8)
             img_bgr = cv2.imdecode(buf, cv2.IMREAD_COLOR)
-        
-        timer_tools.mark('segmentor')
+
+        res = self.searchTool.detect(image_data)
+        timer_tools.mark('global_search')
         timer_tools.mark('clip_dtct')
         timer_summary = timer_tools.summary()
         logger.info(timer_summary)
         show_text(timer_summary, trace_id)
         save_datas = {}
-        return {}
+        return res
     
 
 if __name__ == '__main__':
