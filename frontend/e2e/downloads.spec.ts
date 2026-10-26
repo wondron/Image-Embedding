@@ -12,7 +12,7 @@ const rows = [
 ]
 
 async function searchAndSelect(page: Page, selectedRows = rows) {
-  await page.route('**/api/predict/embedding_file', route => route.fulfill({ json: { result: selectedRows } }))
+  await page.route('**/api/predict/searchImage_file', route => route.fulfill({ json: { result: selectedRows } }))
   await page.getByLabel('选择查询图片', { exact: true }).setInputFiles(upload('query.png'))
   await page.getByRole('button', { name: '开始搜索', exact: true }).click()
   await expect(page.locator('.result-card')).toHaveCount(selectedRows.length)
@@ -181,7 +181,7 @@ test('批量查询停止后可继续，晚到的旧请求不会覆盖恢复后�
   const lateResponse = gate()
   const lateFinished = gate()
   const filenames: string[] = []
-  await page.route('**/api/predict/embedding_file', async route => {
+  await page.route('**/api/predict/searchImage_file', async route => {
     const filename = /filename="([^"]+)"/.exec(route.request().postDataBuffer()?.toString() ?? '')?.[1] ?? ''
     filenames.push(filename)
     const isOldRequest = filenames.length === 1

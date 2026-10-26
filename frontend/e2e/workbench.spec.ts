@@ -51,6 +51,16 @@ async function noHorizontalOverflow(page: Page) {
   expect(dimensions.body).toBeLessThanOrEqual(dimensions.viewport)
 }
 
+async function expectNativeFilePicker(page: Page, selector: string) {
+  const picker = page.locator(selector)
+  await expect(picker).toBeVisible()
+  expect(await picker.evaluate(element => {
+    const bounds = element.getBoundingClientRect()
+    const target = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+    return target instanceof HTMLInputElement && target.type === 'file' && target.classList.contains('file-picker-input')
+  })).toBe(true)
+}
+
 test.beforeEach(async ({ page }) => {
   await page.route('**/api/**', route => route.request().url().endsWith('/api/ping')
     ? route.fulfill({ json: { ok: true, max_image_bytes: 15 * 1024 * 1024 } })
@@ -76,7 +86,7 @@ test('空页面显示真实连接状态及搜索引导', async ({ page }, info) 
 
 test('图片链接搜索显示结果、缺失分数与缩略图回退', async ({ page }, info) => {
   await mockSearch(page)
-  const requestPromise = page.waitForRequest('**/api/predict/embedding_url')
+  const requestPromise = page.waitForRequest('**/api/predict/searchImage_url')
   await search(page)
   const request = await requestPromise
   expect(request.method()).toBe('POST')
@@ -114,12 +124,120 @@ test('查询文件以 multipart file 字段提交', async ({ page }) => {
   await mockSearch(page)
   await page.getByLabel('选择查询图片').setInputFiles(upload())
   await expect(page.getByRole('img', { name: '当前查询图片' })).toBeVisible()
-  const requestPromise = page.waitForRequest('**/api/predict/embedding_file')
+  const requestPromise = page.waitForRequest('**/api/predict/searchImage_file')
   await page.getByRole('button', { name: '开始搜索', exact: true }).click()
   const request = await requestPromise
   expect(request.headers()['content-type']).toContain('multipart/form-data; boundary=')
   expect(request.postDataBuffer()?.toString()).toContain('name="file"; filename="query.png"')
   await expect(page.locator('.result-card')).toHaveCount(12)
+})
+
+test('上传入口只打开一次文件选择且取消和重复选图后仍可搜索', async ({ page }) => {
+  const pageErrors: string[] = []
+  let chooserCount = 0
+  page.on('pageerror', error => pageErrors.push(error.message))
+  page.on('filechooser', () => { chooserCount += 1 })
+  await mockSearch(page)
+  const startSearch = page.getByRole('button', { name: '开始搜索', exact: true })
+  const preview = page.getByRole('img', { name: '当前查询图片', exact: true })
+
+  await expectNativeFilePicker(page, '.upload-trigger')
+  const firstChooser = page.waitForEvent('filechooser')
+  await page.locator('.upload-trigger').click()
+  await (await firstChooser).setFiles([])
+  expect(chooserCount).toBe(1)
+  await expect(startSearch).toBeDisabled()
+  await expect(preview).toHaveCount(0)
+  await expect(page.locator('.upload-trigger')).toBeVisible()
+
+  const uploadChooser = page.waitForEvent('filechooser')
+  await page.locator('.upload-trigger').click()
+  await (await uploadChooser).setFiles(upload())
+  expect(chooserCount).toBe(2)
+  await expect(preview).toBeVisible()
+  await expect(startSearch).toBeEnabled()
+  await startSearch.click()
+  await expect(page.locator('.result-card')).toHaveCount(12)
+  const selectedPreview = await preview.getAttribute('src')
+
+  await expectNativeFilePicker(page, '.replace-image')
+  const cancelChooser = page.waitForEvent('filechooser')
+  await page.locator('.replace-image').click()
+  await (await cancelChooser).setFiles([])
+  expect(chooserCount).toBe(3)
+  await expect(preview).toBeVisible()
+  await expect(preview).toHaveAttribute('src', selectedPreview!)
+  await expect(page.locator('.result-card')).toHaveCount(12)
+  await expect(startSearch).toBeEnabled()
+
+  const sameFileChooser = page.waitForEvent('filechooser')
+  await page.locator('.replace-image').click()
+  await (await sameFileChooser).setFiles(upload())
+  expect(chooserCount).toBe(4)
+  await expect(preview).toBeVisible()
+  await expect(startSearch).toBeEnabled()
+  await expect(page.locator('.result-card')).toHaveCount(0)
+  await startSearch.click()
+  await expect(page.locator('.result-card')).toHaveCount(12)
+  expect(chooserCount).toBe(4)
+  expect(pageErrors).toEqual([])
+})
+
+test('批量上传实际点击后可切预览且返回批量模式恢复结果', async ({ page }) => {
+  const pageErrors: string[] = []
+  let chooserCount = 0
+  let release: () => void = () => {}
+  const gate = new Promise<void>(resolve => { release = resolve })
+  page.on('pageerror', error => pageErrors.push(error.message))
+  page.on('filechooser', () => { chooserCount += 1 })
+  await page.route('**/api/predict/searchImage_file', async route => {
+    const filename = /filename="([^"]+)"/.exec(route.request().postDataBuffer()?.toString() ?? '')?.[1] ?? ''
+    await gate
+    await route.fulfill({ json: { result: [{ ...rows[1], title: filename }] } }).catch(() => {})
+  })
+  try {
+    await page.getByRole('button', { name: '批量搜索', exact: true }).click()
+    await expectNativeFilePicker(page, '.batch-upload-trigger')
+    const chooser = page.waitForEvent('filechooser')
+    await page.locator('.batch-upload-trigger').click()
+    await (await chooser).setFiles([upload('first.png'), upload('second.png')])
+    expect(chooserCount).toBe(1)
+    const firstPreview = page.getByRole('button', { name: '预览查询图片：first.png', exact: true })
+    const secondPreview = page.getByRole('button', { name: '预览查询图片：second.png', exact: true })
+    await expect(page.getByRole('img', { name: '当前查询图片：first.png', exact: true })).toBeVisible()
+    await secondPreview.click()
+    await expect(page.getByRole('img', { name: '当前查询图片：second.png', exact: true })).toBeVisible()
+    await firstPreview.click()
+
+    const request = page.waitForRequest('**/api/predict/searchImage_file')
+    await page.getByRole('button', { name: '开始批量搜索', exact: true }).click()
+    await request
+    const results = page.locator('.results-panel')
+    await expect(results.getByRole('status')).toBeVisible()
+    await expect(results.getByRole('status')).toContainText('正在')
+    await expect(results.getByRole('heading', { name: '等待查询图片' })).toHaveCount(0)
+    release()
+    await expect(page.locator('.result-card').first()).toContainText('first.png')
+    await expect(page.getByRole('button', { name: '单张搜索', exact: true })).toBeEnabled()
+    await secondPreview.click()
+    await expect(page.locator('.result-card').first()).toContainText('second.png')
+    const selectedResult = page.getByRole('checkbox', { name: '选择图片：second.png', exact: true })
+    await selectedResult.check()
+    await secondPreview.click()
+    await expect(selectedResult).toBeChecked()
+
+    await page.getByRole('button', { name: '单张搜索', exact: true }).click()
+    await page.getByRole('button', { name: '批量搜索', exact: true }).click()
+    await expect(secondPreview).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByRole('img', { name: '当前查询图片：second.png', exact: true })).toBeVisible()
+    await expect(page.locator('.result-card')).toHaveCount(1)
+    await expect(page.locator('.result-card').first()).toContainText('second.png')
+    await selectedResult.check()
+    await secondPreview.click()
+    await expect(selectedResult).toBeChecked()
+    expect(chooserCount).toBe(1)
+    expect(pageErrors).toEqual([])
+  } finally { release() }
 })
 
 test('结果支持分页、类别、关键词和相似度排序', async ({ page }) => {
@@ -201,12 +319,12 @@ test('侧栏收起展开后导航与查询结果保持可用', async ({ page }, 
   const expand = page.getByRole('button', { name: '展开侧栏', exact: true })
   await expect(expand).toHaveAttribute('aria-expanded', 'false')
   await expect.poll(() => sidebar.evaluate(element => element.getBoundingClientRect().width)).toBeLessThan(expandedWidth / 2)
-  await expect(page.getByRole('heading', { name: '图搜图', exact: true })).toBeVisible()
+  await expect(page.locator('.topbar').getByRole('heading', { name: '图搜图', level: 1, exact: true })).toBeVisible()
   await expect(page.locator('.result-card')).toHaveCount(12)
   await noHorizontalOverflow(page)
   await screenshot(page, info, 'desktop-collapsed')
   await navigate(page, '图片数据')
-  await expect(page.getByRole('heading', { name: '图片数据管理', exact: true })).toBeVisible()
+  await expect(page.locator('.topbar').getByRole('heading', { name: '图片数据', level: 1, exact: true })).toBeVisible()
   await navigate(page, '图搜图')
   await expect(page.locator('.result-card')).toHaveCount(12)
   await expand.click()
@@ -216,9 +334,18 @@ test('侧栏收起展开后导航与查询结果保持可用', async ({ page }, 
 
 test('桌面结果区域独立滚动且工具栏分页保持在视口内', async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 900 })
+  const queryPanel = page.locator('.query-panel')
+  await expect.poll(() => queryPanel.locator('.upload-area').evaluate(element => element.getBoundingClientRect().height)).toBeLessThanOrEqual(120)
+  await page.getByLabel('选择查询图片').setInputFiles(upload())
+  const queryPreview = queryPanel.getByRole('img', { name: '当前查询图片', exact: true })
+  await expect(queryPreview).toBeVisible()
+  await expect.poll(() => queryPreview.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(180)
   await mockSearch(page)
   await search(page)
-  const queryBounds = await page.locator('.query-panel').boundingBox()
+  await expect(queryPreview).toBeVisible()
+  await expect(queryPreview).toHaveAttribute('src', 'https://images.test/query.png')
+  await expect.poll(() => queryPreview.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(180)
+  const queryBounds = await queryPanel.boundingBox()
   const resultBounds = await page.locator('.results-panel').boundingBox()
   expect(queryBounds).not.toBeNull()
   expect(resultBounds).not.toBeNull()
@@ -232,6 +359,10 @@ test('桌面结果区域独立滚动且工具栏分页保持在视口内', async
   const footer = page.locator('.results-footer')
   const topbar = page.locator('.topbar')
   await expect(page.locator('.result-card')).toHaveCount(12)
+  const imageBounds = await page.locator('.result-image-button').first().boundingBox()
+  expect(imageBounds).not.toBeNull()
+  expect(imageBounds!.width).toBeGreaterThanOrEqual(190)
+  expect(imageBounds!.height).toBeGreaterThanOrEqual(190)
   await expect(toolbar).toBeInViewport()
   await expect(footer).toBeInViewport()
   const before = { toolbar: await toolbar.boundingBox(), footer: await footer.boundingBox(), topbar: await topbar.boundingBox() }
@@ -313,7 +444,7 @@ test('取消正在等待的请求并忽略迟到结果', async ({ page }) => {
     await route.fulfill({ json: result }).catch(() => {})
   })
   try {
-    const requestPromise = page.waitForRequest('**/api/predict/embedding_url')
+    const requestPromise = page.waitForRequest('**/api/predict/searchImage_url')
     await search(page)
     await requestPromise
     await expect(page.getByRole('button', { name: '取消搜索', exact: true })).toBeVisible()
@@ -382,6 +513,8 @@ test('390px 窄屏搜索与管理页面不横向溢出', async ({ page }, info) 
   await mockSearch(page)
   await search(page)
   await expect(page.locator('.result-card')).toHaveCount(12)
+  const imageBounds = await page.locator('.result-image-button').first().boundingBox()
+  expect(imageBounds!.height).toBeGreaterThanOrEqual(150)
   await noHorizontalOverflow(page)
   await screenshot(page, info, 'mobile-results')
   await page.getByRole('button', { name: '查看图片详情：测试食材01', exact: true }).click()
@@ -433,7 +566,7 @@ test('批量图片查询逐项提交且失败不影响后续查询与结果切�
   const filenames: string[] = []
   let releaseLast: () => void = () => {}
   const gate = new Promise<void>(resolve => { releaseLast = resolve })
-  await page.route('**/api/predict/embedding_file', async route => {
+  await page.route('**/api/predict/searchImage_file', async route => {
     const body = route.request().postDataBuffer()?.toString() ?? ''
     const filename = /filename="([^"]+)"/.exec(body)?.[1] ?? ''
     filenames.push(filename)
@@ -447,20 +580,37 @@ test('批量图片查询逐项提交且失败不影响后续查询与结果切�
   try {
     await page.getByRole('button', { name: '批量搜索', exact: true }).click()
     await page.getByLabel('选择批量查询图片').setInputFiles([upload('first.png'), upload('failure.png'), upload('last.png')])
+    const firstPreview = page.getByRole('button', { name: '预览查询图片：first.png', exact: true })
+    const lastPreview = page.getByRole('button', { name: '预览查询图片：last.png', exact: true })
+    await expect(firstPreview).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByRole('img', { name: '当前查询图片：first.png', exact: true })).toBeVisible()
     await page.getByRole('button', { name: '开始批量搜索', exact: true }).click()
     await expect(page.locator('.result-card')).toHaveCount(1)
     await expect(page.locator('.result-card').first()).toContainText('第一张查询结果')
     await expect.poll(() => filenames).toEqual(['first.png', 'failure.png', 'last.png'])
     await expect(page.getByText(/Controlled batch query failure/)).toBeVisible()
     await page.getByRole('checkbox', { name: '选择图片：第一张查询结果', exact: true }).check()
+    await lastPreview.click()
+    await expect(lastPreview).toHaveAttribute('aria-pressed', 'true')
+    await expect(firstPreview).toHaveAttribute('aria-pressed', 'false')
+    await expect(page.getByRole('img', { name: '当前查询图片：last.png', exact: true })).toBeVisible()
+    await expect(page.locator('.result-card')).toHaveCount(0)
+    await firstPreview.click()
+    await expect(firstPreview).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByRole('img', { name: '当前查询图片：first.png', exact: true })).toBeVisible()
+    await expect(page.locator('.result-card').first()).toContainText('第一张查询结果')
     releaseLast()
     await expect(page.getByRole('button', { name: '查看结果：last.png', exact: true })).toBeEnabled()
     await expect(page.locator('.result-card').first()).toContainText('第一张查询结果')
-    await page.getByRole('button', { name: '查看结果：last.png', exact: true }).click()
+    await lastPreview.click()
+    await expect(lastPreview).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByRole('img', { name: '当前查询图片：last.png', exact: true })).toBeVisible()
     await expect(page.locator('.result-card')).toHaveCount(1)
     await expect(page.locator('.result-card').first()).toContainText('第三张查询结果')
     await expect(page.getByRole('button', { name: /^批量下载/ })).toBeDisabled()
-    await page.getByRole('button', { name: '查看结果：first.png', exact: true }).click()
+    await firstPreview.click()
+    await expect(firstPreview).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByRole('img', { name: '当前查询图片：first.png', exact: true })).toBeVisible()
     await expect(page.locator('.result-card').first()).toContainText('第一张查询结果')
     await expect(page.getByRole('checkbox', { name: '选择图片：第一张查询结果', exact: true })).not.toBeChecked()
     await noHorizontalOverflow(page)

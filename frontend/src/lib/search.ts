@@ -152,7 +152,7 @@ export async function searchImages({ file, url, baseUrl = import.meta.env.VITE_A
   if (file && !file.size) throw new Error('图片文件为空，请重新选择。');
   const imageUrl = file ? null : safeHttpUrl(url);
   if (!file && !imageUrl) throw new Error('请输入有效的 HTTP 或 HTTPS 图片链接。');
-  const endpoint = file ? 'embedding_file' : 'embedding_url';
+  const endpoint = file ? 'searchImage_file' : 'searchImage_url';
   const body = file ? new FormData() : JSON.stringify({ img_url: imageUrl });
   if (body instanceof FormData && file) body.append('file', file);
   let response: Response;

@@ -129,7 +129,7 @@ describe('API requests and failures', () => {
     vi.stubGlobal('fetch', fetchMock);
     const signal = new AbortController().signal;
     await searchImages({ url: 'https://example.com/a.png', baseUrl: 'https://api.example/', signal });
-    expect(fetchMock).toHaveBeenCalledWith('https://api.example/api/predict/embedding_url', expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith('https://api.example/api/predict/searchImage_url', expect.objectContaining({
       method: 'POST', body: JSON.stringify({ img_url: 'https://example.com/a.png' }),
       headers: { 'Content-Type': 'application/json' }, signal,
     }));
@@ -141,7 +141,7 @@ describe('API requests and failures', () => {
     const file = new File(['image-data'], 'photo.png', { type: 'image/png' });
     await searchImages({ file });
     const [url, options] = fetchMock.mock.calls[0];
-    expect(url).toBe('/api/predict/embedding_file');
+    expect(url).toBe('/api/predict/searchImage_file');
     expect(options.body).toBeInstanceOf(FormData);
     expect(options.body.get('file').name).toBe('photo.png');
     expect(options.headers).toBeUndefined();
@@ -210,10 +210,10 @@ describe('downloads', () => {
     const item = normalizeSearchResponse({ result: [{
       title: 'food', image_url: 'https://example.com/original.webp', thumbnail_url: 'https://example.com/large.png',
     }] }).items[0];
-    await downloadImage(item, 'http://localhost:8319/');
+    await downloadImage(item, 'http://localhost:8320/');
     expect(fetchMock.mock.calls.map(call => call[0])).toEqual([
       'https://example.com/original.webp',
-      'http://localhost:8319/api/images/download?url=https%3A%2F%2Fexample.com%2Foriginal.webp',
+      'http://localhost:8320/api/images/download?url=https%3A%2F%2Fexample.com%2Foriginal.webp',
     ]);
     expect(anchor.download).toBe('food.webp');
     expect(anchor.click).toHaveBeenCalledOnce();

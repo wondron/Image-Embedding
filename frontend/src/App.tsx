@@ -9,6 +9,7 @@ import { ManagementViews, type ManagementView } from './components/ManagementVie
 import { Dialog } from './components/Dialog'
 import { BatchSearchPanel, type BatchSearchResult } from './components/BatchSearchPanel'
 import { DownloadDialog } from './components/DownloadDialog'
+import { ImageFilePicker } from './components/ImageFilePicker'
 import { downloadImage, getImageSources, safeHttpUrl, searchImages } from './lib/search'
 import type { SearchImage, SearchResponse } from './types'
 
@@ -36,6 +37,16 @@ function ResultImage({ item, className = '' }: { item: SearchImage; className?: 
   return sources[index]
     ? <img className={className} src={sources[index]} alt={item.title} loading="lazy" referrerPolicy="no-referrer" onError={() => setIndex(i => i + 1)} />
     : <div className={`image-unavailable ${className}`}><ImageIcon size={32} strokeWidth={1.3} /><span>图片暂不可用</span></div>
+}
+
+function QueryPreview({ src }: { src: string }) {
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  return <div className="query-preview-frame" aria-busy={status === 'loading'}>
+    {status === 'error'
+      ? <div className="query-preview query-preview-unavailable" role="status"><ImageIcon size={28} strokeWidth={1.4} /><span>图片预览暂不可用</span><small>可更换图片，或继续尝试搜索</small></div>
+      : <img className="query-preview" src={src} alt="当前查询图片" referrerPolicy="no-referrer" decoding="async" onLoad={() => setStatus('ready')} onError={() => setStatus('error')} />}
+    {status === 'loading' && <span className="query-preview-loading" role="status"><LoaderCircle size={16} className="spin" />正在加载预览…</span>}
+  </div>
 }
 
 function Score({ value }: { value: number | null }) {
@@ -102,7 +113,6 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [connection, setConnection] = useState<'checking' | 'online' | 'offline'>('checking')
-  const fileInput = useRef<HTMLInputElement>(null)
   const activeRequest = useRef<AbortController | null>(null)
 
   const checkConnection = useCallback(async () => {
@@ -204,7 +214,9 @@ export default function App() {
   const currentPage = Math.min(page, pages)
   const visible = sorted.slice((currentPage - 1) * pageSize, currentPage * pageSize)
   const pageInfo = navigation.find(item => item.key === view)!
-  const inputReady = mode === 'file' ? Boolean(file) : Boolean(url.trim())
+  const inputReady = mode === 'file' ? Boolean(file) : Boolean(safeHttpUrl(url.trim()))
+  const queryImageUrl = mode === 'url' ? safeHttpUrl(url.trim()) : null
+  const waitingForResults = busy || (queryKind === 'batch' && batchRunning && !searched)
   const selectedItems = items.filter(item => selected.has(item.id))
   const allPageSelected = visible.length > 0 && visible.every(item => selected.has(item.id))
   const somePageSelected = visible.some(item => selected.has(item.id))
@@ -235,34 +247,32 @@ export default function App() {
       </div>
     </aside>
 
-    <div className="main-shell"><header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" aria-label="展开导航" onClick={() => setMobileNav(true)}><Menu size={20} /></button><div className="topbar-title"><b>{pageInfo.name}</b><span>食材图像管理 / {pageInfo.description}</span></div></div><div className="topbar-actions"><span className="current-page-tab">{pageInfo.name}</span><button className="icon-button" title="使用说明" aria-label="使用说明" onClick={() => setHelpOpen(true)}><CircleHelp size={17} /></button><button className="icon-button" title="连接设置" aria-label="连接设置" disabled={batchRunning} onClick={() => { setApiDraft(apiBase); setSettingsOpen(true) }}><Settings2 size={17} /></button></div></header>
+    <div className="main-shell"><header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" aria-label="展开导航" onClick={() => setMobileNav(true)}><Menu size={20} /></button><div className="topbar-title"><h1>{pageInfo.name}</h1><span>食材图像管理 / {pageInfo.description}</span></div></div><div className="topbar-actions"><button className="icon-button" title="使用说明" aria-label="使用说明" onClick={() => setHelpOpen(true)}><CircleHelp size={17} /></button><button className="icon-button" title="连接设置" aria-label="连接设置" disabled={batchRunning} onClick={() => { setApiDraft(apiBase); setSettingsOpen(true) }}><Settings2 size={17} /></button></div></header>
     <main className={view === 'search' ? 'search-page' : 'management-page'}>
       {view !== 'search' && <ManagementViews view={view} onNavigate={navigate} />}
       <div className="search-view" hidden={view !== 'search'}>
-        <div className="page-heading"><div><h1>图搜图</h1><p>上传查询图片，查看相似结果、图片详情与来源。</p></div><span className="mode-badge">Global 搜索</span></div>
         {(error || notice) && <div className={`message-banner ${error ? 'message-error' : 'message-success'}`} role={error ? 'alert' : 'status'}>{error ? <XCircle size={18} /> : <CheckCircle2 size={18} />}<span>{error || notice}</span>{downloadFailure && safeHttpUrl(downloadFailure.imageUrl ?? downloadFailure.thumbnailUrl ?? '') && <a href={downloadFailure.imageUrl ?? downloadFailure.thumbnailUrl!} target="_blank" rel="noreferrer">打开原图 <ArrowUpRight size={14} /></a>}<button className="icon-button" aria-label="关闭提示" onClick={() => { setError(''); setNotice(''); setDownloadFailure(null) }}><X size={16} /></button></div>}
         <div className="search-workspace">
-          <section className="query-panel panel" aria-labelledby="query-heading"><div className="panel-heading"><div><h2 id="query-heading">查询条件</h2></div><span className="subtle-label">{queryKind === 'batch' ? '最多 30 张 · 每张 15 MB' : '单张图片 · 最大 15 MB'}</span></div>
+          <section className="query-panel panel" aria-label="图像搜索"><div className="query-toolbar">
             <div className="query-kind-tabs" aria-label="搜索模式">
               <button aria-pressed={queryKind === 'single'} className={queryKind === 'single' ? 'active' : ''} disabled={batchRunning} onClick={() => { if (queryKind !== 'single') { resetResults(); setQueryKind('single') } }}>单张搜索</button>
               <button aria-pressed={queryKind === 'batch'} className={queryKind === 'batch' ? 'active' : ''} disabled={busy} onClick={() => { if (queryKind !== 'batch') { resetResults(); setQueryKind('batch') } }}>批量搜索</button>
             </div>
+            <span className="subtle-label">{queryKind === 'batch' ? '≤30 张 · 15 MB/张' : '≤15 MB'}</span>
+            </div>
             <div hidden={queryKind !== 'single'}>
             <div className="query-body"><div className="query-source"><div className="segmented" aria-label="查询方式"><button className={mode === 'file' ? 'selected' : ''} aria-pressed={mode === 'file'} onClick={() => { if (mode !== 'file') { resetResults(); setMode('file') } }}><Upload size={14} />本地上传</button><button className={mode === 'url' ? 'selected' : ''} aria-pressed={mode === 'url'} onClick={() => { if (mode !== 'url') { resetResults(); setMode('url') } }}><Link2 size={14} />图片链接</button></div>
-              <input ref={fileInput} type="file" className="sr-only" accept="image/jpeg,image/png,image/webp,image/bmp" aria-label="选择查询图片" onChange={event => { selectFile(event.target.files?.[0]); event.target.value = '' }} />
               {mode === 'file' ? <div className={`upload-area ${dragging ? 'is-dragging' : ''} ${file ? 'has-image' : ''}`} onDragOver={event => { event.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); selectFile(event.dataTransfer.files[0]) }}>
-                {file && preview ? <><img className="query-preview" src={preview} alt="当前查询图片" /><div className="selected-file-info"><b>{file.name}</b><span>{(file.size / 1024).toFixed(0)} KB · 已选择查询图片</span><button className="replace-image" onClick={() => fileInput.current?.click()}><Upload size={13} />更换图片</button></div><button className="remove-image" aria-label="移除查询图片" onClick={() => { resetResults(); setFile(null) }}><X size={15} /></button></> : <button className="upload-trigger" onClick={() => fileInput.current?.click()}><span className="upload-icon"><UploadCloud size={25} strokeWidth={1.3} /></span><span className="upload-copy"><b>点击上传，或拖拽图片至此</b><small>支持 JPG、PNG、WebP、BMP 格式</small></span><span className="upload-button"><Upload size={13} />选择图片</span></button>}
-              </div> : <div className="url-input-area"><label htmlFor="image-url">图片地址</label><textarea id="image-url" className="input" rows={2} placeholder="https://example.com/image.jpg" value={url} onChange={event => { resetResults(); setUrl(event.target.value) }} /><p>请填写可公开访问的图片直链。</p></div>}
-              {file && mode === 'file' && <div className="file-summary"><ImageIcon size={15} /><span title={file.name}>{file.name}</span><small>{(file.size / 1024).toFixed(0)} KB</small><CheckCircle2 size={14} /></div>}
+                {file && preview ? <><QueryPreview key={preview} src={preview} /><div className="selected-file-info"><b>{file.name}</b><span>{(file.size / 1024).toFixed(0)} KB · 已选择查询图片</span><ImageFilePicker className="replace-image" label="选择查询图片" onFiles={files => selectFile(files[0])}><Upload size={13} />更换图片</ImageFilePicker></div><button className="remove-image" aria-label="移除查询图片" onClick={() => { resetResults(); setFile(null) }}><X size={15} /></button></> : <ImageFilePicker className="upload-trigger" label="选择查询图片" onFiles={files => selectFile(files[0])}><span className="upload-icon"><UploadCloud size={25} strokeWidth={1.3} /></span><span className="upload-copy"><b>点击上传，或拖拽图片至此</b><small>支持 JPG、PNG、WebP、BMP 格式</small></span></ImageFilePicker>}
+              </div> : <div className="url-input-area"><label className="sr-only" htmlFor="image-url">图片地址</label><input id="image-url" className="input" type="url" placeholder="https://example.com/image.jpg" value={url} onChange={event => { resetResults(); setUrl(event.target.value) }} /><p>请填写可公开访问的图片直链。</p>{queryImageUrl && <QueryPreview key={queryImageUrl} src={queryImageUrl} />}</div>}
             </div><div className="query-actions">
               <button className="btn btn-primary search-button" onClick={() => void runSearch()} disabled={!inputReady || busy}>{busy ? <LoaderCircle size={15} className="spin" /> : <Search size={15} />}{busy ? '正在搜索相似图片…' : '开始搜索'}</button>
               {busy && <button className="text-button cancel-search" onClick={() => { activeRequest.current?.abort(); activeRequest.current = null; setBusy(false); setNotice('已取消本次搜索。') }}>取消搜索</button>}
               <button className="btn btn-secondary" disabled={!file && !url && !searched && !error} onClick={() => { resetResults(); setFile(null); setUrl('') }}>重置</button>
-              <p className="query-caption">仅用于检索<br />不会自动加入图片库</p>
             </div>
             </div>
             </div>
-            <div hidden={queryKind !== 'batch'}><BatchSearchPanel baseUrl={apiBase} onResult={handleBatchResult} onRunningChange={handleBatchRunningChange} /></div>
+            <div hidden={queryKind !== 'batch'}><BatchSearchPanel active={queryKind === 'batch'} baseUrl={apiBase} onResult={handleBatchResult} onClearResult={resetResults} onRunningChange={handleBatchRunningChange} /></div>
           </section>
 
           <section className="results-panel panel" aria-labelledby="results-heading"><div className="panel-heading results-heading"><div><h2 id="results-heading">搜索结果</h2>{searched && <span className="count-badge">{items.length}</span>}</div><span className="subtle-label">{elapsed !== null ? `检索耗时 ${elapsed.toFixed(2)} s` : 'Global 图片搜索'}</span></div>
@@ -276,7 +286,7 @@ export default function App() {
             </div>}
             {activeQueryName && searched && <div className="active-query-name" title={activeQueryName}><ImageIcon size={14} /><span>当前查询：{activeQueryName}</span></div>}
             <div className={`results-content ${resultLayout === 'list' ? 'content-list' : ''}`}>
-            {busy ? <div className="loading-state" role="status"><div className="loading-orbit"><ScanLine size={37} strokeWidth={1.3} /></div><h3>正在寻找图片之间的联系</h3><p>搜索、获取图片并计算相似度，请稍候…</p><div className="skeleton-row">{[1, 2, 3].map(n => <div className="skeleton-card" key={n} />)}</div></div>
+            {waitingForResults ? <div className="loading-state" role="status"><div className="loading-orbit"><ScanLine size={37} strokeWidth={1.3} /></div><h3>正在寻找图片之间的联系</h3><p>{queryKind === 'batch' ? '批量搜索正在进行，查询图片完成后会显示对应结果。' : '搜索、获取图片并计算相似度，请稍候…'}</p><div className="skeleton-row">{[1, 2, 3].map(n => <div className="skeleton-card" key={n} />)}</div></div>
               : !searched ? <EmptyResults />
               : !visible.length ? <div className="no-results"><Search size={35} strokeWidth={1.2} /><h3>{items.length ? '没有符合筛选条件的结果' : '暂未找到相关图片'}</h3><p>{items.length ? '试试其他关键词或类别。' : '试试更清晰的图片，或更换查询主体。'}</p>{items.length > 0 && <button className="btn btn-secondary" onClick={() => { setKeyword(''); setCategory('all') }}>清除筛选</button>}</div>
               : resultLayout === 'list' ? <ResultTable items={visible} onDetail={setDetail} onDownload={item => void saveImage(item)} downloading={downloading} selected={selected} onToggle={toggleSelected} />
@@ -304,7 +314,7 @@ export default function App() {
 
     </Dialog>}
     {downloadItems && <DownloadDialog items={downloadItems} apiBase={apiBase} onClose={() => setDownloadItems(null)} />}
-    {settingsOpen && <Dialog title="搜索服务连接" onClose={() => setSettingsOpen(false)}><div className="settings-content"><p>连接现有的图像搜索服务。留空时使用当前站点的接口。</p><label htmlFor="api-base">服务地址</label><input className="input" id="api-base" type="url" placeholder="默认使用站点 /api" value={apiDraft} onChange={event => setApiDraft(event.target.value)} /><small>例如 http://127.0.0.1:8319，不包含 /api 路径。跨域连接需服务端允许访问。</small>{apiDraft.trim() && !safeHttpUrl(apiDraft.trim()) && <p className="inline-error">请输入 HTTP 或 HTTPS 地址。</p>}<div className="connection-info"><span className={`status-dot ${connection}`} />{connection === 'online' ? '接口可连接' : connection === 'checking' ? '正在检查连接…' : '当前未连接，请检查服务地址与后端运行状态'}<button className="text-button" onClick={() => void checkConnection()}>重新检查</button></div><div className="dialog-actions"><button className="btn btn-secondary" onClick={() => setSettingsOpen(false)}>取消</button><button className="btn btn-primary" disabled={Boolean(apiDraft.trim() && !safeHttpUrl(apiDraft.trim()))} onClick={saveSettings}><Check size={16} />保存连接</button></div></div></Dialog>}
+    {settingsOpen && <Dialog title="搜索服务连接" onClose={() => setSettingsOpen(false)}><div className="settings-content"><p>连接现有的图像搜索服务。留空时使用当前站点的接口。</p><label htmlFor="api-base">服务地址</label><input className="input" id="api-base" type="url" placeholder="默认使用站点 /api" value={apiDraft} onChange={event => setApiDraft(event.target.value)} /><small>例如 http://127.0.0.1:8320，不包含 /api 路径。跨域连接需服务端允许访问。</small>{apiDraft.trim() && !safeHttpUrl(apiDraft.trim()) && <p className="inline-error">请输入 HTTP 或 HTTPS 地址。</p>}<div className="connection-info"><span className={`status-dot ${connection}`} />{connection === 'online' ? '接口可连接' : connection === 'checking' ? '正在检查连接…' : '当前未连接，请检查服务地址与后端运行状态'}<button className="text-button" onClick={() => void checkConnection()}>重新检查</button></div><div className="dialog-actions"><button className="btn btn-secondary" onClick={() => setSettingsOpen(false)}>取消</button><button className="btn btn-primary" disabled={Boolean(apiDraft.trim() && !safeHttpUrl(apiDraft.trim()))} onClick={saveSettings}><Check size={16} />保存连接</button></div></div></Dialog>}
     {helpOpen && <Dialog title="开始使用食图" onClose={() => setHelpOpen(false)}><div className="help-content"><div><Search size={21} /><section><h3>以图搜图</h3><p>上传图片或输入可公开访问的图片直链，点击搜索。切换到「批量搜索」可添加最多 30 张图片，逐张搜索并在队列中分别查看结果；支持停止、继续和重试。</p></section></div><div><ArrowDownToLine size={21} /><section><h3>查看与下载</h3><p>点击结果打开详情，勾选图片后可「批量下载」。支持跨页多选，保存为 ZIP 或选择本地目录，并附带来源与相似度清单。目录选择需浏览器支持，并通过 HTTPS 或 localhost 访问；也可使用 ZIP 下载。</p></section></div><div><FolderOpen size={21} /><section><h3>为数据管理做好准备</h3><p>图片库、批量入库和任务接口待接入。导入队列与食材编辑仅为本地草稿，不会写入后台。</p></section></div><div className="help-note">相似度仅在服务返回分数时展示；类别不从图片标题自动推断。</div></div></Dialog>}
   </div>
 }

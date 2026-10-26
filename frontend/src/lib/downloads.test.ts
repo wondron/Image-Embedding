@@ -58,10 +58,10 @@ describe('downloadImages', () => {
   it('uses configured backend proxy for CORS failures without misreporting image source', async () => {
     const fetcher = vi.fn().mockRejectedValueOnce(new TypeError('Failed to fetch')).mockResolvedValueOnce(imageResponse())
     vi.stubGlobal('fetch', fetcher)
-    const result = await downloadImages({ items: [candidate()], apiBase: 'http://localhost:8319/', mode: 'zip',
+    const result = await downloadImages({ items: [candidate()], apiBase: 'http://localhost:8320/', mode: 'zip',
       signal: new AbortController().signal, saveArchive: vi.fn() })
     expect(result.saved).toBe(1)
-    expect(fetcher.mock.calls[1][0]).toBe('http://localhost:8319/api/images/download?url=https%3A%2F%2Fimages.example%2F1.jpg')
+    expect(fetcher.mock.calls[1][0]).toBe('http://localhost:8320/api/images/download?url=https%3A%2F%2Fimages.example%2F1.jpg')
     expect(result.records[0].source).toBe('https://images.example/1.jpg')
   })
 

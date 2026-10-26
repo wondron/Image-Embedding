@@ -33,6 +33,6 @@ services:
       - ./save_images:/app/save_imagesoutput
       - ./output:/app/output
     ports:
-      - "8319:8319"
+      - "8320:8320"
     <<: [*hc, *logs, *gpu]
     restart: unless-stopped

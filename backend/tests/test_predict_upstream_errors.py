@@ -40,7 +40,7 @@ class PredictUpstreamErrorTests(unittest.TestCase):
         return response
 
     def upload(self):
-        return self.client.post('/api/predict/embedding_file',
+        return self.client.post('/api/predict/searchImage_file',
                                 files={'file': ('query.png', b'controlled-query', 'image/png')})
 
     def test_upstream_502_is_reported_as_502_with_safe_detail_and_request_log(self):
@@ -49,7 +49,7 @@ class PredictUpstreamErrorTests(unittest.TestCase):
                 response = self.upload()
         post.assert_called_once()
         self.assertEqual(response.status_code, 502)
-        self.assertIn('上游搜索服务暂时不可用', response.json()['detail'])
+        self.assertIn('global服务检索失败', response.json()['detail'])
         self.assertIn('HTTP 502', response.json()['detail'])
         self.assertIn('controlled-upstream-request', logs.output[0])
         for secret in ('private-api-key', 'private-image-base64', 'private-token'):

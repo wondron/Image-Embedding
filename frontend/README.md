@@ -19,7 +19,7 @@ Windows 如因本机 npm 缓存目录权限遇到 `EPERM`，可在 PowerShell �
 npm run dev -- --host 0.0.0.0
 ```
 
-打开终端显示的地址，默认 `http://localhost:5173`。后端需单独启动；开发服务器默认将 `/api` 转发到 `http://127.0.0.1:8319`，与当前后端 Compose 的端口映射一致。
+打开终端显示的地址，默认 `http://localhost:5173`。后端需单独启动；开发服务器默认将 `/api` 转发到 `http://127.0.0.1:8320`，与当前后端 Compose 的端口映射一致。
 
 | 配置 | 用途 |
 | --- | --- |
@@ -53,8 +53,8 @@ npm run dev -- --host 0.0.0.0
 
 | 方法与路径 | 请求 |
 | --- | --- |
-| `POST /api/predict/embedding_file` | `multipart/form-data`，文件字段为 `file` |
-| `POST /api/predict/embedding_url` | JSON：`{"img_url":"https://example.com/image.jpg"}` |
+| `POST /api/predict/searchImage_file` | `multipart/form-data`，文件字段为 `file` |
+| `POST /api/predict/searchImage_url` | JSON：`{"img_url":"https://example.com/image.jpg"}` |
 | `GET /api/images/download` | Query：`url`，返回经验证的图片字节和实际图片 MIME 类型 |
 
 响应为 `{ "result": [...], "trace_id": "..." }`，也兼容 `result` 为包含 `results` 数组的对象。图片字段为 `image_url`，分数为 `similarity`（缺失时不显示虚构分数）；详情和缩略图来自 `details`。Global 搜索返回的候选结果不等同于已入库图片。

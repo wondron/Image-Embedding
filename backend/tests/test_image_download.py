@@ -9,7 +9,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app.adapter.http.endpoints import image_download as downloads
+from app.adapter.http.endpoints import image_download as endpoint
+from app.adapter.http.services import image_download as downloads
 
 
 def address_record(address="93.184.216.34"):
@@ -72,7 +73,7 @@ class ImageDownloadTests(unittest.TestCase):
     def fetch(self, response):
         connection = FakeConnection(response)
         with patch.object(downloads, "_connection", return_value=connection):
-            result = downloads._fetch_image("https://images.example/photo.png")
+            result = downloads.fetch_image("https://images.example/photo.png")
         self.assertTrue(connection.closed)
         self.assertTrue(response.closed)
         return result
@@ -95,7 +96,7 @@ class ImageDownloadTests(unittest.TestCase):
 
     def test_dns_failure_returns_generic_error_without_secret_url(self):
         self.dns.side_effect = socket.gaierror("resolver detail")
-        error = self.assert_http_error(502, downloads._fetch_image, "https://images.example/a?token=secret")
+        error = self.assert_http_error(502, downloads.fetch_image, "https://images.example/a?token=secret")
         self.assertNotIn("secret", error.detail)
 
     def test_connection_pins_dns_address_and_preserves_https_sni_verification(self):
@@ -149,14 +150,14 @@ class ImageDownloadTests(unittest.TestCase):
 
     def test_total_deadline_expiry_returns_timeout_before_connection(self):
         with patch.object(downloads.time, "monotonic", side_effect=[0, downloads.TOTAL_TIMEOUT + 1]), patch.object(downloads, "_connection") as connect:
-            self.assert_http_error(504, downloads._fetch_image, "https://images.example/a")
+            self.assert_http_error(504, downloads.fetch_image, "https://images.example/a")
         connect.assert_not_called()
 
     def test_public_redirect_is_followed_and_connections_are_closed(self):
         responses = [FakeResponse(status=302, headers={"Location": "https://cdn.example/final.png"}), FakeResponse(self.png)]
         connections = [FakeConnection(response) for response in responses]
         with patch.object(downloads, "_connection", side_effect=connections) as connect:
-            self.assertEqual(downloads._fetch_image("http://images.example/start")[0], self.png)
+            self.assertEqual(downloads.fetch_image("http://images.example/start")[0], self.png)
         self.assertEqual([call.args[0].host for call in connect.call_args_list], ["images.example", "cdn.example"])
         self.assertEqual(self.dns.call_count, 2)
         self.assertTrue(all(connection.closed for connection in connections))
@@ -165,14 +166,14 @@ class ImageDownloadTests(unittest.TestCase):
     def test_relative_redirect_keeps_path_and_is_revalidated(self):
         connections = [FakeConnection(FakeResponse(status=307, headers={"Location": "../final.png"})), FakeConnection(FakeResponse(self.png))]
         with patch.object(downloads, "_connection", side_effect=connections) as connect:
-            downloads._fetch_image("https://images.example/path/start.png")
+            downloads.fetch_image("https://images.example/path/start.png")
         self.assertEqual(connect.call_args_list[1].args[0].path, "/final.png")
         self.assertEqual(self.dns.call_count, 2)
 
     def test_redirect_to_private_literal_never_connects_to_it(self):
         connection = FakeConnection(FakeResponse(status=302, headers={"Location": "http://169.254.169.254/metadata"}))
         with patch.object(downloads, "_connection", return_value=connection) as connect:
-            self.assert_http_error(403, downloads._fetch_image, "https://images.example/a")
+            self.assert_http_error(403, downloads.fetch_image, "https://images.example/a")
         connect.assert_called_once()
         self.assertTrue(connection.closed)
 
@@ -180,7 +181,7 @@ class ImageDownloadTests(unittest.TestCase):
         self.dns.side_effect = [[address_record()], [address_record("10.0.0.1")]]
         connection = FakeConnection(FakeResponse(status=301, headers={"Location": "https://private.example/a"}))
         with patch.object(downloads, "_connection", return_value=connection) as connect:
-            self.assert_http_error(403, downloads._fetch_image, "https://images.example/a")
+            self.assert_http_error(403, downloads.fetch_image, "https://images.example/a")
         connect.assert_called_once()
 
     def test_redirect_limit_and_missing_location_are_rejected(self):
@@ -189,7 +190,7 @@ class ImageDownloadTests(unittest.TestCase):
                 response = FakeResponse(status=302, headers={"Location": location} if location else {})
                 connection = FakeConnection(response)
                 with patch.object(downloads, "_connection", return_value=connection) as connect:
-                    self.assert_http_error(502, downloads._fetch_image, "https://images.example/a")
+                    self.assert_http_error(502, downloads.fetch_image, "https://images.example/a")
                 self.assertEqual(connect.call_count, expected_calls)
                 self.assertTrue(connection.closed)
 
@@ -197,7 +198,7 @@ class ImageDownloadTests(unittest.TestCase):
         response = FakeResponse(self.png, headers={"Content-Length": str(downloads.MAX_IMAGE_BYTES + 1)})
         connection = FakeConnection(response)
         with patch.object(downloads, "_connection", return_value=connection):
-            self.assert_http_error(413, downloads._fetch_image, "https://images.example/a")
+            self.assert_http_error(413, downloads.fetch_image, "https://images.example/a")
         self.assertEqual(response.body.tell(), 0)
         self.assertTrue(connection.closed)
 
@@ -206,7 +207,7 @@ class ImageDownloadTests(unittest.TestCase):
             with self.subTest(headers=headers), patch.object(downloads, "MAX_IMAGE_BYTES", 10):
                 connection = FakeConnection(FakeResponse(b"x" * 100, headers=headers))
                 with patch.object(downloads, "_connection", return_value=connection):
-                    self.assert_http_error(413, downloads._fetch_image, "https://images.example/a")
+                    self.assert_http_error(413, downloads.fetch_image, "https://images.example/a")
                 self.assertEqual(connection.response.body.tell(), 11)
                 self.assertTrue(connection.closed)
 
@@ -215,13 +216,13 @@ class ImageDownloadTests(unittest.TestCase):
             with self.subTest(data=data):
                 connection = FakeConnection(FakeResponse(data, headers={"Content-Type": "image/png"}))
                 with patch.object(downloads, "_connection", return_value=connection):
-                    self.assert_http_error(415, downloads._fetch_image, "https://images.example/a")
+                    self.assert_http_error(415, downloads.fetch_image, "https://images.example/a")
 
     def test_invalid_content_length_and_upstream_error_are_generic(self):
         for response in (FakeResponse(headers={"Content-Length": "-1"}), FakeResponse(headers={"Content-Length": "oops"}), FakeResponse(status=403)):
             with self.subTest(response=response):
                 with patch.object(downloads, "_connection", return_value=FakeConnection(response)):
-                    error = self.assert_http_error(502, downloads._fetch_image, "https://images.example/a?token=secret")
+                    error = self.assert_http_error(502, downloads.fetch_image, "https://images.example/a?token=secret")
                 self.assertNotIn("secret", error.detail)
 
     def test_socket_timeout_and_connection_failure_map_to_http_errors(self):
@@ -230,7 +231,7 @@ class ImageDownloadTests(unittest.TestCase):
                 connection = FakeConnection(FakeResponse())
                 connection.request = Mock(side_effect=cause)
                 with patch.object(downloads, "_connection", return_value=connection):
-                    self.assert_http_error(expected, downloads._fetch_image, "https://images.example/a")
+                    self.assert_http_error(expected, downloads.fetch_image, "https://images.example/a")
                 self.assertTrue(connection.closed)
 
     def test_response_deadline_interrupts_slow_headers_and_maps_to_timeout(self):
@@ -244,7 +245,7 @@ class ImageDownloadTests(unittest.TestCase):
                 raise http.client.RemoteDisconnected("closed by deadline")
 
             connection.getresponse = Mock(side_effect=expire_headers)
-            self.assert_http_error(504, downloads._fetch_image, "https://images.example/a")
+            self.assert_http_error(504, downloads.fetch_image, "https://images.example/a")
         transport.shutdown.assert_called_once_with(socket.SHUT_RDWR)
         transport.close.assert_called_once()
         watchdog.return_value.start.assert_called_once()
@@ -264,7 +265,7 @@ class ImageDownloadTests(unittest.TestCase):
                 return b""
 
             response.read = Mock(side_effect=expire_body)
-            self.assert_http_error(504, downloads._fetch_image, "https://images.example/a")
+            self.assert_http_error(504, downloads.fetch_image, "https://images.example/a")
         transport.shutdown.assert_called_once_with(socket.SHUT_RDWR)
         transport.close.assert_called_once()
         watchdog.return_value.cancel.assert_called_once()
@@ -277,8 +278,8 @@ class ImageDownloadTests(unittest.TestCase):
 
     def test_route_returns_image_headers_and_validates_query_without_models(self):
         app = FastAPI()
-        app.include_router(downloads.router)
-        with TestClient(app) as client, patch.object(downloads, "_fetch_image", return_value=(self.png, "image/png")) as fetch:
+        app.include_router(endpoint.router)
+        with TestClient(app) as client, patch.object(downloads, "fetch_image", return_value=(self.png, "image/png")) as fetch:
             response = client.get("/api/images/download", params={"url": "https://images.example/photo.png"})
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.content, self.png)

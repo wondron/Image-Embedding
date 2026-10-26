@@ -15,12 +15,6 @@ let nextDraftId = 0
 // Draft IDs only need to be unique within this browser session. This also works
 // when the dev server is opened over plain HTTP from another device.
 function draftId() { return `draft-${++nextDraftId}` }
-const titles: Record<ManagementView, { title: string; description: string }> = {
-  library: { title: '图片数据管理', description: '管理食材图片、类别与入库信息' },
-  import: { title: '上传与批量导入', description: '选择本地图片，统一整理入库信息' },
-  tasks: { title: '入库任务', description: '查看任务进度与失败记录' },
-  ingredients: { title: '食材管理', description: '维护食材名称、类别与属性' },
-}
 
 function EmptyState({ icon: Icon, title, description, children }: {
   icon: typeof Images; title: string; description: string; children?: ReactNode
@@ -128,19 +122,35 @@ export function ManagementViews({ view, onNavigate }: Props) {
   const filteredIngredients = ingredients.filter(item =>
     (ingredientCategory === '全部类别' || item.category === ingredientCategory) &&
     `${item.name} ${item.attributes}`.toLocaleLowerCase().includes(ingredientQuery.trim().toLocaleLowerCase()))
-  const metadata = titles[view]
   return <div className="mg-page">
-    <header className="mg-header"><div><h1>{metadata.title}</h1><p>{metadata.description}</p></div>
+    <div className="mg-page-toolbar">
+      {view === 'library' && <>
+        <label className="mg-search"><Search size={17} /><input aria-label="搜索图库" placeholder="搜索图片名称或食材…" value={libraryQuery} onChange={event => setLibraryQuery(event.target.value)} />{libraryQuery && <button aria-label="清空搜索" onClick={() => setLibraryQuery('')}><X size={15} /></button>}</label>
+        <select className="mg-select" aria-label="图库类别筛选" value={libraryCategory} onChange={event => setLibraryCategory(event.target.value)}><option>全部类别</option>{categories.map(category => <option key={category}>{category}</option>)}</select>
+        <div className="mg-view-toggle" aria-label="图片展示方式"><button className={libraryLayout === 'grid' ? 'active' : ''} aria-label="网格展示" aria-pressed={libraryLayout === 'grid'} onClick={() => setLibraryLayout('grid')}><Images size={17} /></button><button className={libraryLayout === 'list' ? 'active' : ''} aria-label="列表展示" aria-pressed={libraryLayout === 'list'} onClick={() => setLibraryLayout('list')}><ListChecks size={17} /></button></div>
+        <button className="mg-btn mg-primary" onClick={() => onNavigate('import')}><Plus size={17} />导入图片</button>
+      </>}
+      {view === 'import' && <>
+        <button className="mg-btn mg-primary" onClick={() => fileInput.current?.click()}><FolderOpen size={17} />选择图片</button>
+        <span className="mg-toolbar-summary">JPG、PNG、WebP · 每张最大 15 MB · 最多 100 张</span>
+        <input ref={fileInput} type="file" className="mg-hidden" aria-label="选择待导入图片" accept="image/jpeg,image/png,image/webp" multiple onChange={event => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />
+      </>}
+      {view === 'tasks' && <>
+        <div className="mg-tabs" role="tablist" aria-label="任务状态">{taskStatuses.map((status, index) => <button key={status} id={`task-tab-${index}`} role="tab" aria-selected={taskStatus === status} aria-controls="task-panel" tabIndex={taskStatus === status ? 0 : -1} className={taskStatus === status ? 'active' : ''} onClick={() => setTaskStatus(status)} onKeyDown={event => navigateTaskTabs(event, index)}>{status}</button>)}</div>
+        <button className="mg-btn mg-secondary" onClick={() => onNavigate('import')}><Plus size={16} />准备图片</button>
+      </>}
+      {view === 'ingredients' && <>
+        <label className="mg-search"><Search size={17} /><input aria-label="搜索食材草稿" placeholder="搜索食材名称或属性…" value={ingredientQuery} onChange={event => setIngredientQuery(event.target.value)} />{ingredientQuery && <button aria-label="清空食材搜索" onClick={() => setIngredientQuery('')}><X size={15} /></button>}</label>
+        <select className="mg-select" aria-label="食材类别筛选" value={ingredientCategory} onChange={event => setIngredientCategory(event.target.value)}><option>全部类别</option>{categories.map(category => <option key={category}>{category}</option>)}</select>
+        <span className="mg-toolbar-summary">{ingredients.length} 个食材草稿</span>
+        <button className="mg-btn mg-primary" onClick={() => openEditor()}><Plus size={17} />新建食材</button>
+      </>}
       <span className="mg-status"><span />{view === 'import' || view === 'ingredients' ? '本地草稿模式' : '等待数据接口'}</span>
-    </header>
+    </div>
 
     {view === 'library' && <>
       <div className="mg-metrics"><Metric label="图片总量" value="—" detail="接入图库后显示" icon={Images} /><Metric label="食材类别" value="—" detail="接入分类后显示" icon={Layers3} /><Metric label="待入库任务" value="—" detail="接入任务后显示" icon={ListChecks} /></div>
-      <section className="mg-panel"><div className="mg-section-top"><div><h2>图片资源</h2><p>管理所有已入库的食材图片</p></div><button className="mg-btn mg-primary" onClick={() => onNavigate('import')}><Plus size={17} />导入图片</button></div>
-        <div className="mg-toolbar"><label className="mg-search"><Search size={17} /><input aria-label="搜索图库" placeholder="搜索图片名称或食材…" value={libraryQuery} onChange={event => setLibraryQuery(event.target.value)} />{libraryQuery && <button aria-label="清空搜索" onClick={() => setLibraryQuery('')}><X size={15} /></button>}</label>
-          <select className="mg-select" aria-label="图库类别筛选" value={libraryCategory} onChange={event => setLibraryCategory(event.target.value)}><option>全部类别</option>{categories.map(category => <option key={category}>{category}</option>)}</select>
-          <div className="mg-view-toggle" aria-label="图片展示方式"><button className={libraryLayout === 'grid' ? 'active' : ''} aria-label="网格展示" aria-pressed={libraryLayout === 'grid'} onClick={() => setLibraryLayout('grid')}><Images size={17} /></button><button className={libraryLayout === 'list' ? 'active' : ''} aria-label="列表展示" aria-pressed={libraryLayout === 'list'} onClick={() => setLibraryLayout('list')}><ListChecks size={17} /></button></div>
-        </div>
+      <section className="mg-panel">
         {libraryLayout === 'list' && <div className="mg-table-head mg-library-head"><span>图片 / 名称</span><span>类别</span><span>属性</span><span>入库时间</span></div>}
         <EmptyState icon={Images} title="暂无已入库图片" description={libraryQuery || libraryCategory !== '全部类别' ? '图库尚未开放，暂无可用于搜索和筛选的图片。' : '可先整理本地图片，图库开放后提交入库。'}>
           <button className="mg-btn mg-secondary" onClick={() => onNavigate('import')}><ImagePlus size={17} />准备第一批图片<ArrowRight size={16} /></button>
@@ -150,10 +160,9 @@ export function ManagementViews({ view, onNavigate }: Props) {
       <div className="mg-info"><Info size={17} /><p>后续接入图片详情、类别筛选与分页；当前不会创建或修改后端数据。</p></div>
     </>}
 
-    {view === 'import' && <div className="mg-import-layout"><section className="mg-panel mg-import-main"><div className="mg-section-top"><div><h2>选择本地图片</h2><p>单张上传或批量选择，一次最多 100 张</p></div><span className="mg-step">01 / 准备图片</span></div>
+    {view === 'import' && <div className="mg-import-layout"><section className="mg-panel mg-import-main">
       <div className={`mg-dropzone ${dragging ? 'is-dragging' : ''}`} onDragOver={event => { event.preventDefault(); setDragging(true) }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false) }} onDrop={dropFiles}>
-        <span className="mg-drop-icon"><CloudUpload size={32} strokeWidth={1.5} /></span><h3>把图片拖到这里</h3><p>或从你的设备中选择图片</p><button className="mg-btn mg-primary" onClick={() => fileInput.current?.click()}><FolderOpen size={17} />选择图片</button><small>JPG、PNG、WebP · 每张最大 15 MB</small>
-        <input ref={fileInput} type="file" className="mg-hidden" aria-label="选择待导入图片" accept="image/jpeg,image/png,image/webp" multiple onChange={event => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />
+        <span className="mg-drop-icon"><CloudUpload size={28} strokeWidth={1.5} /></span><div><h3>把图片拖到这里</h3><p>或使用顶部的「选择图片」添加文件</p></div>
       </div>
       {fileIssues.length > 0 && <div className="mg-errors" role="alert"><div><strong>部分图片未添加</strong><button onClick={() => setFileIssues([])} aria-label="关闭文件提示"><X size={16} /></button></div><ul>{fileIssues.map((issue, index) => <li key={index}>{issue}</li>)}</ul></div>}
       <div className="mg-queue-heading"><h3>待导入图片 <span>{queue.length}</span></h3>{queue.length > 0 && <button className="mg-text-button" onClick={clearQueue}>清空列表</button>}</div>
@@ -164,13 +173,12 @@ export function ManagementViews({ view, onNavigate }: Props) {
 
     {view === 'tasks' && <>
       <div className="mg-metrics"><Metric label="正在处理" value="—" detail="等待任务服务接入" icon={CloudUpload} /><Metric label="成功入库" value="—" detail="等待任务服务接入" icon={Check} /><Metric label="失败记录" value="—" detail="等待任务服务接入" icon={ListChecks} /></div>
-      <section className="mg-panel"><div className="mg-section-top"><div><h2>入库记录</h2><p>任务进度与失败记录统一查看</p></div><button className="mg-btn mg-secondary" onClick={() => onNavigate('import')}><Plus size={16} />准备图片</button></div><div className="mg-tabs" role="tablist" aria-label="任务状态">{taskStatuses.map((status, index) => <button key={status} id={`task-tab-${index}`} role="tab" aria-selected={taskStatus === status} aria-controls="task-panel" tabIndex={taskStatus === status ? 0 : -1} className={taskStatus === status ? 'active' : ''} onClick={() => setTaskStatus(status)} onKeyDown={event => navigateTaskTabs(event, index)}>{status}</button>)}</div><div id="task-panel" role="tabpanel" aria-labelledby={`task-tab-${taskStatuses.indexOf(taskStatus)}`}><div className="mg-table-head mg-task-head"><span>任务名称</span><span>处理进度</span><span>状态</span><span>创建时间</span></div><EmptyState icon={ListChecks} title={taskStatus === '失败记录' ? '暂无可查看的失败记录' : taskStatus === '处理中' ? '暂无正在处理的任务' : taskStatus === '已完成' ? '暂无已完成的任务' : '暂无入库任务'} description="任务接口尚未接入。正式开放后，这里会显示真实进度、处理数量与失败原因。"><button className="mg-btn mg-secondary" onClick={() => onNavigate('import')}>先准备一批图片<ArrowRight size={16} /></button></EmptyState></div></section>
+      <section className="mg-panel"><div id="task-panel" role="tabpanel" aria-labelledby={`task-tab-${taskStatuses.indexOf(taskStatus)}`}><div className="mg-table-head mg-task-head"><span>任务名称</span><span>处理进度</span><span>状态</span><span>创建时间</span></div><EmptyState icon={ListChecks} title={taskStatus === '失败记录' ? '暂无可查看的失败记录' : taskStatus === '处理中' ? '暂无正在处理的任务' : taskStatus === '已完成' ? '暂无已完成的任务' : '暂无入库任务'} description="任务接口尚未接入。正式开放后，这里会显示真实进度、处理数量与失败原因。"><button className="mg-btn mg-secondary" onClick={() => onNavigate('import')}>先准备一批图片<ArrowRight size={16} /></button></EmptyState></div></section>
       <div className="mg-info"><Info size={17} /><p>后续支持查看失败详情与重试；页面当前不会生成模拟任务或模拟进度。</p></div>
     </>}
 
     {view === 'ingredients' && <>
-      <section className="mg-panel"><div className="mg-section-top"><div><h2>食材字典 <span className="mg-count">{ingredients.length}</span></h2><p>维护名称、类别与属性，当前内容仅为本次会话的本地草稿</p></div><button className="mg-btn mg-primary" onClick={() => openEditor()}><Plus size={17} />新建食材</button></div>
-        <div className="mg-toolbar"><label className="mg-search"><Search size={17} /><input aria-label="搜索食材草稿" placeholder="搜索食材名称或属性…" value={ingredientQuery} onChange={event => setIngredientQuery(event.target.value)} />{ingredientQuery && <button aria-label="清空食材搜索" onClick={() => setIngredientQuery('')}><X size={15} /></button>}</label><select className="mg-select" aria-label="食材类别筛选" value={ingredientCategory} onChange={event => setIngredientCategory(event.target.value)}><option>全部类别</option>{categories.map(category => <option key={category}>{category}</option>)}</select><span className="mg-draft-label">本地草稿 · 未入库</span></div>
+      <section className="mg-panel">
         <div className="mg-ingredient-table"><div className="mg-table-head mg-ingredient-row"><span>食材名称</span><span>类别</span><span>食材属性</span><span>操作</span></div>{filteredIngredients.length ? filteredIngredients.map(item => <div className="mg-ingredient-row mg-table-row" key={item.id}><strong><span className="mg-leaf-icon"><Leaf size={17} /></span>{item.name}</strong><span><span className="mg-category-chip">{item.category}</span></span><span className="mg-attributes">{item.attributes || '未填写'}</span><div className="mg-row-actions"><button aria-label={`编辑 ${item.name}`} onClick={() => openEditor(item)}><Pencil size={16} /></button><button aria-label={`删除 ${item.name}`} onClick={() => { setIngredients(current => current.filter(ingredient => ingredient.id !== item.id)); setNotice(`已删除「${item.name}」的本地草稿`) }}><Trash2 size={16} /></button></div></div>) : <EmptyState icon={Tags} title={ingredients.length ? '没有匹配的食材草稿' : '暂无食材草稿'} description={ingredients.length ? '试试其他食材名称、属性或类别。' : '从名称、类别和属性开始，先在本地整理你的食材数据。'}>{ingredients.length ? <button className="mg-btn mg-secondary" onClick={() => { setIngredientQuery(''); setIngredientCategory('全部类别') }}>重置筛选</button> : <button className="mg-btn mg-secondary" onClick={() => openEditor()}><Plus size={16} />新建食材草稿</button>}</EmptyState>}</div>
       </section><div className="mg-info"><Info size={17} /><p>食材数据接口尚未接入。本地草稿不会写入数据库，刷新页面或离开后将清空。</p></div>
     </>}

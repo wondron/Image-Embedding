@@ -36,13 +36,13 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY . /app
 
 ENV UVICORN_HOST=0.0.0.0 \
-    UVICORN_PORT=8319
+    UVICORN_PORT=8320
 
-EXPOSE 8319
+EXPOSE 8320
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD curl -fsS "http://127.0.0.1:${UVICORN_PORT}/api/healthz" || exit 1
 
 CMD ["uvicorn", "main:app", \
-     "--host", "0.0.0.0", "--port", "8319", \
+     "--host", "0.0.0.0", "--port", "8320", \
      "--workers", "1", "--no-access-log", "--timeout-keep-alive", "5"]
