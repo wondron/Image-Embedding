@@ -275,16 +275,30 @@ export default function App() {
             <div hidden={queryKind !== 'batch'}><BatchSearchPanel active={queryKind === 'batch'} baseUrl={apiBase} onResult={handleBatchResult} onClearResult={resetResults} onRunningChange={handleBatchRunningChange} /></div>
           </section>
 
-          <section className="results-panel panel" aria-labelledby="results-heading"><div className="panel-heading results-heading"><div><h2 id="results-heading">搜索结果</h2>{searched && <span className="count-badge">{items.length}</span>}</div><span className="subtle-label">{elapsed !== null ? `检索耗时 ${elapsed.toFixed(2)} s` : 'Global 图片搜索'}</span></div>
-            <div className="result-toolbar"><div className="filter-input"><Search size={15} /><input aria-label="搜索结果标题或来源" placeholder="搜索结果标题或来源" value={keyword} disabled={!items.length} onChange={event => setKeyword(event.target.value)} /></div><div className="toolbar-select"><ListFilter size={15} /><select aria-label="筛选类别" value={category} disabled={!categories.length} onChange={event => setCategory(event.target.value)}><option value="all">全部类别</option>{categories.map(name => <option key={name} value={name}>{name}</option>)}</select></div><div className="toolbar-select"><SlidersHorizontal size={15} /><select aria-label="结果排序" value={sort} disabled={!items.length} onChange={event => setSort(event.target.value)}><option value="default">默认排序</option><option value="similarity">相似度优先</option></select></div><div className="view-toggle" aria-label="搜索结果展示方式"><button className={resultLayout === 'grid' ? 'selected' : ''} aria-label="网格展示结果" aria-pressed={resultLayout === 'grid'} onClick={() => setResultLayout('grid')}><LayoutGrid size={16} /></button><button className={resultLayout === 'list' ? 'selected' : ''} aria-label="列表展示结果" aria-pressed={resultLayout === 'list'} onClick={() => setResultLayout('list')}><List size={17} /></button></div></div>
+          <section className="results-panel panel" aria-labelledby="results-heading">
+            <div className="result-toolbar">
+              <div className="results-heading" title={activeQueryName && searched ? `当前查询：${activeQueryName}` : undefined}>
+                <h2 id="results-heading">搜索结果</h2>
+                {searched && <span className="count-badge">{items.length}</span>}
+                {elapsed !== null && <span className="result-timing" aria-label={`检索耗时 ${elapsed.toFixed(2)} 秒`}>{elapsed.toFixed(2)} s</span>}
+              </div>
+              <div className="result-filters">
+                <div className="filter-input"><Search size={15} /><input aria-label="搜索结果标题或来源" placeholder="搜索结果标题或来源" value={keyword} disabled={!items.length} onChange={event => setKeyword(event.target.value)} /></div>
+                <div className="toolbar-select"><ListFilter size={15} /><select aria-label="筛选类别" value={category} disabled={!categories.length} onChange={event => setCategory(event.target.value)}><option value="all">全部类别</option>{categories.map(name => <option key={name} value={name}>{name}</option>)}</select></div>
+                <div className="toolbar-select"><SlidersHorizontal size={15} /><select aria-label="结果排序" value={sort} disabled={!items.length} onChange={event => setSort(event.target.value)}><option value="default">默认排序</option><option value="similarity">相似度优先</option></select></div>
+                <div className="view-toggle" aria-label="搜索结果展示方式"><button className={resultLayout === 'grid' ? 'selected' : ''} aria-label="网格展示结果" aria-pressed={resultLayout === 'grid'} onClick={() => setResultLayout('grid')}><LayoutGrid size={16} /></button><button className={resultLayout === 'list' ? 'selected' : ''} aria-label="列表展示结果" aria-pressed={resultLayout === 'list'} onClick={() => setResultLayout('list')}><List size={17} /></button></div>
+              </div>
+            </div>
             {items.length > 0 && <div className="selection-bar">
-              <label className="select-page"><input className="result-checkbox" type="checkbox" aria-label="选择本页" checked={allPageSelected} ref={element => { if (element) element.indeterminate = somePageSelected && !allPageSelected }} onChange={togglePageSelection} />选择本页</label>
-              <button className="text-button" onClick={() => setSelected(new Set(items.map(item => item.id)))}>选择全部结果</button>
-              <span className="selection-count" role="status">已选择 {selectedItems.length} 张</span>
-              {selectedItems.length > 0 && <button className="text-button" onClick={() => setSelected(new Set())}>清空选择</button>}
+              <div className="selection-actions">
+                <label className="select-page"><input className="result-checkbox" type="checkbox" aria-label="选择本页" checked={allPageSelected} ref={element => { if (element) element.indeterminate = somePageSelected && !allPageSelected }} onChange={togglePageSelection} />选择本页</label>
+                <button className="text-button" onClick={() => setSelected(new Set(items.map(item => item.id)))}>选择全部结果</button>
+                <span className="selection-count" role="status">已选择 {selectedItems.length} 张</span>
+                {selectedItems.length > 0 && <button className="text-button" onClick={() => setSelected(new Set())}>清空选择</button>}
+              </div>
+              {activeQueryName && searched && <div className="active-query-name" title={activeQueryName}><ImageIcon size={13} /><span>当前查询：{activeQueryName}</span></div>}
               <button className="btn btn-primary bulk-download-button" disabled={!selectedItems.length} onClick={() => setDownloadItems(selectedItems)}><ArrowDownToLine size={15} />批量下载{selectedItems.length > 0 ? `（${selectedItems.length}）` : ''}</button>
             </div>}
-            {activeQueryName && searched && <div className="active-query-name" title={activeQueryName}><ImageIcon size={14} /><span>当前查询：{activeQueryName}</span></div>}
             <div className={`results-content ${resultLayout === 'list' ? 'content-list' : ''}`}>
             {waitingForResults ? <div className="loading-state" role="status"><div className="loading-orbit"><ScanLine size={37} strokeWidth={1.3} /></div><h3>正在寻找图片之间的联系</h3><p>{queryKind === 'batch' ? '批量搜索正在进行，查询图片完成后会显示对应结果。' : '搜索、获取图片并计算相似度，请稍候…'}</p><div className="skeleton-row">{[1, 2, 3].map(n => <div className="skeleton-card" key={n} />)}</div></div>
               : !searched ? <EmptyResults />
