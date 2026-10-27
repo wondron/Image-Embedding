@@ -24,6 +24,7 @@
 
 1. **MVP 编排 = 自建-first**：最终列表长度 == 0 才调 FlyB（按 §4 写死）。**不走**现网 FlyB-first；实现须改编排，不得「先 FlyB 再过滤」。
 2. **旧** POST /api/predict/searchImage_*：**保留不动**（前端「现网 Global」仍走它）；新能力只加 POST /api/search。本轮 **不** deprecate、**不**转发伪装。
+3. **D4（2026-10-28）`images.path` 唯一索引**：InnoDB utf8mb4 下 `UNIQUE(path)` 落地为 `UNIQUE KEY uk_images_path (path(768))`；列仍 `VARCHAR(1024)`。详见 §2。
 
 > 现网对照见上表；拍板后冲突关闭，实现以本条为准。
 
@@ -88,7 +89,7 @@
 | 字段 | 类型 | Null | 默认 | 索引 | 说明 |
 |---|---|---|---|---|---|
 | `id` | `BIGINT UNSIGNED` | NO | AI | PK | 与 Qdrant point id 相同 |
-| `path` | `VARCHAR(1024)` | NO | — | — | 本地相对/绝对路径；入库时写入。验收样图根：`E:\dataset\红薯叶`（只读引用，不改数据集） |
+| `path` | `VARCHAR(1024)` | NO | — | UNIQUE(`path`(768)) | 本地相对/绝对路径；入库时写入。验收样图根：`E:\dataset\红薯叶`（只读引用，不改数据集）。**索引前缀见约束 D4** |
 | `url` | `VARCHAR(2048)` | YES | NULL | — | 若已通过静态/文件接口暴露的 HTTP(S) URL；无则 null，由适配层用 path 拼 |
 | `title` | `VARCHAR(255)` | YES | NULL | — | 展示标题；缺省可用文件名 |
 | `category` | `VARCHAR(64)` | YES | NULL | IDX(`category`) | 对应 FE 入库壳「食材类别」 |
@@ -102,7 +103,10 @@
 
 **约束**：
 
-- `UNIQUE(path)`（同一文件不重复入库；冲突返回 `INDEX_DUPLICATE_PATH`）。
+- **`path` 唯一（D4 · MySQL 1071）**：`utf8mb4` 下对 `VARCHAR(1024)` 建 `UNIQUE(path)` 会触 **MySQL 1071**（InnoDB 索引键上限 3072 字节 ≈ 768 个 utf8mb4 字符）。
+  - **定案（DDL · 已落地）**：列仍 `VARCHAR(1024)`。**InnoDB + utf8mb4 下契约写的 `UNIQUE(path)` 落地为 `UNIQUE KEY uk_images_path (path(768))`**（前缀唯一，避 MySQL 1071）。冲突仍返回 `INDEX_DUPLICATE_PATH`。
+  - **语义**：应用层以**完整** `path` 判等入库；前缀唯一在「前 768 字符相同、其后不同」时理论上会误冲突——MVP 路径（样图根下）应远短于 768；入库前建议规范化并 **拒绝 `len(path) > 768`**（`422` / `INDEX_PATH_TOO_LONG`），使前缀唯一 ≡ 全路径唯一。
+  - **备选（本轮不采用，仅备案）**：① 缩短列为 `VARCHAR(768)` + 全列 `UNIQUE(path)`；② 另加 `path_hash CHAR(64)`（规范化 path 的 SHA-256 hex）全列 `UNIQUE`，`path` 仅普通索引。
 - 搜图 join：Qdrant 返回的 id 集合 → `WHERE id IN (...) AND status='active'`。
 
 **FE 入库壳已有、表已覆盖**：类别 `category`、本地文件队列。  
@@ -323,6 +327,7 @@ FlyB 返回形态沿用现 `FlyBSearch.parse_results`（数组或 `upstream_empt
 | `INDEX_BAD_IMAGE` | 422 | 解码失败/非图 |
 | `INDEX_BAD_EMBEDDING` | 422 | 维数/NaN/零向量 |
 | `INDEX_DUPLICATE_PATH` | 409 | path 唯一冲突 |
+| `INDEX_PATH_TOO_LONG` | 422 | `path` 规范化后长度 > 768（与 `UNIQUE(path(768))` 语义对齐） |
 | `INDEX_QDRANT_FAILED` | 502 | 写向量失败（MySQL 应回滚或标失败） |
 | `INDEX_MYSQL_FAILED` | 502 | 写元数据失败 |
 | `SEARCH_BAD_IMAGE` | 422 | 查询图无效 |

@@ -13,6 +13,10 @@ from app.domain.retrieval.ports import MetadataStorePort
 
 logger = logging.getLogger("mysql_metadata")
 
+# path stays VARCHAR(1024) per SSOT; utf8mb4 full UNIQUE hits MySQL 1071.
+# Use prefix unique path(768) (same as QA prebuild; 768*4=3072).
+PATH_UNIQUE_PREFIX = 768
+
 IMAGES_DDL = """
 CREATE TABLE IF NOT EXISTS images (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -28,7 +32,7 @@ CREATE TABLE IF NOT EXISTS images (
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
-  UNIQUE KEY uq_images_path (path),
+  UNIQUE KEY uk_images_path (path(768)),
   UNIQUE KEY uq_images_qdrant_point_id (qdrant_point_id),
   KEY idx_images_category (category),
   KEY idx_images_status (status),
@@ -113,6 +117,7 @@ class MySQLMetadataStore(MetadataStorePort):
         try:
             with conn.cursor() as cur:
                 cur.execute(IMAGES_DDL)
+                self._ensure_path_unique_prefix(cur)
             conn.commit()
             self._schema_ready = True
             logger.info("mysql images schema ready db=%s", self.database)
@@ -121,6 +126,42 @@ class MySQLMetadataStore(MetadataStorePort):
             raise err.index_mysql_failed(f"ensure_schema: {exc}") from exc
         finally:
             conn.close()
+
+
+    def _ensure_path_unique_prefix(self, cur) -> None:
+        """D4: ensure UNIQUE KEY uk_images_path (path(768)); migrate legacy names/shapes."""
+        # Drop legacy name from earlier BE draft if present.
+        cur.execute(
+            "SHOW INDEX FROM images WHERE Key_name=%s",
+            ("uq_images_path",),
+        )
+        if cur.fetchall():
+            cur.execute("ALTER TABLE images DROP INDEX uq_images_path")
+
+        cur.execute(
+            "SHOW INDEX FROM images WHERE Key_name=%s",
+            ("uk_images_path",),
+        )
+        rows = cur.fetchall() or []
+        if not rows:
+            cur.execute(
+                f"ALTER TABLE images ADD UNIQUE KEY uk_images_path (path({PATH_UNIQUE_PREFIX}))"
+            )
+            return
+        row0 = rows[0]
+        if isinstance(row0, dict):
+            sub = row0.get("Sub_part")
+        else:
+            try:
+                sub = row0[7]
+            except Exception:
+                sub = None
+        if sub == PATH_UNIQUE_PREFIX:
+            return
+        cur.execute("ALTER TABLE images DROP INDEX uk_images_path")
+        cur.execute(
+            f"ALTER TABLE images ADD UNIQUE KEY uk_images_path (path({PATH_UNIQUE_PREFIX}))"
+        )
 
     def ping(self) -> dict[str, Any]:
         try:

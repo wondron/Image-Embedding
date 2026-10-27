@@ -1,4 +1,4 @@
-﻿"""Index-image use case (SSOT §3.1).
+"""Index-image use case (SSOT §3.1).
 
 Flow: decode → embed(+dim check) → MySQL insert → Qdrant upsert(point_id=id).
 On Qdrant failure: mark MySQL row deleted (best-effort rollback).
@@ -16,6 +16,9 @@ from app.domain.retrieval.embedding_validate import validate_embedding
 from app.domain.retrieval.ports import EmbeddingPort, MetadataStorePort, VectorStorePort
 
 logger = logging.getLogger("retrieval.index")
+
+# Align with SSOT D4 / UNIQUE(path(768))
+PATH_MAX_FOR_UNIQUE = 768
 
 
 def _decode_size(image_bytes: bytes) -> tuple[int | None, int | None]:
@@ -56,6 +59,20 @@ def _read_image_file(path: str) -> bytes:
         import numpy as np
 
         return np.fromfile(path, dtype=np.uint8).tobytes()
+
+
+def _normalize_path(path: str) -> str:
+    """Normalize path for storage + D4 length check (full path uniqueness)."""
+    return str(Path(path).expanduser())
+
+
+def _reject_if_path_too_long(path: str) -> str:
+    normalized = _normalize_path(path)
+    if len(normalized) > PATH_MAX_FOR_UNIQUE:
+        raise err.index_path_too_long(
+            f"path length {len(normalized)} > {PATH_MAX_FOR_UNIQUE} after normalize"
+        )
+    return normalized
 
 def _title_from_path(path: str) -> str:
     return Path(path).name or path
@@ -98,7 +115,7 @@ class IndexImageUseCase:
                 image_bytes = _read_image_file(str(p))
             except OSError as exc:
                 raise err.index_bad_image(f"cannot read path: {exc}") from exc
-            store_path = str(p)
+            store_path = _reject_if_path_too_long(str(p.resolve() if p.exists() else p))
             title = _title_from_path(store_path)
         else:
             assert image_bytes is not None
@@ -129,7 +146,7 @@ class IndexImageUseCase:
                 self._indexed_dir, f"pending_{_uuid.uuid4().hex}_{safe_name}"
             )
             Path(provisional).write_bytes(image_bytes)
-            store_path = provisional
+            store_path = _reject_if_path_too_long(provisional)
 
         row = {
             "path": store_path,
@@ -149,7 +166,7 @@ class IndexImageUseCase:
             final_path = os.path.join(self._indexed_dir, f"{image_id}{ext}")
             try:
                 os.replace(store_path, final_path)
-                store_path = final_path
+                store_path = _reject_if_path_too_long(final_path)
                 self._metadata.update_image(image_id, {"path": store_path})
             except OSError as exc:
                 logger.warning("rename indexed file failed id=%s: %s", image_id, exc)
@@ -238,11 +255,7 @@ class IndexImageUseCase:
                     }
                 )
         if not indexed and failed:
-            # all failed — promote first error if empty request-like, else still return envelope
-            # Contract: no decodable image → 400 INDEX_EMPTY_REQUEST
-            only_bad = all(f.get("error") == "INDEX_BAD_IMAGE" for f in failed)
-            only_empty = all(f.get("error") == "INDEX_EMPTY_REQUEST" for f in failed)
-            if only_empty or (only_bad and len(failed) == len(items)):
-                # keep HTTP decision in endpoint; return marker
-                return {"ok": False, "indexed": [], "failed": failed, "all_failed": True}
+            # Entire batch failed → all_failed so HTTP can promote codes (D4-3 PATH_TOO_LONG etc.)
+            return {"ok": False, "indexed": [], "failed": failed, "all_failed": True}
         return {"ok": True, "indexed": indexed, "failed": failed, "all_failed": False}
+

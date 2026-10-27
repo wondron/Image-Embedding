@@ -30,6 +30,10 @@ def index_duplicate_path(detail: str) -> RetrievalError:
     return RetrievalError("INDEX_DUPLICATE_PATH", detail, http_status=409)
 
 
+def index_path_too_long(detail: str) -> RetrievalError:
+    return RetrievalError("INDEX_PATH_TOO_LONG", detail, http_status=422)
+
+
 def index_qdrant_failed(detail: str) -> RetrievalError:
     return RetrievalError("INDEX_QDRANT_FAILED", detail, http_status=502)
 

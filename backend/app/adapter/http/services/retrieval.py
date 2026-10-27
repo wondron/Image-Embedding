@@ -107,8 +107,18 @@ def run_index(
         logger.exception("index failed: %s", exc)
         return error_response("INTERNAL_ERROR", str(exc), status_code=500, trace_id=tid)
 
-    if outcome.get("all_failed") and not outcome.get("indexed"):
-        failed = outcome.get("failed") or []
+    failed = outcome.get("failed") or []
+    indexed = outcome.get("indexed") or []
+    # D4-3: no indexed + all failures PATH_TOO_LONG → top-level 422 (do not require all_failed flag)
+    if (not indexed) and failed and all(f.get("error") == "INDEX_PATH_TOO_LONG" for f in failed):
+        return error_response(
+            "INDEX_PATH_TOO_LONG",
+            (failed[0].get("message") or "path too long after normalize"),
+            status_code=422,
+            trace_id=tid,
+        )
+
+    if outcome.get("all_failed") and not indexed:
         # No decodable image at all → 400 INDEX_EMPTY_REQUEST per §3.1
         if not failed or all(
             f.get("error") in {"INDEX_EMPTY_REQUEST", "INDEX_BAD_IMAGE"} for f in failed
