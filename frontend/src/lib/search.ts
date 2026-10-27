@@ -63,60 +63,104 @@ function similarity(value: unknown): number | null {
     : null;
 }
 
-function normalizeItem(raw: ObjectValue, index: number): SearchImage {
+function stableId(raw: ObjectValue, index: number): string {
+  const candidate = text(raw.id) ?? text(raw.point_id) ?? text(raw.image_id)
+    ?? (typeof raw.id === 'number' && Number.isFinite(raw.id) ? String(raw.id) : null)
+    ?? (typeof raw.point_id === 'number' && Number.isFinite(raw.point_id) ? String(raw.point_id) : null)
+    ?? (typeof raw.image_id === 'number' && Number.isFinite(raw.image_id) ? String(raw.image_id) : null);
+  return candidate ?? `image-${index + 1}`;
+}
+
+/** Map contract `source` (self|flyb|empty); absent → undefined so UI never invents a badge. */
+export function mapChannelSource(value: unknown): SearchImage['source'] | undefined {
+  const label = text(value)?.toLowerCase();
+  if (!label) return undefined;
+  if (label === 'self' || label === 'local' || label === 'index') return 'self';
+  if (label === 'flyb') return 'flyb';
+  if (label === 'empty') return 'empty';
+  return undefined;
+}
+
+function normalizeItem(raw: ObjectValue, index: number, responseSource?: SearchImage['source']): SearchImage {
   const details = object(raw.details);
   const images = Array.isArray(details.images) ? details.images.map(object) : [];
   const primaryImage = images.find(image => safeHttpUrl(image.image_url)) ?? images[0] ?? {};
+  // Contract: image_url must be http(s); filesystem `path` is never used as a URL.
   const imageUrl = safeHttpUrl(raw.image_url) ?? safeHttpUrl(primaryImage.image_url);
   const thumbnailUrl = uniqueImageUrls(thumbnailSources(raw))[0] ?? null;
   const site = object(details.site);
-  const pageUrl = safeHttpUrl(details.page_url);
+  const pageUrl = safeHttpUrl(details.page_url) ?? safeHttpUrl(raw.page_url);
+  const channel = mapChannelSource(raw.source) ?? (
+    responseSource === 'self' || responseSource === 'flyb' ? responseSource : undefined
+  );
+  const snippets = Array.isArray(details.text_snippets)
+    ? details.text_snippets.map(text).filter((value): value is string => value !== null)
+    : Array.isArray(raw.text_snippets)
+      ? raw.text_snippets.map(text).filter((value): value is string => value !== null)
+      : [];
   return {
-    id: `image-${index + 1}`,
+    id: stableId(raw, index),
     title: text(raw.title) ?? text(primaryImage.alt) ?? `未命名图片 ${index + 1}`,
     imageUrl,
-    thumbnailUrl,
+    thumbnailUrl: thumbnailUrl ?? safeHttpUrl(raw.thumbnail_url),
     similarity: similarity(raw.similarity) ?? similarity(raw.similiar),
     category: text(raw.category) ?? text(details.category),
     pageUrl,
-    siteName: text(details.site) ?? text(site.name) ?? text(site.Name)
+    siteName: text(raw.site_name) ?? text(details.site) ?? text(site.name) ?? text(site.Name)
       ?? text(site.host) ?? text(site.Host) ?? (pageUrl ? new URL(pageUrl).hostname : null),
-    snippets: Array.isArray(details.text_snippets)
-      ? details.text_snippets.map(text).filter((value): value is string => value !== null)
-      : [],
-    width: positiveNumber(primaryImage.width),
-    height: positiveNumber(primaryImage.height),
+    snippets,
+    width: positiveNumber(raw.width) ?? positiveNumber(primaryImage.width),
+    height: positiveNumber(raw.height) ?? positiveNumber(primaryImage.height),
+    ...(channel && channel !== 'empty' ? { source: channel } : {}),
     raw,
   };
 }
 
-/** Supports the current API's list result and its upstream-empty results envelope. */
+/** Prefer contract `result: []`; empty may use `{ results, status, message }` envelope. */
 export function normalizeSearchResponse(payload: unknown): SearchResponse {
   const wrapper = object(payload);
   const result = Array.isArray(payload) ? payload : wrapper.result;
   const envelope = object(result);
-  const rows = Array.isArray(result) ? result : envelope.results;
+  // Prefer array `result`; also accept top-level items/results and empty envelopes.
+  const rows = Array.isArray(payload) ? payload
+    : Array.isArray(result) ? result
+    : Array.isArray(envelope.results) ? envelope.results
+    : Array.isArray(wrapper.items) ? wrapper.items
+    : Array.isArray(wrapper.results) ? wrapper.results
+    : Array.isArray(envelope.items) ? envelope.items
+    : null;
   if (!Array.isArray(rows)) {
     throw new Error('搜索接口返回的数据格式不正确，请检查后端响应。');
   }
-  const status = text(envelope.status) ?? undefined;
+  const responseSource = mapChannelSource(wrapper.source);
+  const status = text(envelope.status) ?? text(wrapper.status) ?? undefined;
   const upstreamError = object(envelope.upstream_error);
   const upstreamMessage = text(upstreamError.message);
-  const message = status === 'upstream_empty_response'
-    ? '上游搜索服务暂未返回结果，请稍后重试或更换图片。'
-    : upstreamMessage ?? text(envelope.message) ?? undefined;
+  let message: string | undefined;
+  if (responseSource === 'empty') {
+    message = text(envelope.message) ?? text(wrapper.message)
+      ?? '自建库与外搜均未找到相关图片。';
+  } else if (status === 'upstream_empty_response' && responseSource !== 'self' && responseSource !== 'flyb') {
+    // Legacy FlyB-only empty envelope (no contract source field).
+    message = '上游搜索服务暂未返回结果，请稍后重试或更换图片。';
+  } else {
+    message = upstreamMessage ?? text(envelope.message) ?? text(wrapper.message) ?? undefined;
+  }
+  const items = rows
+    .filter((row): row is ObjectValue => row !== null && typeof row === 'object' && !Array.isArray(row))
+    .map((row, index) => normalizeItem(row, index, responseSource));
   return {
-    items: rows
-      .filter((row): row is ObjectValue => row !== null && typeof row === 'object' && !Array.isArray(row))
-      .map(normalizeItem),
-    traceId: text(wrapper.trace_id) ?? text(envelope.request_id),
+    items,
+    traceId: text(wrapper.trace_id) ?? text(envelope.request_id) ?? text(envelope.trace_id),
     status,
     message,
+    ...(responseSource ? { source: responseSource } : {}),
   };
 }
 
-export function readableApiError(payload: unknown, status: number): string {
+export function readableApiError(payload: unknown, status: number, action = '搜索'): string {
   const body = object(payload);
+  const code = text(body.error);
   const detail = body.detail ?? body.message;
   if (Array.isArray(detail)) {
     const errors = detail.map(entry => {
@@ -131,11 +175,13 @@ export function readableApiError(payload: unknown, status: number): string {
     if (errors.length) return `请求参数错误（HTTP ${status}）：${errors.join('；')}`;
   }
   const description = text(detail) ?? text(object(detail).message);
-  if (description) return `搜索失败（HTTP ${status}）：${description}`;
-  if (status === 503) return '搜索服务尚未就绪（HTTP 503），请检查后端服务和模型状态。';
+  if (description && code) return `${action}失败（HTTP ${status} · ${code}）：${description}`;
+  if (description) return `${action}失败（HTTP ${status}）：${description}`;
+  if (code) return `${action}失败（HTTP ${status}）：${code}`;
+  if (status === 503) return `${action}服务尚未就绪（HTTP 503），请检查后端服务和模型状态。`;
   if (status === 413) return '图片过大（HTTP 413），请压缩图片后重试。';
-  if (status === 504) return '搜索或图片下载超时（HTTP 504），请稍后重试。';
-  return `搜索失败（HTTP ${status}），请检查后端服务后重试。`;
+  if (status === 504) return `${action}超时（HTTP 504），请稍后重试。`;
+  return `${action}失败（HTTP ${status}），请检查后端服务后重试。`;
 }
 
 export interface SearchOptions {
@@ -143,6 +189,10 @@ export interface SearchOptions {
   url?: string;
   baseUrl?: string;
   signal?: AbortSignal;
+  /** Local /api/search only (contract optional). */
+  topK?: number;
+  scoreThreshold?: number | null;
+  traceId?: string | null;
 }
 
 export async function searchImages({ file, url, baseUrl = import.meta.env.VITE_API_BASE_URL ?? '', signal }: SearchOptions): Promise<SearchResponse> {
@@ -174,6 +224,57 @@ export async function searchImages({ file, url, baseUrl = import.meta.env.VITE_A
     if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
     if (!response.ok) throw new Error(readableApiError(null, response.status));
     throw new Error('搜索接口未返回有效的 JSON 数据，请检查接口地址与代理配置。');
+  }
+  if (!response.ok) throw new Error(readableApiError(payload, response.status));
+  return normalizeSearchResponse(payload);
+}
+
+/** Self-built vector search via POST /api/search (contract: multipart file or JSON { img_url }). */
+export async function searchLocalImages({
+  file, url, baseUrl = import.meta.env.VITE_API_BASE_URL ?? '', signal, topK, scoreThreshold, traceId,
+}: SearchOptions): Promise<SearchResponse> {
+  if ((!file && !url?.trim()) || (file && url?.trim())) {
+    throw new Error('请选择一张图片，或填写一个图片链接。');
+  }
+  if (file && !file.size) throw new Error('图片文件为空，请重新选择。');
+  const imageUrl = file ? null : safeHttpUrl(url);
+  if (!file && !imageUrl) throw new Error('请输入有效的 HTTP 或 HTTPS 图片链接。');
+
+  let body: FormData | string;
+  if (file) {
+    const form = new FormData();
+    form.append('file', file);
+    if (topK !== undefined) form.append('top_k', String(topK));
+    if (scoreThreshold !== undefined && scoreThreshold !== null) form.append('score_threshold', String(scoreThreshold));
+    if (traceId) form.append('trace_id', traceId);
+    body = form;
+  } else {
+    const payload: Record<string, unknown> = { img_url: imageUrl };
+    if (topK !== undefined) payload.top_k = topK;
+    if (scoreThreshold !== undefined) payload.score_threshold = scoreThreshold;
+    if (traceId) payload.trace_id = traceId;
+    body = JSON.stringify(payload);
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl.replace(/\/+$/, '')}/api/search`, {
+      method: 'POST',
+      body,
+      ...(file ? {} : { headers: { 'Content-Type': 'application/json' } }),
+      signal,
+    });
+  } catch (error) {
+    if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
+    throw new Error('无法连接自建检索服务，请确认后端已启动，并检查接口地址与网络连接。');
+  }
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
+    if (!response.ok) throw new Error(readableApiError(null, response.status));
+    throw new Error('自建检索接口未返回有效的 JSON 数据，请检查接口地址与代理配置。');
   }
   if (!response.ok) throw new Error(readableApiError(payload, response.status));
   return normalizeSearchResponse(payload);

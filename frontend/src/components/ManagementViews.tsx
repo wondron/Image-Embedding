@@ -1,20 +1,40 @@
-import { useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
-import { ArrowRight, Check, ChevronLeft, ChevronRight, CloudUpload, FolderOpen, ImagePlus, Images, Info, Layers3, Leaf, ListChecks, Pencil, Plus, Search, Tags, Trash2, X } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Circle, Clock3, CloudUpload, FolderOpen, ImagePlus, Images, Info, Layers3, Leaf, ListChecks, LoaderCircle, Pencil, Plus, RotateCcw, Search, Square, Tags, Trash2, X, XCircle } from 'lucide-react'
 import { Dialog } from './Dialog'
+import { indexImage } from '../lib/index-api'
 import './ManagementViews.css'
 
 export type ManagementView = 'library' | 'import' | 'tasks' | 'ingredients'
-type Props = { view: ManagementView; onNavigate: (view: ManagementView) => void }
-type UploadImage = { id: string; file: File; preview: string }
+type Props = { view: ManagementView; onNavigate: (view: ManagementView) => void; apiBase?: string }
+type IndexJobStatus = 'pending' | 'running' | 'success' | 'error' | 'cancelled'
+type IndexJob = {
+  id: string
+  file: File
+  preview: string
+  status: IndexJobStatus
+  elapsed?: number
+  error?: string
+  remoteId?: string | null
+}
 type Ingredient = { id: string; name: string; category: string; attributes: string }
 const categories = ['蔬菜', '水果', '肉禽', '水产', '蛋奶', '粮油', '调味品', '其他']
 const MAX_IMAGE_SIZE = 15 * 1024 * 1024
 const MAX_QUEUE = 100
+const INDEX_TIMEOUT_MS = 120_000
 const taskStatuses = ['全部任务', '处理中', '已完成', '失败记录']
+const jobStatusText: Record<IndexJobStatus, string> = {
+  pending: '待入库', running: '正在入库', success: '已入库', error: '入库失败', cancelled: '已取消，可继续',
+}
 let nextDraftId = 0
-// Draft IDs only need to be unique within this browser session. This also works
-// when the dev server is opened over plain HTTP from another device.
 function draftId() { return `draft-${++nextDraftId}` }
+
+function supportsDirectoryPicker(): boolean {
+  try {
+    return typeof HTMLInputElement !== 'undefined' && 'webkitdirectory' in HTMLInputElement.prototype
+  } catch {
+    return false
+  }
+}
 
 function EmptyState({ icon: Icon, title, description, children }: {
   icon: typeof Images; title: string; description: string; children?: ReactNode
@@ -23,32 +43,65 @@ function EmptyState({ icon: Icon, title, description, children }: {
     <h3>{title}</h3><p>{description}</p>{children}</div>
 }
 
-export function ManagementViews({ view, onNavigate }: Props) {
+export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
   const [libraryQuery, setLibraryQuery] = useState('')
   const [libraryCategory, setLibraryCategory] = useState('全部类别')
   const [libraryLayout, setLibraryLayout] = useState<'grid' | 'list'>('grid')
   const [taskStatus, setTaskStatus] = useState('全部任务')
-  const [queue, setQueue] = useState<UploadImage[]>([])
-  const queueRef = useRef(queue)
-  queueRef.current = queue
+  const [jobs, setJobs] = useState<IndexJob[]>([])
+  const jobsRef = useRef(jobs)
+  jobsRef.current = jobs
   const [fileIssues, setFileIssues] = useState<string[]>([])
   const [dragging, setDragging] = useState(false)
   const [importCategory, setImportCategory] = useState('未分类')
-  const [preview, setPreview] = useState<UploadImage | null>(null)
+  const [preview, setPreview] = useState<IndexJob | null>(null)
+  const [indexing, setIndexing] = useState(false)
+  const indexingRef = useRef(false)
+  const runToken = useRef(0)
+  const activeIndex = useRef<{ controller: AbortController; jobId: string; timer: number } | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
+  const dirInput = useRef<HTMLInputElement>(null)
+  const [dirSupported] = useState(supportsDirectoryPicker)
   const [ingredients, setIngredients] = useState<Ingredient[]>([])
   const [ingredientQuery, setIngredientQuery] = useState('')
   const [ingredientCategory, setIngredientCategory] = useState('全部类别')
   const [editor, setEditor] = useState<Ingredient | null>(null)
   const [formError, setFormError] = useState('')
   const [notice, setNotice] = useState('')
+  const apiBaseRef = useRef(apiBase)
+  apiBaseRef.current = apiBase
+  const prevApiBase = useRef(apiBase)
 
-  useEffect(() => () => { queueRef.current.forEach(item => URL.revokeObjectURL(item.preview)) }, [])
+  useEffect(() => () => {
+    runToken.current++
+    if (activeIndex.current) {
+      window.clearTimeout(activeIndex.current.timer)
+      activeIndex.current.controller.abort('unmounted')
+      activeIndex.current = null
+    }
+    jobsRef.current.forEach(item => URL.revokeObjectURL(item.preview))
+  }, [])
+
+  useEffect(() => {
+    if (prevApiBase.current !== apiBase) {
+      prevApiBase.current = apiBase
+      if (indexingRef.current) {
+        stopIndexing()
+        setNotice('服务地址已改变，当前入库已停止。可继续未完成的图片。')
+      }
+    }
+  }, [apiBase])
+
+  const commitJobs = useCallback((next: IndexJob[]) => {
+    jobsRef.current = next
+    setJobs(next)
+  }, [])
 
   function addFiles(files: FileList | File[]) {
+    if (indexingRef.current) return
     const issues: string[] = []
-    const additions: UploadImage[] = []
-    const existing = new Set(queue.map(item => `${item.file.name}:${item.file.size}:${item.file.lastModified}`))
+    const additions: IndexJob[] = []
+    const existing = new Set(jobsRef.current.map(item => `${item.file.name}:${item.file.size}:${item.file.lastModified}`))
     for (const file of Array.from(files)) {
       const key = `${file.name}:${file.size}:${file.lastModified}`
       if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
@@ -56,28 +109,30 @@ export function ManagementViews({ view, onNavigate }: Props) {
       } else if (file.size === 0 || file.size > MAX_IMAGE_SIZE) {
         issues.push(`${file.name}：图片不能为空，且不能超过 15 MB`)
       } else if (existing.has(key)) {
-        issues.push(`${file.name}：已在待导入列表中`)
-      } else if (queue.length + additions.length >= MAX_QUEUE) {
+        issues.push(`${file.name}：已在待入库列表中`)
+      } else if (jobsRef.current.length + additions.length >= MAX_QUEUE) {
         issues.push(`${file.name}：单次最多准备 100 张图片`)
       } else {
         existing.add(key)
-        additions.push({ id: draftId(), file, preview: URL.createObjectURL(file) })
+        additions.push({ id: draftId(), file, preview: URL.createObjectURL(file), status: 'pending' })
       }
     }
-    setQueue(current => [...current, ...additions])
+    if (additions.length) commitJobs([...jobsRef.current, ...additions])
     setFileIssues(issues)
   }
 
-  function removeImage(id: string) {
-    const item = queue.find(image => image.id === id)
+  function removeJob(id: string) {
+    if (indexingRef.current) return
+    const item = jobsRef.current.find(job => job.id === id)
     if (item) URL.revokeObjectURL(item.preview)
-    setQueue(current => current.filter(image => image.id !== id))
+    commitJobs(jobsRef.current.filter(job => job.id !== id))
     if (preview?.id === id) setPreview(null)
   }
 
   function clearQueue() {
-    queue.forEach(item => URL.revokeObjectURL(item.preview))
-    setQueue([])
+    if (indexingRef.current) return
+    jobsRef.current.forEach(item => URL.revokeObjectURL(item.preview))
+    commitJobs([])
     setPreview(null)
     setFileIssues([])
   }
@@ -86,6 +141,84 @@ export function ManagementViews({ view, onNavigate }: Props) {
     event.preventDefault()
     setDragging(false)
     addFiles(event.dataTransfer.files)
+  }
+
+  function stopIndexing() {
+    runToken.current++
+    if (activeIndex.current) {
+      window.clearTimeout(activeIndex.current.timer)
+      activeIndex.current.controller.abort('cancelled')
+      activeIndex.current = null
+    }
+    commitJobs(jobsRef.current.map(job => job.status === 'running' ? { ...job, status: 'cancelled', error: undefined } : job))
+    indexingRef.current = false
+    setIndexing(false)
+  }
+
+  async function startIndexing(retryFailed = false) {
+    if (indexingRef.current) return
+    const targets = jobsRef.current.filter(job => retryFailed
+      ? job.status === 'error' || job.status === 'cancelled'
+      : job.status === 'pending' || job.status === 'cancelled')
+    if (!targets.length) {
+      setNotice(retryFailed ? '没有可重试的失败或已取消项。' : '请先添加待入库图片。')
+      return
+    }
+    const token = ++runToken.current
+    const requestBase = apiBaseRef.current
+    const category = importCategory
+    indexingRef.current = true
+    setIndexing(true)
+    setNotice('')
+    setFileIssues([])
+    const currentRun = () => runToken.current === token && apiBaseRef.current === requestBase
+    try {
+      for (const target of targets) {
+        if (!currentRun()) break
+        const controller = new AbortController()
+        const timer = window.setTimeout(() => controller.abort('timeout'), INDEX_TIMEOUT_MS)
+        activeIndex.current = { controller, jobId: target.id, timer }
+        commitJobs(jobsRef.current.map(job => job.id === target.id
+          ? { ...job, status: 'running', error: undefined }
+          : job))
+        const started = performance.now()
+        try {
+          const result = await indexImage({
+            file: target.file,
+            category,
+            baseUrl: requestBase,
+            signal: controller.signal,
+          })
+          if (!currentRun()) break
+          if (controller.signal.aborted) throw new Error('入库超时')
+          commitJobs(jobsRef.current.map(job => job.id === target.id
+            ? {
+              ...job,
+              status: 'success',
+              remoteId: result.indexed[0]?.id ?? null,
+              elapsed: (performance.now() - started) / 1000,
+              error: undefined,
+            }
+            : job))
+        } catch (cause) {
+          if (!currentRun()) break
+          const error = controller.signal.aborted && controller.signal.reason === 'timeout'
+            ? '入库超过 120 秒，请稍后重试。'
+            : cause instanceof Error ? cause.message : '入库失败，请重试。'
+          commitJobs(jobsRef.current.map(job => job.id === target.id
+            ? { ...job, status: 'error', error, elapsed: (performance.now() - started) / 1000 }
+            : job))
+        } finally {
+          window.clearTimeout(timer)
+          if (activeIndex.current?.controller === controller) activeIndex.current = null
+        }
+      }
+    } finally {
+      if (runToken.current === token) {
+        indexingRef.current = false
+        setIndexing(false)
+      }
+    }
   }
 
   function saveIngredient(event: FormEvent<HTMLFormElement>) {
@@ -122,6 +255,23 @@ export function ManagementViews({ view, onNavigate }: Props) {
   const filteredIngredients = ingredients.filter(item =>
     (ingredientCategory === '全部类别' || item.category === ingredientCategory) &&
     `${item.name} ${item.attributes}`.toLocaleLowerCase().includes(ingredientQuery.trim().toLocaleLowerCase()))
+
+  const doneCount = jobs.filter(job => job.status === 'success' || job.status === 'error').length
+  const successCount = jobs.filter(job => job.status === 'success').length
+  const failureCount = jobs.filter(job => job.status === 'error').length
+  const runningCount = jobs.filter(job => job.status === 'running').length
+  const resumable = jobs.some(job => job.status === 'pending' || job.status === 'cancelled')
+  const retryable = jobs.some(job => job.status === 'error' || job.status === 'cancelled')
+  const hasStarted = jobs.some(job => job.status !== 'pending')
+  const totalBytes = jobs.reduce((total, item) => total + item.file.size, 0)
+
+  const taskRows = jobs.filter(job => {
+    if (taskStatus === '处理中') return job.status === 'running' || job.status === 'pending' || job.status === 'cancelled'
+    if (taskStatus === '已完成') return job.status === 'success'
+    if (taskStatus === '失败记录') return job.status === 'error'
+    return true
+  })
+
   return <div className="mg-page">
     <div className="mg-page-toolbar">
       {view === 'library' && <>
@@ -131,9 +281,13 @@ export function ManagementViews({ view, onNavigate }: Props) {
         <button className="mg-btn mg-primary" onClick={() => onNavigate('import')}><Plus size={17} />导入图片</button>
       </>}
       {view === 'import' && <>
-        <button className="mg-btn mg-primary" onClick={() => fileInput.current?.click()}><FolderOpen size={17} />选择图片</button>
+        <button className="mg-btn mg-primary" disabled={indexing} onClick={() => fileInput.current?.click()}><FolderOpen size={17} />选择图片</button>
+        {dirSupported
+          ? <button className="mg-btn mg-secondary" disabled={indexing} onClick={() => dirInput.current?.click()}><FolderOpen size={17} />选择目录</button>
+          : <span className="mg-toolbar-summary" title="当前浏览器不支持目录选择">目录选择不可用</span>}
         <span className="mg-toolbar-summary">JPG、PNG、WebP · 每张最大 15 MB · 最多 100 张</span>
-        <input ref={fileInput} type="file" className="mg-hidden" aria-label="选择待导入图片" accept="image/jpeg,image/png,image/webp" multiple onChange={event => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />
+        <input ref={fileInput} type="file" className="mg-hidden" aria-label="选择待入库图片" accept="image/jpeg,image/png,image/webp" multiple onChange={event => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />
+        {dirSupported && <input ref={dirInput} type="file" className="mg-hidden" aria-label="选择待入库目录" accept="image/jpeg,image/png,image/webp" multiple {...({ webkitdirectory: '', directory: '' } as object)} onChange={event => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />}
       </>}
       {view === 'tasks' && <>
         <div className="mg-tabs" role="tablist" aria-label="任务状态">{taskStatuses.map((status, index) => <button key={status} id={`task-tab-${index}`} role="tab" aria-selected={taskStatus === status} aria-controls="task-panel" tabIndex={taskStatus === status ? 0 : -1} className={taskStatus === status ? 'active' : ''} onClick={() => setTaskStatus(status)} onKeyDown={event => navigateTaskTabs(event, index)}>{status}</button>)}</div>
@@ -145,11 +299,11 @@ export function ManagementViews({ view, onNavigate }: Props) {
         <span className="mg-toolbar-summary">{ingredients.length} 个食材草稿</span>
         <button className="mg-btn mg-primary" onClick={() => openEditor()}><Plus size={17} />新建食材</button>
       </>}
-      <span className="mg-status"><span />{view === 'import' || view === 'ingredients' ? '本地草稿模式' : '等待数据接口'}</span>
+      <span className="mg-status"><span />{view === 'ingredients' ? '本地草稿模式' : view === 'import' || view === 'tasks' ? (indexing ? '入库进行中' : '自建入库已接入') : '等待数据接口'}</span>
     </div>
 
     {view === 'library' && <>
-      <div className="mg-metrics"><Metric label="图片总量" value="—" detail="接入图库后显示" icon={Images} /><Metric label="食材类别" value="—" detail="接入分类后显示" icon={Layers3} /><Metric label="待入库任务" value="—" detail="接入任务后显示" icon={ListChecks} /></div>
+      <div className="mg-metrics"><Metric label="图片总量" value="—" detail="接入图库后显示" icon={Images} /><Metric label="食材类别" value="—" detail="接入分类后显示" icon={Layers3} /><Metric label="待入库任务" value={jobs.length ? String(jobs.filter(j => j.status !== 'success').length) : '—'} detail={jobs.length ? '本会话未完成项' : '接入任务后显示'} icon={ListChecks} /></div>
       <section className="mg-panel">
         {libraryLayout === 'list' && <div className="mg-table-head mg-library-head"><span>图片 / 名称</span><span>类别</span><span>属性</span><span>入库时间</span></div>}
         <EmptyState icon={Images} title="暂无已入库图片" description={libraryQuery || libraryCategory !== '全部类别' ? '图库尚未开放，暂无可用于搜索和筛选的图片。' : '可先整理本地图片，图库开放后提交入库。'}>
@@ -157,24 +311,57 @@ export function ManagementViews({ view, onNavigate }: Props) {
         </EmptyState>
         <div className="mg-pagination"><span>暂无已入库图片</span><div><span>每页 24 张</span><button aria-label="上一页" disabled><ChevronLeft size={16} /></button><span>—</span><button aria-label="下一页" disabled><ChevronRight size={16} /></button></div></div>
       </section>
-      <div className="mg-info"><Info size={17} /><p>后续接入图片详情、类别筛选与分页；当前不会创建或修改后端数据。</p></div>
+      <div className="mg-info"><Info size={17} /><p>后续接入图片详情、类别筛选与分页；当前不会创建或修改后端数据。本会话入库进度见「入库任务」。</p></div>
     </>}
 
     {view === 'import' && <div className="mg-import-layout"><section className="mg-panel mg-import-main">
-      <div className={`mg-dropzone ${dragging ? 'is-dragging' : ''}`} onDragOver={event => { event.preventDefault(); setDragging(true) }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false) }} onDrop={dropFiles}>
-        <span className="mg-drop-icon"><CloudUpload size={28} strokeWidth={1.5} /></span><div><h3>把图片拖到这里</h3><p>或使用顶部的「选择图片」添加文件</p></div>
+      <div className={`mg-dropzone ${dragging ? 'is-dragging' : ''} ${indexing ? 'is-disabled' : ''}`} onDragOver={event => { event.preventDefault(); if (!indexing) setDragging(true) }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false) }} onDrop={dropFiles}>
+        <span className="mg-drop-icon"><CloudUpload size={28} strokeWidth={1.5} /></span><div><h3>把图片拖到这里</h3><p>或使用顶部的「选择图片」{dirSupported ? ' / 「选择目录」' : ''}添加文件</p></div>
       </div>
       {fileIssues.length > 0 && <div className="mg-errors" role="alert"><div><strong>部分图片未添加</strong><button onClick={() => setFileIssues([])} aria-label="关闭文件提示"><X size={16} /></button></div><ul>{fileIssues.map((issue, index) => <li key={index}>{issue}</li>)}</ul></div>}
-      <div className="mg-queue-heading"><h3>待导入图片 <span>{queue.length}</span></h3>{queue.length > 0 && <button className="mg-text-button" onClick={clearQueue}>清空列表</button>}</div>
-      {queue.length === 0 ? <div className="mg-queue-empty"><Images size={22} /><p>选好的图片会在这里显示</p></div> : <div className="mg-upload-grid">{queue.map(item => <article className="mg-upload-card" key={item.id}>
-        <button className="mg-upload-preview" onClick={() => setPreview(item)} aria-label={`预览 ${item.file.name}`}><img src={item.preview} alt={item.file.name} /><span>查看图片</span></button><button className="mg-remove-image" aria-label={`移除 ${item.file.name}`} onClick={() => removeImage(item.id)}><X size={14} /></button><div><strong title={item.file.name}>{item.file.name}</strong><small>{(item.file.size / 1024 / 1024).toFixed(2)} MB <span>待提交</span></small></div></article>)}</div>}
-    </section><aside className="mg-import-aside"><section className="mg-panel mg-import-settings"><h2>整理入库信息</h2><p>为本次图片选择统一类别。</p><label className="mg-field">食材类别<select className="mg-select" value={importCategory} onChange={event => setImportCategory(event.target.value)}><option>未分类</option>{categories.map(category => <option key={category}>{category}</option>)}</select></label><div className="mg-import-summary"><span>已选择图片<strong>{queue.length} 张</strong></span><span>文件总大小<strong>{(queue.reduce((total, item) => total + item.file.size, 0) / 1024 / 1024).toFixed(2)} MB</strong></span><span>默认类别<strong>{importCategory}</strong></span></div><button className="mg-btn mg-primary mg-full" disabled aria-describedby="import-pending"><CloudUpload size={17} />提交入库 · 待接入</button><p id="import-pending" className="mg-help">入库接口尚未开发，当前仅在浏览器内预览与整理，不会上传文件。离开页面后草稿不保留。</p></section>
-      <div className="mg-workflow-note"><ListChecks size={18} /><h3>入库任务</h3><p>未来提交后，可以在任务中心查看处理进度与失败原因。</p><button className="mg-text-button" onClick={() => onNavigate('tasks')}>了解任务中心<ArrowRight size={15} /></button></div></aside></div>}
+      <div className="mg-queue-heading"><h3>待入库队列 <span>{jobs.length}</span></h3>{jobs.length > 0 && <button className="mg-text-button" disabled={indexing} onClick={clearQueue}>清空列表</button>}</div>
+      {jobs.length === 0 ? <div className="mg-queue-empty"><Images size={22} /><p>选好的图片会在这里显示</p></div> : <div className="mg-upload-grid">{jobs.map(item => <article className={`mg-upload-card mg-job-${item.status}`} key={item.id}>
+        <button className="mg-upload-preview" onClick={() => setPreview(item)} aria-label={`预览 ${item.file.name}`}><img src={item.preview} alt={item.file.name} /><span>查看图片</span></button>
+        {!indexing && <button className="mg-remove-image" aria-label={`移除 ${item.file.name}`} onClick={() => removeJob(item.id)}><X size={14} /></button>}
+        <div><strong title={item.file.name}>{item.file.name}</strong>
+          <small>{(item.file.size / 1024 / 1024).toFixed(2)} MB <span className={`mg-job-status mg-job-status-${item.status}`}>{item.status === 'running' ? <LoaderCircle size={12} className="spin" /> : item.status === 'success' ? <CheckCircle2 size={12} /> : item.status === 'error' ? <XCircle size={12} /> : item.status === 'cancelled' ? <Clock3 size={12} /> : <Circle size={11} />}{jobStatusText[item.status]}</span></small>
+          {item.remoteId && <small className="mg-job-id" title={item.remoteId}>id: {item.remoteId}</small>}
+          {item.error && <small className="mg-job-error">{item.error}</small>}
+          {item.elapsed !== undefined && (item.status === 'success' || item.status === 'error') && <small className="mg-job-elapsed">{item.elapsed.toFixed(1)} 秒</small>}
+        </div></article>)}</div>}
+    </section><aside className="mg-import-aside"><section className="mg-panel mg-import-settings"><h2>整理入库信息</h2><p>为本次图片选择统一类别，然后提交到自建向量库。</p><label className="mg-field">食材类别<select className="mg-select" disabled={indexing} value={importCategory} onChange={event => setImportCategory(event.target.value)}><option>未分类</option>{categories.map(category => <option key={category}>{category}</option>)}</select></label><div className="mg-import-summary"><span>已选择图片<strong>{jobs.length} 张</strong></span><span>文件总大小<strong>{(totalBytes / 1024 / 1024).toFixed(2)} MB</strong></span><span>默认类别<strong>{importCategory}</strong></span></div>
+      {jobs.length > 0 && <div className="mg-index-progress" aria-live="polite">
+        <div><b>{indexing ? '正在入库' : doneCount === jobs.length && hasStarted ? '本批入库完成' : '入库进度'}</b><span>{doneCount} / {jobs.length}</span></div>
+        <progress aria-label="入库进度" value={doneCount} max={Math.max(jobs.length, 1)} />
+        <p>成功 {successCount} 张{failureCount > 0 ? ` · 失败 ${failureCount} 张` : ''}{jobs.some(job => job.status === 'cancelled') ? ' · 可继续已取消项' : ''}</p>
+      </div>}
+      <div className="mg-index-actions">
+        {indexing
+          ? <button type="button" className="mg-btn mg-secondary mg-full" onClick={stopIndexing}><Square size={15} />取消入库</button>
+          : <button type="button" className="mg-btn mg-primary mg-full" disabled={!resumable} onClick={() => void startIndexing(false)}><CloudUpload size={17} />{hasStarted && resumable ? '继续入库' : '开始入库'}</button>}
+        {!indexing && retryable && <button type="button" className="mg-btn mg-secondary mg-full" onClick={() => void startIndexing(true)}><RotateCcw size={15} />仅重试失败</button>}
+      </div>
+      <p className="mg-help">逐张调用 <code>POST /api/index</code>。进行中不可清空队列；离开页面后本会话队列不保留。批量端点形态待契约冻结后可改。</p></section>
+      <div className="mg-workflow-note"><ListChecks size={18} /><h3>入库任务</h3><p>本批进度也会汇总到任务中心；无本会话任务时保持空态。</p><button className="mg-text-button" onClick={() => onNavigate('tasks')}>查看任务中心<ArrowRight size={15} /></button></div></aside></div>}
 
     {view === 'tasks' && <>
-      <div className="mg-metrics"><Metric label="正在处理" value="—" detail="等待任务服务接入" icon={CloudUpload} /><Metric label="成功入库" value="—" detail="等待任务服务接入" icon={Check} /><Metric label="失败记录" value="—" detail="等待任务服务接入" icon={ListChecks} /></div>
-      <section className="mg-panel"><div id="task-panel" role="tabpanel" aria-labelledby={`task-tab-${taskStatuses.indexOf(taskStatus)}`}><div className="mg-table-head mg-task-head"><span>任务名称</span><span>处理进度</span><span>状态</span><span>创建时间</span></div><EmptyState icon={ListChecks} title={taskStatus === '失败记录' ? '暂无可查看的失败记录' : taskStatus === '处理中' ? '暂无正在处理的任务' : taskStatus === '已完成' ? '暂无已完成的任务' : '暂无入库任务'} description="任务接口尚未接入。正式开放后，这里会显示真实进度、处理数量与失败原因。"><button className="mg-btn mg-secondary" onClick={() => onNavigate('import')}>先准备一批图片<ArrowRight size={16} /></button></EmptyState></div></section>
-      <div className="mg-info"><Info size={17} /><p>后续支持查看失败详情与重试；页面当前不会生成模拟任务或模拟进度。</p></div>
+      <div className="mg-metrics">
+        <Metric label="正在处理" value={jobs.length ? String(runningCount + jobs.filter(j => j.status === 'pending' || j.status === 'cancelled').length) : '—'} detail={jobs.length ? '本会话队列' : '暂无本会话任务'} icon={CloudUpload} />
+        <Metric label="成功入库" value={jobs.length ? String(successCount) : '—'} detail={jobs.length ? '本会话成功' : '暂无本会话任务'} icon={Check} />
+        <Metric label="失败记录" value={jobs.length ? String(failureCount) : '—'} detail={jobs.length ? '本会话失败' : '暂无本会话任务'} icon={ListChecks} />
+      </div>
+      <section className="mg-panel"><div id="task-panel" role="tabpanel" aria-labelledby={`task-tab-${taskStatuses.indexOf(taskStatus)}`}>
+        <div className="mg-table-head mg-task-head"><span>任务名称</span><span>处理进度</span><span>状态</span><span>标识 / 原因</span></div>
+        {taskRows.length === 0
+          ? <EmptyState icon={ListChecks} title={taskStatus === '失败记录' ? '暂无可查看的失败记录' : taskStatus === '处理中' ? '暂无正在处理的任务' : taskStatus === '已完成' ? '暂无已完成的任务' : '暂无入库任务'} description={jobs.length ? '当前筛选下没有匹配的本会话任务。' : '在「上传与导入」开始入库后，这里会显示本会话进度与失败原因。'}><button className="mg-btn mg-secondary" onClick={() => onNavigate('import')}>先准备一批图片<ArrowRight size={16} /></button></EmptyState>
+          : <div className="mg-task-list" role="list">{taskRows.map(job => <div className={`mg-task-row mg-job-${job.status}`} role="listitem" key={job.id}>
+            <div className="mg-task-name"><img src={job.preview} alt="" className="mg-task-thumb" /><strong title={job.file.name}>{job.file.name}</strong></div>
+            <div className="mg-task-progress">{job.elapsed !== undefined ? `${job.elapsed.toFixed(1)} 秒` : indexing && job.status === 'running' ? '进行中…' : '—'}</div>
+            <div className={`mg-job-status mg-job-status-${job.status}`}>{job.status === 'running' ? <LoaderCircle size={13} className="spin" /> : job.status === 'success' ? <CheckCircle2 size={13} /> : job.status === 'error' ? <XCircle size={13} /> : job.status === 'cancelled' ? <Clock3 size={13} /> : <Circle size={12} />}{jobStatusText[job.status]}</div>
+            <div className="mg-task-detail" title={job.remoteId ?? job.error ?? ''}>{job.remoteId ? `id: ${job.remoteId}` : job.error ? job.error : '—'}</div>
+          </div>)}</div>}
+      </div></section>
+      <div className="mg-info"><Info size={17} /><p>任务列表仅反映本浏览器会话的入库队列，刷新页面后清空；不使用假进度或假成功数据。</p></div>
     </>}
 
     {view === 'ingredients' && <>
@@ -184,7 +371,7 @@ export function ManagementViews({ view, onNavigate }: Props) {
     </>}
 
     <div className="mg-live-status" role="status" aria-live="polite">{notice}</div>
-    {preview && <Dialog title="图片预览" onClose={() => setPreview(null)} wide><img className="mg-dialog-image" src={preview.preview} alt={preview.file.name} /><p className="mg-preview-name">{preview.file.name}</p></Dialog>}
+    {preview && <Dialog title="图片预览" onClose={() => setPreview(null)} wide><img className="mg-dialog-image" src={preview.preview} alt={preview.file.name} /><p className="mg-preview-name">{preview.file.name}</p>{preview.remoteId && <p className="mg-preview-name monospace">入库 id：{preview.remoteId}</p>}{preview.error && <p className="mg-form-error" role="alert">{preview.error}</p>}</Dialog>}
     {editor && <Dialog title={ingredients.some(item => item.id === editor.id) ? '编辑食材草稿' : '新建食材草稿'} onClose={() => setEditor(null)}>
       <form className="mg-editor" onSubmit={saveIngredient}>
         <div className="mg-editor-body">
