@@ -26,6 +26,7 @@
 2. **旧** POST /api/predict/searchImage_*：**保留不动**（前端「现网 Global」仍走它）；新能力只加 POST /api/search。本轮 **不** deprecate、**不**转发伪装。
 3. **D4（2026-10-28）`images.path` 唯一索引**：InnoDB utf8mb4 下 `UNIQUE(path)` 落地为 `UNIQUE KEY uk_images_path (path(768))`；列仍 `VARCHAR(1024)`。详见 §2。
 4. **场景标签（2026-10-28 · 总裁拍板）**：一张图可挂**多个**场景；库表用 `scenes`（JSON 字符串数组），默认 `['normal']`；可扩展 `normal` / `device` / 以后再加。接口用单值 `scene` 过滤（命中标签集），**缺省 = normal**；未知 scene → 422；**禁止**默认混搜全库。Qdrant **本轮单 collection**；FlyB **仅** `scene=normal`（或缺省）时空结果才兜底。详见 §2 / §3 / §4 / 附录 A。
+5. **`embedding_space_id`（2026-10-28 · 总裁拍板）**：维数相同 ≠ 可混搜；配置/自动生成规则与启动门禁见 **§1.5**；不一致 → `VECTOR_SPACE_MISMATCH`；换模须重嵌，禁同 collection 混空间。
 
 > 现网对照见上表；拍板后冲突关闭，实现以本条为准。
 
@@ -55,6 +56,7 @@
 | 时机 | 规则 | 失败行为 |
 |---|---|---|
 | 进程启动 / collection ensure | `collection.vectors.size == 1024` | 拒绝启动或 `503`，错误码 `VECTOR_DIM_MISMATCH` |
+| 进程启动 / collection ensure | 配置 `embedding_space_id` 与 collection meta 一致 | `503` / `VECTOR_SPACE_MISMATCH`（见 §1.5）；**勿**用 dim 门禁代替 |
 | `POST /api/index` 写点前 | `len(embedding) == 1024` 且有限、非零范数 | `422` / `INDEX_BAD_EMBEDDING`，该图不入库 |
 | `POST /api/search` 查询前 | `len(query_embedding) == 1024` 且有限、非零范数 | `422` / `SEARCH_BAD_EMBEDDING` |
 | 重建 collection | 若 dim 变更必须 **新建 collection 或显式 recreate**，禁止静默截断/填充 | — |
@@ -79,6 +81,62 @@
 | 业务展示字段 | ❌ | ✅ |
 
 **原则**：Qdrant 只负责「近邻 id + score」；卡片展示一律 join MySQL（及本地文件服务）。
+
+
+### 1.5 `embedding_space_id`（向量空间门禁）
+
+**含义**：标识「同一向量空间」。**维数相同 ≠ 可混搜**。换权重文件、输出头（`output_name`）、预处理（scale/mean/std/插值）或等价训练配置后，必须换 `embedding_space_id`；否则禁止对已有 collection 继续 index/search。
+
+**配置键**：`EMBEDDING_CONFIG.embedding_space_id`（与现有 `EMBEDDING_CONFIG` 同级；后端可读此键）。允许两种来源（择一写入配置，启动时解析为最终字符串）：
+
+1. **显式写死**：如 `dino-mt-cls-v1`（人工发版时改名）。
+2. **训练/导出流水线自动生成**（推荐与权重一同产出）。
+
+**自动生成规则（训练侧）**：
+
+1. 拼规范化串（字段顺序固定，用 `|` 连接；路径用正斜杠、小写或按仓内既有规范化约定）：
+
+   `model_path|output_name|vector_dim|preprocess|weights_fingerprint`
+
+   其中：
+
+   - `preprocess` = `scale|mean|std|img_interp`（与现 `EMBEDDING_CONFIG` 字段对齐；数组/元组序列化为稳定文本，如逗号分隔）。
+   - `weights_fingerprint` = 权重/ONNX 文件内容 **sha256 的前 16 个 hex**（**强烈建议必选**，避免同 `model_path` 换文件却未改 id）。
+   - 若某环境暂无法算文件哈希，可省略最后一段，但须在运维文档标明风险；正式环境应带指纹。
+
+2. 对整串做 **sha256**，取 **前 12 个 hex**，前缀 `es_`：
+
+   `embedding_space_id = "es_" + sha256(canonical)[:12]`
+
+   示例形态：`es_a1b2c3d4e5f6`。显式写死时可不遵守此前缀，但禁止与已占用 id 冲突。
+
+**权威落点（MVP 定案）**：MySQL 表（或等价）`embedding_collection_meta`：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `collection_name` | `VARCHAR(128)` PK | 如 `image_embeddings` |
+| `embedding_space_id` | `VARCHAR(64)` NOT NULL | 创建时写入的 space_id |
+| `vector_dim` | `INT UNSIGNED` NOT NULL | 冗余 dim，便于对照 |
+| `updated_at` | `DATETIME(3)` | |
+
+备选（等价）：Qdrant collection 自定义 metadata —— 若采用，须保证与配置比对的**唯一权威源**仍只有一处，并在实现注释/本表脚注写明；**禁止**双写不一致。
+
+**启动门禁（后端必须实现）**：
+
+| 时机 | 规则 | 失败行为 |
+|---|---|---|
+| 进程启动 / collection ensure | 配置 `embedding_space_id` == meta 中该 collection 记录的 id；若 collection 尚不存在则创建并**写入**当前 space_id | 不一致 → **拒绝服务** HTTP `503`，错误码 **`VECTOR_SPACE_MISMATCH`**；**禁止**静默混搜、**禁止**自动 recreate |
+| 同上 | `vectors.size` / 配置 dim 仍按 §1.2 | `VECTOR_DIM_MISMATCH`（与 space 门禁独立，两者都要检） |
+| `POST /api/index` / `POST /api/search` | 依赖进程已通过 ensure；若运行中检测到 meta 被外部篡改可再检 | 同 `VECTOR_SPACE_MISMATCH` / `503` |
+
+**健康检查**：`GET /api/health` 的 `embedding` 与 `qdrant` 组件须带回 `embedding_space_id`；mismatch 时该组件 `ok=false`，`detail` 含 `configured` 与 `stored`（见 §3.3）。
+
+**换模语义（本轮只定契约；实现另刀）**：
+
+- MySQL `images` **元数据保留**（id/path/scenes 等）。
+- 向量必须按 `path`（或文件字节）用**新**模型全量重嵌。
+- 推荐：**蓝绿**新 collection（新 `collection_name` + 新 meta 行）或 **显式** recreate + reindex。
+- **禁止**在同一 collection 内静默混写新旧 `embedding_space_id` 的点。
 
 ---
 
@@ -294,8 +352,8 @@ MVP 聚合检查（**不**替代现有 `healthz`/`readyz`；二者可继续给�
   "ts": "2026-10-27T10:00:00",
   "components": {
     "api": { "ok": true },
-    "embedding": { "ok": true, "model_path": "config/model/dino/multitask_cls.onnx", "vector_dim": 1024 },
-    "qdrant": { "ok": true, "collection": "image_embeddings", "points_count": 0 },
+    "embedding": { "ok": true, "model_path": "config/model/dino/multitask_cls.onnx", "vector_dim": 1024, "embedding_space_id": "es_a1b2c3d4e5f6" },
+    "qdrant": { "ok": true, "collection": "image_embeddings", "points_count": 0, "embedding_space_id": "es_a1b2c3d4e5f6" },
     "mysql": { "ok": true },
     "flyb": { "ok": true, "optional": true }
   }
@@ -303,6 +361,7 @@ MVP 聚合检查（**不**替代现有 `healthz`/`readyz`；二者可继续给�
 ```
 
 规则：`embedding` / `qdrant` / `mysql` 任一不可用 → 整体 `ok=false` 且 HTTP 503。`flyb` 失败 **不**导致 503（兜底可选；但应在 JSON 里标 `ok=false` 便于排障）。
+`embedding` / `qdrant` 均应暴露 `embedding_space_id`；若配置与 meta 不一致，对应组件 `ok=false`，并在 `detail`（或同级字段）给出 `configured` / `stored`；整体 503，错误语义同 `VECTOR_SPACE_MISMATCH`。
 
 现网对照：`GET /api/healthz` 轻量存活可保留；`GET /api/readyz` 当前检查 segmentor/clip，与 MVP embedding/qdrant **不一致** —— 后端架构改 ready 语义或让 `/api/health` 专管 MVP，**需实现时对齐，勿静默删旧探针**。
 
@@ -386,7 +445,7 @@ FlyB 返回形态沿用现 `FlyBSearch.parse_results`（数组或 `upstream_empt
 | 角色 | 可开工项 | 阻塞 |
 |---|---|---|
 | **算法逻辑** | dim 已锁定 1024；可开工：索引/查询伪代码、阈值建议、样图 embedding 质量抽检 | 无 |
-| **后端架构** | Compose Qdrant+MySQL；表 images（含 `scenes`）；collection ensure（单库）；POST /api/index、POST /api/search（`scene` 默认 normal + MySQL JSON 过滤）；GET /api/health；**仅 normal** 空结果 FlyB；可选 GET /api/images/file；编排自建-first | 无（旧 predict 保留不动；scenes 以本契约为准） |
+| **后端架构** | Compose Qdrant+MySQL；表 images（含 `scenes`）；collection ensure（单库 + embedding_space_id 门禁）；POST /api/index、POST /api/search（`scene` 默认 normal + MySQL JSON 过滤）；GET /api/health；**仅 normal** 空结果 FlyB；可选 GET /api/images/file；编排自建-first | 无（旧 predict 保留不动；scenes 以本契约为准） |
 | **前端架构** | 仅 **适配层**：search 改 `/api/search`（或认转发）、入库接 `/api/index`、认 `source`、稳定 `id`、本地 `image_url` | 等 API 形状稳定 |
 
 ---
@@ -394,6 +453,7 @@ FlyB 返回形态沿用现 `FlyBSearch.parse_results`（数组或 `upstream_empt
 ## 7. 已锁定 / 仍可选
 
 - [x] `VECTOR_DIM` = **1024**（`multitask_cls.onnx` / `cls_emb`，L2 后 `(1024,)`）
+- [x] `embedding_space_id` 生成规则 + 启动门禁（§1.5）；错误码 `VECTOR_SPACE_MISMATCH`
 - [x] 场景：`scenes` JSON 数组；接口 `scene` 默认 `normal`；单 collection；FlyB 仅 normal
 - [ ] （可选）建议默认 `score_threshold`；无共识则 API 默认 `null`（只按 top_k）
 - [ ] （未实施）按 scope 分 Qdrant collection —— 见附录 A
@@ -409,6 +469,7 @@ FlyB 返回形态沿用现 `FlyBSearch.parse_results`（数组或 `upstream_empt
 | 2026-10-27 | **PM 拍板**：自建-first（空才 FlyB）；旧 predict/searchImage_* 保留不动，新能力只加 /api/search |
 | 2026-10-28 | **D4**：`uk_images_path (path(768))`；`INDEX_PATH_TOO_LONG` |
 | 2026-10-28 | **场景拍板**：`scenes` 多标签 JSON；接口 `scene` 默认 normal；单 collection；FlyB 仅 normal；list 延后但同字段；附录 A 分 collection 扩展位 |
+| 2026-10-28 | **§1.5 embedding_space_id**：生成规则（含 weights_fingerprint）、meta 落点、启动门禁 `VECTOR_SPACE_MISMATCH`、health 带回、换模语义 |
 
 ---
 

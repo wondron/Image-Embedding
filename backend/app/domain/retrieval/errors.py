@@ -1,4 +1,4 @@
-"""Retrieval domain errors mapped to contract §4.2 codes."""
+"""Retrieval domain errors mapped to contract 搂4.2 codes."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ class RetrievalError(Exception):
         self.http_status = http_status
 
 
-# Convenience constructors matching §4.2
+# Convenience constructors matching 搂4.2
 def index_empty_request(detail: str = "no file and no path") -> RetrievalError:
     return RetrievalError("INDEX_EMPTY_REQUEST", detail, http_status=400)
 
@@ -74,6 +74,19 @@ def vector_dim_mismatch(detail: str) -> RetrievalError:
     return RetrievalError("VECTOR_DIM_MISMATCH", detail, http_status=503)
 
 
+def vector_space_mismatch(
+    detail: str,
+    *,
+    configured: str | None = None,
+    stored: str | None = None,
+) -> RetrievalError:
+    """Configured embedding_space_id != collection meta (SSOT §1.5)."""
+    exc = RetrievalError("VECTOR_SPACE_MISMATCH", detail, http_status=503)
+    exc.configured = configured  # type: ignore[attr-defined]
+    exc.stored = stored  # type: ignore[attr-defined]
+    return exc
+
+
 def not_ready(detail: str) -> RetrievalError:
     return RetrievalError("NOT_READY", detail, http_status=503)
 
@@ -84,3 +97,4 @@ def validation_error(detail: str) -> RetrievalError:
 
 def internal_error(detail: str) -> RetrievalError:
     return RetrievalError("INTERNAL_ERROR", detail, http_status=500)
+

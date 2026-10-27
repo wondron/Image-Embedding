@@ -1,4 +1,4 @@
-"""MySQL `images` table adapter (SSOT §2)."""
+"""MySQL `images` table adapter (SSOT 搂2)."""
 
 from __future__ import annotations
 
@@ -39,6 +39,18 @@ CREATE TABLE IF NOT EXISTS images (
   KEY idx_images_category (category),
   KEY idx_images_status (status),
   KEY idx_images_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+"""
+
+# MVP authority for embedding_space_id (SSOT §1.5). Not dual-written to Qdrant metadata.
+META_DDL = """
+CREATE TABLE IF NOT EXISTS embedding_collection_meta (
+  collection_name VARCHAR(128) NOT NULL,
+  embedding_space_id VARCHAR(64) NOT NULL,
+  vector_dim INT UNSIGNED NOT NULL,
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+    ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (collection_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 """
 
@@ -138,9 +150,13 @@ class MySQLMetadataStore(MetadataStorePort):
                 cur.execute(IMAGES_DDL)
                 self._ensure_path_unique_prefix(cur)
                 self._ensure_scenes_column(cur)
+                cur.execute(META_DDL)
             conn.commit()
             self._schema_ready = True
-            logger.info("mysql images schema ready db=%s", self.database)
+            logger.info(
+                "mysql images+embedding_collection_meta schema ready db=%s",
+                self.database,
+            )
         except Exception as exc:
             conn.rollback()
             raise err.index_mysql_failed(f"ensure_schema: {exc}") from exc
@@ -235,7 +251,7 @@ class MySQLMetadataStore(MetadataStorePort):
         if not path:
             raise err.validation_error("path is required")
         # Temporary unique placeholder for NOT NULL + UNIQUE(qdrant_point_id),
-        # then set qdrant_point_id = id in the same transaction (SSOT §1.3).
+        # then set qdrant_point_id = id in the same transaction (SSOT 搂1.3).
         placeholder = random.randint(1 << 48, (1 << 63) - 1)
         sql = (
             "INSERT INTO images "
@@ -362,3 +378,107 @@ class MySQLMetadataStore(MetadataStorePort):
             raise err.search_mysql_failed(f"{type(exc).__name__}: {exc}") from exc
         finally:
             conn.close()
+
+
+    def get_collection_meta(self, collection_name: str) -> dict[str, Any] | None:
+        """Return embedding_collection_meta row or None."""
+        self.ensure_schema()
+        name = str(collection_name or "").strip()
+        if not name:
+            raise err.validation_error("collection_name is required")
+        conn = self._connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT collection_name, embedding_space_id, vector_dim, updated_at "
+                    "FROM embedding_collection_meta WHERE collection_name=%s",
+                    (name,),
+                )
+                row = cur.fetchone()
+            if not row:
+                return None
+            out = dict(row)
+            ts = out.get("updated_at")
+            if isinstance(ts, datetime):
+                out["updated_at"] = ts.isoformat(timespec="milliseconds")
+            return out
+        except err.RetrievalError:
+            raise
+        except Exception as exc:
+            raise err.index_mysql_failed(f"get_collection_meta: {exc}") from exc
+        finally:
+            conn.close()
+
+    def upsert_collection_meta(
+        self,
+        collection_name: str,
+        embedding_space_id: str,
+        vector_dim: int,
+    ) -> None:
+        """Insert or update meta for collection (MVP authority for space_id)."""
+        self.ensure_schema()
+        name = str(collection_name or "").strip()
+        space = str(embedding_space_id or "").strip()
+        if not name or not space:
+            raise err.validation_error("collection_name and embedding_space_id required")
+        dim = int(vector_dim)
+        conn = self._connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO embedding_collection_meta "
+                    "(collection_name, embedding_space_id, vector_dim) "
+                    "VALUES (%s,%s,%s) "
+                    "ON DUPLICATE KEY UPDATE "
+                    "embedding_space_id=VALUES(embedding_space_id), "
+                    "vector_dim=VALUES(vector_dim)",
+                    (name, space, dim),
+                )
+            conn.commit()
+            logger.info(
+                "embedding_collection_meta upserted collection=%s space_id=%s dim=%s",
+                name,
+                space,
+                dim,
+            )
+        except Exception as exc:
+            conn.rollback()
+            raise err.index_mysql_failed(f"upsert_collection_meta: {exc}") from exc
+        finally:
+            conn.close()
+
+    def ensure_embedding_space(
+        self,
+        collection_name: str,
+        embedding_space_id: str,
+        vector_dim: int,
+    ) -> dict[str, Any]:
+        """Gate §1.5: insert meta if missing; raise VECTOR_SPACE_MISMATCH if differs.
+
+        Does NOT recreate Qdrant collection.
+        """
+        self.ensure_schema()
+        configured = str(embedding_space_id or "").strip()
+        row = self.get_collection_meta(collection_name)
+        if row is None:
+            self.upsert_collection_meta(collection_name, configured, int(vector_dim))
+            return {
+                "collection_name": collection_name,
+                "embedding_space_id": configured,
+                "vector_dim": int(vector_dim),
+                "created": True,
+            }
+        stored = str(row.get("embedding_space_id") or "")
+        if stored != configured:
+            raise err.vector_space_mismatch(
+                f"embedding_space_id mismatch: configured={configured} stored={stored}",
+                configured=configured,
+                stored=stored,
+            )
+        return {
+            "collection_name": collection_name,
+            "embedding_space_id": stored,
+            "vector_dim": int(row.get("vector_dim") or vector_dim),
+            "created": False,
+        }
+

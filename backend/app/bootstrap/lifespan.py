@@ -73,18 +73,39 @@ def initialize_retrieval(runtime: ApplicationState) -> None:
     """Best-effort wire embedder + Qdrant + MySQL + FlyB. Does not block FoodService."""
     try:
         from app.bootstrap.retrieval_stack import build_retrieval_stack
+        from app.domain.retrieval.errors import RetrievalError
 
         runtime.retrieval = build_retrieval_stack(runtime.config, runtime.settings)
         runtime.retrieval_error = None
+        runtime.retrieval_error_code = None
+        runtime.retrieval_space_mismatch = None
         logger.info(
-            "Retrieval stack ready | qdrant=%s | mysql=%s/%s",
+            "Retrieval stack ready | qdrant=%s | mysql=%s/%s | space_id=%s",
             runtime.settings.qdrant.url,
             runtime.settings.mysql.host,
             runtime.settings.mysql.database,
+            getattr(runtime.retrieval, "embedding_space_id", None),
         )
     except Exception as exc:
         runtime.retrieval = None
-        runtime.retrieval_error = f"{type(exc).__name__}: {exc}"
+        from app.domain.retrieval.errors import RetrievalError
+
+        if isinstance(exc, RetrievalError):
+            runtime.retrieval_error = f"{exc.code}: {exc.detail}"
+            runtime.retrieval_error_code = exc.code
+            configured = getattr(exc, "configured", None)
+            stored = getattr(exc, "stored", None)
+            if configured is not None or stored is not None:
+                runtime.retrieval_space_mismatch = {
+                    "configured": configured,
+                    "stored": stored,
+                }
+            else:
+                runtime.retrieval_space_mismatch = None
+        else:
+            runtime.retrieval_error = f"{type(exc).__name__}: {exc}"
+            runtime.retrieval_error_code = None
+            runtime.retrieval_space_mismatch = None
         logger.exception("Retrieval stack initialization failed: %s", exc)
 
 def initialize_food_service(runtime: ApplicationState) -> None:

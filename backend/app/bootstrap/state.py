@@ -35,6 +35,8 @@ class ApplicationState:
     warmup_error: str | None = None
     retrieval: Optional["RetrievalStack"] = None
     retrieval_error: str | None = None
+    retrieval_error_code: str | None = None
+    retrieval_space_mismatch: dict[str, Any] | None = None
     stopping: bool = False
     config_provider: NacosConfigProvider | None = None
     configuration_lock: threading.RLock = field(

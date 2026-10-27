@@ -217,11 +217,29 @@ def run_search(
 
 def mvp_health(runtime: ApplicationState) -> JSONResponse:
     """GET /api/health aggregate (§3.3). Does not replace healthz/readyz."""
+    from app.domain.retrieval.embedding_space import resolve_space_id
+
     ts = datetime.now().astimezone().isoformat(timespec="seconds")
     components: Dict[str, Any] = {"api": {"ok": True}}
 
     retrieval = getattr(runtime, "retrieval", None)
     retrieval_error = getattr(runtime, "retrieval_error", None)
+    err_code = getattr(runtime, "retrieval_error_code", None)
+    mismatch = getattr(runtime, "retrieval_space_mismatch", None) or {}
+
+    configured_space: Optional[str] = None
+    try:
+        configured_space = resolve_space_id(
+            runtime.config,
+            vector_dim=int(runtime.settings.qdrant.vector_size),
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("resolve_space_id for health failed: %s", exc)
+
+    space_mismatch = err_code == "VECTOR_SPACE_MISMATCH"
+    stored_space = mismatch.get("stored") if isinstance(mismatch, dict) else None
+    if space_mismatch and isinstance(mismatch, dict) and mismatch.get("configured"):
+        configured_space = mismatch.get("configured") or configured_space
 
     # embedding
     emb_ok = False
@@ -233,9 +251,24 @@ def mvp_health(runtime: ApplicationState) -> JSONResponse:
             "ok": True,
             "model_path": getattr(emb, "model_path", None),
             "vector_dim": getattr(emb, "embedding_dim", 1024),
+            "embedding_space_id": getattr(retrieval, "embedding_space_id", None)
+            or configured_space,
         }
     elif retrieval_error:
-        emb_info = {"ok": False, "detail": retrieval_error}
+        emb_info = {
+            "ok": False,
+            "detail": retrieval_error,
+            "embedding_space_id": configured_space,
+        }
+        if space_mismatch:
+            emb_info["detail"] = {
+                "error": "VECTOR_SPACE_MISMATCH",
+                "configured": configured_space,
+                "stored": stored_space,
+                "message": retrieval_error,
+            }
+    else:
+        emb_info = {"ok": False, "detail": "not wired", "embedding_space_id": configured_space}
     components["embedding"] = emb_info
 
     # qdrant
@@ -246,9 +279,26 @@ def mvp_health(runtime: ApplicationState) -> JSONResponse:
             "ok": bool(ping.get("ok")),
             "collection": ping.get("collection") or "image_embeddings",
             "points_count": ping.get("points_count"),
+            "embedding_space_id": getattr(retrieval, "embedding_space_id", None)
+            or configured_space,
         }
         if not q_info["ok"]:
             q_info["detail"] = ping.get("detail")
+    else:
+        q_info = {
+            "ok": False,
+            "detail": retrieval_error or "not wired",
+            "collection": runtime.settings.qdrant.collection,
+            "embedding_space_id": configured_space,
+        }
+        if space_mismatch:
+            q_info["ok"] = False
+            q_info["detail"] = {
+                "error": "VECTOR_SPACE_MISMATCH",
+                "configured": configured_space,
+                "stored": stored_space,
+                "message": retrieval_error,
+            }
     components["qdrant"] = q_info
 
     # mysql
@@ -258,6 +308,8 @@ def mvp_health(runtime: ApplicationState) -> JSONResponse:
         m_info = {"ok": bool(ping.get("ok"))}
         if not m_info["ok"]:
             m_info["detail"] = ping.get("detail")
+    elif retrieval_error and not space_mismatch:
+        m_info = {"ok": False, "detail": retrieval_error}
     components["mysql"] = m_info
 
     # flyb optional
@@ -269,6 +321,10 @@ def mvp_health(runtime: ApplicationState) -> JSONResponse:
         else:
             f_info = {"ok": bool(getattr(flyb, "wired", False)), "optional": True}
     components["flyb"] = f_info
+
+    if space_mismatch:
+        emb_ok = False
+        q_info["ok"] = False
 
     ok = bool(emb_ok and q_info.get("ok") and m_info.get("ok"))
     status_code = 200 if ok else 503

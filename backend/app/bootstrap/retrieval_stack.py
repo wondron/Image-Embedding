@@ -11,6 +11,7 @@ from app.adapter.persistence.flyb_fallback import FlyBFallbackAdapter
 from app.adapter.persistence.mysql_metadata import MySQLMetadataStore
 from app.adapter.persistence.qdrant_store import QdrantVectorStore
 from app.core.config.settings import Settings
+from app.domain.retrieval.embedding_space import resolve_space_id
 from app.domain.retrieval.index_image import IndexImageUseCase
 from app.domain.retrieval.search_image import SearchImageUseCase
 
@@ -25,6 +26,7 @@ class RetrievalStack:
     flyb: FlyBFallbackAdapter
     index_uc: IndexImageUseCase
     search_uc: SearchImageUseCase
+    embedding_space_id: str = ""
 
 
 def build_retrieval_stack(
@@ -59,6 +61,21 @@ def build_retrieval_stack(
     )
     metadata.ensure_schema()
 
+    # SSOT §1.5: resolve space_id then gate against embedding_collection_meta.
+    # Mismatch -> VECTOR_SPACE_MISMATCH (no silent mix / no auto recreate).
+    space_id = resolve_space_id(config, vector_dim=int(q.vector_size))
+    metadata.ensure_embedding_space(
+        q.collection,
+        space_id,
+        int(q.vector_size),
+    )
+    logger.info(
+        "embedding_space gate ok | collection=%s space_id=%s dim=%s",
+        q.collection,
+        space_id,
+        q.vector_size,
+    )
+
     embedding = EmbedderPortImpl(config=config)
     flyb = FlyBFallbackAdapter(config)
 
@@ -72,4 +89,5 @@ def build_retrieval_stack(
         flyb=flyb,
         index_uc=index_uc,
         search_uc=search_uc,
+        embedding_space_id=space_id,
     )
