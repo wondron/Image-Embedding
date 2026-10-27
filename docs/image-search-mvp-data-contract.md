@@ -1,9 +1,9 @@
 # Image-Search MVP · 数据契约（SSOT）
 
-> **状态**：契约终稿（文档 only；PM 已拍板编排与旧 predict 双轨）  
+> **状态**：契约终稿（文档 only；含场景 scenes 拍板；不改业务代码、不 commit）  
 > **仓**：`D:\python\Image-Embedding`  
 > **权重（权威）**：`backend/config/model/dino/multitask_cls.onnx`（`EMBEDDING_CONFIG.output_name=cls_emb`，L2 归一化）  
-> **不改语义**：自建 embed → Qdrant → MySQL 为主路径；**仅当自建 top-k 为空**才兜底 FlyB。  
+> **不改语义**：自建 embed → Qdrant → MySQL 为主路径；**仅当 scene=normal（或缺省）且自建 top-k 为空**才兜底 FlyB。  
 > **编码**：UTF-8（无 BOM）  
 > **范围**：本地 Docker Compose（Qdrant + MySQL）；不 push；实现方不自测验收、不 commit（PM 测 PASS 后统一 commit）
 
@@ -22,9 +22,10 @@
 
 ### ✅ PM 拍板（2026-10-27）
 
-1. **MVP 编排 = 自建-first**：最终列表长度 == 0 才调 FlyB（按 §4 写死）。**不走**现网 FlyB-first；实现须改编排，不得「先 FlyB 再过滤」。
+1. **MVP 编排 = 自建-first**：最终列表长度 == 0 才调 FlyB（按 §4 写死）；且 **仅 `scene=normal`（或缺省）** 允许 FlyB。**不走**现网 FlyB-first；实现须改编排，不得「先 FlyB 再过滤」。
 2. **旧** POST /api/predict/searchImage_*：**保留不动**（前端「现网 Global」仍走它）；新能力只加 POST /api/search。本轮 **不** deprecate、**不**转发伪装。
 3. **D4（2026-10-28）`images.path` 唯一索引**：InnoDB utf8mb4 下 `UNIQUE(path)` 落地为 `UNIQUE KEY uk_images_path (path(768))`；列仍 `VARCHAR(1024)`。详见 §2。
+4. **场景标签（2026-10-28 · 总裁拍板）**：一张图可挂**多个**场景；库表用 `scenes`（JSON 字符串数组），默认 `['normal']`；可扩展 `normal` / `device` / 以后再加。接口用单值 `scene` 过滤（命中标签集），**缺省 = normal**；未知 scene → 422；**禁止**默认混搜全库。Qdrant **本轮单 collection**；FlyB **仅** `scene=normal`（或缺省）时空结果才兜底。详见 §2 / §3 / §4 / 附录 A。
 
 > 现网对照见上表；拍板后冲突关闭，实现以本条为准。
 
@@ -37,7 +38,7 @@
 
 | 项 | 值 | 说明 |
 |---|---|---|
-| collection name | `image_embeddings` | 仓内无既有 collection；新名 |
+| collection name | `image_embeddings` | 仓内无既有 collection；新名。**本轮单 collection**（不分场景）；日后按 scope 分 collection 见附录 A（未实施） |
 | distance | **Cosine** | 与现 `OnnxEmbedding.detect` 的 **L2 归一化**向量一致（点积 ≡ cosine） |
 | vectors.size | **1024**（已锁定） | 算法实测 `cls_emb`；见 §1.2 |
 | vectors.on_disk | false（MVP 默认可） | 样图约 109 张，内存足够 |
@@ -73,6 +74,7 @@
 | `image_id`（= point id） | 可选冗余 | ✅ PK |
 | `path` / 可访问 URL | ❌（避免双源） | ✅ |
 | `title` / `category` / tags | ❌ MVP | ✅ |
+| `scenes`（场景标签） | ❌ MVP（权威在 MySQL） | ✅ |
 | `created_at` | ❌ | ✅ |
 | 业务展示字段 | ❌ | ✅ |
 
@@ -93,7 +95,8 @@
 | `url` | `VARCHAR(2048)` | YES | NULL | — | 若已通过静态/文件接口暴露的 HTTP(S) URL；无则 null，由适配层用 path 拼 |
 | `title` | `VARCHAR(255)` | YES | NULL | — | 展示标题；缺省可用文件名 |
 | `category` | `VARCHAR(64)` | YES | NULL | IDX(`category`) | 对应 FE 入库壳「食材类别」 |
-| `tags` | `JSON` | YES | NULL | — | 可选标签数组，如 `["红薯叶"]` |
+| `tags` | `JSON` | YES | NULL | — | 可选标签数组，如 `["红薯叶"]`；**禁止**用 tags/category 冒充场景 |
+| `scenes` | `JSON` | NO | — | IDX 见约束 | **场景标签集**：JSON 字符串数组，wire 英文短串。默认入库 `["normal"]`；已登记值：`normal`（普通）、`device`（一体机）；可扩展。一张图可挂多个；某类 gallery「每张只需 1 个」由该 scope 的**产品规则**约束，**非**库表全局强制单值 |
 | `width` | `INT UNSIGNED` | YES | NULL | — | 像素宽 |
 | `height` | `INT UNSIGNED` | YES | NULL | — | 像素高 |
 | `qdrant_point_id` | `BIGINT UNSIGNED` | NO | — | UNIQUE | **MVP = `id`**；显式列便于日后迁移；写入时必须 `qdrant_point_id = id` |
@@ -107,10 +110,17 @@
   - **定案（DDL · 已落地）**：列仍 `VARCHAR(1024)`。**InnoDB + utf8mb4 下契约写的 `UNIQUE(path)` 落地为 `UNIQUE KEY uk_images_path (path(768))`**（前缀唯一，避 MySQL 1071）。冲突仍返回 `INDEX_DUPLICATE_PATH`。
   - **语义**：应用层以**完整** `path` 判等入库；前缀唯一在「前 768 字符相同、其后不同」时理论上会误冲突——MVP 路径（样图根下）应远短于 768；入库前建议规范化并 **拒绝 `len(path) > 768`**（`422` / `INDEX_PATH_TOO_LONG`），使前缀唯一 ≡ 全路径唯一。
   - **备选（本轮不采用，仅备案）**：① 缩短列为 `VARCHAR(768)` + 全列 `UNIQUE(path)`；② 另加 `path_hash CHAR(64)`（规范化 path 的 SHA-256 hex）全列 `UNIQUE`，`path` 仅普通索引。
-- 搜图 join：Qdrant 返回的 id 集合 → `WHERE id IN (...) AND status='active'`。
+- **`scenes`（场景）**：
+  - 必须为非空 JSON **字符串数组**；元素均为已登记英文短串（MVP 登记表：`normal`、`device`；扩展须先改本契约）。
+  - 入库缺省：`["normal"]`。禁止空数组。禁止用 `tags` / `category` 冒充场景。
+  - 查询语义（接口字段名 `scene`，单值）：命中标签集 ⟺ MySQL `status='active' AND JSON_CONTAINS(scenes, JSON_QUOTE(:scene), '$')`（或等价）。
+  - **多标签 vs 单标签**：库表允许多值；若某 gallery/scope 规定「每张只需 1 个」，由该 scope 写入/校验规则约束，不在此加全局 CHECK。
+  - 索引：可对生成列或应用层约定；MVP 允许无函数索引，量级靠回表过滤。
+- 搜图 join：Qdrant 返回的 id 集合 → `WHERE id IN (...) AND status='active' AND JSON_CONTAINS(scenes, JSON_QUOTE(:scene), '$')`。
+- **path 仍全局唯一**：`uk_images_path (path(768))`；同 path **不因**多场景双挂（一图一行，多场景靠 `scenes` 数组）。
 
 **FE 入库壳已有、表已覆盖**：类别 `category`、本地文件队列。  
-**FE 图库壳尚未接 API**：列表/筛选后续可用 `title`/`category`/`created_at`；本契约不定义 list API（可延后）。
+**FE 图库壳尚未接 API**：本契约**暂不定义** list API（可延后）。将来 list 与 search **同字段**：查询参数/过滤 `scene`，**默认 `normal`**；可用 `title`/`category`/`created_at`/`scenes` 筛选。
 
 ---
 
@@ -124,8 +134,15 @@
 
 **Content-Type**：
 
-- `multipart/form-data`：字段 `file`（单文件）或 `files`（多文件，MVP 建议单请求 ≤ 100，与 FE 队列上限对齐）；可选 `category`（string）、`tags`（JSON 字符串数组）。
-- 或 `application/json`：`{ "path": "...", "category": "...", "tags": [] }` —— 仅当文件已在服务可达路径上（批处理样图用）；与 multipart **二选一**。
+- `multipart/form-data`：字段 `file`（单文件）或 `files`（多文件，MVP 建议单请求 ≤ 100，与 FE 队列上限对齐）；可选 `category`（string）、`tags`（JSON 字符串数组）；可选 `scene`（单个英文短串）或 `scenes`（JSON 字符串数组）。
+- 或 `application/json`：`{ "path": "...", "category": "...", "tags": [], "scene": "normal", "scenes": ["normal"] }` —— 仅当文件已在服务可达路径上（批处理样图用）；与 multipart **二选一**。
+
+**场景写入规则**：
+- 若提供 `scenes`（数组）→ 存该数组（须非空、元素均已登记）。
+- 否则若提供 `scene`（单值）→ 存 `[scene]`。
+- 否则 → 存 `["normal"]`。
+- `scene` / `scenes` 中任一未知短串 → `422` `INDEX_UNKNOWN_SCENE`（或 `VALIDATION_ERROR`）。
+- 同时提供且不一致时 → `422`（以明确错误拒绝，不静默合并）。
 
 **成功响应** `200`：
 
@@ -142,6 +159,7 @@
       "title": "path.jpg",
       "category": "蔬菜",
       "tags": ["红薯叶"],
+      "scenes": ["normal"],
       "width": 1024,
       "height": 768,
       "status": "active",
@@ -162,7 +180,7 @@
 
 ### 3.2 `POST /api/search`
 
-**用途**：自建向量检索；**仅当自建 top-k 为空**时触发 FlyB 兜底（§4）。
+**用途**：自建向量检索；**仅当 `scene=normal`（或缺省）且自建 top-k 为空**时触发 FlyB 兜底（§4）。其他 scene 自建空则直接空，不调 FlyB。
 
 **请求**（与现 FE 能力对齐，两种互斥）：
 
@@ -173,6 +191,7 @@ B. `application/json`：`{ "img_url": "https://..." }`
 
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|
+| `scene` | string | `normal` | **单值过滤**：只返回 `scenes` 标签集**包含**该值的图。缺省 = `normal`。**禁止**缺省混搜全库。未知短串 → `422` `SEARCH_UNKNOWN_SCENE`。不提供「全场景」默认值；若产品要跨场景须显式另议（本轮不做） |
 | `top_k` | int | 10 | 自建召回条数，范围 1～50 |
 | `score_threshold` | float \| null | null | 若设，cosine score **严格低于**阈值的点丢弃后再判空 |
 | `trace_id` | string \| null | 服务端生成 | |
@@ -192,6 +211,7 @@ B. `application/json`：`{ "img_url": "https://..." }`
       "thumbnail_url": null,
       "similarity": 0.91,
       "category": "蔬菜",
+      "scenes": ["normal"],
       "page_url": null,
       "site_name": "local",
       "text_snippets": [],
@@ -302,19 +322,23 @@ MVP 聚合检查（**不**替代现有 `healthz`/`readyz`；二者可继续给�
 
 在调用 FlyB **之前**，完成：
 
-1. 查询图 embed 成功；
-2. Qdrant `search`（collection=`image_embeddings`，limit=`top_k`）；
-3. 若配置了 `score_threshold`，过滤后保留 `score >= threshold` 的点；
-4. 用保留 id 查 MySQL `status='active'`，去掉库中不存在或已删的 id；
-5. **若最终列表长度 == 0** ⇒ 判定 **自建 top-k 为空** ⇒ **唯一**允许触发 FlyB 的条件。
+1. 解析 `scene`（缺省 `normal`）；未知 → `422`，不检索、不调 FlyB；
+2. 查询图 embed 成功；
+3. Qdrant `search`（collection=`image_embeddings`，limit=`top_k`；本轮可适当多取再裁）；
+4. 若配置了 `score_threshold`，过滤后保留 `score >= threshold` 的点；
+5. 用保留 id 查 MySQL：`status='active' AND JSON_CONTAINS(scenes, JSON_QUOTE(:scene), '$')`，去掉不存在/已删/场景不匹配的 id；
+6. **若最终列表长度 == 0**：
+   - 且 **`scene` 为 `normal`（含请求缺省）** ⇒ 判定 **自建 top-k 为空** ⇒ **允许**触发 FlyB；
+   - 且 **`scene` 为其他值**（如 `device`）⇒ **不**调 FlyB，直接 `source=empty`。
 
-**不是空、禁止 FlyB 的情况**：
+**禁止 FlyB 的情况**：
 
 - 自建已有 ≥1 条（即使分低）—— **不得**再调 FlyB 混排或替换；
+- 请求 `scene ≠ normal`（且非缺省等价）—— 空结果保持 empty；
 - embed / Qdrant / MySQL 基础设施错误 —— 返回对应 5xx/错误码，**不得**用 FlyB 冒充自建成功；
-- 查询图非法 —— `4xx`，不调 FlyB。
+- 查询图非法 / 未知 scene —— `4xx`，不调 FlyB。
 
-FlyB 返回形态沿用现 `FlyBSearch.parse_results`（数组或 `upstream_empty_response` envelope）。契约 **不**发明 FlyB-first 路径。
+FlyB 返回形态沿用现 `FlyBSearch.parse_results`（数组或 `upstream_empty_response` envelope）。契约 **不**发明 FlyB-first 路径。FlyB 结果**不保证**带本地 `scenes` 语义（仅 normal 路径兜底）。
 
 ### 4.2 错误码表
 
@@ -328,9 +352,11 @@ FlyB 返回形态沿用现 `FlyBSearch.parse_results`（数组或 `upstream_empt
 | `INDEX_BAD_EMBEDDING` | 422 | 维数/NaN/零向量 |
 | `INDEX_DUPLICATE_PATH` | 409 | path 唯一冲突 |
 | `INDEX_PATH_TOO_LONG` | 422 | `path` 规范化后长度 > 768（与 `UNIQUE(path(768))` 语义对齐） |
+| `INDEX_UNKNOWN_SCENE` | 422 | `scene`/`scenes` 含未登记短串 |
 | `INDEX_QDRANT_FAILED` | 502 | 写向量失败（MySQL 应回滚或标失败） |
 | `INDEX_MYSQL_FAILED` | 502 | 写元数据失败 |
 | `SEARCH_BAD_IMAGE` | 422 | 查询图无效 |
+| `SEARCH_UNKNOWN_SCENE` | 422 | 请求 `scene` 未登记 |
 | `SEARCH_BAD_EMBEDDING` | 422 | 查询向量非法 |
 | `SEARCH_QDRANT_FAILED` | 502 | 检索基础设施失败（**不**降级 FlyB） |
 | `SEARCH_MYSQL_FAILED` | 502 | 元数据 join 失败 |
@@ -360,7 +386,7 @@ FlyB 返回形态沿用现 `FlyBSearch.parse_results`（数组或 `upstream_empt
 | 角色 | 可开工项 | 阻塞 |
 |---|---|---|
 | **算法逻辑** | dim 已锁定 1024；可开工：索引/查询伪代码、阈值建议、样图 embedding 质量抽检 | 无 |
-| **后端架构** | Compose Qdrant+MySQL；表 images；collection ensure；POST /api/index、POST /api/search、GET /api/health；空结果 FlyB；可选 GET /api/images/file；编排改为自建-first | 无（旧 predict 保留不动） |
+| **后端架构** | Compose Qdrant+MySQL；表 images（含 `scenes`）；collection ensure（单库）；POST /api/index、POST /api/search（`scene` 默认 normal + MySQL JSON 过滤）；GET /api/health；**仅 normal** 空结果 FlyB；可选 GET /api/images/file；编排自建-first | 无（旧 predict 保留不动；scenes 以本契约为准） |
 | **前端架构** | 仅 **适配层**：search 改 `/api/search`（或认转发）、入库接 `/api/index`、认 `source`、稳定 `id`、本地 `image_url` | 等 API 形状稳定 |
 
 ---
@@ -368,7 +394,9 @@ FlyB 返回形态沿用现 `FlyBSearch.parse_results`（数组或 `upstream_empt
 ## 7. 已锁定 / 仍可选
 
 - [x] `VECTOR_DIM` = **1024**（`multitask_cls.onnx` / `cls_emb`，L2 后 `(1024,)`）
+- [x] 场景：`scenes` JSON 数组；接口 `scene` 默认 `normal`；单 collection；FlyB 仅 normal
 - [ ] （可选）建议默认 `score_threshold`；无共识则 API 默认 `null`（只按 top_k）
+- [ ] （未实施）按 scope 分 Qdrant collection —— 见附录 A
 
 ---
 
@@ -379,3 +407,22 @@ FlyB 返回形态沿用现 `FlyBSearch.parse_results`（数组或 `upstream_empt
 | 2026-10-27 | 初稿：Qdrant / MySQL / `/api/index` `/api/search` `/api/health` / 空→FlyB；标现网 FlyB-first 冲突与 FE 适配缺口 |
 | 2026-10-27 | **dim 锁定 1024**（算法实测 cls_emb）；去掉待回填占位；校验仍拒绝 ≠1024 |
 | 2026-10-27 | **PM 拍板**：自建-first（空才 FlyB）；旧 predict/searchImage_* 保留不动，新能力只加 /api/search |
+| 2026-10-28 | **D4**：`uk_images_path (path(768))`；`INDEX_PATH_TOO_LONG` |
+| 2026-10-28 | **场景拍板**：`scenes` 多标签 JSON；接口 `scene` 默认 normal；单 collection；FlyB 仅 normal；list 延后但同字段；附录 A 分 collection 扩展位 |
+
+---
+
+## 附录 A · 按 scope 分 Qdrant collection（**未实施**）
+
+> 算法侧主张：按场景/scope 分 collection 可降低串库风险。本轮总裁/PM 定案：**YAGNI**，保持单一 `image_embeddings`；权威场景过滤在 MySQL。
+
+**扩展位（日后若实施，须先改本契约再改代码）**：
+
+| scope / scene | collection（示例名） | 说明 |
+|---|---|---|
+| `normal` | `image_embeddings` | 现网单库；迁移期可保持此名 |
+| `device` | `image_embeddings_device` | 示例；维数/模型须仍与契约一致或单独立项 |
+| （未来） | （映射表扩行） | 禁止静默把请求 scene 打进未映射 collection |
+
+实施时建议：配置项 `SCENE_COLLECTION_MAP`（scene → collection name）；ensure 各 collection；search 只查映射目标；**禁止**跨 collection 混搜除非显式产品需求。
+未实施前：忽略本表，一律 `image_embeddings`。

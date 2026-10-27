@@ -21,6 +21,8 @@ class IndexJsonRequest(BaseModel):
     path: str = Field(..., description="Local path reachable by the API process")
     category: Optional[str] = None
     tags: Optional[List[Any]] = None
+    scene: Optional[str] = None
+    scenes: Optional[List[Any]] = None
 
 
 class IndexItemOut(BaseModel):
@@ -31,6 +33,7 @@ class IndexItemOut(BaseModel):
     title: Optional[str] = None
     category: Optional[str] = None
     tags: Optional[Any] = None
+    scenes: Optional[List[Any]] = None
     width: Optional[int] = None
     height: Optional[int] = None
     status: str = "active"
@@ -54,6 +57,7 @@ class SearchJsonRequest(BaseModel):
     """JSON search body (§3.2 B)."""
 
     img_url: str = Field(..., description="Remote query image URL")
+    scene: Optional[str] = None
     top_k: int = Field(default=10, ge=1, le=50)
     score_threshold: Optional[float] = None
     trace_id: Optional[str] = None

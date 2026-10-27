@@ -77,6 +77,33 @@ def parse_tags(raw: Optional[str]) -> Optional[List[Any]]:
     return val
 
 
+def parse_scenes_json(raw: Optional[str]) -> Optional[List[Any]]:
+    """Parse multipart `scenes` JSON array; None if omitted. Domain validates registry."""
+    if raw is None or raw == "":
+        return None
+    try:
+        val = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "ok": False,
+                "error": "VALIDATION_ERROR",
+                "detail": f"scenes JSON invalid: {exc}",
+            },
+        ) from exc
+    if not isinstance(val, list):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "ok": False,
+                "error": "VALIDATION_ERROR",
+                "detail": "scenes must be a JSON array",
+            },
+        )
+    return val
+
+
 async def read_upload(file: UploadFile, max_bytes: int) -> bytes:
     data = await file.read(max_bytes + 1)
     if not data:
@@ -118,6 +145,24 @@ def run_index(
             trace_id=tid,
         )
 
+    # Promote uniform INDEX_UNKNOWN_SCENE when whole batch failed on that code
+    if (not indexed) and failed and all(f.get("error") == "INDEX_UNKNOWN_SCENE" for f in failed):
+        return error_response(
+            "INDEX_UNKNOWN_SCENE",
+            (failed[0].get("message") or "unknown scene"),
+            status_code=422,
+            trace_id=tid,
+        )
+
+    # S5: whole-batch VALIDATION_ERROR (e.g. scene+scenes conflict) → top-level 422
+    if (not indexed) and failed and all(f.get("error") == "VALIDATION_ERROR" for f in failed):
+        return error_response(
+            "VALIDATION_ERROR",
+            (failed[0].get("message") or "validation error"),
+            status_code=422,
+            trace_id=tid,
+        )
+
     if outcome.get("all_failed") and not indexed:
         # No decodable image at all → 400 INDEX_EMPTY_REQUEST per §3.1
         if not failed or all(
@@ -144,6 +189,7 @@ def run_search(
     *,
     image_bytes: Optional[bytes] = None,
     image_url: Optional[str] = None,
+    scene: Optional[str] = None,
     top_k: int = 10,
     score_threshold: Optional[float] = None,
     public_file_base: str,
@@ -155,6 +201,7 @@ def run_search(
         payload = stack.search_uc.execute(
             image_bytes=image_bytes,
             image_url=image_url,
+            scene=scene,
             top_k=top_k,
             score_threshold=score_threshold,
             public_file_base=public_file_base,

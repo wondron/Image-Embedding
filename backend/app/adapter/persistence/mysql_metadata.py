@@ -10,6 +10,7 @@ from typing import Any
 
 from app.domain.retrieval import errors as err
 from app.domain.retrieval.ports import MetadataStorePort
+from app.domain.retrieval.scenes import DEFAULT_SCENES
 
 logger = logging.getLogger("mysql_metadata")
 
@@ -25,6 +26,7 @@ CREATE TABLE IF NOT EXISTS images (
   title VARCHAR(255) NULL,
   category VARCHAR(64) NULL,
   tags JSON NULL,
+  scenes JSON NOT NULL,
   width INT UNSIGNED NULL,
   height INT UNSIGNED NULL,
   qdrant_point_id BIGINT UNSIGNED NOT NULL,
@@ -49,16 +51,33 @@ def _json_tags(tags: Any) -> str | None:
     return json.dumps(tags, ensure_ascii=False)
 
 
+def _json_scenes(scenes: Any) -> str:
+    """Serialize scenes list to JSON text; default ["normal"]."""
+    if scenes is None:
+        return json.dumps(list(DEFAULT_SCENES), ensure_ascii=False)
+    if isinstance(scenes, str):
+        return scenes
+    return json.dumps(list(scenes), ensure_ascii=False)
+
+
+def _parse_json_field(val: Any) -> Any:
+    if isinstance(val, (bytes, bytearray)):
+        val = val.decode("utf-8")
+    if isinstance(val, str):
+        try:
+            return json.loads(val)
+        except json.JSONDecodeError:
+            return val
+    return val
+
+
 def _row_to_dict(row: dict[str, Any]) -> dict[str, Any]:
     out = dict(row)
-    tags = out.get("tags")
-    if isinstance(tags, (bytes, bytearray)):
-        tags = tags.decode("utf-8")
-    if isinstance(tags, str):
-        try:
-            out["tags"] = json.loads(tags)
-        except json.JSONDecodeError:
-            out["tags"] = tags
+    out["tags"] = _parse_json_field(out.get("tags"))
+    scenes = _parse_json_field(out.get("scenes"))
+    if scenes is None:
+        scenes = list(DEFAULT_SCENES)
+    out["scenes"] = scenes
     for key in ("created_at", "updated_at"):
         val = out.get(key)
         if isinstance(val, datetime):
@@ -118,6 +137,7 @@ class MySQLMetadataStore(MetadataStorePort):
             with conn.cursor() as cur:
                 cur.execute(IMAGES_DDL)
                 self._ensure_path_unique_prefix(cur)
+                self._ensure_scenes_column(cur)
             conn.commit()
             self._schema_ready = True
             logger.info("mysql images schema ready db=%s", self.database)
@@ -127,10 +147,8 @@ class MySQLMetadataStore(MetadataStorePort):
         finally:
             conn.close()
 
-
     def _ensure_path_unique_prefix(self, cur) -> None:
         """D4: ensure UNIQUE KEY uk_images_path (path(768)); migrate legacy names/shapes."""
-        # Drop legacy name from earlier BE draft if present.
         cur.execute(
             "SHOW INDEX FROM images WHERE Key_name=%s",
             ("uq_images_path",),
@@ -163,6 +181,36 @@ class MySQLMetadataStore(MetadataStorePort):
             f"ALTER TABLE images ADD UNIQUE KEY uk_images_path (path({PATH_UNIQUE_PREFIX}))"
         )
 
+    def _ensure_scenes_column(self, cur) -> None:
+        """Add scenes JSON NOT NULL; backfill existing rows to [\"normal\"]."""
+        cur.execute(
+            "SELECT COUNT(*) AS c FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA=%s AND TABLE_NAME='images' AND COLUMN_NAME='scenes'",
+            (self.database,),
+        )
+        row = cur.fetchone() or {}
+        count = int(row.get("c") if isinstance(row, dict) else row[0])
+        default_json = json.dumps(list(DEFAULT_SCENES), ensure_ascii=False)
+        if count == 0:
+            # MySQL 8: ADD nullable first, backfill, then NOT NULL
+            cur.execute("ALTER TABLE images ADD COLUMN scenes JSON NULL")
+            cur.execute(
+                "UPDATE images SET scenes=CAST(%s AS JSON) "
+                "WHERE scenes IS NULL OR JSON_TYPE(scenes)='NULL' "
+                "OR JSON_LENGTH(scenes)=0",
+                (default_json,),
+            )
+            cur.execute("ALTER TABLE images MODIFY COLUMN scenes JSON NOT NULL")
+            logger.info("mysql added scenes column + backfill default=%s", default_json)
+            return
+        # Column exists: still backfill null/empty
+        cur.execute(
+            "UPDATE images SET scenes=CAST(%s AS JSON) "
+            "WHERE scenes IS NULL OR JSON_TYPE(scenes)='NULL' "
+            "OR JSON_LENGTH(scenes)=0",
+            (default_json,),
+        )
+
     def ping(self) -> dict[str, Any]:
         try:
             conn = self._connect()
@@ -191,8 +239,8 @@ class MySQLMetadataStore(MetadataStorePort):
         placeholder = random.randint(1 << 48, (1 << 63) - 1)
         sql = (
             "INSERT INTO images "
-            "(path, url, title, category, tags, width, height, qdrant_point_id, status) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+            "(path, url, title, category, tags, scenes, width, height, qdrant_point_id, status) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
         )
         args = (
             path,
@@ -200,6 +248,7 @@ class MySQLMetadataStore(MetadataStorePort):
             row.get("title"),
             row.get("category"),
             _json_tags(row.get("tags")),
+            _json_scenes(row.get("scenes")),
             row.get("width"),
             row.get("height"),
             placeholder,
@@ -237,7 +286,7 @@ class MySQLMetadataStore(MetadataStorePort):
             return
         self.ensure_schema()
         allowed = {
-            "path", "url", "title", "category", "tags",
+            "path", "url", "title", "category", "tags", "scenes",
             "width", "height", "qdrant_point_id", "status",
         }
         cols = []
@@ -246,7 +295,12 @@ class MySQLMetadataStore(MetadataStorePort):
             if key not in allowed:
                 continue
             cols.append(f"`{key}`=%s")
-            args.append(_json_tags(value) if key == "tags" else value)
+            if key == "tags":
+                args.append(_json_tags(value))
+            elif key == "scenes":
+                args.append(_json_scenes(value))
+            else:
+                args.append(value)
         if not cols:
             return
         args.append(int(image_id))
@@ -267,7 +321,12 @@ class MySQLMetadataStore(MetadataStorePort):
     def mark_deleted(self, image_id: int) -> None:
         self.update_image(int(image_id), {"status": "deleted"})
 
-    def get_active_by_ids(self, image_ids: list[int]) -> dict[int, dict[str, Any]]:
+    def get_active_by_ids(
+        self,
+        image_ids: list[int],
+        *,
+        scene: str | None = None,
+    ) -> dict[int, dict[str, Any]]:
         if not image_ids:
             return {}
         self.ensure_schema()
@@ -276,10 +335,14 @@ class MySQLMetadataStore(MetadataStorePort):
         sql = (
             f"SELECT * FROM images WHERE id IN ({placeholders}) AND status='active'"
         )
+        args: list[Any] = list(ids)
+        if scene is not None and str(scene).strip() != "":
+            sql += " AND JSON_CONTAINS(scenes, JSON_QUOTE(%s), '$')"
+            args.append(str(scene).strip())
         conn = self._connect()
         try:
             with conn.cursor() as cur:
-                cur.execute(sql, ids)
+                cur.execute(sql, args)
                 rows = cur.fetchall() or []
             return {int(r["id"]): _row_to_dict(r) for r in rows}
         except Exception as exc:

@@ -34,6 +34,10 @@ def index_path_too_long(detail: str) -> RetrievalError:
     return RetrievalError("INDEX_PATH_TOO_LONG", detail, http_status=422)
 
 
+def index_unknown_scene(detail: str) -> RetrievalError:
+    return RetrievalError("INDEX_UNKNOWN_SCENE", detail, http_status=422)
+
+
 def index_qdrant_failed(detail: str) -> RetrievalError:
     return RetrievalError("INDEX_QDRANT_FAILED", detail, http_status=502)
 
@@ -44,6 +48,10 @@ def index_mysql_failed(detail: str) -> RetrievalError:
 
 def search_bad_image(detail: str) -> RetrievalError:
     return RetrievalError("SEARCH_BAD_IMAGE", detail, http_status=422)
+
+
+def search_unknown_scene(detail: str) -> RetrievalError:
+    return RetrievalError("SEARCH_UNKNOWN_SCENE", detail, http_status=422)
 
 
 def search_bad_embedding(detail: str) -> RetrievalError:

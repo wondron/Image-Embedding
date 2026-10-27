@@ -68,8 +68,16 @@ class MetadataStorePort(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_active_by_ids(self, image_ids: list[int]) -> dict[int, dict[str, Any]]:
-        """id -> row for status='active' only; missing/deleted omitted."""
+    def get_active_by_ids(
+        self,
+        image_ids: list[int],
+        *,
+        scene: str | None = None,
+    ) -> dict[int, dict[str, Any]]:
+        """id -> row for status='active' only; missing/deleted omitted.
+
+        If scene is set, also require JSON_CONTAINS(scenes, JSON_QUOTE(scene), '$').
+        """
         raise NotImplementedError
 
     @abstractmethod
@@ -82,7 +90,7 @@ class MetadataStorePort(ABC):
 
 
 class FlyBFallbackPort(ABC):
-    """Only when final self-built list length == 0 (§4.1)."""
+    """Only when final self-built list length == 0 and scene=normal (§4.1)."""
 
     @abstractmethod
     def search_fallback(

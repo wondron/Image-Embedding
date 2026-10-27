@@ -9,11 +9,12 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, Sequence
 
 from app.domain.retrieval import errors as err
 from app.domain.retrieval.embedding_validate import validate_embedding
 from app.domain.retrieval.ports import EmbeddingPort, MetadataStorePort, VectorStorePort
+from app.domain.retrieval.scenes import resolve_index_scenes
 
 logger = logging.getLogger("retrieval.index")
 
@@ -45,7 +46,6 @@ def _decode_size(image_bytes: bytes) -> tuple[int | None, int | None]:
             return None, None
 
 
-
 def _read_image_file(path: str) -> bytes:
     """Unicode-safe file read for Windows 中文路径.
 
@@ -74,6 +74,7 @@ def _reject_if_path_too_long(path: str) -> str:
         )
     return normalized
 
+
 def _title_from_path(path: str) -> str:
     return Path(path).name or path
 
@@ -100,12 +101,16 @@ class IndexImageUseCase:
         filename: str | None = None,
         category: str | None = None,
         tags: list[Any] | None = None,
+        scene: str | None = None,
+        scenes: Sequence[Any] | None = None,
         public_file_base: str | None = None,
     ) -> dict[str, Any]:
         """Index a single image. Raises RetrievalError on hard failure."""
         path_mode = bool(source_path and not image_bytes)
         if image_bytes is None and not source_path:
             raise err.index_empty_request()
+
+        resolved_scenes = resolve_index_scenes(scene=scene, scenes=scenes)
 
         if path_mode:
             p = Path(source_path)
@@ -154,6 +159,7 @@ class IndexImageUseCase:
             "title": title,
             "category": category,
             "tags": tags,
+            "scenes": resolved_scenes,
             "width": width,
             "height": height,
             "status": "active",
@@ -208,6 +214,7 @@ class IndexImageUseCase:
             "title": created.get("title") or title,
             "category": created.get("category") or category,
             "tags": created.get("tags") if created.get("tags") is not None else tags,
+            "scenes": created.get("scenes") if created.get("scenes") is not None else resolved_scenes,
             "width": created.get("width") or width,
             "height": created.get("height") or height,
             "status": created.get("status") or "active",
@@ -235,6 +242,8 @@ class IndexImageUseCase:
                         filename=item.get("filename"),
                         category=item.get("category"),
                         tags=item.get("tags"),
+                        scene=item.get("scene"),
+                        scenes=item.get("scenes"),
                         public_file_base=public_file_base,
                     )
                 )
@@ -258,4 +267,3 @@ class IndexImageUseCase:
             # Entire batch failed → all_failed so HTTP can promote codes (D4-3 PATH_TOO_LONG etc.)
             return {"ok": False, "indexed": [], "failed": failed, "all_failed": True}
         return {"ok": True, "indexed": indexed, "failed": failed, "all_failed": False}
-

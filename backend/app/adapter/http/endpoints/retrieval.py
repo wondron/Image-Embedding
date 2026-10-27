@@ -32,7 +32,7 @@ def _as_upload(value: Any) -> Optional[UploadFile]:
 @router.post(
     "/index",
     summary="Index image(s)",
-    description="multipart file/files or JSON {path,category,tags}. SSOT §3.1.",
+    description="multipart file/files or JSON {path,category,tags,scene,scenes}. SSOT §3.1.",
 )
 async def index_image(request: Request) -> JSONResponse:
     runtime = get_application_state(request)
@@ -50,6 +50,8 @@ async def index_image(request: Request) -> JSONResponse:
                     "filename": raw.path,
                     "category": raw.category,
                     "tags": raw.tags,
+                    "scene": raw.scene,
+                    "scenes": raw.scenes,
                 }
             )
         else:
@@ -59,6 +61,12 @@ async def index_image(request: Request) -> JSONResponse:
             tags_raw = form.get("tags")
             tag_list = retrieval_service.parse_tags(
                 str(tags_raw) if tags_raw is not None else None
+            )
+            scene_raw = form.get("scene")
+            scene_s = str(scene_raw).strip() if scene_raw not in (None, "") else None
+            scenes_raw = form.get("scenes")
+            scenes_list = retrieval_service.parse_scenes_json(
+                str(scenes_raw) if scenes_raw is not None else None
             )
 
             uploads: List[UploadFile] = []
@@ -96,6 +104,8 @@ async def index_image(request: Request) -> JSONResponse:
                         "filename": up.filename or "upload.bin",
                         "category": category_s,
                         "tags": tag_list,
+                        "scene": scene_s,
+                        "scenes": scenes_list,
                     }
                 )
     except RetrievalError as exc:
@@ -114,8 +124,8 @@ async def index_image(request: Request) -> JSONResponse:
     "/search",
     summary="Search by image",
     description=(
-        "multipart file OR JSON {img_url}. Self-built-first; "
-        "FlyB only when final list length==0. SSOT §3.2/§4."
+        "multipart file OR JSON {img_url,scene}. Self-built-first; "
+        "FlyB only when scene=normal and final list length==0. SSOT §3.2/§4."
     ),
 )
 async def search_image(request: Request) -> JSONResponse:
@@ -125,6 +135,7 @@ async def search_image(request: Request) -> JSONResponse:
 
     image_bytes = None
     image_url = None
+    scene = None
     k = 10
     thr = None
     tid = None
@@ -134,6 +145,7 @@ async def search_image(request: Request) -> JSONResponse:
             payload = await request.json()
             raw = SearchJsonRequest(**payload)
             image_url = raw.img_url
+            scene = raw.scene
             k = int(raw.top_k)
             thr = raw.score_threshold
             tid = raw.trace_id
@@ -147,6 +159,9 @@ async def search_image(request: Request) -> JSONResponse:
             img_url_val = form.get("img_url")
             if img_url_val and image_bytes is None:
                 image_url = str(img_url_val)
+            scene_val = form.get("scene")
+            if scene_val not in (None, ""):
+                scene = str(scene_val)
             if form.get("top_k") is not None:
                 k = int(str(form.get("top_k")))
             if form.get("score_threshold") not in (None, ""):
@@ -156,6 +171,8 @@ async def search_image(request: Request) -> JSONResponse:
 
         # query overrides
         qp = request.query_params
+        if qp.get("scene") not in (None, ""):
+            scene = qp.get("scene")
         if qp.get("top_k") is not None:
             k = int(qp.get("top_k"))
         if qp.get("score_threshold") not in (None, ""):
@@ -191,6 +208,7 @@ async def search_image(request: Request) -> JSONResponse:
         runtime,
         image_bytes=image_bytes,
         image_url=image_url,
+        scene=scene,
         top_k=k,
         score_threshold=thr,
         public_file_base=base,

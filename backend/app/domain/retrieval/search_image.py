@@ -1,15 +1,15 @@
 """Search-image use case (SSOT §3.2 / §4.1).
 
 Self-built-first:
-  embed → Qdrant top-k → score_threshold filter → MySQL active join.
-FlyB ONLY when final list length == 0.
+  embed → Qdrant top-k → score_threshold filter → MySQL active+scene join.
+FlyB ONLY when final list length == 0 AND scene == normal.
 Infra errors (embed/qdrant/mysql) NEVER fall back to FlyB.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from app.domain.retrieval import errors as err
 from app.domain.retrieval.embedding_validate import validate_embedding
@@ -19,6 +19,7 @@ from app.domain.retrieval.ports import (
     MetadataStorePort,
     VectorStorePort,
 )
+from app.domain.retrieval.scenes import allows_flyb_fallback, normalize_search_scene
 
 logger = logging.getLogger("retrieval.search")
 
@@ -49,6 +50,7 @@ def _hit_from_row(
         "thumbnail_url": None,
         "similarity": score,
         "category": row.get("category"),
+        "scenes": row.get("scenes"),
         "page_url": None,
         "site_name": "local",
         "text_snippets": [],
@@ -110,6 +112,7 @@ def _normalize_flyb(raw: Any) -> tuple[str, Any]:
                     "thumbnail_url": None,
                     "similarity": doc.get("similiar") or doc.get("similarity"),
                     "category": doc.get("category"),
+                    "scenes": None,
                     "page_url": details.get("page_url"),
                     "site_name": (details.get("site") or {}).get("Name")
                     if isinstance(details.get("site"), dict)
@@ -136,6 +139,15 @@ def _normalize_flyb(raw: Any) -> tuple[str, Any]:
     }
 
 
+def _empty_envelope(*, message: str = "no local matches") -> dict[str, Any]:
+    return {
+        "results": [],
+        "status": "upstream_empty_response",
+        "message": message,
+        "upstream_error": None,
+    }
+
+
 class SearchImageUseCase:
     def __init__(
         self,
@@ -154,6 +166,7 @@ class SearchImageUseCase:
         *,
         image_bytes: bytes | None = None,
         image_url: str | None = None,
+        scene: str | None = None,
         top_k: int = 10,
         score_threshold: float | None = None,
         public_file_base: str | None = None,
@@ -163,6 +176,8 @@ class SearchImageUseCase:
             raise err.validation_error("file or img_url is required")
         if not (1 <= int(top_k) <= 50):
             raise err.validation_error("top_k must be in 1..50")
+
+        active_scene = normalize_search_scene(scene)
 
         # Keep bytes for potential FlyB (download once if URL)
         bytes_for_flyb = image_bytes
@@ -189,6 +204,7 @@ class SearchImageUseCase:
         vector = validate_embedding(vector, for_search=True)
 
         # Qdrant search — infra errors must NOT fall back to FlyB
+        # Single collection image_embeddings (no per-scene split this round)
         raw_hits = self._vectors.search(
             vector,
             top_k=int(top_k),
@@ -210,7 +226,9 @@ class SearchImageUseCase:
             ids.append(pid)
             score_by_id[pid] = float(h.get("score") or 0.0)
 
-        rows = self._metadata.get_active_by_ids(ids) if ids else {}
+        rows = (
+            self._metadata.get_active_by_ids(ids, scene=active_scene) if ids else {}
+        )
         # Preserve Qdrant score order
         result: list[dict[str, Any]] = []
         for pid in ids:
@@ -233,7 +251,21 @@ class SearchImageUseCase:
                 "result": result,
             }
 
-        # Final list empty → ONLY place allowed to call FlyB
+        # Final list empty → FlyB ONLY when scene=normal
+        if not allows_flyb_fallback(active_scene):
+            logger.info(
+                "self-built top-k empty after join; scene=%s skips FlyB",
+                active_scene,
+            )
+            return {
+                "ok": True,
+                "trace_id": trace_id,
+                "source": "empty",
+                "result": _empty_envelope(
+                    message=f"no local matches for scene={active_scene}; flyb skipped"
+                ),
+            }
+
         logger.info("self-built top-k empty after join; invoking FlyB fallback")
         flyb_raw = self._flyb.search_fallback(
             image_bytes=bytes_for_flyb,
