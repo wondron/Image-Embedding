@@ -29,10 +29,88 @@ services:
     environment:
       # Set NACOS_ENV=test to use test; unset or empty defaults to prod.
       NACOS_ENV: ${NACOS_ENV:-test}
+      # 本地 compose 联调：api 经服务名访问（接线后再真正读取；骨架阶段仅预留）
+      QDRANT_HOST: ${QDRANT_HOST:-qdrant}
+      QDRANT_PORT: ${QDRANT_PORT:-6333}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-image_embeddings}
+      QDRANT_VECTOR_SIZE: ${QDRANT_VECTOR_SIZE:-1024}
+      QDRANT_DISTANCE: ${QDRANT_DISTANCE:-Cosine}
+      MYSQL_HOST: ${MYSQL_HOST:-mysql}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_USER: ${MYSQL_USER:-image_emb}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-image_emb}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-image_embedding}
     volumes:
       - ./save_images:/app/save_imagesoutput
       - ./output:/app/output
     ports:
       - "8320:8320"
+    # 骨架未接线：不强依赖 healthy，避免仅起 api 时被卡住
+    depends_on:
+      - qdrant
+      - mysql
     <<: [*hc, *logs, *gpu]
     restart: unless-stopped
+
+  # 本地开发：向量库（图搜图 MVP）
+  qdrant:
+    image: qdrant/qdrant:v1.13.2
+    container_name: roki-imageembedding-qdrant
+    ports:
+      - "6333:6333"   # REST
+      - "6334:6334"   # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333' || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    <<: *logs
+    restart: unless-stopped
+
+  # 本地开发：元数据（表结构归数据规范；密码仅本地默认）
+  mysql:
+    image: mysql:8.0
+    container_name: roki-imageembedding-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_local_dev}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-image_embedding}
+      MYSQL_USER: ${MYSQL_USER:-image_emb}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-image_emb}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command:
+      [
+        "--character-set-server=utf8mb4",
+        "--collation-server=utf8mb4_unicode_ci",
+      ]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "127.0.0.1",
+          "-uroot",
+          "-p$${MYSQL_ROOT_PASSWORD}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    <<: *logs
+    restart: unless-stopped
+
+volumes:
+  qdrant_data:
+  mysql_data:

@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app.adapter.http.services.health import model_paths, readiness_info
+from app.adapter.http.services.health import dependency_stubs, model_paths, readiness_info
 from app.bootstrap.state import get_application_state
 
 logger = logging.getLogger("svc.health")
@@ -17,7 +17,11 @@ router = APIRouter(prefix="/api", tags=["health"])
 @router.get("/healthz")
 def healthz(request: Request) -> dict[str, Any]:
     """轻量存活检查：不触发模型加载。"""
-    return {"ok": True, **get_application_state(request).runtime_info()}
+    return {
+        "ok": True,
+        "deps": dependency_stubs(get_application_state(request)),
+        **get_application_state(request).runtime_info(),
+    }
 
 
 @router.get("/livez")

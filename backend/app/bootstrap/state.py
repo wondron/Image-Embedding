@@ -7,7 +7,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 import httpx
 from fastapi import Request
@@ -17,6 +17,7 @@ from app.core.config.settings import Settings
 if TYPE_CHECKING:
     from app.core.config.nacos import NacosConfigProvider
     from app.domain.food_service import FoodService
+    from app.bootstrap.retrieval_stack import RetrievalStack
 
 
 @dataclass(slots=True)
@@ -32,6 +33,8 @@ class ApplicationState:
     food_service: FoodService | None = None
     initialization_error: str | None = None
     warmup_error: str | None = None
+    retrieval: Optional["RetrievalStack"] = None
+    retrieval_error: str | None = None
     stopping: bool = False
     config_provider: NacosConfigProvider | None = None
     configuration_lock: threading.RLock = field(
@@ -64,6 +67,13 @@ class ApplicationState:
                 detail = self.initialization_error or "food service is not initialized"
                 raise RuntimeError(detail)
             return self.food_service
+
+    def require_retrieval(self) -> "RetrievalStack":
+        with self.configuration_lock:
+            if self.retrieval is None:
+                detail = self.retrieval_error or "retrieval stack is not initialized"
+                raise RuntimeError(detail)
+            return self.retrieval
 
     def replace_configuration(
         self,

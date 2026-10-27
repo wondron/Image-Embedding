@@ -33,6 +33,35 @@ def _providers(component: Any) -> list[str]:
     return []
 
 
+
+
+def dependency_stubs(runtime: ApplicationState | None = None) -> dict[str, Any]:
+    """Report Qdrant/MySQL wiring; does not affect model readiness (/readyz)."""
+    retrieval = getattr(runtime, "retrieval", None) if runtime is not None else None
+    if retrieval is None:
+        detail = None
+        if runtime is not None:
+            detail = getattr(runtime, "retrieval_error", None) or "not initialized"
+        return {
+            "qdrant": {"status": "not_wired", "detail": detail or "unchecked"},
+            "mysql": {"status": "not_wired", "detail": detail or "unchecked"},
+        }
+    q = retrieval.vectors.ping() if hasattr(retrieval.vectors, "ping") else {"ok": False}
+    m = retrieval.metadata.ping() if hasattr(retrieval.metadata, "ping") else {"ok": False}
+    return {
+        "qdrant": {
+            "status": "ok" if q.get("ok") else "error",
+            "detail": q.get("detail"),
+            "collection": q.get("collection"),
+            "points_count": q.get("points_count"),
+        },
+        "mysql": {
+            "status": "ok" if m.get("ok") else "error",
+            "detail": m.get("detail"),
+        },
+    }
+
+
 def readiness_info(runtime: ApplicationState, service: FoodService) -> dict[str, Any]:
     """Report loaded components and preserve runtime readiness failures."""
     segmentor = getattr(service, "segmentor", None)
@@ -69,6 +98,7 @@ def readiness_info(runtime: ApplicationState, service: FoodService) -> dict[str,
                 "text_model_path": paths["clip_text"],
             },
         },
+        "deps": dependency_stubs(runtime),
         "warmup_error": runtime.warmup_error,
         **runtime.runtime_info(),
     }

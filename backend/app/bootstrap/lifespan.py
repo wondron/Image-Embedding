@@ -68,6 +68,25 @@ def warmup_models(service, app_settings: Settings = settings) -> None:
 
     logger.info("预热配置 | warmup=%s", app_settings.warmup)
 
+
+def initialize_retrieval(runtime: ApplicationState) -> None:
+    """Best-effort wire embedder + Qdrant + MySQL + FlyB. Does not block FoodService."""
+    try:
+        from app.bootstrap.retrieval_stack import build_retrieval_stack
+
+        runtime.retrieval = build_retrieval_stack(runtime.config, runtime.settings)
+        runtime.retrieval_error = None
+        logger.info(
+            "Retrieval stack ready | qdrant=%s | mysql=%s/%s",
+            runtime.settings.qdrant.url,
+            runtime.settings.mysql.host,
+            runtime.settings.mysql.database,
+        )
+    except Exception as exc:
+        runtime.retrieval = None
+        runtime.retrieval_error = f"{type(exc).__name__}: {exc}"
+        logger.exception("Retrieval stack initialization failed: %s", exc)
+
 def initialize_food_service(runtime: ApplicationState) -> None:
     try:
         runtime.food_service = create_food_service(runtime.config)
@@ -133,6 +152,7 @@ async def lifespan(app: FastAPI):
     app.state.runtime = runtime
     logger.info("App starting | APP_ENV=%s | cfg=%s", runtime.settings.application.env, runtime.config_info,)
     initialize_food_service(runtime)
+    initialize_retrieval(runtime)
     config_provider.start_polling(lambda snapshot: apply_nacos_config_update(runtime, config_provider, snapshot))
     try:
         yield

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
@@ -116,6 +116,45 @@ class NacosSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class QdrantSettings:
+    """本地/compose 默认；可用环境变量覆盖。collection / 表结构最终归数据规范。
+    向量客户端实现归算法逻辑 (domain.common.qdrant_store)；此处仅连接与 collection 形状。
+    """
+
+    host: str = field(default_factory=lambda: os.getenv("QDRANT_HOST", "qdrant"))
+    port: int = field(default_factory=lambda: int(os.getenv("QDRANT_PORT", "6333")))
+    url: str = field(
+        default_factory=lambda: os.getenv("QDRANT_URL", "http://qdrant:6333")
+    )
+    collection: str = field(
+        default_factory=lambda: os.getenv("QDRANT_COLLECTION", "image_embeddings")
+    )
+    vector_size: int = field(
+        default_factory=lambda: int(os.getenv("QDRANT_VECTOR_SIZE", "1024"))
+    )
+    distance: str = field(
+        default_factory=lambda: os.getenv("QDRANT_DISTANCE", "Cosine")
+    )
+    prefer_grpc: bool = field(
+        default_factory=lambda: os.getenv("QDRANT_PREFER_GRPC", "1").strip().lower() in {"1", "true", "yes", "y", "on"}
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class MySQLSettings:
+    """本地/compose 默认；勿把生产密钥写进仓库。表结构归数据规范。"""
+
+    host: str = field(default_factory=lambda: os.getenv("MYSQL_HOST", "mysql"))
+    port: int = field(default_factory=lambda: int(os.getenv("MYSQL_PORT", "3306")))
+    user: str = field(default_factory=lambda: os.getenv("MYSQL_USER", "image_emb"))
+    password: str = field(
+        default_factory=lambda: os.getenv("MYSQL_PASSWORD", "image_emb")
+    )
+    database: str = field(
+        default_factory=lambda: os.getenv("MYSQL_DATABASE", "image_embedding")
+    )
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     application: ApplicationSettings = field(default_factory=ApplicationSettings)
     config: ConfigSettings = field(default_factory=ConfigSettings)
@@ -127,6 +166,8 @@ class Settings:
     http_client: HttpClientSettings = field(default_factory=HttpClientSettings)
     concurrency: ConcurrencySettings = field(default_factory=ConcurrencySettings)
     nacos: NacosSettings = field(default_factory=NacosSettings)
+    qdrant: QdrantSettings = field(default_factory=QdrantSettings)
+    mysql: MySQLSettings = field(default_factory=MySQLSettings)
     allowed_content_types: frozenset[str] = field(
         default_factory=lambda: frozenset(
             {
