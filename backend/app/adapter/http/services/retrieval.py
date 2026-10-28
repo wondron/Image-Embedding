@@ -1,4 +1,4 @@
-"""HTTP helpers for index/search/health/file. Orchestration in domain.retrieval.
+"""HTTP helpers for index/search/list/health/file. Orchestration in domain.retrieval.
 
 Pydantic v1 compatible: dump via dump_model / .dict() — never bare model_dump (D1).
 """
@@ -333,6 +333,38 @@ def mvp_health(runtime: ApplicationState) -> JSONResponse:
         content={"ok": ok, "ts": ts, "components": components},
     )
 
+
+
+def run_list_images(
+    runtime: ApplicationState,
+    *,
+    scene: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 24,
+    q: Optional[str] = None,
+    category: Optional[str] = None,
+    public_file_base: str,
+    trace_id: Optional[str] = None,
+) -> JSONResponse:
+    """GET /api/images library list (SSOT section 3.5)."""
+    tid = _trace_id(trace_id)
+    stack = require_retrieval(runtime)
+    try:
+        payload = stack.list_uc.execute(
+            scene=scene,
+            page=page,
+            page_size=page_size,
+            q=q,
+            category=category,
+            public_file_base=public_file_base,
+            trace_id=tid,
+        )
+        return JSONResponse(status_code=200, content=payload)
+    except RetrievalError as exc:
+        return retrieval_error_response(exc, trace_id=tid)
+    except Exception as exc:
+        logger.exception("list images failed: %s", exc)
+        return error_response("INTERNAL_ERROR", str(exc), status_code=500, trace_id=tid)
 
 def serve_image_file(runtime: ApplicationState, image_id: int) -> FileResponse:
     stack = require_retrieval(runtime)

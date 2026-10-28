@@ -81,6 +81,24 @@ class MetadataStorePort(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def list_images(
+        self,
+        *,
+        scene: str,
+        page: int = 1,
+        page_size: int = 24,
+        q: str | None = None,
+        category: str | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Return (rows, total) for status=active + scene JSON_CONTAINS.
+
+        Sort: created_at DESC, id DESC. page is 1-based.
+        Optional q: title substring OR any tags element substring (not path).
+        Optional category: exact match on images.category.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     def get_by_id(self, image_id: int) -> dict[str, Any] | None:
         raise NotImplementedError
 

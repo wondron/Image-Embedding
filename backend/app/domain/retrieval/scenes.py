@@ -39,6 +39,8 @@ def _validate_registered(scenes: Sequence[str], *, code_for_unknown: str) -> lis
                 raise err.index_unknown_scene(detail)
             if code_for_unknown == "SEARCH_UNKNOWN_SCENE":
                 raise err.search_unknown_scene(detail)
+            if code_for_unknown == "LIST_UNKNOWN_SCENE":
+                raise err.list_unknown_scene(detail)
             raise err.validation_error(detail)
         if s not in seen:
             seen.add(s)
@@ -96,6 +98,18 @@ def normalize_search_scene(scene: Optional[str] = None) -> str:
     s = _as_short_str(scene, where="scene")
     if s not in REGISTERED_SCENES:
         raise err.search_unknown_scene(
+            f"unknown scene: {s!r}; registered={sorted(REGISTERED_SCENES)}"
+        )
+    return s
+
+
+def normalize_list_scene(scene: Optional[str] = None) -> str:
+    """List filter scene; omit/blank -> normal. Unknown -> LIST_UNKNOWN_SCENE."""
+    if scene is None or (isinstance(scene, str) and scene.strip() == ""):
+        return DEFAULT_SCENE
+    s = _as_short_str(scene, where="scene")
+    if s not in REGISTERED_SCENES:
+        raise err.list_unknown_scene(
             f"unknown scene: {s!r}; registered={sorted(REGISTERED_SCENES)}"
         )
     return s

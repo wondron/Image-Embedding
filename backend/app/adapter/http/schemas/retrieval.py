@@ -68,3 +68,32 @@ class ErrorBody(BaseModel):
     error: str
     detail: str
     trace_id: Optional[str] = None
+
+
+class ListImageItem(BaseModel):
+    """Library list item (SSOT section 3.5)."""
+
+    id: int
+    qdrant_point_id: int
+    path: Optional[str] = None
+    url: Optional[str] = None
+    image_url: Optional[str] = None
+    title: Optional[str] = None
+    category: Optional[str] = None
+    tags: Optional[Any] = None
+    scenes: Optional[List[Any]] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    status: str = "active"
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ListImagesResponse(BaseModel):
+    ok: bool = True
+    trace_id: Optional[str] = None
+    scene: str = "normal"
+    page: int = 1
+    page_size: int = 24
+    total: int = 0
+    items: List[ListImageItem] = Field(default_factory=list)

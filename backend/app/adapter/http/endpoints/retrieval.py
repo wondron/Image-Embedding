@@ -1,4 +1,4 @@
-"""Image index / search / health / file (SSOT §3).
+"""Image index / search / list / health / file (SSOT §3).
 
 Keeps existing predict/searchImage_* untouched.
 Multipart vs JSON resolved by Content-Type (avoids FastAPI File+Body conflict).
@@ -224,6 +224,37 @@ async def search_image(request: Request) -> JSONResponse:
 def mvp_health(request: Request) -> JSONResponse:
     return retrieval_service.mvp_health(get_application_state(request))
 
+
+
+@router.get(
+    "/images",
+    summary="List library images",
+    description=(
+        "Paginated active images filtered by scene (default normal). "
+        "Optional q (title/tags substring) and category exact match. SSOT §3.5."
+    ),
+)
+def list_library_images(
+    request: Request,
+    scene: Optional[str] = Query(None, description="default normal; unknown -> LIST_UNKNOWN_SCENE"),
+    page: int = Query(1, description="1-based page"),
+    page_size: int = Query(24, description="default 24, range 1..100"),
+    q: Optional[str] = Query(None, description="optional title/tags substring"),
+    category: Optional[str] = Query(None, description="optional exact category"),
+    trace_id: Optional[str] = Query(None),
+) -> JSONResponse:
+    runtime = get_application_state(request)
+    base = retrieval_service.public_base(request)
+    return retrieval_service.run_list_images(
+        runtime,
+        scene=scene,
+        page=page,
+        page_size=page_size,
+        q=q,
+        category=category,
+        public_file_base=base,
+        trace_id=trace_id,
+    )
 
 @router.get(
     "/images/file",

@@ -380,6 +380,60 @@ class MySQLMetadataStore(MetadataStorePort):
             conn.close()
 
 
+
+    def list_images(
+        self,
+        *,
+        scene: str,
+        page: int = 1,
+        page_size: int = 24,
+        q: str | None = None,
+        category: str | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Paginated active+scene list (SSOT section 3.5)."""
+        self.ensure_schema()
+        scene_s = str(scene).strip()
+        where = ["status='active'", "JSON_CONTAINS(scenes, JSON_QUOTE(%s), '$')"]
+        args: list[Any] = [scene_s]
+
+        if category is not None and str(category).strip() != "":
+            where.append("category=%s")
+            args.append(str(category).strip())
+
+        if q is not None and str(q).strip() != "":
+            q_s = str(q).strip()
+            like = f"%{q_s}%"
+            # title substring (ci via LOWER) OR any tags element substring via JSON_SEARCH
+            where.append(
+                "(LOWER(IFNULL(title, '')) LIKE LOWER(%s) OR "
+                "(tags IS NOT NULL AND JSON_SEARCH(tags, 'one', %s, NULL, '$[*]') IS NOT NULL))"
+            )
+            args.extend([like, like])
+
+        where_sql = " AND ".join(where)
+        offset = max(0, (int(page) - 1) * int(page_size))
+        count_sql = f"SELECT COUNT(*) AS c FROM images WHERE {where_sql}"
+        list_sql = (
+            f"SELECT * FROM images WHERE {where_sql} "
+            f"ORDER BY created_at DESC, id DESC LIMIT %s OFFSET %s"
+        )
+        conn = self._connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(count_sql, args)
+                crow = cur.fetchone() or {}
+                total = int(crow.get("c") if isinstance(crow, dict) else crow[0])
+                cur.execute(list_sql, list(args) + [int(page_size), int(offset)])
+                rows = cur.fetchall() or []
+            return [_row_to_dict(r) for r in rows], total
+        except err.RetrievalError:
+            raise
+        except Exception as exc:
+            raise err.list_mysql_failed(f"{type(exc).__name__}: {exc}") from exc
+        finally:
+            conn.close()
+
+
     def get_collection_meta(self, collection_name: str) -> dict[str, Any] | None:
         """Return embedding_collection_meta row or None."""
         self.ensure_schema()

@@ -91,6 +91,14 @@ def not_ready(detail: str) -> RetrievalError:
     return RetrievalError("NOT_READY", detail, http_status=503)
 
 
+def list_unknown_scene(detail: str) -> RetrievalError:
+    return RetrievalError("LIST_UNKNOWN_SCENE", detail, http_status=422)
+
+
+def list_mysql_failed(detail: str) -> RetrievalError:
+    return RetrievalError("LIST_MYSQL_FAILED", detail, http_status=502)
+
+
 def validation_error(detail: str) -> RetrievalError:
     return RetrievalError("VALIDATION_ERROR", detail, http_status=422)
 

@@ -13,6 +13,7 @@ from app.adapter.persistence.qdrant_store import QdrantVectorStore
 from app.core.config.settings import Settings
 from app.domain.retrieval.embedding_space import resolve_space_id
 from app.domain.retrieval.index_image import IndexImageUseCase
+from app.domain.retrieval.list_images import ListImagesUseCase
 from app.domain.retrieval.search_image import SearchImageUseCase
 
 logger = logging.getLogger("bootstrap.retrieval")
@@ -26,6 +27,7 @@ class RetrievalStack:
     flyb: FlyBFallbackAdapter
     index_uc: IndexImageUseCase
     search_uc: SearchImageUseCase
+    list_uc: ListImagesUseCase
     embedding_space_id: str = ""
 
 
@@ -82,6 +84,7 @@ def build_retrieval_stack(
     save_dir = indexed_dir or f"{settings.paths.save_images_dir}/indexed"
     index_uc = IndexImageUseCase(embedding, vectors, metadata, indexed_dir=save_dir)
     search_uc = SearchImageUseCase(embedding, vectors, metadata, flyb)
+    list_uc = ListImagesUseCase(metadata)
     return RetrievalStack(
         embedding=embedding,
         vectors=vectors,
@@ -89,5 +92,6 @@ def build_retrieval_stack(
         flyb=flyb,
         index_uc=index_uc,
         search_uc=search_uc,
+        list_uc=list_uc,
         embedding_space_id=space_id,
     )
