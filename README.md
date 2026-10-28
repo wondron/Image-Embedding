@@ -42,3 +42,28 @@ docker compose -f backend/docker-compose.yml up -d --force-recreate
 ```
 
 使用包含这些代码的镜像后，环境选择逻辑才会生效。
+## Docker 本地后台构建
+
+在 `backend` 目录用 Dockerfile 后台构建本地镜像（不阻塞当前终端）：
+
+```bat
+cd backend
+
+docker build -t roki-ai-image-embedding:local
+
+```
+
+查看进度：`type docker-build.log`（PowerShell 可用 `Get-Content docker-build.log -Wait`）。
+
+说明：当前 `backend/docker-compose.yml` 的 `api` 使用远端 Harbor 镜像，不会自动走本地 Dockerfile。仅起本地依赖：
+
+```bat
+docker compose -f backend/docker-compose.yml up -d qdrant mysql
+```
+
+若要让 compose 使用刚构建的本地镜像，把 `api` 的 `image:` 改成 `roki-ai-image-embedding:local`，或为 `api` 增加 `build: .` 后再执行：
+
+```bat
+docker compose -f backend/docker-compose.yml up -d --build
+```
+

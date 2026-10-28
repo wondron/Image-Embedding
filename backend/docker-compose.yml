@@ -24,7 +24,7 @@ x-gpu: &gpu
 
 services:
   api:
-    image: aliyun-docker-harbor-registry.cn-hangzhou.cr.aliyuncs.com/roki-ai/roki-ai-image-embedding:2026081001
+    image: roki-ai-image-embedding:local
     container_name: roki-imageembedding
     environment:
       # Set NACOS_ENV=test to use test; unset or empty defaults to prod.
