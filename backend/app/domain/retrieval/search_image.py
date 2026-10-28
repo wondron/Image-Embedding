@@ -182,7 +182,7 @@ class SearchImageUseCase:
             raise err.validation_error("top_k must be in 1..50")
 
         active_scene = normalize_search_scene(scene)
-        # SSOT section 3.2.1: omit/null -> 0.55; explicit 0 -> disable; else [0.30, 0.95]
+        # SSOT section 3.2.1: omit/null -> 0.55; explicit 0 -> disable; else [0.30, 1]
         effective_t = resolve_score_threshold(score_threshold)
         native_thr = qdrant_score_threshold(effective_t)
 

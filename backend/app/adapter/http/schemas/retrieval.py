@@ -61,7 +61,7 @@ class SearchJsonRequest(BaseModel):
     top_k: int = Field(default=10, ge=1, le=50)
     score_threshold: Optional[float] = Field(
         default=None,
-        description="omit/null=0.55 reject; 0=off; else [0.30,0.95]. SSOT section 3.2.1",
+        description="omit/null=0.55 reject; 0=off; else [0.30,1] (inclusive). SSOT section 3.2.1",
     )
     trace_id: Optional[str] = None
 

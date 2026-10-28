@@ -1,7 +1,7 @@
 """score_threshold resolve + hard validate (SSOT section 3.2.1).
 
 Omitted / null -> 0.55 (rejection ON). Explicit 0 -> OFF.
-Legal set: {0} union [0.30, 0.95]. Out of range -> SEARCH_BAD_SCORE_THRESHOLD.
+Legal set: {0} union [0.30, 1]. Out of range -> SEARCH_BAD_SCORE_THRESHOLD.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from app.domain.retrieval import errors as err
 
 DEFAULT_SCORE_THRESHOLD = 0.55
 MIN_SCORE_THRESHOLD = 0.30
-MAX_SCORE_THRESHOLD = 0.95
+MAX_SCORE_THRESHOLD = 1.0
 
 
 def resolve_score_threshold(value: Optional[Union[float, int]] = None) -> float:
@@ -21,7 +21,7 @@ def resolve_score_threshold(value: Optional[Union[float, int]] = None) -> float:
 
     - None (omit / JSON null) -> DEFAULT_SCORE_THRESHOLD (0.55)
     - 0 -> 0.0 (disable rejection; no score filter)
-    - otherwise must be finite and in [0.30, 0.95]
+    - otherwise must be finite and in [0.30, 1]
     """
     if value is None:
         return float(DEFAULT_SCORE_THRESHOLD)

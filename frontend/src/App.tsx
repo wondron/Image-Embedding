@@ -26,10 +26,10 @@ const maxBytes = 15 * 1024 * 1024
 
 const SCORE_DEFAULT = 0.55
 const SCORE_MIN = 0.30
-const SCORE_MAX = 0.95
+const SCORE_MAX = 1
 const SCORE_STEP = 0.01
 
-/** Clamp to legal set {0} ∪ [0.30, 0.95] (step 0.01). Sentinel 0 only when reject-off. */
+/** Clamp to legal set {0} ∪ [0.30, 1] (step 0.01). Sentinel 0 only when reject-off. */
 function clampScoreThreshold(value: number, allowZero = false): number {
   if (!Number.isFinite(value)) return SCORE_DEFAULT
   if (allowZero && value === 0) return 0
@@ -306,7 +306,7 @@ export default function App() {
               <div className="score-threshold-header">
                 <SlidersHorizontal size={14} aria-hidden />
                 <span className="score-threshold-title">拒识阈值</span>
-                <span className="score-threshold-hint">仅自建库生效 · 默认 0.55 · 范围 0.30–0.95</span>
+                <span className="score-threshold-hint">仅自建库生效 · 默认 0.55 · 范围 0.30–1</span>
               </div>
               <div className="score-threshold-row">
                 <input

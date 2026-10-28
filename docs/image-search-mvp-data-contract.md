@@ -252,7 +252,7 @@ B. `application/json`：`{ "img_url": "https://..." }`
 |---|---|---|---|
 | `scene` | string | `normal` | **单值过滤**：只返回 `scenes` 标签集**包含**该值的图。缺省 = `normal`。**禁止**缺省混搜全库。未知短串 → `422` `SEARCH_UNKNOWN_SCENE`。不提供「全场景」默认值；若产品要跨场景须显式另议（本轮不做） |
 | `top_k` | int | 10 | 自建召回条数，范围 1～50 |
-| `score_threshold` | float \| null | **0.55** | 拒识阈值；语义见 §3.2.1。**省略 / null = 0.55**（开启拒识）；显式 **`0`** = 关闭拒识；可调 **0.30–0.95**（step 0.01） |
+| `score_threshold` | float \| null | **0.55** | 拒识阈值；语义见 §3.2.1。**省略 / null = 0.55**（开启拒识）；显式 **`0`** = 关闭拒识；可调 **0.30–1**（含 1；step 0.01） |
 | `trace_id` | string \| null | 服务端生成 | |
 
 #### 3.2.1 `score_threshold`（拒识 · FE 可调）
@@ -264,8 +264,8 @@ B. `application/json`：`{ "img_url": "https://..." }`
 | 缺省 / 省略 / `null` | **一律视为 `0.55`**（拒识**开启**）。**禁止**把 null/省略解释成「不过滤」——否则噪声 top_k 会直接吐给 FE |
 | 关闭拒识 | 须**显式**传 **`score_threshold=0`**（约定哨兵：只按 `top_k` + scene/active，不做分过滤）。`>0` 才过滤 |
 | 比较 | 生效阈值 `T` 下保留 **`score >= T`**；**严格低于**丢弃。相等保留 |
-| FE/产品可调 | **`0.30`～`0.95`**，步进 **`0.01`**（滑条/输入建议对齐）。另允许哨兵 **`0`** |
-| 硬校验 | 有限 float；合法集合 = **`{0} ∪ [0.30, 0.95]`**。NaN/Inf、负数、`(0, 0.30)`、`>0.95` → **`422` `SEARCH_BAD_SCORE_THRESHOLD`**（必选，不再与 VALIDATION_ERROR 二选一） |
+| FE/产品可调 | **`0.30`～`1`**（含 1），步进 **`0.01`**（滑条/输入建议对齐）。另允许哨兵 **`0`** |
+| 硬校验 | 有限 float；合法集合 = **`{0} ∪ [0.30, 1]`**（含 1）。NaN/Inf、负数、`(0, 0.30)`、`>1` → **`422` `SEARCH_BAD_SCORE_THRESHOLD`**（必选，不再与 VALIDATION_ERROR 二选一） |
 | 作用面 | **仅自建路径**（Qdrant → 阈值 → MySQL）。**不**作用于 FlyB 行 |
 | 与 `scene` | **正交**：任意合法 scene 都先按阈值滤自建。`scene` 只决定空列表后是否 FlyB（§4.1） |
 | 与 `top_k` | **先** Qdrant `limit=top_k` 取近邻（可用原生 score_threshold 等价），**再**丢掉 `score < T` 的点。不先无界扫库再截 k；也**不**在滤后回补低分凑满 k |
@@ -498,7 +498,7 @@ FlyB 返回形态沿用现 `FlyBSearch.parse_results`（数组或 `upstream_empt
 | CODE | HTTP | 场景 |
 |---|---|---|
 | `VALIDATION_ERROR` | 422 | 参数/类型错误 |
-| `SEARCH_BAD_SCORE_THRESHOLD` | 422 | `score_threshold` 非有限，或不在 `{0} ∪ [0.30, 0.95]` |
+| `SEARCH_BAD_SCORE_THRESHOLD` | 422 | `score_threshold` 非有限，或不在 `{0} ∪ [0.30, 1]`（含 1） |
 | `INDEX_EMPTY_REQUEST` | 400 | 无文件且无 path |
 | `INDEX_BAD_IMAGE` | 422 | 解码失败/非图 |
 | `INDEX_BAD_EMBEDDING` | 422 | 维数/NaN/零向量 |
@@ -549,7 +549,7 @@ FlyB 返回形态沿用现 `FlyBSearch.parse_results`（数组或 `upstream_empt
 - [x] `embedding_space_id` 生成规则 + 启动门禁（§1.5）；错误码 `VECTOR_SPACE_MISMATCH`
 - [x] 场景：`scenes` JSON 数组；接口 `scene` 默认 `normal`；单 collection；FlyB 仅 normal
 - [x] 图库 list：`GET /api/images`（§3.5）；软删 API 本刀不做
-- [x] `score_threshold`（§3.2.1）：**缺省 0.55**；显式 `0` 关拒识；可调 0.30–0.95 step 0.01；越界 `SEARCH_BAD_SCORE_THRESHOLD`；与 scene/`top_k`/FlyB 交互锁定
+- [x] `score_threshold`（§3.2.1）：**缺省 0.55**；显式 `0` 关拒识；可调 0.30–1（含 1）step 0.01；越界 `SEARCH_BAD_SCORE_THRESHOLD`；与 scene/`top_k`/FlyB 交互锁定
 - [ ] （附录 B 占位）`device` 更严默认档（建议 0.65）—— 本轮不强制
 - [ ] （未实施）按 scope 分 Qdrant collection —— 见附录 A
 
@@ -567,7 +567,8 @@ FlyB 返回形态沿用现 `FlyBSearch.parse_results`（数组或 `upstream_empt
 | 2026-10-28 | **§1.5 embedding_space_id**：生成规则（含 weights_fingerprint）、meta 落点、启动门禁 `VECTOR_SPACE_MISMATCH`、health 带回、换模语义 |
 | 2026-10-28 | **§3.5 图库 list**：`GET /api/images`；scene 默认 normal；q/category/分页；仅 active；对齐 FE ManagementViews |
 | 2026-10-28 | **拒识 §3.2.1（初稿）**：字段语义；缺省曾写 null（已废） |
-| 2026-10-28 | **拒识锁数字**：缺省/**null**=**0.55**；显式 `0`=关；可调 0.30–0.95 step 0.01；`SEARCH_BAD_SCORE_THRESHOLD`；附录 B device 占位 |
+| 2026-10-28 | **拒识锁数字**：缺省/**null**=**0.55**；显式 `0`=关；可调 0.30–0.95 step 0.01（后改上限 1）；`SEARCH_BAD_SCORE_THRESHOLD`；附录 B device 占位 |
+| 2026-10-28 | **拒识上限**：总裁裁定合法上限 **0.95→1**（含 1）；合法 `{0}∪[0.30,1]`；其余不变 |
 
 ---
 
