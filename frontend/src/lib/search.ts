@@ -251,7 +251,7 @@ export async function searchLocalImages({
   } else {
     const payload: Record<string, unknown> = { img_url: imageUrl };
     if (topK !== undefined) payload.top_k = topK;
-    if (scoreThreshold !== undefined) payload.score_threshold = scoreThreshold;
+    if (scoreThreshold !== undefined && scoreThreshold !== null) payload.score_threshold = scoreThreshold;
     if (traceId) payload.trace_id = traceId;
     body = JSON.stringify(payload);
   }

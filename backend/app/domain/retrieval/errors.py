@@ -54,6 +54,10 @@ def search_unknown_scene(detail: str) -> RetrievalError:
     return RetrievalError("SEARCH_UNKNOWN_SCENE", detail, http_status=422)
 
 
+def search_bad_score_threshold(detail: str) -> RetrievalError:
+    return RetrievalError("SEARCH_BAD_SCORE_THRESHOLD", detail, http_status=422)
+
+
 def search_bad_embedding(detail: str) -> RetrievalError:
     return RetrievalError("SEARCH_BAD_EMBEDDING", detail, http_status=422)
 

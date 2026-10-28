@@ -20,6 +20,10 @@ from app.domain.retrieval.ports import (
     VectorStorePort,
 )
 from app.domain.retrieval.scenes import allows_flyb_fallback, normalize_search_scene
+from app.domain.retrieval.score_threshold import (
+    qdrant_score_threshold,
+    resolve_score_threshold,
+)
 
 logger = logging.getLogger("retrieval.search")
 
@@ -178,6 +182,9 @@ class SearchImageUseCase:
             raise err.validation_error("top_k must be in 1..50")
 
         active_scene = normalize_search_scene(scene)
+        # SSOT section 3.2.1: omit/null -> 0.55; explicit 0 -> disable; else [0.30, 0.95]
+        effective_t = resolve_score_threshold(score_threshold)
+        native_thr = qdrant_score_threshold(effective_t)
 
         # Keep bytes for potential FlyB (download once if URL)
         bytes_for_flyb = image_bytes
@@ -204,17 +211,18 @@ class SearchImageUseCase:
         vector = validate_embedding(vector, for_search=True)
 
         # Qdrant search — infra errors must NOT fall back to FlyB
-        # Single collection image_embeddings (no per-scene split this round)
+        # limit=top_k first; native score_threshold when T>0 (SSOT section 3.2.1)
         raw_hits = self._vectors.search(
             vector,
             top_k=int(top_k),
-            score_threshold=score_threshold,
+            score_threshold=native_thr,
         )
 
-        # Extra threshold filter (domain may already apply; keep strict >=)
-        if score_threshold is not None:
-            thr = float(score_threshold)
-            raw_hits = [h for h in raw_hits if float(h.get("score") or 0) >= thr]
+        # Domain post-filter: keep score >= T when rejection ON; T==0 skips
+        if effective_t > 0.0:
+            raw_hits = [
+                h for h in raw_hits if float(h.get("score") or 0) >= effective_t
+            ]
 
         ids: list[int] = []
         score_by_id: dict[int, float] = {}

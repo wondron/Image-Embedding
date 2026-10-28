@@ -24,6 +24,23 @@ const navigation = [
 const pageSize = 12
 const maxBytes = 15 * 1024 * 1024
 
+const SCORE_DEFAULT = 0.55
+const SCORE_MIN = 0.30
+const SCORE_MAX = 0.95
+const SCORE_STEP = 0.01
+
+/** Clamp to legal set {0} ∪ [0.30, 0.95] (step 0.01). Sentinel 0 only when reject-off. */
+function clampScoreThreshold(value: number, allowZero = false): number {
+  if (!Number.isFinite(value)) return SCORE_DEFAULT
+  if (allowZero && value === 0) return 0
+  const stepped = Math.round(value / SCORE_STEP) * SCORE_STEP
+  return Math.min(SCORE_MAX, Math.max(SCORE_MIN, Number(stepped.toFixed(2))))
+}
+
+function formatScore(value: number): string {
+  return value.toFixed(2)
+}
+
 function loadBaseUrl() {
   try { return localStorage.getItem('food-atlas-api') ?? import.meta.env.VITE_API_BASE_URL ?? '' }
   catch { return import.meta.env.VITE_API_BASE_URL ?? '' }
@@ -94,6 +111,9 @@ export default function App() {
   const [mode, setMode] = useState<'file' | 'url'>('file')
   const [queryKind, setQueryKind] = useState<'single' | 'batch'>('single')
   const [searchTarget, setSearchTarget] = useState<'local' | 'global'>('local')
+  const [scoreThreshold, setScoreThreshold] = useState(SCORE_DEFAULT)
+  const [rejectOff, setRejectOff] = useState(false)
+  const [scoreBeforeOff, setScoreBeforeOff] = useState(SCORE_DEFAULT)
   const [batchRunning, setBatchRunning] = useState(false)
   const [activeQueryName, setActiveQueryName] = useState('')
   const [file, setFile] = useState<File | null>(null)
@@ -186,8 +206,10 @@ export default function App() {
     const started = performance.now()
     const timer = window.setTimeout(() => controller.abort('timeout'), 120000)
     try {
-      const searchFn = searchTarget === 'local' ? searchLocalImages : searchImages
-      const result = await searchFn({ file: mode === 'file' ? file! : undefined, url: mode === 'url' ? url.trim() : undefined, baseUrl: apiBase, signal: controller.signal })
+      const common = { file: mode === 'file' ? file! : undefined, url: mode === 'url' ? url.trim() : undefined, baseUrl: apiBase, signal: controller.signal }
+      const result = searchTarget === 'local'
+        ? await searchLocalImages({ ...common, scoreThreshold: rejectOff ? 0 : clampScoreThreshold(scoreThreshold) })
+        : await searchImages(common)
       if (activeRequest.current !== controller) return
       setResponse(result); setSearched(true); setElapsed((performance.now() - started) / 1000)
       if (result.message) setNotice(result.message)
@@ -279,7 +301,71 @@ export default function App() {
               {mode === 'file' ? <div className={`upload-area ${dragging ? 'is-dragging' : ''} ${file ? 'has-image' : ''}`} onDragOver={event => { event.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); selectFile(event.dataTransfer.files[0]) }}>
                 {file && preview ? <><QueryPreview key={preview} src={preview} /><div className="selected-file-info"><b>{file.name}</b><span>{(file.size / 1024).toFixed(0)} KB · 已选择查询图片</span><ImageFilePicker className="replace-image" label="选择查询图片" onFiles={files => selectFile(files[0])}><Upload size={13} />更换图片</ImageFilePicker></div><button className="remove-image" aria-label="移除查询图片" onClick={() => { resetResults(); setFile(null) }}><X size={15} /></button></> : <ImageFilePicker className="upload-trigger" label="选择查询图片" onFiles={files => selectFile(files[0])}><span className="upload-icon"><UploadCloud size={25} strokeWidth={1.3} /></span><span className="upload-copy"><b>点击上传，或拖拽图片至此</b><small>支持 JPG、PNG、WebP、BMP 格式</small></span></ImageFilePicker>}
               </div> : <div className="url-input-area"><label className="sr-only" htmlFor="image-url">图片地址</label><input id="image-url" className="input" type="url" placeholder="https://example.com/image.jpg" value={url} onChange={event => { resetResults(); setUrl(event.target.value) }} /><p>请填写可公开访问的图片直链。</p>{queryImageUrl && <QueryPreview key={queryImageUrl} src={queryImageUrl} />}</div>}
-            </div><div className="query-actions">
+            </div>
+            <div className="score-threshold-control" aria-label="拒识阈值">
+              <div className="score-threshold-header">
+                <SlidersHorizontal size={14} aria-hidden />
+                <span className="score-threshold-title">拒识阈值</span>
+                <span className="score-threshold-hint">仅自建库生效 · 默认 0.55 · 范围 0.30–0.95</span>
+              </div>
+              <div className="score-threshold-row">
+                <input
+                  type="range"
+                  className="score-threshold-slider"
+                  min={SCORE_MIN}
+                  max={SCORE_MAX}
+                  step={SCORE_STEP}
+                  value={scoreThreshold}
+                  disabled={busy || rejectOff || searchTarget !== 'local'}
+                  aria-label="拒识阈值滑块"
+                  aria-valuemin={SCORE_MIN}
+                  aria-valuemax={SCORE_MAX}
+                  aria-valuenow={scoreThreshold}
+                  onChange={event => setScoreThreshold(clampScoreThreshold(Number(event.target.value)))}
+                />
+                <input
+                  type="number"
+                  className="input score-threshold-number"
+                  min={SCORE_MIN}
+                  max={SCORE_MAX}
+                  step={SCORE_STEP}
+                  value={formatScore(scoreThreshold)}
+                  disabled={busy || rejectOff || searchTarget !== 'local'}
+                  aria-label="拒识阈值数值"
+                  onChange={event => {
+                    const raw = event.target.value
+                    if (raw.trim() === '') return
+                    const parsed = Number(raw)
+                    if (!Number.isFinite(parsed)) return
+                    setScoreThreshold(clampScoreThreshold(parsed))
+                  }}
+                  onBlur={event => {
+                    const parsed = Number(event.target.value)
+                    setScoreThreshold(clampScoreThreshold(Number.isFinite(parsed) ? parsed : scoreThreshold))
+                  }}
+                />
+              </div>
+              <label className="score-threshold-off">
+                <input
+                  type="checkbox"
+                  checked={rejectOff}
+                  disabled={busy || searchTarget !== 'local'}
+                  onChange={event => {
+                    const next = event.target.checked
+                    if (next) {
+                      setScoreBeforeOff(scoreThreshold)
+                      setRejectOff(true)
+                    } else {
+                      setRejectOff(false)
+                      setScoreThreshold(clampScoreThreshold(scoreBeforeOff || SCORE_DEFAULT))
+                    }
+                  }}
+                />
+                <span>关闭拒识{rejectOff ? '（提交 0）' : ''}</span>
+              </label>
+              {searchTarget === 'global' && <p className="score-threshold-global-note">现网 Global 不传拒识阈值；切回自建后沿用当前设置。</p>}
+            </div>
+            <div className="query-actions">
               <button className="btn btn-primary search-button" onClick={() => void runSearch()} disabled={!inputReady || busy}>{busy ? <LoaderCircle size={15} className="spin" /> : <Search size={15} />}{busy ? '正在搜索相似图片…' : '开始搜索'}</button>
               {busy && <button className="text-button cancel-search" onClick={() => { activeRequest.current?.abort(); activeRequest.current = null; setBusy(false); setNotice('已取消本次搜索。') }}>取消搜索</button>}
               <button className="btn btn-secondary" disabled={!file && !url && !searched && !error} onClick={() => { resetResults(); setFile(null); setUrl('') }}>重置</button>
