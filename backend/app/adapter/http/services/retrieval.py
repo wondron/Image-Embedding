@@ -1,6 +1,7 @@
-"""HTTP helpers for index/search/list/health/file. Orchestration in application.retrieval.
+"""HTTP adapter for retrieval: wire parse + call application usecases + map errors.
 
-Pydantic v1 compatible: dump via dump_model / .dict() — never bare model_dump (D1).
+DDD D3: business flow lives in app.application.retrieval (via RetrievalStack).
+This module does not open DB/Qdrant clients or re-implement index/search/list rules.
 """
 
 from __future__ import annotations
@@ -9,13 +10,14 @@ import json
 import logging
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 
 from app.adapter.http.schemas.retrieval import dump_model, ErrorBody, IndexResponse
-from app.bootstrap.state import ApplicationState, get_application_state
+from app.bootstrap.state import ApplicationState
 from app.domain.retrieval.errors import RetrievalError
 
 logger = logging.getLogger("svc.retrieval")
@@ -36,7 +38,9 @@ def error_response(
     return JSONResponse(status_code=status_code, content=dump_model(body))
 
 
-def retrieval_error_response(exc: RetrievalError, *, trace_id: Optional[str] = None) -> JSONResponse:
+def retrieval_error_response(
+    exc: RetrievalError, *, trace_id: Optional[str] = None
+) -> JSONResponse:
     return error_response(
         exc.code,
         exc.detail,
@@ -67,12 +71,20 @@ def parse_tags(raw: Optional[str]) -> Optional[List[Any]]:
     except json.JSONDecodeError as exc:
         raise HTTPException(
             status_code=422,
-            detail={"ok": False, "error": "VALIDATION_ERROR", "detail": f"tags JSON invalid: {exc}"},
+            detail={
+                "ok": False,
+                "error": "VALIDATION_ERROR",
+                "detail": f"tags JSON invalid: {exc}",
+            },
         ) from exc
     if not isinstance(val, list):
         raise HTTPException(
             status_code=422,
-            detail={"ok": False, "error": "VALIDATION_ERROR", "detail": "tags must be a JSON array"},
+            detail={
+                "ok": False,
+                "error": "VALIDATION_ERROR",
+                "detail": "tags must be a JSON array",
+            },
         )
     return val
 
@@ -104,6 +116,28 @@ def parse_scenes_json(raw: Optional[str]) -> Optional[List[Any]]:
     return val
 
 
+def parse_score_threshold_raw(raw: Any) -> Optional[float]:
+    """Parse wire score_threshold; invalid literal -> SEARCH_BAD_SCORE_THRESHOLD.
+
+    Empty / missing -> None (application default 0.55). Range checks stay in usecase.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    s = str(raw).strip()
+    if s == "":
+        return None
+    try:
+        return float(s)
+    except (TypeError, ValueError) as exc:
+        from app.domain.retrieval import errors as err
+
+        raise err.search_bad_score_threshold(
+            f"score_threshold must be a finite float; got {raw!r}"
+        ) from exc
+
+
 async def read_upload(file: UploadFile, max_bytes: int) -> bytes:
     data = await file.read(max_bytes + 1)
     if not data:
@@ -124,6 +158,7 @@ def run_index(
     public_file_base: str,
     trace_id: Optional[str] = None,
 ) -> JSONResponse:
+    """Invoke IndexImageUseCase; map batch outcome to HTTP."""
     tid = _trace_id(trace_id)
     stack = require_retrieval(runtime)
     try:
@@ -136,7 +171,7 @@ def run_index(
 
     failed = outcome.get("failed") or []
     indexed = outcome.get("indexed") or []
-    # D4-3: no indexed + all failures PATH_TOO_LONG → top-level 422 (do not require all_failed flag)
+    # Uniform whole-batch failures -> top-level error (HTTP mapping only)
     if (not indexed) and failed and all(f.get("error") == "INDEX_PATH_TOO_LONG" for f in failed):
         return error_response(
             "INDEX_PATH_TOO_LONG",
@@ -144,8 +179,6 @@ def run_index(
             status_code=422,
             trace_id=tid,
         )
-
-    # Promote uniform INDEX_UNKNOWN_SCENE when whole batch failed on that code
     if (not indexed) and failed and all(f.get("error") == "INDEX_UNKNOWN_SCENE" for f in failed):
         return error_response(
             "INDEX_UNKNOWN_SCENE",
@@ -153,8 +186,6 @@ def run_index(
             status_code=422,
             trace_id=tid,
         )
-
-    # S5: whole-batch VALIDATION_ERROR (e.g. scene+scenes conflict) → top-level 422
     if (not indexed) and failed and all(f.get("error") == "VALIDATION_ERROR" for f in failed):
         return error_response(
             "VALIDATION_ERROR",
@@ -162,9 +193,7 @@ def run_index(
             status_code=422,
             trace_id=tid,
         )
-
     if outcome.get("all_failed") and not indexed:
-        # No decodable image at all → 400 INDEX_EMPTY_REQUEST per §3.1
         if not failed or all(
             f.get("error") in {"INDEX_EMPTY_REQUEST", "INDEX_BAD_IMAGE"} for f in failed
         ):
@@ -195,6 +224,7 @@ def run_search(
     public_file_base: str,
     trace_id: Optional[str] = None,
 ) -> JSONResponse:
+    """Invoke SearchImageUseCase; return envelope as-is."""
     tid = _trace_id(trace_id)
     stack = require_retrieval(runtime)
     try:
@@ -215,10 +245,44 @@ def run_search(
         return error_response("INTERNAL_ERROR", str(exc), status_code=500, trace_id=tid)
 
 
-def mvp_health(runtime: ApplicationState) -> JSONResponse:
-    """GET /api/health aggregate (§3.3). Does not replace healthz/readyz."""
-    from app.domain.retrieval.embedding_space import resolve_space_id
+def run_list_images(
+    runtime: ApplicationState,
+    *,
+    scene: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 24,
+    q: Optional[str] = None,
+    category: Optional[str] = None,
+    public_file_base: str,
+    trace_id: Optional[str] = None,
+) -> JSONResponse:
+    """Invoke ListImagesUseCase."""
+    tid = _trace_id(trace_id)
+    stack = require_retrieval(runtime)
+    try:
+        payload = stack.list_uc.execute(
+            scene=scene,
+            page=page,
+            page_size=page_size,
+            q=q,
+            category=category,
+            public_file_base=public_file_base,
+            trace_id=tid,
+        )
+        return JSONResponse(status_code=200, content=payload)
+    except RetrievalError as exc:
+        return retrieval_error_response(exc, trace_id=tid)
+    except Exception as exc:
+        logger.exception("list images failed: %s", exc)
+        return error_response("INTERNAL_ERROR", str(exc), status_code=500, trace_id=tid)
 
+
+def mvp_health(runtime: ApplicationState) -> JSONResponse:
+    """GET /api/health aggregate via RetrievalStack ports (no direct adapter ctor).
+
+    Wire shape kept: components.api/embedding/qdrant/mysql/flyb (mysql key = metadata
+    ping; implementation is PostgreSQL). Does not replace healthz/readyz.
+    """
     ts = datetime.now().astimezone().isoformat(timespec="seconds")
     components: Dict[str, Any] = {"api": {"ok": True}}
 
@@ -228,32 +292,32 @@ def mvp_health(runtime: ApplicationState) -> JSONResponse:
     mismatch = getattr(runtime, "retrieval_space_mismatch", None) or {}
 
     configured_space: Optional[str] = None
-    try:
-        configured_space = resolve_space_id(
-            runtime.config,
-            vector_dim=int(runtime.settings.qdrant.vector_size),
-        )
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("resolve_space_id for health failed: %s", exc)
+    if retrieval is not None:
+        configured_space = getattr(retrieval, "embedding_space_id", None)
+    if not configured_space and isinstance(mismatch, dict):
+        configured_space = mismatch.get("configured")
 
     space_mismatch = err_code == "VECTOR_SPACE_MISMATCH"
     stored_space = mismatch.get("stored") if isinstance(mismatch, dict) else None
     if space_mismatch and isinstance(mismatch, dict) and mismatch.get("configured"):
         configured_space = mismatch.get("configured") or configured_space
 
-    # embedding
+    # embedding — from stack only
     emb_ok = False
-    emb_info: Dict[str, Any] = {"ok": False}
     if retrieval is not None and getattr(retrieval, "embedding", None) is not None:
         emb = retrieval.embedding
         emb_ok = True
-        emb_info = {
+        emb_info: Dict[str, Any] = {
             "ok": True,
             "model_path": getattr(emb, "model_path", None),
             "vector_dim": getattr(emb, "embedding_dim", 1024),
-            "embedding_space_id": getattr(retrieval, "embedding_space_id", None)
-            or configured_space,
+            "embedding_space_id": configured_space,
         }
+        current = getattr(retrieval, "current_model", None) or {}
+        if current.get("name"):
+            emb_info["current_model"] = current.get("name")
+        if current.get("collection"):
+            emb_info["current_collection"] = current.get("collection")
     elif retrieval_error:
         emb_info = {
             "ok": False,
@@ -268,19 +332,25 @@ def mvp_health(runtime: ApplicationState) -> JSONResponse:
                 "message": retrieval_error,
             }
     else:
-        emb_info = {"ok": False, "detail": "not wired", "embedding_space_id": configured_space}
+        emb_info = {
+            "ok": False,
+            "detail": "not wired",
+            "embedding_space_id": configured_space,
+        }
     components["embedding"] = emb_info
 
-    # qdrant
+    # qdrant — VectorStorePort.ping via stack
     q_info: Dict[str, Any] = {"ok": False, "detail": "not wired"}
     if retrieval is not None and getattr(retrieval, "vectors", None) is not None:
         ping = retrieval.vectors.ping()
+        current = getattr(retrieval, "current_model", None) or {}
         q_info = {
             "ok": bool(ping.get("ok")),
-            "collection": ping.get("collection") or "image_embeddings",
+            "collection": ping.get("collection")
+            or current.get("collection")
+            or "image_embeddings",
             "points_count": ping.get("points_count"),
-            "embedding_space_id": getattr(retrieval, "embedding_space_id", None)
-            or configured_space,
+            "embedding_space_id": configured_space,
         }
         if not q_info["ok"]:
             q_info["detail"] = ping.get("detail")
@@ -301,26 +371,29 @@ def mvp_health(runtime: ApplicationState) -> JSONResponse:
             }
     components["qdrant"] = q_info
 
-    # mysql
+    # metadata (wire key remains "mysql" for API compatibility; backend is PG)
     m_info: Dict[str, Any] = {"ok": False, "detail": "not wired"}
     if retrieval is not None and getattr(retrieval, "metadata", None) is not None:
         ping = retrieval.metadata.ping()
-        m_info = {"ok": bool(ping.get("ok"))}
+        m_info = {
+            "ok": bool(ping.get("ok")),
+            "driver": ping.get("driver") or "postgresql",
+            "host": ping.get("host"),
+            "database": ping.get("database"),
+        }
         if not m_info["ok"]:
             m_info["detail"] = ping.get("detail")
     elif retrieval_error and not space_mismatch:
         m_info = {"ok": False, "detail": retrieval_error}
     components["mysql"] = m_info
 
-    # flyb optional
-    f_info: Dict[str, Any] = {"ok": False, "optional": True, "detail": "not wired"}
-    if retrieval is not None and getattr(retrieval, "flyb", None) is not None:
-        flyb = retrieval.flyb
-        if hasattr(flyb, "ping"):
-            f_info = flyb.ping()
-        else:
-            f_info = {"ok": bool(getattr(flyb, "wired", False)), "optional": True}
-    components["flyb"] = f_info
+    # flyb wire key kept for API compat; retrieval path no longer wires FlyB (D5)
+    components["flyb"] = {
+        "ok": False,
+        "optional": True,
+        "disabled": True,
+        "detail": "out of scope",
+    }
 
     if space_mismatch:
         emb_ok = False
@@ -334,39 +407,11 @@ def mvp_health(runtime: ApplicationState) -> JSONResponse:
     )
 
 
-
-def run_list_images(
-    runtime: ApplicationState,
-    *,
-    scene: Optional[str] = None,
-    page: int = 1,
-    page_size: int = 24,
-    q: Optional[str] = None,
-    category: Optional[str] = None,
-    public_file_base: str,
-    trace_id: Optional[str] = None,
-) -> JSONResponse:
-    """GET /api/images library list (SSOT section 3.5)."""
-    tid = _trace_id(trace_id)
-    stack = require_retrieval(runtime)
-    try:
-        payload = stack.list_uc.execute(
-            scene=scene,
-            page=page,
-            page_size=page_size,
-            q=q,
-            category=category,
-            public_file_base=public_file_base,
-            trace_id=tid,
-        )
-        return JSONResponse(status_code=200, content=payload)
-    except RetrievalError as exc:
-        return retrieval_error_response(exc, trace_id=tid)
-    except Exception as exc:
-        logger.exception("list images failed: %s", exc)
-        return error_response("INTERNAL_ERROR", str(exc), status_code=500, trace_id=tid)
-
 def serve_image_file(runtime: ApplicationState, image_id: int) -> FileResponse:
+    """Legacy local-file serve via stack MetadataStorePort (no PgMetadataStore import).
+
+    PG rows use https URLs and may omit local `path`; missing path -> 404 (unchanged).
+    """
     stack = require_retrieval(runtime)
     row = stack.metadata.get_by_id(int(image_id))
     if not row or row.get("status") != "active":
@@ -380,8 +425,6 @@ def serve_image_file(runtime: ApplicationState, image_id: int) -> FileResponse:
             status_code=404,
             detail={"ok": False, "error": "NOT_FOUND", "detail": "path missing"},
         )
-    from pathlib import Path
-
     p = Path(path)
     if not p.is_file():
         raise HTTPException(

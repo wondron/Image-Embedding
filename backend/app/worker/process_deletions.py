@@ -1,5 +1,8 @@
 """Drain image_deletions once (contract §2.5).
 
+Goes through composition root (build_retrieval_stack → deletion_worker),
+not adapter ctors.
+
 Invoke from backend/:
 
   python -m app.worker.process_deletions
@@ -32,7 +35,6 @@ def main(argv: list[str] | None = None) -> int:
     settings = Settings()
     config: dict = {}
     try:
-        # Optional: reuse app config loader if wired
         from app.core.config.loader import load_config  # type: ignore
 
         config = load_config() or {}

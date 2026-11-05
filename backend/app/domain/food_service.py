@@ -1,3 +1,10 @@
+"""Predict-only FoodService facade (legacy inference island).
+
+DDD D6: used by adapter.http predict routes via bootstrap state.
+Must not be imported by application.retrieval or retrieval_stack.
+Pipeline stages live under domain.pipeline (predict island).
+"""
+
 import logging, cv2
 import numpy as np
 import app.domain.common.timer_utils as timerUtils

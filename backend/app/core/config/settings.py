@@ -118,7 +118,7 @@ class NacosSettings:
 @dataclass(frozen=True, slots=True)
 class QdrantSettings:
     """本地/compose 默认；可用环境变量覆盖。collection / 表结构最终归数据规范。
-    向量客户端实现归算法逻辑 (domain.common.qdrant_store)；此处仅连接与 collection 形状。
+    向量客户端实现: app.adapter.persistence.qdrant_store.QdrantStore；此处仅连接与 collection 形状。
     """
 
     host: str = field(default_factory=lambda: os.getenv("QDRANT_HOST", "qdrant"))

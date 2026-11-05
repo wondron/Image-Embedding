@@ -15,7 +15,6 @@ from app.domain.retrieval import errors as err
 from app.domain.retrieval.embedding_validate import validate_embedding
 from app.domain.retrieval.ports import (
     EmbeddingPort,
-    FlyBFallbackPort,
     MetadataStorePort,
     VectorStorePort,
 )
@@ -102,13 +101,10 @@ class SearchImageUseCase:
         embedding: EmbeddingPort,
         vectors: VectorStorePort,
         metadata: MetadataStorePort,
-        flyb_fallback: FlyBFallbackPort | None = None,
     ) -> None:
         self._embedding = embedding
         self._vectors = vectors
         self._metadata = metadata
-        # Kept for bootstrap ctor compatibility; never invoked (A4).
-        self._flyb = flyb_fallback
 
     def execute(
         self,

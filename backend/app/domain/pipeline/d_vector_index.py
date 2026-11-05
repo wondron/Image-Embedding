@@ -13,7 +13,7 @@ from uuid import UUID
 import numpy as np
 
 from app.domain.common.embedding import OnnxEmbedding
-from app.domain.common.qdrant_store import (
+from app.adapter.persistence.qdrant_store import (
     DEFAULT_SCORE_THRESHOLD,
     DEFAULT_VECTOR_DIM,
     QdrantStore,

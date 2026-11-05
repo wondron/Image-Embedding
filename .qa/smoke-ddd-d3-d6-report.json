@@ -1,0 +1,90 @@
+{
+  "suite": "ddd-d3-d6",
+  "timestamp": "2026-11-05T14:32:48+08:00",
+  "timezone": "Asia/Shanghai",
+  "verdict": "PASS",
+  "git_head": "53ab6897bb71e40888af9468fc056f2b561a4d02",
+  "git_head_short": "53ab689",
+  "dirty_worktree": true,
+  "git_status_sb_head": [
+    "## main...origin/main [ahead 2]"
+  ],
+  "note_uncommitted": "D3-D6 changes present as uncommitted modifications/untracked; QA did NOT commit.",
+  "python": "D:\\99-tools\\anaconda\\envs\\onnxgpu\\python.exe",
+  "smoke_command": "cd backend && set PYTHONPATH=. && onnxgpu python -c \"from app.bootstrap.application import create_app; from app.adapter.http.endpoints import predict, retrieval; app=create_app(); print('ok', len(app.routes))\"",
+  "items": [
+    {
+      "id": "A1",
+      "name": "no old usecase package path (app.usecase/usecases)",
+      "result": "PASS",
+      "detail": "AST live-import scan over backend/app: zero hits for app.usecase / app.usecases. Remaining usecase tokens are application-layer *UseCase class names (IndexImageUseCase etc.) — expected after D1/D2."
+    },
+    {
+      "id": "A2",
+      "name": "no mysql_metadata residual",
+      "result": "PASS",
+      "detail": "Select-String/AST over backend/**/*.py: zero hits for mysql_metadata."
+    },
+    {
+      "id": "A3",
+      "name": "domain/common/qdrant_store shim deleted + no imports",
+      "result": "PASS",
+      "detail": "File absent (Test-Path False); git shows D backend/app/domain/common/qdrant_store.py. AST: zero live imports of domain.common.qdrant_store (only historical comment in adapter persistence module docstring)."
+    },
+    {
+      "id": "A4",
+      "name": "retrieval path no live import flybSearch",
+      "result": "PASS",
+      "detail": "AST over application/retrieval, endpoints/services/schemas retrieval, retrieval_stack, domain/retrieval, worker, flyb_fallback, qdrant_store, pg_metadata: zero flybSearch/FlyBSearch live imports. Remaining flybSearch usage is predict island (domain/common/flybSearch + pipeline b_getGlobalData + tests) — out of retrieval path."
+    },
+    {
+      "id": "B_D3",
+      "name": "D3 HTTP thin — endpoints wire only",
+      "result": "PASS",
+      "detail": "endpoints/retrieval.py only imports schemas + services.retrieval + get_application_state; handlers parse Content-Type/form/json then call retrieval_service.run_index/run_search/run_list_images/mvp_health/serve_image_file. services/retrieval.py delegates to stack.index_uc/search_uc/list_uc.execute*. No UseCase/Qdrant/pg_metadata imports in endpoints. Predict endpoint similarly wires to services.predict."
+    },
+    {
+      "id": "C_D4",
+      "name": "D4 workers via retrieval_stack",
+      "result": "PASS",
+      "detail": "process_deletions.py and recompute_scenes.py both: Settings + build_retrieval_stack then stack.deletion_worker / stack.recompute_scenes_uc. AST worker scan: zero direct adapter.persistence / QdrantStore / PgMetadataStore imports."
+    },
+    {
+      "id": "D_D5",
+      "name": "D5 QdrantStore formal path + FlyB out of retrieval",
+      "result": "PASS",
+      "detail": "from app.adapter.persistence.qdrant_store import QdrantStore,QdrantVectorStore succeeds. retrieval_stack imports QdrantVectorStore from adapter.persistence.qdrant_store; no FlyB wiring in stack. search_image documents FlyB OUT OF SCOPE. Shim deleted (A3)."
+    },
+    {
+      "id": "E1_D6",
+      "name": "D6 predict/pipeline marked inference island",
+      "result": "PASS",
+      "detail": "domain/pipeline/__init__.py documents DDD D6 dependency boundary (predict HTTP only). application/retrieval/__init__.py and services/predict.py docstring likewise mark the island / forbid cross imports."
+    },
+    {
+      "id": "E2_D6",
+      "name": "D6 no live bidirectional import retrieval↔predict",
+      "result": "PASS",
+      "detail": "AST: retrieval-side modules have zero live imports of domain.pipeline / food_service / services.predict / endpoints.predict. Predict/pipeline/food_service have zero live imports of application.retrieval / services.retrieval / endpoints.retrieval / retrieval_stack / domain.retrieval. TYPE_CHECKING-only would be ignored; none found."
+    },
+    {
+      "id": "E3_D6",
+      "name": "D6 flyb_fallback is stub, no flybSearch import",
+      "result": "PASS",
+      "detail": "flyb_fallback.py imports only annotations, typing, domain.retrieval.errors, FlyBFallbackPort. Class docstring: No-op stub — never constructs FlyBSearch. wired=False; search_fallback raises search_flyb_failed."
+    },
+    {
+      "id": "F_smoke",
+      "name": "create_app smoke",
+      "result": "PASS",
+      "detail": "ok 21 | routes=21 | python=D:\\\\99-tools\\\\anaconda\\\\envs\\\\onnxgpu\\\\python.exe PYTHONPATH=backend"
+    }
+  ],
+  "blockers": [],
+  "notes": [
+    "Combined acceptance for D3 HTTP thin, D4 worker via retrieval_stack, D5 QdrantStore move + FlyB out of retrieval, D6 Option A inference island.",
+    "Prior .qa/smoke-ddd-d3-d4-report.json was PASS at same HEAD; this run re-validates and adds D5/D6.",
+    "flybSearch remains under domain/common for predict island only — allowed by D6 Option A.",
+    "No business source edits by QA; only .qa report/artifacts written."
+  ]
+}

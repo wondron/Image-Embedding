@@ -1,4 +1,7 @@
-"""Image search orchestration and translation of upstream failures to HTTP errors."""
+"""Predict orchestration via FoodService (legacy inference island).
+
+DDD D6: must not import application.retrieval or pg_metadata.
+"""
 
 from __future__ import annotations
 

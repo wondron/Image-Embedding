@@ -29,28 +29,6 @@ def _as_upload(value: Any) -> Optional[UploadFile]:
     return None
 
 
-def _parse_score_threshold_raw(raw: Any) -> Optional[float]:
-    """Parse wire score_threshold; invalid literal -> SEARCH_BAD_SCORE_THRESHOLD.
-
-    Empty / missing handled by caller (returns None -> domain default 0.55).
-    Domain resolve_score_threshold still validates range / finiteness.
-    """
-    if raw is None:
-        return None
-    if isinstance(raw, (int, float)):
-        return float(raw)
-    s = str(raw).strip()
-    if s == "":
-        return None
-    try:
-        return float(s)
-    except (TypeError, ValueError) as exc:
-        from app.domain.retrieval import errors as err
-
-        raise err.search_bad_score_threshold(
-            f"score_threshold must be a finite float; got {raw!r}"
-        ) from exc
-
 @router.post(
     "/index",
     summary="Index image(s)",
@@ -169,7 +147,7 @@ async def search_image(request: Request) -> JSONResponse:
             image_url = raw.img_url
             scene = raw.scene
             k = int(raw.top_k)
-            thr = _parse_score_threshold_raw(raw.score_threshold)
+            thr = retrieval_service.parse_score_threshold_raw(raw.score_threshold)
             tid = raw.trace_id
         else:
             form = await request.form()
@@ -187,7 +165,7 @@ async def search_image(request: Request) -> JSONResponse:
             if form.get("top_k") is not None:
                 k = int(str(form.get("top_k")))
             if form.get("score_threshold") not in (None, ""):
-                thr = _parse_score_threshold_raw(form.get("score_threshold"))
+                thr = retrieval_service.parse_score_threshold_raw(form.get("score_threshold"))
             if form.get("trace_id") is not None:
                 tid = str(form.get("trace_id"))
 
@@ -198,7 +176,7 @@ async def search_image(request: Request) -> JSONResponse:
         if qp.get("top_k") is not None:
             k = int(qp.get("top_k"))
         if qp.get("score_threshold") not in (None, ""):
-            thr = _parse_score_threshold_raw(qp.get("score_threshold"))
+            thr = retrieval_service.parse_score_threshold_raw(qp.get("score_threshold"))
         if qp.get("trace_id"):
             tid = qp.get("trace_id")
 
@@ -241,11 +219,10 @@ async def search_image(request: Request) -> JSONResponse:
 @router.get(
     "/health",
     summary="MVP dependency health",
-    description="Aggregate embedding/qdrant/mysql/flyb. Does not replace healthz/readyz. SSOT §3.3.",
+    description="Aggregate embedding/qdrant/metadata(PG); flyb key disabled. Does not replace healthz/readyz.",
 )
 def mvp_health(request: Request) -> JSONResponse:
     return retrieval_service.mvp_health(get_application_state(request))
-
 
 
 @router.get(

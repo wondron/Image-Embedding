@@ -1,11 +1,13 @@
 """Build retrieval stack (embedder + Qdrant + PostgreSQL + S3 + use cases).
 
 M2: MySQL removed. Collection/dim/distance from embedding_models.status='current'.
-QdrantVectorStore thin-wraps domain.common.qdrant_store.QdrantStore (no second client).
+QdrantVectorStore thin-wraps adapter.persistence.qdrant_store.QdrantStore (no second client).
 After vector upsert success → image_embeddings.synced_version = images.payload_version.
 
 M4: ObjectStoragePort (mock by default) + DeleteImageUseCase + DeletionWorker.
 Qdrant delete scope = current collection only (multi-collection TBD).
+D5: QdrantStore under adapter; FlyB removed from retrieval stack (search source=empty).
+D6: retrieval island — do not import domain.food_service / domain.pipeline here.
 """
 
 from __future__ import annotations
@@ -16,7 +18,6 @@ from typing import Any, Optional
 from uuid import UUID
 
 from app.adapter.embedding.embedder_port_impl import EmbedderPortImpl
-from app.adapter.persistence.flyb_fallback import FlyBFallbackAdapter
 from app.adapter.persistence.object_storage import build_object_storage
 from app.adapter.persistence.pg_metadata import PgMetadataStore
 from app.adapter.persistence.qdrant_store import QdrantVectorStore
@@ -24,8 +25,9 @@ from app.core.config.settings import Settings
 from app.application.retrieval.delete_image import DeleteImageUseCase, DeletionWorker
 from app.application.retrieval.index_image import IndexImageUseCase
 from app.application.retrieval.list_images import ListImagesUseCase
-from app.domain.retrieval.ports import ObjectStoragePort, VectorStorePort
+from app.application.retrieval.recompute_scenes import RecomputeScenesUseCase
 from app.application.retrieval.search_image import SearchImageUseCase
+from app.domain.retrieval.ports import ObjectStoragePort, VectorStorePort
 
 logger = logging.getLogger("bootstrap.retrieval")
 
@@ -33,7 +35,7 @@ logger = logging.getLogger("bootstrap.retrieval")
 class EmbeddingLedgerVectorStore(VectorStorePort):
     """Decorator: on successful upsert, upsert image_embeddings for current model.
 
-    Does not open a second Qdrant client — delegates to QdrantVectorStore → domain QdrantStore.
+    Does not open a second Qdrant client — delegates to QdrantVectorStore → QdrantStore.
     """
 
     def __init__(
@@ -121,12 +123,12 @@ class RetrievalStack:
     vectors: VectorStorePort
     metadata: PgMetadataStore
     storage: ObjectStoragePort
-    flyb: FlyBFallbackAdapter
     index_uc: IndexImageUseCase
     search_uc: SearchImageUseCase
     list_uc: ListImagesUseCase
     delete_uc: DeleteImageUseCase
     deletion_worker: DeletionWorker
+    recompute_scenes_uc: RecomputeScenesUseCase
     embedding_space_id: str = ""
     current_model: dict[str, Any] | None = None
 
@@ -168,7 +170,7 @@ def build_retrieval_stack(
         config=config,
     )
     if not vectors_inner.wired:
-        raise RuntimeError("QdrantVectorStore failed to wire domain QdrantStore")
+        raise RuntimeError("QdrantVectorStore failed to wire QdrantStore")
     vectors_inner.ensure_collection(recreate=False)
 
     vectors: VectorStorePort = EmbeddingLedgerVectorStore(
@@ -187,26 +189,24 @@ def build_retrieval_stack(
     )
 
     embedding = EmbedderPortImpl(config=config)
-    # FlyB OUT OF SCOPE (M0); adapter kept so SearchImageUseCase still constructs.
-    flyb = FlyBFallbackAdapter(config)
-
     save_dir = indexed_dir or f"{settings.paths.save_images_dir}/indexed"
     index_uc = IndexImageUseCase(embedding, vectors, metadata, storage=storage, indexed_dir=save_dir)
-    search_uc = SearchImageUseCase(embedding, vectors, metadata, flyb)
+    search_uc = SearchImageUseCase(embedding, vectors, metadata)
     list_uc = ListImagesUseCase(metadata)
     delete_uc = DeleteImageUseCase(metadata)
     deletion_worker = DeletionWorker(metadata, vectors, storage)
+    recompute_scenes_uc = RecomputeScenesUseCase(metadata)
     return RetrievalStack(
         embedding=embedding,
         vectors=vectors,
         metadata=metadata,
         storage=storage,
-        flyb=flyb,
         index_uc=index_uc,
         search_uc=search_uc,
         list_uc=list_uc,
         delete_uc=delete_uc,
         deletion_worker=deletion_worker,
+        recompute_scenes_uc=recompute_scenes_uc,
         embedding_space_id=space_id,
         current_model=current,
     )

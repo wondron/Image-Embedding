@@ -14,7 +14,7 @@ categories.path: DB trigger `categories_set_path` (migration); app never writes 
 forbid attaching under own descendant.
 
 VectorStorePort is uuid (algo M3). Adapter persistence/qdrant_store thin-wraps
-domain.common.qdrant_store.QdrantStore — no second client.
+adapter.persistence.qdrant_store.QdrantStore — no second client.
 """
 
 from __future__ import annotations
