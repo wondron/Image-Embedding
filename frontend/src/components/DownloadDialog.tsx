@@ -135,7 +135,7 @@ export function DownloadDialog({ items, onClose, apiBase }: { items: SearchImage
 
       {!!report?.failures.length && <section className="download-failures"><h3>失败记录 · {report.failures.length}</h3>
         <ul>{report.failures.map(({ item, reason }, index) => {
-          const source = safeHttpUrl(item.imageUrl) ?? safeHttpUrl(item.thumbnailUrl) ?? safeHttpUrl(item.pageUrl)
+          const source = safeHttpUrl(item.imageUrl) ?? safeHttpUrl(item.thumbnailUrl)
           return <li key={`${item.id}-${index}`}><div><strong>{item.title}</strong><p>{reason}</p></div>
             {source && <a href={source} target="_blank" rel="noreferrer">打开来源<ExternalLink size={13} /></a>}</li>
         })}</ul>

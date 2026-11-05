@@ -1,13 +1,13 @@
 """Build retrieval stack (embedder + Qdrant + PostgreSQL + S3 + use cases).
 
 M2: MySQL removed. Collection/dim/distance from embedding_models.status='current'.
-QdrantVectorStore thin-wraps adapter.persistence.qdrant_store.QdrantStore (no second client).
+QdrantVectorStore thin-wraps app.clients.qdrant.QdrantStore (no second client).
 After vector upsert success → image_embeddings.synced_version = images.payload_version.
 
 M4: ObjectStoragePort (mock by default) + DeleteImageUseCase + DeletionWorker.
 Qdrant delete scope = current collection only (multi-collection TBD).
-D5: QdrantStore under adapter; FlyB removed from retrieval stack (search source=empty).
-D6: retrieval island — do not import domain.food_service / domain.pipeline here.
+D5/R3: QdrantStore under app.clients; FlyB removed from retrieval stack (search source=empty).
+D6/R3: retrieval island — do not import app.services.predict / pipeline / flyb_search here.
 """
 
 from __future__ import annotations
@@ -17,17 +17,17 @@ from dataclasses import dataclass
 from typing import Any, Optional
 from uuid import UUID
 
-from app.adapter.embedding.embedder_port_impl import EmbedderPortImpl
-from app.adapter.persistence.object_storage import build_object_storage
-from app.adapter.persistence.pg_metadata import PgMetadataStore
-from app.adapter.persistence.qdrant_store import QdrantVectorStore
+from app.clients.inference import EmbedderPortImpl
+from app.clients.s3 import build_object_storage
+from app.repositories.metadata import PgMetadataStore
+from app.clients.qdrant import QdrantVectorStore
 from app.core.config.settings import Settings
-from app.application.retrieval.delete_image import DeleteImageUseCase, DeletionWorker
-from app.application.retrieval.index_image import IndexImageUseCase
-from app.application.retrieval.list_images import ListImagesUseCase
-from app.application.retrieval.recompute_scenes import RecomputeScenesUseCase
-from app.application.retrieval.search_image import SearchImageUseCase
-from app.domain.retrieval.ports import ObjectStoragePort, VectorStorePort
+from app.services.retrieval.delete_image import DeleteImageUseCase, DeletionWorker
+from app.services.retrieval.index_image import IndexImageUseCase
+from app.services.retrieval.list_images import ListImagesUseCase
+from app.services.retrieval.recompute_scenes import RecomputeScenesUseCase
+from app.services.retrieval.search_image import SearchImageUseCase
+from app.repositories.ports import ObjectStoragePort, VectorStorePort
 
 logger = logging.getLogger("bootstrap.retrieval")
 

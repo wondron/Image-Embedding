@@ -7,7 +7,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.adapter.http.endpoints import predict
+from app.api.v1 import predict
 
 
 class PredictEndpointTests(unittest.TestCase):

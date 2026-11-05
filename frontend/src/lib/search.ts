@@ -1,10 +1,11 @@
 import type { SearchImage, SearchResponse } from '../types';
-import { DEFAULT_SCENE, toApiSceneCode, sceneOutputsHeating } from '../entities/scene';
+import { DEFAULT_SCENE, toApiSceneCode } from '../entities/scene';
 import {
   extractSceneLabel,
   extractHeatingGroup,
   extractFoodState,
-  extractOutputsHeating,
+  pickSearchImageUrls,
+  displayCategoryLabel,
 } from '../entities/search-result';
 import { safeHttpUrl as sharedSafeHttpUrl } from '../shared/lib/safeHttpUrl';
 
@@ -25,31 +26,16 @@ export function safeHttpUrl(value: unknown): string | null {
   return sharedSafeHttpUrl(value);
 }
 
-function thumbnailSources(raw: ObjectValue): unknown[] {
-  const details = object(raw.details);
-  const images = Array.isArray(details.images) ? details.images.map(object) : [];
-  const thumbnails = [object(raw.image_url), raw.thumbnail_url, ...images.map(image => image.thumbnail_url)];
-  const sizes = ['large', 'medium', 'small'];
-  const sources: unknown[] = [];
-  // Rank sizes across every thumbnail collection before trying a smaller variant.
-  for (const size of sizes) {
-    for (const value of thumbnails) {
-      sources.push(typeof value === 'string' && size === 'large' ? value : object(value)[size]);
-    }
-  }
-  for (const value of thumbnails) {
-    sources.push(...Object.entries(object(value)).filter(([key]) => !sizes.includes(key)).map(([, url]) => url));
-  }
-  return sources;
-}
-
 function uniqueImageUrls(values: unknown[]): string[] {
   return [...new Set(values.map(safeHttpUrl).filter((url): url is string => url !== null))];
 }
 
-/** Candidate URLs only: availability is checked when the image is displayed or downloaded. */
-export function getImageSources(item: Pick<SearchImage, 'imageUrl' | 'thumbnailUrl' | 'raw'>): string[] {
-  return uniqueImageUrls([item.imageUrl, item.raw.image_url, ...thumbnailSources(item.raw), item.thumbnailUrl]);
+/**
+ * Candidate URLs only from adapted fields (original_url → imageUrl, thumb_url → thumbnailUrl).
+ * FORBIDDEN: raw.image_url / thumbnail_url / details.* (P2).
+ */
+export function getImageSources(item: Pick<SearchImage, 'imageUrl' | 'thumbnailUrl'>): string[] {
+  return uniqueImageUrls([item.imageUrl, item.thumbnailUrl]);
 }
 
 function positiveNumber(value: unknown): number | null {
@@ -58,20 +44,29 @@ function positiveNumber(value: unknown): number | null {
 
 function similarity(value: unknown): number | null {
   // Do not turn missing/null scores into zero or interpret arbitrary strings as scores.
+  // FORBIDDEN: similiar misspelling (P7).
   return typeof value === 'number' && Number.isFinite(value) && value >= -1 && value <= 1
     ? value
     : null;
 }
 
+function integerOrNull(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
+  return null;
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(text).filter((entry): entry is string => entry !== null);
+}
+
 function stableId(raw: ObjectValue, index: number): string {
-  const candidate = text(raw.id) ?? text(raw.point_id) ?? text(raw.image_id)
-    ?? (typeof raw.id === 'number' && Number.isFinite(raw.id) ? String(raw.id) : null)
-    ?? (typeof raw.point_id === 'number' && Number.isFinite(raw.point_id) ? String(raw.point_id) : null)
-    ?? (typeof raw.image_id === 'number' && Number.isFinite(raw.image_id) ? String(raw.image_id) : null);
+  const candidate = text(raw.id)
+    ?? (typeof raw.id === 'number' && Number.isFinite(raw.id) ? String(raw.id) : null);
   return candidate ?? `image-${index + 1}`;
 }
 
-/** Map contract `source` (self|flyb|empty); absent → undefined so UI never invents a badge. */
+/** Map contract envelope `source` (self|empty); flyb legacy only; absent → undefined. */
 export function mapChannelSource(value: unknown): SearchImage['source'] | undefined {
   const label = text(value)?.toLowerCase();
   if (!label) return undefined;
@@ -81,93 +76,69 @@ export function mapChannelSource(value: unknown): SearchImage['source'] | undefi
   return undefined;
 }
 
-function normalizeItem(raw: ObjectValue, index: number, responseSource?: SearchImage['source']): SearchImage {
-  const details = object(raw.details);
-  const images = Array.isArray(details.images) ? details.images.map(object) : [];
-  const primaryImage = images.find(image => safeHttpUrl(image.image_url)) ?? images[0] ?? {};
-  // Contract: https only; never filesystem path. Prefer thumb_url / original_url (PG S3).
-  const imageUrl = safeHttpUrl(raw.original_url) ?? safeHttpUrl(raw.image_url) ?? safeHttpUrl(primaryImage.image_url);
-  const thumbnailUrl = safeHttpUrl(raw.thumb_url) ?? uniqueImageUrls(thumbnailSources(raw))[0] ?? null;
-  const site = object(details.site);
-  const pageUrl = safeHttpUrl(details.page_url) ?? safeHttpUrl(raw.page_url);
-  const channel = mapChannelSource(raw.source) ?? (
-    responseSource === 'self' || responseSource === 'flyb' ? responseSource : undefined
-  );
-  const snippets = Array.isArray(details.text_snippets)
-    ? details.text_snippets.map(text).filter((value): value is string => value !== null)
-    : Array.isArray(raw.text_snippets)
-      ? raw.text_snippets.map(text).filter((value): value is string => value !== null)
-      : [];
+/**
+ * §6.1.4 Search hit map — single-source wire fields only.
+ * pageUrl / siteName / snippets always null / [].
+ * title derived for UI; never from wire `title` (P5).
+ */
+function normalizeItem(
+  raw: ObjectValue,
+  index: number,
+  responseSource?: SearchImage['source'],
+  outputsHeating?: boolean,
+): SearchImage {
+  const { imageUrl, thumbnailUrl } = pickSearchImageUrls(raw);
+  const category = text(raw.category);
+  const sceneLabel = extractSceneLabel(raw);
+  const display = displayCategoryLabel({ sceneLabel, category }) ?? `未命名图片 ${index + 1}`;
+  const channel = responseSource === 'self' || responseSource === 'flyb' ? responseSource : undefined;
   return {
     id: stableId(raw, index),
-    title: text(raw.title) ?? text(primaryImage.alt) ?? `未命名图片 ${index + 1}`,
+    title: display,
     imageUrl,
-    thumbnailUrl: thumbnailUrl ?? safeHttpUrl(raw.thumbnail_url),
-    similarity: similarity(raw.similarity) ?? similarity(raw.similiar),
-    category: text(raw.category) ?? text(details.category),
-    pageUrl,
-    siteName: text(raw.site_name) ?? text(details.site) ?? text(site.name) ?? text(site.Name)
-      ?? text(site.host) ?? text(site.Host) ?? (pageUrl ? new URL(pageUrl).hostname : null),
-    snippets,
-    width: positiveNumber(raw.width) ?? positiveNumber(primaryImage.width),
-    height: positiveNumber(raw.height) ?? positiveNumber(primaryImage.height),
-    sceneLabel: extractSceneLabel(raw),
+    thumbnailUrl,
+    similarity: similarity(raw.similarity),
+    category,
+    categoryId: integerOrNull(raw.category_id),
+    scenes: stringList(raw.scenes),
+    pageUrl: null,
+    siteName: null,
+    snippets: [],
+    width: positiveNumber(raw.width),
+    height: positiveNumber(raw.height),
+    sceneLabel,
     heatingGroup: extractHeatingGroup(raw),
     foodState: extractFoodState(raw),
-    outputsHeating: extractOutputsHeating(raw),
-    ...(channel && channel !== 'empty' ? { source: channel } : {}),
+    ...(typeof outputsHeating === 'boolean' ? { outputsHeating } : {}),
+    ...(channel ? { source: channel } : {}),
     raw,
   };
 }
 
-/** Prefer contract `result: []`; empty may use `{ results, status, message }` envelope. */
+/**
+ * §6.1 Search envelope: only `items` (always array).
+ * FORBIDDEN: reading `result` / `results` / nested empty shells (P3/P4).
+ */
 export function normalizeSearchResponse(payload: unknown): SearchResponse {
   const wrapper = object(payload);
-  const result = Array.isArray(payload) ? payload : wrapper.result;
-  const envelope = object(result);
-  // Prefer array `result`; also accept top-level items/results and empty envelopes.
-  const rows = Array.isArray(payload) ? payload
-    : Array.isArray(result) ? result
-    : Array.isArray(envelope.results) ? envelope.results
-    : Array.isArray(wrapper.items) ? wrapper.items
-    : Array.isArray(wrapper.results) ? wrapper.results
-    : Array.isArray(envelope.items) ? envelope.items
-    : null;
+  const rows = Array.isArray(wrapper.items) ? wrapper.items : null;
   if (!Array.isArray(rows)) {
     throw new Error('搜索接口返回的数据格式不正确，请检查后端响应。');
   }
   const responseSource = mapChannelSource(wrapper.source);
-  const status = text(envelope.status) ?? text(wrapper.status) ?? undefined;
-  const upstreamError = object(envelope.upstream_error);
-  const upstreamMessage = text(upstreamError.message);
-  let message: string | undefined;
-  if (responseSource === 'empty') {
-    message = text(envelope.message) ?? text(wrapper.message)
-      ?? '自建库暂未找到相关图片。';
-  } else if (status === 'upstream_empty_response' && responseSource !== 'self' && responseSource !== 'flyb') {
-    // Legacy FlyB-only empty envelope (no contract source field).
-    message = '上游搜索服务暂未返回结果，请稍后重试或更换图片。';
-  } else {
-    message = upstreamMessage ?? text(envelope.message) ?? text(wrapper.message) ?? undefined;
-  }
-  const items = rows
-    .filter((row): row is ObjectValue => row !== null && typeof row === 'object' && !Array.isArray(row))
-    .map((row, index) => normalizeItem(row, index, responseSource));
-  const responseScene = text(wrapper.scene) ?? text(envelope.scene) ?? undefined;
+  const message = text(wrapper.message) ?? (
+    responseSource === 'empty' ? '自建库暂未找到相关图片。' : undefined
+  );
+  const responseScene = text(wrapper.scene) ?? undefined;
   const outputsHeatingFlag = typeof wrapper.outputs_heating === 'boolean'
     ? wrapper.outputs_heating
-    : typeof envelope.outputs_heating === 'boolean'
-      ? envelope.outputs_heating
-      : undefined;
-  const itemsWithHeating = items.map(item => ({
-    ...item,
-    outputsHeating: item.outputsHeating ?? outputsHeatingFlag
-      ?? (responseScene ? sceneOutputsHeating(responseScene) : undefined),
-  }));
+    : undefined;
+  const items = rows
+    .filter((row): row is ObjectValue => row !== null && typeof row === 'object' && !Array.isArray(row))
+    .map((row, index) => normalizeItem(row, index, responseSource, outputsHeatingFlag));
   return {
-    items: itemsWithHeating,
-    traceId: text(wrapper.trace_id) ?? text(envelope.request_id) ?? text(envelope.trace_id),
-    status,
+    items,
+    traceId: text(wrapper.trace_id),
     message,
     ...(responseSource ? { source: responseSource } : {}),
     ...(responseScene ? { scene: toApiSceneCode(responseScene) } : {}),

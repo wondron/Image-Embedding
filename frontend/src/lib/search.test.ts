@@ -116,9 +116,9 @@ describe('image candidate sources', () => {
   });
 
   it('retains manually constructed image and thumbnail URLs with empty raw metadata', () => {
-    expect(getImageSources({ imageUrl: 'https://img.example/original.png', thumbnailUrl: 'https://img.example/thumbnail.png', raw: {} }))
+    expect(getImageSources({ imageUrl: 'https://img.example/original.png', thumbnailUrl: 'https://img.example/thumbnail.png' }))
       .toEqual(['https://img.example/original.png', 'https://img.example/thumbnail.png']);
-    expect(getImageSources({ imageUrl: null, thumbnailUrl: 'https://img.example/thumbnail.png', raw: {} }))
+    expect(getImageSources({ imageUrl: null, thumbnailUrl: 'https://img.example/thumbnail.png' }))
       .toEqual(['https://img.example/thumbnail.png']);
   });
 });

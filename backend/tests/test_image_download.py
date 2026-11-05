@@ -9,8 +9,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app.adapter.http.endpoints import image_download as endpoint
-from app.adapter.http.services import image_download as downloads
+from app.api.v1 import image_download as endpoint
+from app.api.services import image_download as downloads
 
 
 def address_record(address="93.184.216.34"):

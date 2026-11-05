@@ -52,7 +52,7 @@ def load_application_config(
 
 def create_food_service(config: dict):
     # Keep model dependencies out of module import and initialize them at startup.
-    from app.domain.food_service import FoodService
+    from app.services.predict.food_service import FoodService
 
     return FoodService(config)
 
@@ -73,7 +73,7 @@ def initialize_retrieval(runtime: ApplicationState) -> None:
     """Best-effort wire embedder + Qdrant + PostgreSQL. Does not block FoodService."""
     try:
         from app.bootstrap.retrieval_stack import build_retrieval_stack
-        from app.domain.retrieval.errors import RetrievalError
+        from app.services.retrieval.errors import RetrievalError
 
         runtime.retrieval = build_retrieval_stack(runtime.config, runtime.settings)
         runtime.retrieval_error = None
@@ -90,7 +90,7 @@ def initialize_retrieval(runtime: ApplicationState) -> None:
         )
     except Exception as exc:
         runtime.retrieval = None
-        from app.domain.retrieval.errors import RetrievalError
+        from app.services.retrieval.errors import RetrievalError
 
         if isinstance(exc, RetrievalError):
             runtime.retrieval_error = f"{exc.code}: {exc.detail}"

@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 import requests
 
-from app.domain.common import image_utils
+from app.utils import image as image_utils
 
 
 class ImageResolutionTests(unittest.TestCase):
@@ -22,7 +22,7 @@ class ImageResolutionTests(unittest.TestCase):
         ok, encoded = cv2.imencode('.png', self.bgr)
         self.assertTrue(ok)
         self.png = encoded.tobytes()
-        self.request_patch = patch('app.domain.common.image_utils.requests.get')
+        self.request_patch = patch('app.utils.image.requests.get')
         self.get = self.request_patch.start()
         self.addCleanup(self.request_patch.stop)
 

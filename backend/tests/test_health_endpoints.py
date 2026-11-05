@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.adapter.http.endpoints import health
+from app.api.v1 import health
 from app.bootstrap.state import ApplicationState
 
 

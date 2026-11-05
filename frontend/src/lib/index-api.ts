@@ -59,7 +59,7 @@ export interface IndexResponse {
 }
 
 function normalizeIndexedRow(raw: ObjectValue): IndexedItem | null {
-  const id = text(raw.id) ?? text(raw.qdrant_point_id);
+  const id = text(raw.id);
   if (!id) return null;
   const tagsRaw = raw.tags;
   const tags = Array.isArray(tagsRaw)
@@ -71,10 +71,10 @@ function normalizeIndexedRow(raw: ObjectValue): IndexedItem | null {
     : [];
   return {
     id,
-    qdrantPointId: text(raw.qdrant_point_id) ?? id,
+    qdrantPointId: text(raw.qdrant_point_id),
     path: text(raw.path),
-    url: httpUrl(raw.thumb_url) ?? httpUrl(raw.original_url) ?? httpUrl(raw.url) ?? httpUrl(raw.image_url),
-    title: text(raw.title),
+    url: httpUrl(raw.thumb_url) ?? httpUrl(raw.original_url),
+    title: null,
     category: text(raw.category),
     tags,
     scenes,

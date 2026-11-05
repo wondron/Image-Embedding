@@ -3,7 +3,7 @@ from unittest.mock import Mock, patch
 
 import requests
 
-from app.domain.common.flybSearch import FlyBSearch
+from app.services.predict.flyb_search import FlyBSearch
 
 
 EMPTY_RESPONSE_MESSAGE = (
@@ -37,7 +37,7 @@ class FlyBSearchTests(unittest.TestCase):
         response = Mock(spec=requests.Response)
         response.json.return_value = self.empty_engine_response()
         with patch(
-            "app.domain.common.flybSearch.requests.post", return_value=response
+            "app.services.predict.flyb_search.requests.post", return_value=response
         ) as post:
             with self.assertLogs("flyB", level="WARNING") as logs:
                 result = self.search.get_result("test-image-base64")
@@ -200,7 +200,7 @@ class FlyBSearchTests(unittest.TestCase):
         response.status_code = 503
         response.url = "https://search.invalid/global_search"
         with patch(
-            "app.domain.common.flybSearch.requests.post", return_value=response
+            "app.services.predict.flyb_search.requests.post", return_value=response
         ) as post:
             with self.assertRaises(requests.HTTPError):
                 self.search.get_result("test-image-base64")
@@ -208,7 +208,7 @@ class FlyBSearchTests(unittest.TestCase):
 
     def test_timeout_still_raises_without_retry(self):
         with patch(
-            "app.domain.common.flybSearch.requests.post",
+            "app.services.predict.flyb_search.requests.post",
             side_effect=requests.Timeout("test timeout"),
         ) as post:
             with self.assertRaises(requests.Timeout):

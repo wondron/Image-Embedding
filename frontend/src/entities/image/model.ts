@@ -34,17 +34,20 @@ export interface SceneMembership {
 
 export interface LibraryImageItem {
   id: string
-  /** Display thumb: https only — never filesystem path. */
+  /** Display thumb from wire `thumb_url` only (https). */
   imageUrl: string | null
-  /** Prefer original for detail / open. */
+  /** Wire `original_url` only. */
   originalUrl: string | null
+  /** Always null — wire has no title (P5). UI may show category / id. */
   title: string | null
   category: string | null
+  /** Always [] — tags have no PG column. */
   tags: string[]
   scenes: string[]
   /** Rich membership when API provides origin; else derived from scenes[]. */
   sceneMemberships: SceneMembership[]
   foodState: FoodState
+  heatingGroup: string | null
   createdAt: string | null
   width: number | null
   height: number | null
@@ -52,27 +55,16 @@ export interface LibraryImageItem {
 }
 
 /**
- * Pick https display URL: thumb_url → original_url → legacy image_url.
- * FORBIDDEN: path / local filesystem as src.
+ * Display URL: wire `thumb_url` only (List map §6.1.4).
+ * FORBIDDEN: image_url / thumbnail_url / path / url aliases (P2).
  */
 export function pickImageDisplayUrl(raw: ObjectValue): string | null {
-  return (
-    safeHttpUrl(raw.thumb_url)
-    ?? safeHttpUrl(raw.original_url)
-    ?? safeHttpUrl(raw.image_url)
-    ?? safeHttpUrl(raw.url)
-    ?? null
-  )
+  return safeHttpUrl(raw.thumb_url)
 }
 
+/** Wire `original_url` only. */
 export function pickOriginalUrl(raw: ObjectValue): string | null {
-  return (
-    safeHttpUrl(raw.original_url)
-    ?? safeHttpUrl(raw.image_url)
-    ?? safeHttpUrl(raw.url)
-    ?? safeHttpUrl(raw.thumb_url)
-    ?? null
-  )
+  return safeHttpUrl(raw.original_url)
 }
 
 function parseFoodState(value: unknown): FoodState {
@@ -82,7 +74,7 @@ function parseFoodState(value: unknown): FoodState {
 }
 
 function parseMemberships(raw: ObjectValue): SceneMembership[] {
-  const detailed = raw.scene_memberships ?? raw.image_scenes ?? raw.memberships
+  const detailed = raw.scene_memberships
   if (Array.isArray(detailed)) {
     return detailed
       .map(entry => {
@@ -98,6 +90,7 @@ function parseMemberships(raw: ObjectValue): SceneMembership[] {
 }
 
 export function normalizeLibraryItem(raw: ObjectValue): LibraryImageItem | null {
+  // id only — never qdrant_point_id (P11)
   const id = text(raw.id) ?? (typeof raw.id === 'number' && Number.isFinite(raw.id) ? String(raw.id) : null)
   if (!id) return null
   const memberships = parseMemberships(raw)
@@ -108,12 +101,13 @@ export function normalizeLibraryItem(raw: ObjectValue): LibraryImageItem | null 
     id,
     imageUrl: pickImageDisplayUrl(raw),
     originalUrl: pickOriginalUrl(raw),
-    title: text(raw.title),
+    title: null,
     category: text(raw.category),
-    tags: stringList(raw.tags),
+    tags: [],
     scenes,
     sceneMemberships: memberships,
     foodState: parseFoodState(raw.food_state),
+    heatingGroup: text(raw.heating_group),
     createdAt: text(raw.created_at),
     width: positiveNumber(raw.width),
     height: positiveNumber(raw.height),

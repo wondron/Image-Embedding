@@ -1,0 +1,96 @@
+{
+  "suite": "backend-r0-r5-fe61",
+  "timestamp": "2026-11-05T16:01:54+08:00",
+  "timezone": "Asia/Shanghai",
+  "verdict": "PASS",
+  "git_head": "5733e764b455eb8ebe0c8c3c40cfa0e70562b915",
+  "git_head_short": "5733e76",
+  "dirty": true,
+  "dirty_paths_approx": 110,
+  "note_uncommitted": "Worktree contains R0–R5 layout move + §6.1 wire + FE adapter changes; QA did NOT commit.",
+  "python": "D:\\99-tools\\anaconda\\envs\\onnxgpu\\python.exe",
+  "create_app_smoke": "ok 21",
+  "items": [
+    {
+      "id": "A1_envelope_items_source",
+      "result": "PASS",
+      "detail": "SearchImageUseCase returns ok/source/scene/outputs_heating/items; empty uses source=empty + items:[]. HTTP run_search returns usecase payload as-is (JSONResponse). SearchResponse schema keys: items,message,ok,outputs_heating,scene,source,trace_id — no result/results. AST dict literals in search_image.py contain items/source, never result."
+    },
+    {
+      "id": "A2_authoritative_urls",
+      "result": "PASS",
+      "detail": "_hit_from_row / _item_from_row emit original_url + thumb_url only. SearchHitOut/ListImageItem schemas have original_url/thumb_url; no image_url/thumbnail_url. Static unit + AST keys OK."
+    },
+    {
+      "id": "A3_forbidden_flyb_shell_fields",
+      "result": "PASS",
+      "detail": "Search/List builders and Search/List schemas omit title, description, text_snippets, details, page_url, site/site_name, similiar. Remaining image_url/title/details/similiar only under services/predict/flyb_search.py and pipeline (predict island, not Search/List wire). IndexItemOut still has title/qdrant_point_id — Index is outside §6.1 Search/List (documented in schemas/retrieval.py)."
+    },
+    {
+      "id": "A4_list_no_qdrant_point_id",
+      "result": "PASS",
+      "detail": "ListImageItem schema and list_images._item_from_row AST keys have no qdrant_point_id. FE normalizeLibraryItem documents never qdrant_point_id."
+    },
+    {
+      "id": "A5_scene_label_and_outputs_heating",
+      "result": "PASS",
+      "detail": "P8: _scene_label_name squeezes dict→name string|null. P9: outputs_heating only on Search envelope (SearchResponse); heating_group/food_state attached to hits/items only when scene_meta.outputs_heating. ListImagesResponse has no outputs_heating field."
+    },
+    {
+      "id": "A6_live_http_search_list",
+      "result": "SKIP",
+      "detail": "TestClient GET /api/images without lifespan raises application state not initialized. Live Search/List JSON capture not run this round; wire covered by schemas + usecase builders + AST. ENV: full lifespan needs PG/Qdrant/onnx stack."
+    },
+    {
+      "id": "B1_new_tree_present",
+      "result": "PASS",
+      "detail": "backend/app has api, services, repositories, clients, models, db, schemas, workers, utils (plus bootstrap/core). Subtrees: api/v1, services/retrieval, services/predict/pipeline, workers/{process_deletions,recompute_scenes}, clients/{qdrant,s3,inference*}."
+    },
+    {
+      "id": "B2_old_tree_deleted",
+      "result": "PASS",
+      "detail": "Test-Path adapter/application/domain/worker all False. git status shows D for those trees. AST live-import scan over app/**/*.py: OLD_PATH_HITS=0 for app.adapter|application|domain|worker."
+    },
+    {
+      "id": "B3_create_app_entry",
+      "result": "PASS",
+      "detail": "main.py: from app.bootstrap.application import create_app. Smoke: D:\\99-tools\\anaconda\\envs\\onnxgpu\\python.exe with PYTHONPATH=. → ok 21 (also imported app.api.v1.predict + retrieval)."
+    },
+    {
+      "id": "B4_retrieval_predict_boundary",
+      "result": "PASS",
+      "detail": "AST over services/retrieval, repositories, workers, bootstrap/retrieval_stack.py: BOUNDARY_HITS=0 for services.predict / pipeline / flyb_search. Workers both reference retrieval_stack. flyb_search.py lives only under services/predict/."
+    },
+    {
+      "id": "C1_fe_wire_static",
+      "result": "PASS",
+      "detail": "lib/search.ts normalizeSearchResponse reads only wrapper.items (throws if not array); FORBIDDEN result/results. pickSearchImageUrls only thumb_url/original_url. entities/image pickImageDisplayUrl/pickOriginalUrl only thumb_url/original_url — no image_url/thumbnail_url production fallback. extractSceneLabel/heating/food_state single-source."
+    },
+    {
+      "id": "C2_fe_tsc",
+      "result": "PASS",
+      "detail": "npx tsc --noEmit → exit 0"
+    },
+    {
+      "id": "C3_fe_unit_tests",
+      "result": "WARN",
+      "detail": "npx vitest run src/lib/search.test.ts → 19 failed | 5 passed. Failures from legacy fixtures using {result:[...]} / image_url / thumbnail_url / details — incompatible with §6.1 adapter. Per brief: WARN only; does not fail wire-static PASS."
+    }
+  ],
+  "blockers": [
+    {
+      "id": "ENV_live_http",
+      "severity": "TestClient without lifespan cannot hit /api/images|/api/search; live JSON capture SKIP. Does not block static wire / layout verdict."
+    },
+    {
+      "id": "NOTE_models_alembic",
+      "severity": "models/ present (tables.py) but alembic autogen not wired — expected per brief; not a FAIL."
+    }
+  ],
+  "notes": [
+    "IndexItemOut still exposes title/qdrant_point_id — outside §6.1 Search/List scope.",
+    "index-api.ts still maps qdrant_point_id for Index response (Index wire), not List/Search.",
+    "legacy searchImages() still calls /api/predict/searchImage_*; searchLocalImages() uses /api/search with §6.1 normalize.",
+    "No commit/push performed by QA."
+  ]
+}

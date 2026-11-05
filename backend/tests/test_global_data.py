@@ -2,7 +2,7 @@ import copy
 import unittest
 from unittest.mock import Mock, patch
 
-from app.domain.pipeline.b_getGlobalData import GetGlobalData
+from app.services.predict.pipeline.b_getGlobalData import GetGlobalData
 
 
 class GlobalDataTests(unittest.TestCase):

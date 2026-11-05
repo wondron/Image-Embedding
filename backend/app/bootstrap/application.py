@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from app.adapter.http.exception_handlers import register_exception_handlers
-from app.adapter.http.middleware import register_middlewares
-from app.adapter.http.router import router
+from app.core.exceptions import register_exception_handlers
+from app.core.middleware import register_middlewares
+from app.api.router import router
 from app.bootstrap.lifespan import lifespan
 from app.core.config.settings import settings
 

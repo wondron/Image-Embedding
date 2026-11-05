@@ -26,8 +26,8 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 os.chdir(BACKEND_ROOT)
 
-from app.adapter.persistence.qdrant_store import VECTOR_DIM, QdrantStore
-from app.domain.pipeline.d_vector_index import VectorIndexPipeline
+from app.clients.qdrant import VECTOR_DIM, QdrantStore
+from app.services.predict.pipeline.d_vector_index import VectorIndexPipeline
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 

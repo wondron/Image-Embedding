@@ -8,7 +8,7 @@ from fastapi import HTTPException, UploadFile
 from PIL import Image
 from starlette.datastructures import Headers
 
-from app.adapter.http.services.image_io import clean_url, encode_png_base64, read_file_bytes, read_url_bytes
+from app.api.services.image_io import clean_url, encode_png_base64, read_file_bytes, read_url_bytes
 
 
 class ImageInputTests(unittest.IsolatedAsyncioTestCase):

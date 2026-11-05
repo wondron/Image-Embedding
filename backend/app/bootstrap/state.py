@@ -16,7 +16,7 @@ from app.core.config.settings import Settings
 
 if TYPE_CHECKING:
     from app.core.config.nacos import NacosConfigProvider
-    from app.domain.food_service import FoodService
+    from app.services.predict.food_service import FoodService
     from app.bootstrap.retrieval_stack import RetrievalStack
 
 

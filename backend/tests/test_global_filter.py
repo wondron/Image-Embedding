@@ -7,18 +7,18 @@ import numpy as np
 from fastapi.encoders import jsonable_encoder
 from starlette.responses import JSONResponse
 
-from app.domain.food_service import FoodService
-from app.domain.pipeline.b_getGlobalData import GetGlobalData
-from app.domain.pipeline.c_embedding import GlobalFilter
+from app.services.predict.food_service import FoodService
+from app.services.predict.pipeline.b_getGlobalData import GetGlobalData
+from app.services.predict.pipeline.c_embedding import GlobalFilter
 
 
 class GlobalFilterTests(unittest.TestCase):
     def setUp(self):
-        self.model_patch = patch('app.domain.pipeline.c_embedding.OnnxEmbedding')
+        self.model_patch = patch('app.services.predict.pipeline.c_embedding.OnnxEmbedding')
         self.model_type = self.model_patch.start()
         self.addCleanup(self.model_patch.stop)
         self.model = self.model_type.return_value
-        self.resolver_patch = patch('app.domain.pipeline.c_embedding.resolve_image_bgr', return_value=(None, None))
+        self.resolver_patch = patch('app.services.predict.pipeline.c_embedding.resolve_image_bgr', return_value=(None, None))
         self.resolve = self.resolver_patch.start()
         self.addCleanup(self.resolver_patch.stop)
         self.filter = GlobalFilter({'GLOBAL_FILTER': {'threshold': 0.7, 'switch': True}})
@@ -136,7 +136,7 @@ class GlobalFilterTests(unittest.TestCase):
         service.searchFilter = self.filter
         _, query_png = cv2.imencode('.png', self.image)
 
-        with patch('app.domain.common.image_utils.requests.get') as download:
+        with patch('app.utils.image.requests.get') as download:
             result = service.detect(query_png.tobytes())
 
         self.assertEqual(result, documents)
@@ -242,7 +242,7 @@ class GlobalFilterTests(unittest.TestCase):
         service.searchFilter = self.filter
         _, encoded = cv2.imencode('.png', self.image)
 
-        with patch('app.domain.common.image_utils.requests.get') as download:
+        with patch('app.utils.image.requests.get') as download:
             result = service.detect(encoded.tobytes())
 
         self.assertEqual(result, envelope)
