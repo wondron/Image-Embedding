@@ -1,4 +1,4 @@
-"""HTTP helpers for index/search/list/health/file. Orchestration in domain.retrieval.
+"""HTTP helpers for index/search/list/health/file. Orchestration in application.retrieval.
 
 Pydantic v1 compatible: dump via dump_model / .dict() — never bare model_dump (D1).
 """

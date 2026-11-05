@@ -21,11 +21,11 @@ from app.adapter.persistence.object_storage import build_object_storage
 from app.adapter.persistence.pg_metadata import PgMetadataStore
 from app.adapter.persistence.qdrant_store import QdrantVectorStore
 from app.core.config.settings import Settings
-from app.domain.retrieval.delete_image import DeleteImageUseCase, DeletionWorker
-from app.domain.retrieval.index_image import IndexImageUseCase
-from app.domain.retrieval.list_images import ListImagesUseCase
+from app.application.retrieval.delete_image import DeleteImageUseCase, DeletionWorker
+from app.application.retrieval.index_image import IndexImageUseCase
+from app.application.retrieval.list_images import ListImagesUseCase
 from app.domain.retrieval.ports import ObjectStoragePort, VectorStorePort
-from app.domain.retrieval.search_image import SearchImageUseCase
+from app.application.retrieval.search_image import SearchImageUseCase
 
 logger = logging.getLogger("bootstrap.retrieval")
 

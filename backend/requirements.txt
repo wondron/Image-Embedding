@@ -20,8 +20,7 @@ requests
 
 # ==== Retrieval / Storage (image-search PG v0.1) ====
 qdrant-client>=1.9,<2.0
-# PostgreSQL metadata (M2); pymysql kept unused temporarily for old adapter file
+# PostgreSQL metadata (M2); MySQL adapter removed (DDD D2)
 psycopg[binary]>=3.1,<4.0
 SQLAlchemy>=2.0,<3.0
 alembic>=1.13,<2.0
-pymysql>=1.1,<2.0

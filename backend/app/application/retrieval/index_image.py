@@ -30,7 +30,7 @@ from app.domain.retrieval.ports import (
 from app.domain.retrieval.scene_membership import build_qdrant_payload
 from app.domain.retrieval.scenes import resolve_index_scenes
 from app.domain.retrieval.storage_keys import guess_ext_from_bytes_header
-from app.domain.retrieval.storage_upload import put_original_and_thumb
+from app.application.retrieval.storage_upload import put_original_and_thumb
 
 logger = logging.getLogger("retrieval.index")
 
