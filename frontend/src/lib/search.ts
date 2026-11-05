@@ -1,4 +1,12 @@
 import type { SearchImage, SearchResponse } from '../types';
+import { DEFAULT_SCENE, toApiSceneCode, sceneOutputsHeating } from '../entities/scene';
+import {
+  extractSceneLabel,
+  extractHeatingGroup,
+  extractFoodState,
+  extractOutputsHeating,
+} from '../entities/search-result';
+import { safeHttpUrl as sharedSafeHttpUrl } from '../shared/lib/safeHttpUrl';
 
 type ObjectValue = Record<string, unknown>;
 
@@ -14,15 +22,7 @@ function text(value: unknown): string | null {
 
 /** Only remote HTTP(S) sources may become clickable links or image sources. */
 export function safeHttpUrl(value: unknown): string | null {
-  const candidate = text(value);
-  if (!candidate) return null;
-  try {
-    const url = new URL(candidate.startsWith('//') ? `https:${candidate}` : candidate);
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
-    return url.href;
-  } catch {
-    return null;
-  }
+  return sharedSafeHttpUrl(value);
 }
 
 function thumbnailSources(raw: ObjectValue): unknown[] {
@@ -85,9 +85,9 @@ function normalizeItem(raw: ObjectValue, index: number, responseSource?: SearchI
   const details = object(raw.details);
   const images = Array.isArray(details.images) ? details.images.map(object) : [];
   const primaryImage = images.find(image => safeHttpUrl(image.image_url)) ?? images[0] ?? {};
-  // Contract: image_url must be http(s); filesystem `path` is never used as a URL.
-  const imageUrl = safeHttpUrl(raw.image_url) ?? safeHttpUrl(primaryImage.image_url);
-  const thumbnailUrl = uniqueImageUrls(thumbnailSources(raw))[0] ?? null;
+  // Contract: https only; never filesystem path. Prefer thumb_url / original_url (PG S3).
+  const imageUrl = safeHttpUrl(raw.original_url) ?? safeHttpUrl(raw.image_url) ?? safeHttpUrl(primaryImage.image_url);
+  const thumbnailUrl = safeHttpUrl(raw.thumb_url) ?? uniqueImageUrls(thumbnailSources(raw))[0] ?? null;
   const site = object(details.site);
   const pageUrl = safeHttpUrl(details.page_url) ?? safeHttpUrl(raw.page_url);
   const channel = mapChannelSource(raw.source) ?? (
@@ -111,6 +111,10 @@ function normalizeItem(raw: ObjectValue, index: number, responseSource?: SearchI
     snippets,
     width: positiveNumber(raw.width) ?? positiveNumber(primaryImage.width),
     height: positiveNumber(raw.height) ?? positiveNumber(primaryImage.height),
+    sceneLabel: extractSceneLabel(raw),
+    heatingGroup: extractHeatingGroup(raw),
+    foodState: extractFoodState(raw),
+    outputsHeating: extractOutputsHeating(raw),
     ...(channel && channel !== 'empty' ? { source: channel } : {}),
     raw,
   };
@@ -139,7 +143,7 @@ export function normalizeSearchResponse(payload: unknown): SearchResponse {
   let message: string | undefined;
   if (responseSource === 'empty') {
     message = text(envelope.message) ?? text(wrapper.message)
-      ?? '自建库与外搜均未找到相关图片。';
+      ?? '自建库暂未找到相关图片。';
   } else if (status === 'upstream_empty_response' && responseSource !== 'self' && responseSource !== 'flyb') {
     // Legacy FlyB-only empty envelope (no contract source field).
     message = '上游搜索服务暂未返回结果，请稍后重试或更换图片。';
@@ -149,12 +153,25 @@ export function normalizeSearchResponse(payload: unknown): SearchResponse {
   const items = rows
     .filter((row): row is ObjectValue => row !== null && typeof row === 'object' && !Array.isArray(row))
     .map((row, index) => normalizeItem(row, index, responseSource));
+  const responseScene = text(wrapper.scene) ?? text(envelope.scene) ?? undefined;
+  const outputsHeatingFlag = typeof wrapper.outputs_heating === 'boolean'
+    ? wrapper.outputs_heating
+    : typeof envelope.outputs_heating === 'boolean'
+      ? envelope.outputs_heating
+      : undefined;
+  const itemsWithHeating = items.map(item => ({
+    ...item,
+    outputsHeating: item.outputsHeating ?? outputsHeatingFlag
+      ?? (responseScene ? sceneOutputsHeating(responseScene) : undefined),
+  }));
   return {
-    items,
+    items: itemsWithHeating,
     traceId: text(wrapper.trace_id) ?? text(envelope.request_id) ?? text(envelope.trace_id),
     status,
     message,
     ...(responseSource ? { source: responseSource } : {}),
+    ...(responseScene ? { scene: toApiSceneCode(responseScene) } : {}),
+    ...(outputsHeatingFlag !== undefined ? { outputsHeating: outputsHeatingFlag } : {}),
   };
 }
 
@@ -193,6 +210,8 @@ export interface SearchOptions {
   topK?: number;
   scoreThreshold?: number | null;
   traceId?: string | null;
+  /** PG v0.1 scene code; default general. Never send legacy normal/device. */
+  scene?: string;
 }
 
 export async function searchImages({ file, url, baseUrl = import.meta.env.VITE_API_BASE_URL ?? '', signal }: SearchOptions): Promise<SearchResponse> {
@@ -231,8 +250,9 @@ export async function searchImages({ file, url, baseUrl = import.meta.env.VITE_A
 
 /** Self-built vector search via POST /api/search (contract: multipart file or JSON { img_url }). */
 export async function searchLocalImages({
-  file, url, baseUrl = import.meta.env.VITE_API_BASE_URL ?? '', signal, topK, scoreThreshold, traceId,
+  file, url, baseUrl = import.meta.env.VITE_API_BASE_URL ?? '', signal, topK, scoreThreshold, traceId, scene,
 }: SearchOptions): Promise<SearchResponse> {
+  const apiScene = toApiSceneCode(scene, DEFAULT_SCENE);
   if ((!file && !url?.trim()) || (file && url?.trim())) {
     throw new Error('请选择一张图片，或填写一个图片链接。');
   }
@@ -247,9 +267,10 @@ export async function searchLocalImages({
     if (topK !== undefined) form.append('top_k', String(topK));
     if (scoreThreshold !== undefined && scoreThreshold !== null) form.append('score_threshold', String(scoreThreshold));
     if (traceId) form.append('trace_id', traceId);
+    form.append('scene', apiScene);
     body = form;
   } else {
-    const payload: Record<string, unknown> = { img_url: imageUrl };
+    const payload: Record<string, unknown> = { img_url: imageUrl, scene: apiScene };
     if (topK !== undefined) payload.top_k = topK;
     if (scoreThreshold !== undefined && scoreThreshold !== null) payload.score_threshold = scoreThreshold;
     if (traceId) payload.trace_id = traceId;

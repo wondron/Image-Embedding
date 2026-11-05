@@ -29,12 +29,14 @@ function httpUrl(value: unknown): string | null {
 export interface IndexedItem {
   id: string;
   qdrantPointId: string | null;
+  /** Debug-only; never use as <img src>. */
   path: string | null;
-  /** Only http(s); local filesystem path is never treated as a URL. */
+  /** Prefer S3 https thumb/original; never filesystem path. */
   url: string | null;
   title: string | null;
   category: string | null;
   tags: string[];
+  scenes: string[];
   width: number | null;
   height: number | null;
   status: string | null;
@@ -63,14 +65,19 @@ function normalizeIndexedRow(raw: ObjectValue): IndexedItem | null {
   const tags = Array.isArray(tagsRaw)
     ? tagsRaw.map(text).filter((value): value is string => value !== null)
     : [];
+  const scenesRaw = raw.scenes;
+  const scenes = Array.isArray(scenesRaw)
+    ? scenesRaw.map(text).filter((value) => value !== null)
+    : [];
   return {
     id,
     qdrantPointId: text(raw.qdrant_point_id) ?? id,
     path: text(raw.path),
-    url: httpUrl(raw.url),
+    url: httpUrl(raw.thumb_url) ?? httpUrl(raw.original_url) ?? httpUrl(raw.url) ?? httpUrl(raw.image_url),
     title: text(raw.title),
     category: text(raw.category),
     tags,
+    scenes,
     width: typeof raw.width === 'number' && Number.isFinite(raw.width) && raw.width > 0 ? raw.width : null,
     height: typeof raw.height === 'number' && Number.isFinite(raw.height) && raw.height > 0 ? raw.height : null,
     status: text(raw.status),
@@ -94,7 +101,7 @@ export function normalizeIndexResponse(payload: unknown): IndexResponse {
     failed: failedRows
       .filter((row): row is ObjectValue => row !== null && typeof row === 'object' && !Array.isArray(row))
       .map(row => ({
-        filenameOrPath: text(row.filename_or_path) ?? text(row.filename) ?? text(row.path),
+        filenameOrPath: text(row.filename_or_path) ?? text(row.filename) ?? text(row.name),
         error: text(row.error),
         message: text(row.message) ?? text(row.detail),
       })),
@@ -107,6 +114,8 @@ export interface IndexOptions {
   files?: File[];
   category?: string;
   tags?: string[];
+  /** Intent scenes (TBD wire); default caller sends ['general']. */
+  scenes?: string[];
   baseUrl?: string;
   signal?: AbortSignal;
 }
@@ -117,6 +126,7 @@ export async function indexImage({
   files,
   category,
   tags,
+  scenes,
   baseUrl = import.meta.env.VITE_API_BASE_URL ?? '',
   signal,
 }: IndexOptions): Promise<IndexResponse> {
@@ -132,6 +142,7 @@ export async function indexImage({
   else batch.forEach(item => form.append('files', item));
   if (category && category !== '未分类') form.append('category', category);
   if (tags?.length) form.append('tags', JSON.stringify(tags));
+  if (scenes?.length) form.append('scenes', JSON.stringify(scenes));
 
   let response: Response;
   try {

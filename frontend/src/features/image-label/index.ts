@@ -1,0 +1,1 @@
+export { ImageLabelPanel, type ImageLabelPanelProps } from './ImageLabelPanel'

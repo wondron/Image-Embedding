@@ -12,6 +12,16 @@ import { DownloadDialog } from './components/DownloadDialog'
 import { ImageFilePicker } from './components/ImageFilePicker'
 import { downloadImage, getImageSources, safeHttpUrl, searchImages, searchLocalImages } from './lib/search'
 import type { SearchImage, SearchResponse } from './types'
+import { DEFAULT_SCENE, sceneOutputsHeating } from './entities/scene'
+import { SourceBadge, displayCategoryLabel } from './entities/search-result'
+import { pingApi } from './shared/api'
+import { SceneSelect } from './features/scene-select'
+import {
+  ScoreThresholdControl,
+  SCORE_DEFAULT,
+  clampScoreThreshold,
+} from './features/score-threshold'
+import { HeatingFields, SearchNeverEmpty, SearchNoMatch, SearchFilteredEmpty } from './features/search'
 
 type View = 'search' | ManagementView
 const navigation = [
@@ -23,23 +33,6 @@ const navigation = [
 ]
 const pageSize = 12
 const maxBytes = 15 * 1024 * 1024
-
-const SCORE_DEFAULT = 0.55
-const SCORE_MIN = 0.30
-const SCORE_MAX = 1
-const SCORE_STEP = 0.01
-
-/** Clamp to legal set {0} ∪ [0.30, 1] (step 0.01). Sentinel 0 only when reject-off. */
-function clampScoreThreshold(value: number, allowZero = false): number {
-  if (!Number.isFinite(value)) return SCORE_DEFAULT
-  if (allowZero && value === 0) return 0
-  const stepped = Math.round(value / SCORE_STEP) * SCORE_STEP
-  return Math.min(SCORE_MAX, Math.max(SCORE_MIN, Number(stepped.toFixed(2))))
-}
-
-function formatScore(value: number): string {
-  return value.toFixed(2)
-}
 
 function loadBaseUrl() {
   try { return localStorage.getItem('food-atlas-api') ?? import.meta.env.VITE_API_BASE_URL ?? '' }
@@ -72,17 +65,10 @@ function Score({ value }: { value: number | null }) {
   </span>
 }
 
-/** Channel badge only when API mapped source to local/flyb; never invent from siteName. */
-function SourceBadge({ source }: { source?: SearchImage['source'] }) {
-  if (source === 'self') return <span className="source-badge source-badge-self">自建</span>
-  if (source === 'flyb') return <span className="source-badge source-badge-flyb">FlyB 兜底</span>
-  return null
-}
-
-function ResultTable({ items, onDetail, onDownload, downloading, selected, onToggle }: {
+function ResultTable({ items, onDetail, onDownload, downloading, selected, onToggle, activeScene }: {
   items: SearchImage[]; onDetail: (item: SearchImage) => void;
   onDownload: (item: SearchImage) => void; downloading: string | null;
-  selected: Set<string>; onToggle: (id: string) => void
+  selected: Set<string>; onToggle: (id: string) => void; activeScene?: string
 }) {
   return <div className="result-table-scroll"><table className="result-table">
     <thead><tr><th>选择</th><th>图片</th><th>图片名称</th><th>相似度</th><th>类别</th><th>来源</th><th>通道</th><th>操作</th></tr></thead>
@@ -90,18 +76,10 @@ function ResultTable({ items, onDetail, onDownload, downloading, selected, onTog
       <td><input type="checkbox" className="result-checkbox" aria-label={`选择图片：${item.title}`} checked={selected.has(item.id)} onChange={() => onToggle(item.id)} /></td>
       <td><button className="table-image" onClick={() => onDetail(item)} aria-label={`查看图片详情：${item.title}`}><ResultImage item={item} /></button></td>
       <th scope="row"><button className="table-title" onClick={() => onDetail(item)}>{item.title}</button></th>
-      <td><Score value={item.similarity} /></td><td>{item.category ?? '—'}</td><td>{item.siteName ?? '—'}</td><td><SourceBadge source={item.source} /></td>
+      <td><Score value={item.similarity} /></td><td>{displayCategoryLabel(item) ?? '—'}{(item.outputsHeating || sceneOutputsHeating(activeScene ?? '')) ? <> · <HeatingFields show compact heatingGroup={item.heatingGroup} foodState={item.foodState} /></> : null}</td><td>{item.siteName ?? '—'}</td><td><SourceBadge source={item.source} /></td>
       <td><div className="table-actions"><button className="btn btn-secondary" onClick={() => onDetail(item)}>详情</button><button className="btn btn-secondary" disabled={Boolean(downloading)} aria-label={`下载图片：${item.title}`} onClick={() => onDownload(item)}>{downloading === item.id ? <LoaderCircle size={13} className="spin" /> : <ArrowDownToLine size={13} />}下载</button></div></td>
     </tr>)}</tbody>
   </table></div>
-}
-
-function EmptyResults() {
-  return <div className="results-empty">
-    <span className="empty-image-icon" aria-hidden="true"><Images size={34} strokeWidth={1.2} /></span>
-    <h3>等待查询图片</h3><p>上传图片或粘贴图片链接后，点击「开始搜索」。</p>
-    <div className="empty-steps"><span>上传图片</span><ArrowRight size={13} /><span>检索相似结果</span><ArrowRight size={13} /><span>查看与下载</span></div>
-  </div>
 }
 
 export default function App() {
@@ -114,6 +92,7 @@ export default function App() {
   const [scoreThreshold, setScoreThreshold] = useState(SCORE_DEFAULT)
   const [rejectOff, setRejectOff] = useState(false)
   const [scoreBeforeOff, setScoreBeforeOff] = useState(SCORE_DEFAULT)
+  const [scene, setScene] = useState<string>(DEFAULT_SCENE)
   const [batchRunning, setBatchRunning] = useState(false)
   const [activeQueryName, setActiveQueryName] = useState('')
   const [file, setFile] = useState<File | null>(null)
@@ -145,12 +124,8 @@ export default function App() {
 
   const checkConnection = useCallback(async () => {
     setConnection('checking')
-    try {
-      const result = await fetch(`${apiBase.replace(/\/$/, '')}/api/ping`, { signal: AbortSignal.timeout(5000) })
-      if (!result.ok) throw new Error('offline')
-      const ping = await result.json()
-      setConnection(ping.ok === true ? 'online' : 'offline')
-    } catch { setConnection('offline') }
+    const result = await pingApi(apiBase)
+    setConnection(result.online ? 'online' : 'offline')
   }, [apiBase])
   useEffect(() => { void checkConnection() }, [checkConnection])
   useEffect(() => {
@@ -208,7 +183,7 @@ export default function App() {
     try {
       const common = { file: mode === 'file' ? file! : undefined, url: mode === 'url' ? url.trim() : undefined, baseUrl: apiBase, signal: controller.signal }
       const result = searchTarget === 'local'
-        ? await searchLocalImages({ ...common, scoreThreshold: rejectOff ? 0 : clampScoreThreshold(scoreThreshold) })
+        ? await searchLocalImages({ ...common, scoreThreshold: rejectOff ? 0 : clampScoreThreshold(scoreThreshold), scene })
         : await searchImages(common)
       if (activeRequest.current !== controller) return
       setResponse(result); setSearched(true); setElapsed((performance.now() - started) / 1000)
@@ -238,8 +213,8 @@ export default function App() {
   }
 
   const items = response?.items ?? []
-  const categories = [...new Set(items.flatMap(item => item.category ? [item.category] : []))]
-  const filtered = items.filter(item => (category === 'all' || item.category === category) && (!keyword || `${item.title} ${item.siteName ?? ''}`.toLocaleLowerCase().includes(keyword.toLocaleLowerCase())))
+  const categories = [...new Set(items.flatMap(item => { const label = displayCategoryLabel(item); return label ? [label] : [] }))]
+  const filtered = items.filter(item => (category === 'all' || displayCategoryLabel(item) === category) && (!keyword || `${item.title} ${item.siteName ?? ''}`.toLocaleLowerCase().includes(keyword.toLocaleLowerCase())))
   const sorted = sort === 'similarity' ? [...filtered].sort((a, b) => (b.similarity ?? -Infinity) - (a.similarity ?? -Infinity)) : filtered
   const pages = Math.max(1, Math.ceil(sorted.length / pageSize))
   const currentPage = Math.min(page, pages)
@@ -302,68 +277,32 @@ export default function App() {
                 {file && preview ? <><QueryPreview key={preview} src={preview} /><div className="selected-file-info"><b>{file.name}</b><span>{(file.size / 1024).toFixed(0)} KB · 已选择查询图片</span><ImageFilePicker className="replace-image" label="选择查询图片" onFiles={files => selectFile(files[0])}><Upload size={13} />更换图片</ImageFilePicker></div><button className="remove-image" aria-label="移除查询图片" onClick={() => { resetResults(); setFile(null) }}><X size={15} /></button></> : <ImageFilePicker className="upload-trigger" label="选择查询图片" onFiles={files => selectFile(files[0])}><span className="upload-icon"><UploadCloud size={25} strokeWidth={1.3} /></span><span className="upload-copy"><b>点击上传，或拖拽图片至此</b><small>支持 JPG、PNG、WebP、BMP 格式</small></span></ImageFilePicker>}
               </div> : <div className="url-input-area"><label className="sr-only" htmlFor="image-url">图片地址</label><input id="image-url" className="input" type="url" placeholder="https://example.com/image.jpg" value={url} onChange={event => { resetResults(); setUrl(event.target.value) }} /><p>请填写可公开访问的图片直链。</p>{queryImageUrl && <QueryPreview key={queryImageUrl} src={queryImageUrl} />}</div>}
             </div>
-            <div className="score-threshold-control" aria-label="拒识阈值">
-              <div className="score-threshold-header">
-                <SlidersHorizontal size={14} aria-hidden />
-                <span className="score-threshold-title">拒识阈值</span>
-                <span className="score-threshold-hint">仅自建库生效 · 默认 0.55 · 范围 0.30–1</span>
-              </div>
-              <div className="score-threshold-row">
-                <input
-                  type="range"
-                  className="score-threshold-slider"
-                  min={SCORE_MIN}
-                  max={SCORE_MAX}
-                  step={SCORE_STEP}
-                  value={scoreThreshold}
-                  disabled={busy || rejectOff || searchTarget !== 'local'}
-                  aria-label="拒识阈值滑块"
-                  aria-valuemin={SCORE_MIN}
-                  aria-valuemax={SCORE_MAX}
-                  aria-valuenow={scoreThreshold}
-                  onChange={event => setScoreThreshold(clampScoreThreshold(Number(event.target.value)))}
+            <div className="query-scene-score">
+              {searchTarget === 'local' && (
+                <SceneSelect
+                  id="search-scene"
+                  value={scene}
+                  disabled={busy}
+                  onChange={setScene}
                 />
-                <input
-                  type="number"
-                  className="input score-threshold-number"
-                  min={SCORE_MIN}
-                  max={SCORE_MAX}
-                  step={SCORE_STEP}
-                  value={formatScore(scoreThreshold)}
-                  disabled={busy || rejectOff || searchTarget !== 'local'}
-                  aria-label="拒识阈值数值"
-                  onChange={event => {
-                    const raw = event.target.value
-                    if (raw.trim() === '') return
-                    const parsed = Number(raw)
-                    if (!Number.isFinite(parsed)) return
-                    setScoreThreshold(clampScoreThreshold(parsed))
-                  }}
-                  onBlur={event => {
-                    const parsed = Number(event.target.value)
-                    setScoreThreshold(clampScoreThreshold(Number.isFinite(parsed) ? parsed : scoreThreshold))
-                  }}
-                />
-              </div>
-              <label className="score-threshold-off">
-                <input
-                  type="checkbox"
-                  checked={rejectOff}
-                  disabled={busy || searchTarget !== 'local'}
-                  onChange={event => {
-                    const next = event.target.checked
-                    if (next) {
-                      setScoreBeforeOff(scoreThreshold)
-                      setRejectOff(true)
-                    } else {
-                      setRejectOff(false)
-                      setScoreThreshold(clampScoreThreshold(scoreBeforeOff || SCORE_DEFAULT))
-                    }
-                  }}
-                />
-                <span>关闭拒识{rejectOff ? '（提交 0）' : ''}</span>
-              </label>
-              {searchTarget === 'global' && <p className="score-threshold-global-note">现网 Global 不传拒识阈值；切回自建后沿用当前设置。</p>}
+              )}
+              <ScoreThresholdControl
+                scoreThreshold={scoreThreshold}
+                rejectOff={rejectOff}
+                disabled={busy || searchTarget !== 'local'}
+                scoreBeforeOff={scoreBeforeOff}
+                onScoreChange={setScoreThreshold}
+                onRejectOffChange={(off, restore) => {
+                  if (off) {
+                    setScoreBeforeOff(scoreThreshold)
+                    setRejectOff(true)
+                    setScoreThreshold(0)
+                  } else {
+                    setRejectOff(false)
+                    setScoreThreshold(clampScoreThreshold(restore ?? scoreBeforeOff))
+                  }
+                }}
+              />
             </div>
             <div className="query-actions">
               <button className="btn btn-primary search-button" onClick={() => void runSearch()} disabled={!inputReady || busy}>{busy ? <LoaderCircle size={15} className="spin" /> : <Search size={15} />}{busy ? '正在搜索相似图片…' : '开始搜索'}</button>
@@ -401,15 +340,21 @@ export default function App() {
             </div>}
             <div className={`results-content ${resultLayout === 'list' ? 'content-list' : ''}`}>
             {waitingForResults ? <div className="loading-state" role="status"><div className="loading-orbit"><ScanLine size={37} strokeWidth={1.3} /></div><h3>正在寻找图片之间的联系</h3><p>{queryKind === 'batch' ? '批量搜索正在进行，查询图片完成后会显示对应结果。' : searchTarget === 'local' ? '正在自建库中检索…' : '搜索、获取图片并计算相似度，请稍候…'}</p><div className="skeleton-row">{[1, 2, 3].map(n => <div className="skeleton-card" key={n} />)}</div></div>
-              : !searched ? <EmptyResults />
-              : !visible.length ? <div className="no-results"><Search size={35} strokeWidth={1.2} /><h3>{items.length ? '没有符合筛选条件的结果' : '暂未找到相关图片'}</h3><p>{items.length ? '试试其他关键词或类别。' : '试试更清晰的图片，或更换查询主体。'}</p>{items.length > 0 && <button className="btn btn-secondary" onClick={() => { setKeyword(''); setCategory('all') }}>清除筛选</button>}</div>
-              : resultLayout === 'list' ? <ResultTable items={visible} onDetail={setDetail} onDownload={item => void saveImage(item)} downloading={downloading} selected={selected} onToggle={toggleSelected} />
-              : <div className="result-grid">{visible.map(item => <article className={`result-card ${selected.has(item.id) ? 'result-selected' : ''}`} key={item.id}><label className="image-select"><input className="result-checkbox" type="checkbox" aria-label={`选择图片：${item.title}`} checked={selected.has(item.id)} onChange={() => toggleSelected(item.id)} /></label><button className="result-image-button" onClick={() => setDetail(item)} aria-label={`查看图片详情：${item.title}`}><ResultImage item={item} /><Score value={item.similarity} /><SourceBadge source={item.source} /><span className="image-hover-hint"><Search size={15} />查看详情</span></button><div className="result-card-body"><h3><button onClick={() => setDetail(item)}>{item.title}</button></h3><div className="result-card-meta"><span>{item.category ?? item.siteName ?? 'Global 搜索'}</span><button className="icon-button download-button" title="下载图片" aria-label={`下载图片：${item.title}`} disabled={Boolean(downloading)} onClick={() => void saveImage(item)}>{downloading === item.id ? <LoaderCircle size={16} className="spin" /> : <ArrowDownToLine size={16} />}</button></div></div></article>)}</div>}
+              : !searched ? <SearchNeverEmpty />
+              : !visible.length ? (items.length
+                ? <SearchFilteredEmpty onClear={() => { setKeyword(''); setCategory('all') }} />
+                : <SearchNoMatch
+                    message={response?.message}
+                    libraryLikelyEmpty={response?.source === 'empty'}
+                    onGoImport={() => navigate('import')}
+                  />)
+              : resultLayout === 'list' ? <ResultTable items={visible} activeScene={scene} onDetail={setDetail} onDownload={item => void saveImage(item)} downloading={downloading} selected={selected} onToggle={toggleSelected} />
+              : <div className="result-grid">{visible.map(item => <article className={`result-card ${selected.has(item.id) ? 'result-selected' : ''}`} key={item.id}><label className="image-select"><input className="result-checkbox" type="checkbox" aria-label={`选择图片：${item.title}`} checked={selected.has(item.id)} onChange={() => toggleSelected(item.id)} /></label><button className="result-image-button" onClick={() => setDetail(item)} aria-label={`查看图片详情：${item.title}`}><ResultImage item={item} /><Score value={item.similarity} /><SourceBadge source={item.source} /><span className="image-hover-hint"><Search size={15} />查看详情</span></button><div className="result-card-body"><h3><button onClick={() => setDetail(item)}>{item.title}</button></h3><div className="result-card-meta"><span>{displayCategoryLabel(item) ?? item.siteName ?? 'Global 搜索'}</span>{(item.outputsHeating || sceneOutputsHeating(scene)) && <HeatingFields show compact heatingGroup={item.heatingGroup} foodState={item.foodState} />}<button className="icon-button download-button" title="下载图片" aria-label={`下载图片：${item.title}`} disabled={Boolean(downloading)} onClick={() => void saveImage(item)}>{downloading === item.id ? <LoaderCircle size={16} className="spin" /> : <ArrowDownToLine size={16} />}</button></div></div></article>)}</div>}
             </div>
             <div className="results-footer"><span>{searched ? `共 ${items.length} 张图片${filtered.length !== items.length ? ` · 筛选后 ${filtered.length} 张` : ''}` : '搜索结果将在这里展示'}{items.length > 0 && !categories.length && <small> · 暂无类别数据</small>}</span><div className="pagination"><button className="icon-button" aria-label="上一页" disabled={currentPage <= 1 || !items.length} onClick={() => setPage(currentPage - 1)}><ArrowLeft size={15} /></button><span>{currentPage} <small>/ {pages}</small></span><button className="icon-button" aria-label="下一页" disabled={currentPage >= pages || !items.length} onClick={() => setPage(currentPage + 1)}><ArrowRight size={15} /></button></div></div>
           </section>
         </div>
-        <div className="search-bottom-note">{response?.traceId && <span className="trace-id" title={response.traceId}>请求 ID：{response.traceId}</span>}{response?.source === 'self' && <span className="source-mode-note">检索通道：自建</span>}{response?.source === 'flyb' && <span className="source-mode-note">检索通道：FlyB 兜底</span>}{response?.source === 'empty' && <span className="source-mode-note">检索通道：无结果</span>}<span className="local-filter-note">类别筛选与分页仅作用于本次搜索结果</span></div>
+        <div className="search-bottom-note">{response?.traceId && <span className="trace-id" title={response.traceId}>请求 ID：{response.traceId}</span>}{response?.source === 'self' && <span className="source-mode-note">检索通道：自建</span>}{/* M6: FlyB not a product-success path for self-built acceptance */}{response?.source === 'empty' && <span className="source-mode-note">检索通道：无结果</span>}<span className="local-filter-note">类别筛选与分页仅作用于本次搜索结果</span></div>
       </div>
     </main></div>
 
@@ -417,7 +362,10 @@ export default function App() {
       <div className="detail-content">
         <section className="detail-section"><h3>检索信息</h3>
           <div className="detail-summary"><h4>{detail.title}</h4><Score value={detail.similarity} /></div>
-          <dl className="detail-fields"><div><dt>食材类别</dt><dd>{detail.category ?? '未提供类别'}</dd></div><div><dt>图片尺寸</dt><dd>{detail.width && detail.height ? `${detail.width} × ${detail.height} px` : '未提供'}</dd></div><div><dt>图片来源</dt><dd>{detail.siteName ?? '未提供'}</dd></div><div><dt>检索通道</dt><dd>{detail.source === 'self' ? '自建' : detail.source === 'flyb' ? 'FlyB 兜底' : '未提供'}</dd></div><div><dt>结果编号</dt><dd className="monospace">{detail.id}</dd></div></dl>
+          <dl className="detail-fields"><div><dt>食材类别</dt><dd>{displayCategoryLabel(detail) ?? '未提供类别'}</dd></div>
+          {(detail.outputsHeating || sceneOutputsHeating(scene) || scene === 'oven') && (
+            <div className="detail-heating"><dt>加热信息</dt><dd><HeatingFields show heatingGroup={detail.heatingGroup} foodState={detail.foodState} /></dd></div>
+          )}<div><dt>图片尺寸</dt><dd>{detail.width && detail.height ? `${detail.width} × ${detail.height} px` : '未提供'}</dd></div><div><dt>图片来源</dt><dd>{detail.siteName ?? '未提供'}</dd></div><div><dt>检索通道</dt><dd>{detail.source === 'self' ? '自建' : detail.source === 'empty' ? '无结果' : detail.source === 'flyb' ? 'FlyB 兜底' : '未提供'}</dd></div><div><dt>结果编号</dt><dd className="monospace">{detail.id}</dd></div></dl>
         </section>
         <section className="detail-section"><h3>图片预览</h3><div className="detail-image"><ResultImage item={detail} /></div></section>
         <section className="detail-section"><h3>来源信息</h3><dl className="detail-links"><div><dt>来源网页</dt><dd>{detail.pageUrl ? <a href={detail.pageUrl} target="_blank" rel="noreferrer">{detail.pageUrl}<ArrowUpRight size={12} /></a> : '—'}</dd></div><div><dt>图片地址</dt><dd>{(detail.imageUrl || detail.thumbnailUrl) ? <a className="original-link" href={detail.imageUrl ?? detail.thumbnailUrl!} target="_blank" rel="noreferrer">打开原图 / 另存为 <ArrowUpRight size={12} /></a> : '—'}</dd></div></dl>
@@ -429,6 +377,6 @@ export default function App() {
     </Dialog>}
     {downloadItems && <DownloadDialog items={downloadItems} apiBase={apiBase} onClose={() => setDownloadItems(null)} />}
     {settingsOpen && <Dialog title="搜索服务连接" onClose={() => setSettingsOpen(false)}><div className="settings-content"><p>连接现有的图像搜索服务。留空时使用当前站点的接口。</p><label htmlFor="api-base">服务地址</label><input className="input" id="api-base" type="url" placeholder="默认使用站点 /api" value={apiDraft} onChange={event => setApiDraft(event.target.value)} /><small>例如 http://127.0.0.1:8320，不包含 /api 路径。跨域连接需服务端允许访问。</small>{apiDraft.trim() && !safeHttpUrl(apiDraft.trim()) && <p className="inline-error">请输入 HTTP 或 HTTPS 地址。</p>}<div className="connection-info"><span className={`status-dot ${connection}`} />{connection === 'online' ? '接口可连接' : connection === 'checking' ? '正在检查连接…' : '当前未连接，请检查服务地址与后端运行状态'}<button className="text-button" onClick={() => void checkConnection()}>重新检查</button></div><div className="dialog-actions"><button className="btn btn-secondary" onClick={() => setSettingsOpen(false)}>取消</button><button className="btn btn-primary" disabled={Boolean(apiDraft.trim() && !safeHttpUrl(apiDraft.trim()))} onClick={saveSettings}><Check size={16} />保存连接</button></div></div></Dialog>}
-    {helpOpen && <Dialog title="开始使用食图" onClose={() => setHelpOpen(false)}><div className="help-content"><div><Search size={21} /><section><h3>以图搜图</h3><p>上传图片或输入可公开访问的图片直链，选择「自建库」或「现网 Global」后点击搜索。切换到「批量搜索」可添加最多 30 张图片（现网），逐张搜索并在队列中分别查看结果；支持停止、继续和重试。</p></section></div><div><ArrowDownToLine size={21} /><section><h3>查看与下载</h3><p>点击结果打开详情，勾选图片后可「批量下载」。支持跨页多选，保存为 ZIP 或选择本地目录，并附带来源与相似度清单。目录选择需浏览器支持，并通过 HTTPS 或 localhost 访问；也可使用 ZIP 下载。</p></section></div><div><FolderOpen size={21} /><section><h3>为数据管理做好准备</h3><p>「上传与导入」已可提交自建入库；任务页展示本会话进度。食材编辑仍为本地草稿。图片库浏览 CRUD 待接入。</p></section></div><div className="help-note">相似度仅在服务返回分数时展示；类别不从图片标题自动推断。</div></div></Dialog>}
+    {helpOpen && <Dialog title="开始使用食图" onClose={() => setHelpOpen(false)}><div className="help-content"><div><Search size={21} /><section><h3>以图搜图</h3><p>上传图片或输入可公开访问的图片直链，在自建库中检索。默认场景为「通用」（general）；可切换场景与拒识阈值后点「开始搜索」。空库时请先去「上传与导入」入库（PG + S3），不以 FlyB 外搜兜底为完成标准。</p></section></div><div><ArrowDownToLine size={21} /><section><h3>查看与下载</h3><p>点击结果打开详情，勾选图片后可「批量下载」。一体机场景下结果会展示加热组与食物状态（缺字段显示「—」）。</p></section></div><div><FolderOpen size={21} /><section><h3>图库与入库</h3><p>图库按场景筛选（默认 general），缩略图使用 S3 https 地址。入库可指定场景意向；最终成员以规则 + 手动覆盖为准。</p></section></div><div className="help-note">相似度仅在服务返回分数时展示；类别优先展示 scene_label，否则回落通用类别。</div></div></Dialog>}
   </div>
 }

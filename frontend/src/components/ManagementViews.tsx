@@ -2,7 +2,15 @@ import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEven
 import { ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Circle, Clock3, CloudUpload, FolderOpen, ImagePlus, Images, Info, Layers3, Leaf, ListChecks, LoaderCircle, Pencil, Plus, RotateCcw, Search, Square, Tags, Trash2, X, XCircle } from 'lucide-react'
 import { Dialog } from './Dialog'
 import { indexImage } from '../lib/index-api'
-import { listImages, type LibraryImageItem } from '../lib/images-api'
+import type { LibraryImageItem } from '../entities/image'
+import { DEFAULT_SCENE, sceneDisplayLabel, toApiSceneCode } from '../entities/scene'
+import { EmptyState, Metric } from '../shared/ui'
+import { EMPTY_COPY } from '../shared/config'
+import { formatLibraryTime } from '../shared/lib'
+import { SceneSelect } from '../features/scene-select'
+import { useLibraryList } from '../features/library-list'
+import { ImageLabelPanel } from '../features/image-label'
+import { ImportSceneIntent } from '../features/index-upload'
 import './ManagementViews.css'
 
 export type ManagementView = 'library' | 'import' | 'tasks' | 'ingredients'
@@ -37,27 +45,15 @@ function supportsDirectoryPicker(): boolean {
   }
 }
 
-function EmptyState({ icon: Icon, title, description, children }: {
-  icon: typeof Images; title: string; description: string; children?: ReactNode
-}) {
-  return <div className="mg-empty"><span className="mg-empty-icon"><Icon size={29} strokeWidth={1.4} /></span>
-    <h3>{title}</h3><p>{description}</p>{children}</div>
-}
-
 export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
   const [libraryQuery, setLibraryQuery] = useState('')
   const [libraryCategory, setLibraryCategory] = useState('全部类别')
+  const [libraryScene, setLibraryScene] = useState<string>(DEFAULT_SCENE)
   const [libraryLayout, setLibraryLayout] = useState<'grid' | 'list'>('grid')
   const [libraryPage, setLibraryPage] = useState(1)
   const [debouncedLibraryQuery, setDebouncedLibraryQuery] = useState('')
-  const [libraryItems, setLibraryItems] = useState<LibraryImageItem[]>([])
-  const [libraryTotal, setLibraryTotal] = useState(0)
-  const [libraryLoading, setLibraryLoading] = useState(false)
-  const [libraryError, setLibraryError] = useState<string | null>(null)
-  const [libraryConnected, setLibraryConnected] = useState(false)
   const [libraryPreview, setLibraryPreview] = useState<LibraryImageItem | null>(null)
   const [libraryReloadKey, setLibraryReloadKey] = useState(0)
-  const libraryAbort = useRef<AbortController | null>(null)
   const [taskStatus, setTaskStatus] = useState('全部任务')
   const [jobs, setJobs] = useState<IndexJob[]>([])
   const jobsRef = useRef(jobs)
@@ -65,6 +61,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
   const [fileIssues, setFileIssues] = useState<string[]>([])
   const [dragging, setDragging] = useState(false)
   const [importCategory, setImportCategory] = useState('未分类')
+  const [importScenes, setImportScenes] = useState<string[]>([DEFAULT_SCENE])
   const [preview, setPreview] = useState<IndexJob | null>(null)
   const [indexing, setIndexing] = useState(false)
   const indexingRef = useRef(false)
@@ -112,43 +109,29 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     return () => window.clearTimeout(timer)
   }, [libraryQuery])
 
-  // Fetch GET /api/images when library view is active (depends on backend §3.5).
+  const libraryList = useLibraryList({
+    enabled: view === 'library',
+    apiBase,
+    page: libraryPage,
+    pageSize: 24,
+    q: debouncedLibraryQuery || undefined,
+    category: libraryCategory === '全部类别' ? undefined : libraryCategory,
+    scene: libraryScene,
+    reloadKey: libraryReloadKey,
+  })
   useEffect(() => {
     if (view !== 'library') return
-    libraryAbort.current?.abort()
-    const controller = new AbortController()
-    libraryAbort.current = controller
-    const requestBase = apiBaseRef.current
-    setLibraryLoading(true)
-    setLibraryError(null)
-    void listImages({
-      page: libraryPage,
-      pageSize: 24,
-      q: debouncedLibraryQuery || undefined,
-      category: libraryCategory === '全部类别' ? undefined : libraryCategory,
-      scene: 'normal',
-      baseUrl: requestBase,
-      signal: controller.signal,
-    }).then(result => {
-      if (controller.signal.aborted) return
-      const maxPage = Math.max(1, Math.ceil(result.total / 24) || 1)
-      if (result.total > 0 && result.items.length === 0 && libraryPage > maxPage) {
-        setLibraryPage(maxPage)
-        return
-      }
-      setLibraryItems(result.items)
-      setLibraryTotal(result.total)
-      setLibraryConnected(true)
-      setLibraryLoading(false)
-    }).catch(cause => {
-      if (controller.signal.aborted || (cause instanceof Error && cause.name === 'AbortError')) return
-      setLibraryItems([])
-      setLibraryTotal(0)
-      setLibraryError(cause instanceof Error ? cause.message : '图库列表加载失败，请重试。')
-      setLibraryLoading(false)
-    })
-    return () => controller.abort()
-  }, [view, libraryPage, debouncedLibraryQuery, libraryCategory, apiBase, libraryReloadKey])
+    // Clamp page when total shrinks
+    const maxPage = Math.max(1, Math.ceil(libraryList.total / 24) || 1)
+    if (libraryList.total > 0 && libraryList.items.length === 0 && libraryPage > maxPage) {
+      setLibraryPage(maxPage)
+    }
+  }, [view, libraryList.total, libraryList.items.length, libraryPage])
+  const libraryItems = libraryList.items
+  const libraryTotal = libraryList.total
+  const libraryLoading = libraryList.loading
+  const libraryError = libraryList.error
+  const libraryConnected = libraryList.connected
 
     const commitJobs = useCallback((next: IndexJob[]) => {
     jobsRef.current = next
@@ -242,8 +225,9 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
         const started = performance.now()
         try {
           const result = await indexImage({
-            file: target.file,
-            category,
+          file: target.file,
+          category,
+          scenes: importScenes,
             baseUrl: requestBase,
             signal: controller.signal,
           })
@@ -335,6 +319,13 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
       {view === 'library' && <>
         <label className="mg-search"><Search size={17} /><input aria-label="搜索图库" placeholder="搜索图片名称或食材…" value={libraryQuery} onChange={event => setLibraryQuery(event.target.value)} />{libraryQuery && <button aria-label="清空搜索" onClick={() => setLibraryQuery('')}><X size={15} /></button>}</label>
         <select className="mg-select" aria-label="图库类别筛选" value={libraryCategory} onChange={event => { setLibraryCategory(event.target.value); setLibraryPage(1) }}><option>全部类别</option>{categories.map(category => <option key={category}>{category}</option>)}</select>
+          <SceneSelect
+            id="library-scene"
+            variant="management"
+            value={libraryScene}
+            disabled={libraryLoading}
+            onChange={code => { setLibraryScene(toApiSceneCode(code)); setLibraryPage(1) }}
+          />
         <div className="mg-view-toggle" aria-label="图片展示方式"><button className={libraryLayout === 'grid' ? 'active' : ''} aria-label="网格展示" aria-pressed={libraryLayout === 'grid'} onClick={() => setLibraryLayout('grid')}><Images size={17} /></button><button className={libraryLayout === 'list' ? 'active' : ''} aria-label="列表展示" aria-pressed={libraryLayout === 'list'} onClick={() => setLibraryLayout('list')}><ListChecks size={17} /></button></div>
         <button className="mg-btn mg-primary" onClick={() => onNavigate('import')}><Plus size={17} />导入图片</button>
       </>}
@@ -361,7 +352,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     </div>
 
     {view === 'library' && (() => {
-      const hasFilter = Boolean(debouncedLibraryQuery) || libraryCategory !== '全部类别'
+      const hasFilter = Boolean(debouncedLibraryQuery) || libraryCategory !== '全部类别' || libraryScene !== DEFAULT_SCENE
       const totalPages = Math.max(1, Math.ceil(libraryTotal / 24) || 1)
       const pageLabel = libraryTotal === 0 ? '—' : `${libraryPage} / ${totalPages}`
       return <>
@@ -382,13 +373,13 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
           </div>
         )}
         {!libraryError && !libraryLoading && libraryTotal === 0 && !hasFilter && (
-          <EmptyState icon={Images} title="暂无已入库图片" description="可先整理本地图片，再提交到自建向量库。">
+          <EmptyState icon={Images} title={EMPTY_COPY.libraryEmpty.title} description={EMPTY_COPY.libraryEmpty.description}>
             <button className="mg-btn mg-secondary" onClick={() => onNavigate('import')}><ImagePlus size={17} />准备第一批图片<ArrowRight size={16} /></button>
           </EmptyState>
         )}
         {!libraryError && !libraryLoading && libraryTotal === 0 && hasFilter && (
-          <EmptyState icon={Images} title="没有匹配的图片" description="当前搜索或类别下没有结果，试试清空筛选。">
-            <button className="mg-btn mg-secondary" onClick={() => { setLibraryQuery(''); setLibraryCategory('全部类别'); setLibraryPage(1) }}>清空筛选</button>
+          <EmptyState icon={Images} title={EMPTY_COPY.libraryFilteredEmpty.title} description={EMPTY_COPY.libraryFilteredEmpty.description}>
+            <button className="mg-btn mg-secondary" onClick={() => { setLibraryQuery(''); setLibraryCategory('全部类别'); setLibraryScene(DEFAULT_SCENE); setLibraryPage(1) }}>清空筛选</button>
           </EmptyState>
         )}
         {!libraryError && libraryItems.length > 0 && libraryLayout === 'grid' && (
@@ -399,7 +390,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
                   type="button"
                   className="mg-upload-preview"
                   disabled={!item.imageUrl}
-                  onClick={() => item.imageUrl && setLibraryPreview(item)}
+                  onClick={() => setLibraryPreview(item)}
                   aria-label={item.imageUrl ? `预览 ${item.title ?? item.id}` : '暂无预览'}
                 >
                   {item.imageUrl
@@ -411,7 +402,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
                   <strong title={item.title ?? item.id}>{item.title ?? '未命名图片'}</strong>
                   <small>
                     {item.category ? <span className="mg-category-chip">{item.category}</span> : <span>—</span>}
-                    {item.scenes.length > 0 && <span className="mg-library-scene">{item.scenes[0]}</span>}
+                    {item.scenes.map(code => <span className="mg-library-scene" key={code}>{sceneDisplayLabel(code)}</span>)}
                   </small>
                 </div>
               </article>
@@ -426,7 +417,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
                   type="button"
                   className="mg-library-name"
                   disabled={!item.imageUrl}
-                  onClick={() => item.imageUrl && setLibraryPreview(item)}
+                  onClick={() => setLibraryPreview(item)}
                 >
                   {item.imageUrl
                     ? <img src={item.imageUrl} alt="" className="mg-library-thumb" loading="lazy" />
@@ -450,7 +441,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
           </div>
         </div>
       </section>
-      <div className="mg-info"><Info size={17} /><p>图库列表来自 <code>GET /api/images</code>（scene=normal，每页 24）。缩略图只用 <code>image_url</code>；本刀不做软删。本会话入库进度见「入库任务」。</p></div>
+      <div className="mg-info"><Info size={17} /><p>图库列表来自 <code>GET /api/images</code>（默认 scene=general，每页 24）。缩略图认 S3 <code>thumb_url</code>/<code>original_url</code>（禁 path）；本刀不做软删。空库请走「上传与导入」重建。</p></div>
     </>
     })()}
 
@@ -469,7 +460,9 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
           {item.error && <small className="mg-job-error">{item.error}</small>}
           {item.elapsed !== undefined && (item.status === 'success' || item.status === 'error') && <small className="mg-job-elapsed">{item.elapsed.toFixed(1)} 秒</small>}
         </div></article>)}</div>}
-    </section><aside className="mg-import-aside"><section className="mg-panel mg-import-settings"><h2>整理入库信息</h2><p>为本次图片选择统一类别，然后提交到自建向量库。</p><label className="mg-field">食材类别<select className="mg-select" disabled={indexing} value={importCategory} onChange={event => setImportCategory(event.target.value)}><option>未分类</option>{categories.map(category => <option key={category}>{category}</option>)}</select></label><div className="mg-import-summary"><span>已选择图片<strong>{jobs.length} 张</strong></span><span>文件总大小<strong>{(totalBytes / 1024 / 1024).toFixed(2)} MB</strong></span><span>默认类别<strong>{importCategory}</strong></span></div>
+    </section><aside className="mg-import-aside"><section className="mg-panel mg-import-settings"><h2>整理入库信息</h2><p>为本次图片选择统一类别，然后提交到自建向量库。</p><label className="mg-field">食材类别<select className="mg-select" disabled={indexing} value={importCategory} onChange={event => setImportCategory(event.target.value)}><option>未分类</option>{categories.map(category => <option key={category}>{category}</option>)}</select></label>
+      <ImportSceneIntent scenes={importScenes} onChange={setImportScenes} disabled={indexing} />
+      <p className="mg-help">类别下拉目前为本地种子（待对接 categories API）。</p><div className="mg-import-summary"><span>已选择图片<strong>{jobs.length} 张</strong></span><span>文件总大小<strong>{(totalBytes / 1024 / 1024).toFixed(2)} MB</strong></span><span>默认类别<strong>{importCategory}</strong></span></div>
       {jobs.length > 0 && <div className="mg-index-progress" aria-live="polite">
         <div><b>{indexing ? '正在入库' : doneCount === jobs.length && hasStarted ? '本批入库完成' : '入库进度'}</b><span>{doneCount} / {jobs.length}</span></div>
         <progress aria-label="入库进度" value={doneCount} max={Math.max(jobs.length, 1)} />
@@ -512,7 +505,13 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
 
     <div className="mg-live-status" role="status" aria-live="polite">{notice}</div>
     {preview && <Dialog title="图片预览" onClose={() => setPreview(null)} wide><img className="mg-dialog-image" src={preview.preview} alt={preview.file.name} /><p className="mg-preview-name">{preview.file.name}</p>{preview.remoteId && <p className="mg-preview-name monospace">入库 id：{preview.remoteId}</p>}{preview.error && <p className="mg-form-error" role="alert">{preview.error}</p>}</Dialog>}
-    {libraryPreview?.imageUrl && <Dialog title="图片预览" onClose={() => setLibraryPreview(null)} wide><img className="mg-dialog-image" src={libraryPreview.imageUrl} alt={libraryPreview.title ?? ''} /><p className="mg-preview-name">{libraryPreview.title ?? libraryPreview.id}</p>{libraryPreview.category && <p className="mg-preview-name">{libraryPreview.category}</p>}</Dialog>}
+    {libraryPreview && <Dialog title="图片标注" onClose={() => setLibraryPreview(null)} wide>
+      {(libraryPreview.originalUrl || libraryPreview.imageUrl)
+        ? <img className="mg-dialog-image" src={libraryPreview.originalUrl ?? libraryPreview.imageUrl!} alt={libraryPreview.title ?? ''} />
+        : <div className="mg-empty"><p>暂无预览地址</p></div>}
+      <p className="mg-preview-name">{libraryPreview.title ?? libraryPreview.id}</p>
+      <ImageLabelPanel item={libraryPreview} apiReady={false} />
+    </Dialog>}
     {editor && <Dialog title={ingredients.some(item => item.id === editor.id) ? '编辑食材草稿' : '新建食材草稿'} onClose={() => setEditor(null)}>
       <form className="mg-editor" onSubmit={saveIngredient}>
         <div className="mg-editor-body">
@@ -541,14 +540,4 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
   </div>
 }
 
-function formatLibraryTime(value: string | null): string {
-  if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
 
-function Metric({ label, value, detail, icon: Icon }: { label: string; value: string; detail: string; icon: typeof Images }) {
-  return <div className="mg-metric"><div><span>{label}</span><strong>{value}</strong><small>{detail}</small></div><span className="mg-metric-icon"><Icon size={22} strokeWidth={1.5} /></span></div>
-}

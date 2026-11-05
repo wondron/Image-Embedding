@@ -535,3 +535,106 @@ main { flex: 1; min-height: 0; width: 100%; max-width: none; padding: 14px; marg
   color: var(--muted);
   line-height: 1.45;
 }
+
+/* M6 scene select + heating + label panel */
+.scene-select {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+}
+.scene-select-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted, #6b7280);
+}
+.scene-select-input,
+.scene-select .mg-select {
+  width: 100%;
+}
+.query-scene-score {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 12px 0;
+}
+.heating-fields {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+.heating-fields div {
+  display: flex;
+  gap: 8px;
+}
+.heating-fields dt {
+  color: var(--muted, #6b7280);
+  min-width: 4em;
+}
+.heating-fields-compact {
+  display: inline-block;
+  font-size: 12px;
+  color: var(--muted, #6b7280);
+  margin-left: 6px;
+}
+.image-label-panel {
+  margin-top: 12px;
+  text-align: left;
+}
+.image-label-heading {
+  margin: 12px 0 8px;
+  font-size: 14px;
+}
+.image-label-scenes {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.image-label-scenes li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+}
+.image-label-scenes .scene-chip code {
+  font-size: 11px;
+  margin-left: 4px;
+  opacity: 0.7;
+}
+.image-label-scenes .origin-tag {
+  font-size: 12px;
+  color: var(--muted, #6b7280);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.import-scene-intent {
+  margin-top: 12px;
+}
+.no-results-actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+.mg-library-scene {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 11px;
+}
+.detail-heating {
+  margin-top: 4px;
+}

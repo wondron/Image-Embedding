@@ -1,0 +1,234 @@
+{
+  "timestamp": "2026-11-05T14:42:37+08:00",
+  "timezone": "Asia/Shanghai",
+  "doc": "frontend/docs/acceptance-pg-v01-m6-frontend.md",
+  "doc_version": "v0.2",
+  "verdict": "PASS",
+  "git_head": "e8a7d4d6979b291e712671166761a7fcd95db363",
+  "git_note": "HEAD e8a7d4d (ahead 3 of origin/main); M6 FE changes uncommitted in working tree — QA did not commit",
+  "machine": {
+    "id": "fada9197-1d47-44f2-8e45-fdb157d8e181",
+    "label": "wondron"
+  },
+  "tsc": {
+    "command": "cd frontend && npx tsc --noEmit",
+    "exit_code": 0,
+    "result": "PASS"
+  },
+  "items": [
+    {
+      "id": "C1",
+      "result": "PASS",
+      "detail": "DEFAULT_SCENE='general'; list+search use toApiSceneCode(..., DEFAULT_SCENE); App/MV state init DEFAULT_SCENE"
+    },
+    {
+      "id": "C2",
+      "result": "PASS",
+      "detail": "LEGACY_SCENE_MAP normal->general, device->oven in entities/scene; toApiSceneCode never emits legacy; no scene='normal'|'device' request literals in src"
+    },
+    {
+      "id": "C3",
+      "result": "PASS",
+      "detail": "SCENE_SEEDS: general/oven/range_hood/us_diet/cn_diet/jp_diet; SceneSelect options from seeds"
+    },
+    {
+      "id": "C4",
+      "result": "PASS",
+      "detail": "pickImageDisplayUrl/pickSearchImageUrls/index-api url via safeHttpUrl(thumb_url|original_url|image_url); no img src={...path}; path kept only as raw/debug on index success item"
+    },
+    {
+      "id": "C5",
+      "result": "PASS",
+      "detail": "normalizeLibraryItem id as string uuid; ImageLabelPanel renders item.id as text"
+    },
+    {
+      "id": "C6",
+      "result": "PASS",
+      "detail": "Empty product path: SearchNoMatch + EMPTY_COPY without FlyB next-step; bottom note maps self/empty only; SourceBadge flyb branch retained but not product-success; help says no FlyB兜底 as completion"
+    },
+    {
+      "id": "C7",
+      "result": "PASS",
+      "detail": "EMPTY_COPY.libraryEmpty title 暂无已入库图片（空库） + CTA 准备第一批图片/去导入"
+    },
+    {
+      "id": "C8",
+      "result": "PASS",
+      "detail": "SCORE_DEFAULT=0.55; clamp {0}U[0.30,1]; ScoreThresholdControl coexists with SceneSelect; K2 numbers unchanged"
+    },
+    {
+      "id": "C9",
+      "result": "PASS",
+      "detail": "HeatingFields for oven/outputs_heating; missing heatingGroup/foodState show —; general hides block via show=false"
+    },
+    {
+      "id": "C10",
+      "result": "PASS",
+      "detail": "displayCategoryLabel prefers sceneLabel/scene_label then category; UI uses — when absent"
+    },
+    {
+      "id": "C11",
+      "result": "PASS",
+      "detail": "ImageLabelPanel readonly scene membership origin=rule|manual; write disabled apiReady=false with 待接入"
+    },
+    {
+      "id": "C12",
+      "result": "PASS",
+      "detail": "No soft-delete / deleted-status filter UI in library"
+    },
+    {
+      "id": "A1",
+      "result": "PASS",
+      "detail": "Tree present: pages/, features/, entities/, shared/; M6 modules land there (scene-select, search empty/heating, library-list, image-label, index-upload, entities/scene|image|search-result)"
+    },
+    {
+      "id": "A2",
+      "result": "PASS",
+      "detail": "No fetch( in App.tsx / ManagementViews.tsx / pages/**; pingApi in shared/api; remaining fetch in lib/* adapters + shared/api (allowed transitional)"
+    },
+    {
+      "id": "A3",
+      "result": "PASS",
+      "detail": "Single features/scene-select/SceneSelect used by App search + ManagementViews library + ImportSceneIntent; default via toApiSceneCode/DEFAULT_SCENE"
+    },
+    {
+      "id": "A4",
+      "result": "PASS",
+      "detail": "Legacy map only entities/scene; S3 URL pick primarily entities/image (+ search-result pickSearchImageUrls / lib/search normalize using same safeHttpUrl rules)"
+    },
+    {
+      "id": "A5",
+      "result": "PASS",
+      "detail": "App 382 lines (down from ~434), ManagementViews 543 (~554); M6 logic extracted to features/entities/shared; shells assemble"
+    },
+    {
+      "id": "FACET_LIBRARY",
+      "result": "PASS",
+      "detail": "list scene=general page_size=24; SceneSelect resets page=1; https thumbs; empty+filtered empty states"
+    },
+    {
+      "id": "FACET_SEARCH",
+      "result": "PASS",
+      "detail": "searchLocalImages carries scene; empty states SearchNever/NoMatch/Filtered; heating+scene_label slots"
+    },
+    {
+      "id": "FACET_IMPORT",
+      "result": "PASS",
+      "detail": "ImportSceneIntent default general; success url https via httpUrl; path not used as img"
+    },
+    {
+      "id": "FACET_HEATING_LABEL",
+      "result": "PASS",
+      "detail": "HeatingFields — slots; scene_label prefer; general no forced heating"
+    },
+    {
+      "id": "FACET_MEMBERSHIP",
+      "result": "PASS",
+      "detail": "Readonly membership UI; write 待接入 (R13 DEFER)"
+    },
+    {
+      "id": "EMPTY_MATRIX",
+      "result": "PASS",
+      "detail": "never-search / searched-empty / library-empty / no FlyB bottom-note as next step"
+    },
+    {
+      "id": "TSC",
+      "result": "PASS",
+      "detail": "cd frontend && npx tsc --noEmit exit 0"
+    },
+    {
+      "id": "UI_SMOKE",
+      "result": "SKIP",
+      "detail": "ENVIRONMENT: no Playwright/dev-server smoke this run; verdict rests on static+tsc+source evidence"
+    },
+    {
+      "id": "DRAFTS",
+      "result": "PASS",
+      "detail": "No leftover _m6-* or _patch_*.cjs under repo"
+    },
+    {
+      "id": "NAV_BADGE_WARN",
+      "result": "WARN",
+      "detail": "App.tsx still renders <small>待接入</small> for all nav keys except search, even though library/import/tasks are wired — cosmetic leftover, does not fail contract/layering"
+    }
+  ],
+  "r_checklist": {
+    "R1": "PASS",
+    "R2": "PASS",
+    "R3": "PASS",
+    "R4": "PASS",
+    "R5": "PASS",
+    "R6": "PASS",
+    "R7": "PASS",
+    "R8": "PASS",
+    "R9": "PASS",
+    "R10": "PASS",
+    "R11": "PASS",
+    "R12": "DEFER",
+    "R13": "DEFER",
+    "R14": "PASS",
+    "R15": "PASS",
+    "R16": "PASS",
+    "R17": "PASS",
+    "R18": "PASS",
+    "R19": "PASS",
+    "R20": "PASS",
+    "R21": "PASS",
+    "R22": "PASS",
+    "R23": "PASS"
+  },
+  "a_checklist": {
+    "A1": "PASS",
+    "A2": "PASS",
+    "A3": "PASS",
+    "A4": "PASS",
+    "A5": "PASS"
+  },
+  "k_checklist": {
+    "K1": "PASS",
+    "K2": "PASS",
+    "K3": "PASS",
+    "K4": "PASS",
+    "K5": "PASS",
+    "K6": "PASS",
+    "K7": "PASS",
+    "K8": "PASS"
+  },
+  "v_checklist": {
+    "V1": "PASS",
+    "V2": "PASS",
+    "V3": "PASS",
+    "V4": "PASS",
+    "V5": "PASS",
+    "V6": "PASS",
+    "V7": "PASS",
+    "V8": "PASS"
+  },
+  "blockers": [],
+  "warns": [
+    "App sidebar still labels non-search nav items 待接入 despite ManagementViews being functional (cosmetic).",
+    "pages/* mostly stub index comments; assembly still in App/ManagementViews — allowed by progressive FSD migration given features/entities/shared hold M6 code."
+  ],
+  "notes": [
+    "Static acceptance only for UI interactions; Vite/Playwright smoke not run.",
+    "R12/R13 DEFER per acceptance: UI marks 待接入 / 待对接 categories API; not counted as FAIL.",
+    "FlyB SourceBadge branch code retained intentionally; M6 acceptance does not light FlyB success path.",
+    "Uncommitted: frontend entities/features/pages/shared + modified App/ManagementViews/lib/styles/types + acceptance doc."
+  ],
+  "evidence": {
+    "fsd_dirs": [
+      "frontend/src/pages",
+      "frontend/src/features",
+      "frontend/src/entities",
+      "frontend/src/shared"
+    ],
+    "line_counts": {
+      "App.tsx": 382,
+      "ManagementViews.tsx": 543,
+      "lib/search.ts": 358,
+      "lib/images-api.ts": 127,
+      "lib/index-api.ts": 180
+    },
+    "scan_script": ".qa/_scan_m6_fe.py"
+  }
+}

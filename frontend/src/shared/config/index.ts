@@ -1,0 +1,1 @@
+export { EMPTY_COPY } from './empty-copy'
