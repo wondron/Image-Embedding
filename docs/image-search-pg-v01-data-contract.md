@@ -422,9 +422,253 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | **删除** | 软删 status | 删图 API → `image_deletions` 流水线 |
 | **Health** | 聚合 Qdrant+MySQL | 改探 PG + Qdrant(current collection) +（可选）S3；回报 current model/collection |
 
-**结果卡形状**：本刀不复活 §9 统一 wire 草案；search/list 最小字段以能展示 url + 类别/场景为准，**细字段表 TBD（FE 对齐刀）**。
+**结果卡形状**：旧 SSOT §9 统一 wire **仍作废**（见 §0.1）。前后端统一 wire 见 **§6.1（已拍 2026-11-05 · 一刀切）**；实现须按已拍定案改 BE hit/list 与 FE 适配层。
 
 **错误码**：MVP 已定码能复用的复用（如 `SEARCH_BAD_SCORE_THRESHOLD`）；uuid/sha 冲突、未知 scene code、无 current 模型等 **TBD 补表**。
+
+---
+
+---
+
+## 6.1 前后端 Wire / 结果卡（**已拍 · 2026-11-05 · 一刀切**）
+
+> **状态**：**已拍 · 2026-11-05 · 一刀切**（P1–P12 全按建议）。  
+> **本刀交付**：补齐 §6「细字段 TBD（FE 对齐刀）」——只定 **HTTP JSON wire**（snake_case），不复活旧 §9，不写业务代码。  
+> **摸底基线（2026-11-05 本机核实）**：  
+> - BE Search hit（`application/retrieval/search_image.py`）仍吐 FlyB 旧壳：`image_url`/`thumbnail_url`、`site_name`、`text_snippets:[]`、嵌套 `details.{page_url,site,text_snippets,images[]}`；加热时另带 `scene_label`/`heating_group`/`food_state`；envelope 用 `result` + `source=self|empty`（空时 `result` 竟为嵌套 `{results,status,message}` 对象）。  
+> - BE List（`list_images.py`）权威已偏 PG：`original_url`/`thumb_url`，同时兼容吐 `image_url`/`thumbnail_url`。  
+> - FE Search（`frontend/src/lib/search.ts` + `entities/search-result`）：UI camel；`normalize` 仍读 `text_snippets`/`details`；`pickSearchImageUrls` 优先 `thumb_url`/`original_url`。  
+> - FE Library（`entities/image`）：已偏 PG https-only（`thumb_url`→`original_url`→遗留别名）。  
+> - 表侧 `external_candidates` 已有（§2.12）；API 差量已列（§6），细 wire 本小节补形状，**实现标 TBD 刀**。  
+> **M0 冻结不回退**：空库重建；FlyB OUT OF SCOPE；`scene_labels` 纳入；空搜 → `source=empty` 不调外搜。
+
+### 6.1.0 已拍定案清单（P1…Pn）
+
+> **拍板日期**：2026-11-05 · **迁移**：**一刀切**（P10）· P1–P12 **全按建议**。
+
+| # | 议题 | 已拍定案 | 备注 |
+|---|---|---|---|
+| **P1** | Search/List 权威 URL 字段名 | **已拍**：`original_url` / `thumb_url` 为唯一权威（完整 https） | 与 §2.4 / §5 一致 · 拍板日期 2026-11-05 |
+| **P2** | 是否一期保留 `image_url` / `thumbnail_url` 别名 | **已拍**：**不保留**（一刀切）；无兼容窗 | 现状 BE search 只吐别名、list 双吐 → 实现刀须同发删 |
+| **P3** | Search envelope 数组键名 | **已拍**：权威键 = `items`（始终 array）；**禁**把对象塞进 `result` | 现状 BE 用 `result`；FE 须只读 `items` |
+| **P4** | 空结果形态 | **已拍**：`source=empty` + `items: []`；可选顶层 `message`；**禁**嵌套空壳 | 对齐 A4；FE 可简化 |
+| **P5** | `title` 是否出现在 wire | **已拍**：**禁**（`images` 无 title 列）；展示名用 `category` / `scene_label` | 现状 BE 用 category_name 冒充 title |
+| **P6** | `description` | **已拍**：结果卡 **禁**（仅 string 也不放） | 表侧 description 属 `scenes`/`heating_groups`，非结果卡 |
+| **P7** | `site` / `site_name` / `page_url` / `snippets` / `text_snippets` / `details.*` | **已拍**：**全禁**（FlyB 壳） | 本轮无外搜 |
+| **P8** | `scene_label` 类型 | **已拍**：`string \| null`（场景展示名）；禁止随意 object | 若需 id+name 对象另开拍板（见 ASSUMPTION W3） |
+| **P9** | `outputs_heating` 放哪 | **已拍**：**仅 envelope** 布尔；hit 上仅当 true 出现 `heating_group`/`food_state` | 避免双源 |
+| **P10** | 迁移策略 | **已拍**：**一刀切**（BE 改吐 + FE 适配同发）；B 兼容窗 **未采纳** | 见 §6.1.6 |
+| **P11** | List 是否保留 `qdrant_point_id` | **已拍**：**禁**（恒等于 `id`） | 现状 list 仍吐 |
+| **P12** | `external_candidates` API 本轮是否实现 | **已拍**：本契约**只定最小 wire**；落地 **TBD 实现刀** | 见 §6.1.3 |
+
+> P1–P12 已全部冻结。未出现在上表且未标「已定 / M0 / 已拍」的条款，一律视为 **ASSUMPTION / 草案**，不得当已拍板实现。
+
+### 6.1.1 Search 候选 / 结果卡（`POST /api/search`）
+
+#### Envelope（响应顶层）
+
+| 字段 | 必填 | 类型 | 说明 |
+|---|---|---|---|
+| `ok` | 是 | `boolean` | 成功为 `true`（业务空结果仍 `true` + `source=empty`） |
+| `trace_id` | 否 | `string \| null` | 请求追踪 |
+| `source` | 是 | `"self" \| "empty"` | **本轮禁止 `"flyb"`**（A4 / M0）；有命中 → `self`；无命中 → `empty` |
+| `scene` | 是 | `string` | 实际检索场景 code（默认 `general`，A5） |
+| `outputs_heating` | 否 | `boolean` | **仅 envelope**（P9 已拍）；回显该 scene 是否加热输出；缺省时 FE 不得猜 |
+| `items` | 是 | `array` | **始终为数组**；`source=empty` 时必须 `[]` |
+| `message` | 否 | `string` | 给人看的空结果说明；仅建议在 `empty` 时出现 |
+
+**禁（envelope）**：把空结果做成非 array 的 `result` 对象；顶层再挂一套 `results`/`status`/`upstream_error` 双轨（旧 FlyB 空壳）。  
+**`result` 键**：**禁**（P3 已拍 · 一刀切）。不得再吐 `result`/`results` 别名；空结果亦不得把对象塞进 `result`。B 兼容窗 **未采纳**。
+
+请求侧沿用 §6 / 附录 Q：`scene`、`top_k`、`score_threshold`（A6）、file 或 `img_url`；细 path **已有实现者不在本刀重开**。
+
+#### Hit 顶层字段表（`items[]` 元素）
+
+| 字段 | 必填 | 类型 | 说明 |
+|---|---|---|---|
+| `id` | 是 | `string`（uuid） | = `images.id` = Qdrant point id |
+| `original_url` | 是 | `string`（https） | 原图；**权威** |
+| `thumb_url` | 是 | `string`（https） | 缩略图；**权威** |
+| `similarity` | 是（`source=self`） | `number` | 相似度；合法有限数；**禁止**拼写 `similiar` |
+| `category_id` | 否 | `integer \| null` | |
+| `category` | 否 | `string \| null` | 通用类别**展示名**（由 `category_names` 解析；非 code） |
+| `scenes` | 否 | `string[]` | 有效场景 code 列表 |
+| `scene_label` | 否 | `string \| null` | 当前检索 scene 下的场景类别展示名（有 `scene_labels` 时） |
+| `label_status` | 否 | `string` | `unlabeled`/`auto`/`verified` |
+| `width` | 否 | `integer \| null` | |
+| `height` | 否 | `integer \| null` | |
+| `food_state` | 条件 | `"raw"\|"cooked"\|"frozen"\|null` | **仅当**该 scene `outputs_heating=true` 时可出现 |
+| `heating_group` | 条件 | `string \| null` | 加热组**展示名或 code**（见 W2）；仅加热场景 |
+
+**禁字段（Search hit）**——出现即视为违约（实现刀须删）：
+
+| 禁字段 | 原因 |
+|---|---|
+| `image_url` / `thumbnail_url` | 非权威 URL；**P2 已拍禁**（一刀切，无别名窗） |
+| `text_snippets` / `snippets` | FlyB 旧壳 |
+| `details` / `details.*` | FlyB 嵌套壳 |
+| `page_url` | 外链页；本轮无 |
+| `site` / `site_name` | 站点壳；本轮无 |
+| `similiar` | 错误拼写 |
+| `description` | 结果卡不承载；见 **P6** |
+| `title` | 表无列；**P5 已拍禁** |
+| `source`（hit 级） | 渠道只在 envelope；禁止 hit 自报 flyb/self |
+
+### 6.1.2 List item 与 Search 对齐 / 差量（`GET /api/images`）
+
+#### List envelope
+
+| 字段 | 必填 | 类型 | 说明 |
+|---|---|---|---|
+| `ok` | 是 | `boolean` | |
+| `trace_id` | 否 | `string \| null` | |
+| `scene` | 是 | `string` | 过滤场景 code（默认 `general`） |
+| `page` | 是 | `integer` | ≥1 |
+| `page_size` | 是 | `integer` | 1..100 |
+| `total` | 是 | `integer` | |
+| `items` | 是 | `array` | |
+
+#### List item vs Search hit
+
+| 字段 | Search | List | 差量说明 |
+|---|---|---|---|
+| `id` | ✓ | ✓ | 同 |
+| `original_url` / `thumb_url` | ✓ 权威 | ✓ 权威 | 同；https-only |
+| `similarity` | ✓ | **禁** | List 非检索打分 |
+| `category_id` / `category` | ✓ | ✓ | 同 |
+| `scenes` | ✓ | ✓ | 同 |
+| `scene_label` | ✓（按检索 scene） | **通常不出现** | List 无「当前投票 scene 标签」语义；若产品要展示另刀 |
+| `label_status` | 可选 | 可选 | 同 |
+| `width` / `height` | 可选 | 可选 | 同 |
+| `food_state` / `heating_group` | 加热 scene 条件出现 | 同（`outputs_heating`） | 同规则 |
+| `created_at` / `updated_at` | **禁**（非检索所需） | 可选 `string`（ISO-8601 / timestamptz 序列化） | List 可展示入库时间 |
+| `image_url` / `thumbnail_url` | **禁**（P2 已拍） | **禁**（P2 已拍） | 双边同时删除（一刀切） |
+| `qdrant_point_id` | 禁 | **禁**（P11 已拍） | 与 `id` 重复 |
+| `title` / `tags` | 见 P5；tags 表无列 | 同 | 附录 M：title/tags 无对等列 |
+
+### 6.1.3 `external_candidates` 最小 wire（**形状已拍 · 实现 TBD · P12**）
+
+> 表字典见 §2.12。下列 API **本轮只定 JSON 形状**，路由落地、鉴权、入库流水线 → **TBD 实现刀**（P12）。
+
+#### `GET` 列表（建议路径 TBD，如 `/api/external-candidates`）
+
+**Query（建议）**：`review_status`（默认 `pending`）、`page`、`page_size`。
+
+**Envelope**：同 List 风格 — `ok`、`page`、`page_size`、`total`、`items`。
+
+**Item**：
+
+| 字段 | 必填 | 类型 | 说明 |
+|---|---|---|---|
+| `id` | 是 | `string`（uuid） | 候选 id |
+| `provider` | 是 | `string` | |
+| `source_url` | 是 | `string`（https） | 外部原链 |
+| `staged_url` | 是 | `string`（https） | S3 staging |
+| `external_label` | 否 | `string \| null` | |
+| `query_ref` | 否 | `string \| null` | |
+| `review_status` | 是 | `"pending"\|"accepted"\|"rejected"` | |
+| `reviewed_at` | 否 | `string \| null` | |
+| `image_id` | 否 | `string \| null` | 入库后回填 |
+| `created_at` | 是 | `string` | |
+
+#### `POST …/{id}/accept`（路径 TBD）
+
+**Request body（最小）**：可空对象 `{}`；可选标注字段（`category_id` / `food_state` 等）**TBD 实现刀**补表。  
+**Response（最小）**：
+
+```json
+{ "ok": true, "id": "<candidate_uuid>", "review_status": "accepted", "image_id": "<images.uuid>" }
+```
+
+#### `POST …/{id}/reject`（路径 TBD）
+
+**Request body（最小）**：`{}` 或 `{ "reason": "…" }`（reason 是否落库 TBD）。  
+**Response（最小）**：
+
+```json
+{ "ok": true, "id": "<candidate_uuid>", "review_status": "rejected", "image_id": null }
+```
+
+**说明**：accept 成功后须走普通入库（`source_type='external'`），写 `images` + embed + Qdrant；**不**在候选表写向量。FlyB **自动**灌入本表的编排仍 OUT OF SCOPE（A4）；本 API 供人工/日后导入通道使用。
+
+### 6.1.4 FE 映射规则（wire snake → UI camel）
+
+**硬规则**：
+
+1. **Wire 一律 snake_case**；UI 层 camelCase **只**由 FE 适配层转换。  
+2. **禁止双源猜字段**：某一 UI 属性只对应一张映射表中的**一个** wire 字段；不得再回落读 `details.*` / 旧别名（P2/P10 已拍一刀切，**无**兼容窗）。  
+3. Library 与 Search 对 URL 的映射必须一致：展示缩略图 ← `thumb_url`；打开原图 ← `original_url`。
+
+#### Search 一一对应
+
+| Wire（snake） | UI（camel） | 备注 |
+|---|---|---|
+| `items[]` | `SearchResponse.items` | envelope |
+| `source` | `SearchResponse.source` | 仅 `self`/`empty`；缺省不发明 |
+| `scene` | `SearchResponse.scene` | |
+| `outputs_heating` | `SearchResponse.outputsHeating` | |
+| `trace_id` | `SearchResponse.traceId` | |
+| `message` | `SearchResponse.message` | |
+| `id` | `SearchImage.id` | |
+| `original_url` | → 适配为 `imageUrl`（原图） | **勿**再读 `image_url`（P2 已拍禁） |
+| `thumb_url` | → 适配为 `thumbnailUrl` | **勿**再读 `thumbnail_url`/`details.images` |
+| `similarity` | `similarity` | 禁读 `similiar` |
+| `category` | `category` | |
+| `category_id` | （若 UI 需要）`categoryId` | 现状类型可补 |
+| `scenes` | （若 UI 需要）`scenes` | |
+| `scene_label` | `sceneLabel` | string |
+| `heating_group` | `heatingGroup` | |
+| `food_state` | `foodState` | |
+| `width` / `height` | `width` / `height` | |
+| — | `pageUrl` / `siteName` / `snippets` | **恒为 null / []**；适配层可删字段（产品刀） |
+
+#### List 一一对应
+
+| Wire（snake） | UI（camel） | 备注 |
+|---|---|---|
+| `items[]` | `ListImagesResponse.items` | |
+| `page` / `page_size` / `total` | `page` / `pageSize` / `total` | |
+| `thumb_url` | → `LibraryImageItem.imageUrl`（展示） | 与现 `pickImageDisplayUrl` 目标一致，但**最终只认** `thumb_url` |
+| `original_url` | `originalUrl` | |
+| `created_at` | `createdAt` | |
+| `food_state` | `foodState` | |
+| `scenes` | `scenes` / `sceneMemberships` | 若未来提供 `scene_memberships` 再扩展；本草案不强制 |
+
+### 6.1.5 相对现状的删除 / 改名清单（破坏性）
+
+| 对象 | 现状（本机核实） | 定案目标（已拍） | 动作 |
+|---|---|---|---|
+| Search hit URL | 只吐 `image_url`/`thumbnail_url` | `original_url`/`thumb_url` | **改名 + 删旧键**（P2 一刀切） |
+| Search hit 壳 | `text_snippets`、`details.*`、`page_url`、`site_name` | 无 | **删除**（P7） |
+| Search hit `title` | 用 category_name 冒充 | 无 title（P5 已拍禁） | **删除**（展示走 category/scene_label） |
+| Search envelope 键 | `result`（空时可为对象） | `items` 恒 array（P3/P4 已拍） | **改名 + 形态修复**；禁 `result` |
+| Search `source` | `self`/`empty` | 同；禁 flyb | **保持**；文档冻结 |
+| List URL | 双吐权威+别名 | 仅权威（P2 已拍） | **删除别名** |
+| List `qdrant_point_id` | 有 | 无（P11 已拍禁） | **删除** |
+| FE `normalizeItem` | 读 `details`/`text_snippets`/`similiar`、多 URL 回落 | 单源映射表 | **删除回落枝**（实现刀） |
+| FE `pickSearchImageUrls` | 仍回落 `thumbnail_url`/`image_url` | 只读 thumb/original | **收紧** |
+| 旧 §9 结果卡 | 已作废 | 不复活 | **保持作废** |
+
+### 6.1.6 迁移策略（**已拍 · P10 · 一刀切**）
+
+| 方案 | 做法 | 定案 |
+|---|---|---|
+| **A · 一刀切** | 同一发布：BE 按 §6.1 吐字段；FE 适配层按映射表改；测试 bot 验搜索+图库 | **已拍采纳**（2026-11-05） |
+| **B · 兼容窗** | BE 同时吐权威+别名 N 天；FE 只读权威；到期 BE 删别名 | **未采纳** |
+
+**定案 = A · 一刀切**：BE 改吐与 FE 适配同发；无 URL 别名窗、无 `result` 别名窗。
+
+### 6.1.7 本节 ASSUMPTION（**与已拍不冲突**；P1–P12 本身不再标 ASSUMPTION）
+
+> 下列 W1–W5 **不是**对 P1–P12 的再开放；P1–P12 已于 2026-11-05 冻结。此处仅保留实现细节假设，且与已拍定案不冲突。
+
+| # | ASSUMPTION | 说明 |
+|---|---|---|
+| W1 | Wire 编码 snake_case；时间字段 ISO-8601 / timestamptz JSON 字符串 | 与全文「Wire 字段名英文」一致；与已拍不冲突 |
+| W2 | `heating_group` 一期先用**展示名 string**；若需稳定 code 另加 `heating_group_code` 字段刀 | 避免与表 `heating_groups.code`  silently 混用；与 P9 不冲突 |
+| W3 | `scene_label` 类型 **已由 P8 拍为** `string \| null`；若要 `{id,name,code}` 对象须**另开拍板**，不得默默改类型 | 对象形态仍属 ASSUMPTION / 未拍；string 本身已是已拍 |
+| W4 | `source=empty` 时 **HTTP 仍 200** + `ok=true`（与现 BE 一致）；真正校验错误仍走既有 4xx 码 | 与 P4 不冲突 |
+| W5 | 本轮 Search `source` 枚举**不包含** `flyb`；FE 类型里遗留 `flyb` 仅历史兼容，不得新写 | A4 / M0；与已拍不冲突 |
 
 ---
 
@@ -435,7 +679,7 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | MySQL→PG 数据迁移脚本 / 旧数导入 | **OUT OF SCOPE（M0）**；空库重建；附录 M 仅历史对照 |
 | FlyB 空兜底工作流 / 接口编排 | **OUT OF SCOPE（M0）**；search 空即 empty |
 | 真传 S3/OSS SDK 与桶策略 | 另刀 |
-| FE 结果卡像素级对齐 / 旧 §9 wire | 另刀；§9 已作废 |
+| FE 结果卡**像素级 UI** / 旧 §9 wire 复活 | 像素级仍另刀；§9 已作废；**字段级 wire 见 §6.1** |
 | 业务代码、自测、git commit | **禁止**（本契约刀） |
 | 抽油烟机 `range_hood` 规则明细 | 待配置 |
 
@@ -479,7 +723,9 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 |---|---|
 | 2026-11-04 | **M1 草案**：按《图搜图数据结构设计 v0.1》落 12 表字典、Qdrant/S3/API 差量、作废旧 §9/双轨；ASSUMPTION A1–A8 |
 | 2026-11-04 | **M0 总裁已拍**：空库重建（无迁移脚本）；FlyB 本轮 OUT OF SCOPE；`scene_labels` 纳入冻结；ASSUMPTION A2–A4 改写 |
+| 2026-11-05 | **§6.1 Wire/结果卡草案（FE 对齐刀）**：Search/List 字段表、external_candidates 最小 wire、FE snake→camel 映射、破坏性清单与 P1–P12 待拍板；更新 §6/§7 交叉引用；未 commit |
+| 2026-11-05 | **§6.1 P1–P12 冻结**：全按建议已拍；**一刀切**；禁 `image_url`/`thumbnail_url` 别名与 FlyB 壳（site/page_url/snippets/details 等）；envelope 权威 `items`；禁 title/description/qdrant_point_id；`external_candidates` 仅定最小 wire（落地 TBD）；未 commit |
 
 ---
 
-*文档结束 · 待 PM/总裁审后派后端/算法*
+*文档结束 · §6.1 Wire **已拍 2026-11-05 · 一刀切**（P1–P12）；实现刀派后端/前端适配*
