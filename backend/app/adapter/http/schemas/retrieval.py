@@ -95,7 +95,7 @@ class ListImageItem(BaseModel):
 class ListImagesResponse(BaseModel):
     ok: bool = True
     trace_id: Optional[str] = None
-    scene: str = "normal"
+    scene: str = "general"
     page: int = 1
     page_size: int = 24
     total: int = 0

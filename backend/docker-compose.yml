@@ -29,31 +29,41 @@ services:
     environment:
       # Set NACOS_ENV=test to use test; unset or empty defaults to prod.
       NACOS_ENV: ${NACOS_ENV:-test}
-      # 本地 compose 联调：api 经服务名访问（接线后再真正读取；骨架阶段仅预留）
+      # 本地 compose 联调：api 经服务名访问
       QDRANT_HOST: ${QDRANT_HOST:-qdrant}
       QDRANT_PORT: ${QDRANT_PORT:-6333}
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-image_embeddings}
       QDRANT_VECTOR_SIZE: ${QDRANT_VECTOR_SIZE:-1024}
       QDRANT_DISTANCE: ${QDRANT_DISTANCE:-Cosine}
-      MYSQL_HOST: ${MYSQL_HOST:-mysql}
-      MYSQL_PORT: ${MYSQL_PORT:-3306}
-      MYSQL_USER: ${MYSQL_USER:-image_emb}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-image_emb}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-image_embedding}
+      # PG v0.1 M2: PostgreSQL metadata (replaces MySQL)
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_USER: ${POSTGRES_USER:-image_emb}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-image_emb}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-image_embedding}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://image_emb:image_emb@postgres:5432/image_embedding}
+      # PG v0.1 M4: object storage (mock by default; no secrets in repo)
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_BUCKET: ${S3_BUCKET:-image-embedding}
+      S3_PUBLIC_BASE_URL: ${S3_PUBLIC_BASE_URL:-https://cdn.example.local/image-embedding}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ACCESS_KEY_ENV: ${S3_ACCESS_KEY_ENV:-S3_ACCESS_KEY_ID}
+      S3_SECRET_KEY_ENV: ${S3_SECRET_KEY_ENV:-S3_SECRET_ACCESS_KEY}
+      S3_USE_BOTO3: ${S3_USE_BOTO3:-0}
+      S3_MOCK_MIRROR_DIR: ${S3_MOCK_MIRROR_DIR:-}
     volumes:
       - ./save_images:/app/save_imagesoutput
       - ./output:/app/output
     ports:
       - "8320:8320"
-    # 骨架未接线：不强依赖 healthy，避免仅起 api 时被卡住
     depends_on:
       - qdrant
-      - mysql
+      - postgres
     <<: [*hc, *logs, *gpu]
     restart: unless-stopped
 
-  # 本地开发：向量库（图搜图 MVP）
+  # 本地开发：向量库（图搜图）
   qdrant:
     image: qdrant/qdrant:v1.13.2
     container_name: roki-imageembedding-qdrant
@@ -75,42 +85,31 @@ services:
     <<: *logs
     restart: unless-stopped
 
-  # 本地开发：元数据（表结构归数据规范；密码仅本地默认）
-  mysql:
-    image: mysql:8.0
-    container_name: roki-imageembedding-mysql
+  # 本地开发：元数据 PostgreSQL + ltree（PG v0.1；空库重建，无 MySQL）
+  postgres:
+    image: postgres:16
+    container_name: roki-imageembedding-postgres
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_local_dev}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-image_embedding}
-      MYSQL_USER: ${MYSQL_USER:-image_emb}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-image_emb}
+      POSTGRES_USER: ${POSTGRES_USER:-image_emb}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-image_emb}
+      POSTGRES_DB: ${POSTGRES_DATABASE:-image_embedding}
     ports:
-      - "3306:3306"
+      - "5432:5432"
     volumes:
-      - mysql_data:/var/lib/mysql
-    command:
-      [
-        "--character-set-server=utf8mb4",
-        "--collation-server=utf8mb4_unicode_ci",
-      ]
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test:
         [
-          "CMD",
-          "mysqladmin",
-          "ping",
-          "-h",
-          "127.0.0.1",
-          "-uroot",
-          "-p$${MYSQL_ROOT_PASSWORD}",
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}",
         ]
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 30s
+      start_period: 20s
     <<: *logs
     restart: unless-stopped
 
 volumes:
   qdrant_data:
-  mysql_data:
+  postgres_data:

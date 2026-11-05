@@ -147,7 +147,7 @@ async def index_image(request: Request) -> JSONResponse:
     summary="Search by image",
     description=(
         "multipart file OR JSON {img_url,scene}. Self-built-first; "
-        "FlyB only when scene=normal and final list length==0. SSOT §3.2/§4."
+        "PG v0.1: empty self-built -> source=empty (FlyB OUT) and final list length==0. SSOT §3.2/§4."
     ),
 )
 async def search_image(request: Request) -> JSONResponse:
@@ -252,13 +252,13 @@ def mvp_health(request: Request) -> JSONResponse:
     "/images",
     summary="List library images",
     description=(
-        "Paginated active images filtered by scene (default normal). "
+        "Paginated active images filtered by scene (default general). "
         "Optional q (title/tags substring) and category exact match. SSOT §3.5."
     ),
 )
 def list_library_images(
     request: Request,
-    scene: Optional[str] = Query(None, description="default normal; unknown -> LIST_UNKNOWN_SCENE"),
+    scene: Optional[str] = Query(None, description="default general; unknown -> LIST_UNKNOWN_SCENE"),
     page: int = Query(1, description="1-based page"),
     page_size: int = Query(24, description="default 24, range 1..100"),
     q: Optional[str] = Query(None, description="optional title/tags substring"),

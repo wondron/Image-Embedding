@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
@@ -141,8 +141,38 @@ class QdrantSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class PostgresSettings:
+    """PG v0.1 metadata DB (compose service `postgres`). Prefer DATABASE_URL when set."""
+
+    host: str = field(default_factory=lambda: os.getenv("POSTGRES_HOST", "postgres"))
+    port: int = field(default_factory=lambda: int(os.getenv("POSTGRES_PORT", "5432")))
+    user: str = field(default_factory=lambda: os.getenv("POSTGRES_USER", "image_emb"))
+    password: str = field(
+        default_factory=lambda: os.getenv("POSTGRES_PASSWORD", "image_emb")
+    )
+    database: str = field(
+        default_factory=lambda: os.getenv("POSTGRES_DATABASE", "image_embedding")
+    )
+    url: str = field(
+        default_factory=lambda: os.getenv(
+            "DATABASE_URL",
+            "postgresql+psycopg://image_emb:image_emb@postgres:5432/image_embedding",
+        )
+    )
+
+    def dsn(self) -> str:
+        """SQLAlchemy URL; DATABASE_URL wins when non-empty."""
+        if self.url and self.url.strip():
+            return self.url.strip()
+        return (
+            f"postgresql+psycopg://{self.user}:{self.password}"
+            f"@{self.host}:{self.port}/{self.database}"
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class MySQLSettings:
-    """本地/compose 默认；勿把生产密钥写进仓库。表结构归数据规范。"""
+    """DEPRECATED (M2): MySQL removed from compose. Kept briefly for old imports."""
 
     host: str = field(default_factory=lambda: os.getenv("MYSQL_HOST", "mysql"))
     port: int = field(default_factory=lambda: int(os.getenv("MYSQL_PORT", "3306")))
@@ -153,6 +183,46 @@ class MySQLSettings:
     database: str = field(
         default_factory=lambda: os.getenv("MYSQL_DATABASE", "image_embedding")
     )
+
+
+@dataclass(frozen=True, slots=True)
+class S3Settings:
+    """Object storage (contract §5). Secrets only via env; mock by default.
+
+    ASSUMPTION A8: public_base_url is the CDN/bucket HTTPS prefix baked into
+    original_url / thumb_url / staged_url. Keys never include scene/category.
+    """
+
+    endpoint_url: str = field(
+        default_factory=lambda: os.getenv("S3_ENDPOINT_URL", "").strip()
+    )
+    bucket: str = field(
+        default_factory=lambda: os.getenv("S3_BUCKET", "image-embedding").strip()
+    )
+    public_base_url: str = field(
+        default_factory=lambda: os.getenv(
+            "S3_PUBLIC_BASE_URL", "https://cdn.example.local/image-embedding"
+        ).strip().rstrip("/")
+    )
+    region: str = field(
+        default_factory=lambda: os.getenv("S3_REGION", "us-east-1").strip()
+    )
+    access_key_env: str = field(
+        default_factory=lambda: os.getenv("S3_ACCESS_KEY_ENV", "S3_ACCESS_KEY_ID")
+    )
+    secret_key_env: str = field(
+        default_factory=lambda: os.getenv("S3_SECRET_KEY_ENV", "S3_SECRET_ACCESS_KEY")
+    )
+    # When true, adapter may attempt boto3; default mock (no network).
+    use_boto3: bool = field(
+        default_factory=lambda: os.getenv("S3_USE_BOTO3", "").strip().lower()
+        in {"1", "true", "yes", "y", "on"}
+    )
+    # Local mock also optionally mirrors bytes under this dir (empty = memory only).
+    mock_mirror_dir: str = field(
+        default_factory=lambda: os.getenv("S3_MOCK_MIRROR_DIR", "").strip()
+    )
+
 
 @dataclass(frozen=True, slots=True)
 class Settings:
@@ -167,7 +237,9 @@ class Settings:
     concurrency: ConcurrencySettings = field(default_factory=ConcurrencySettings)
     nacos: NacosSettings = field(default_factory=NacosSettings)
     qdrant: QdrantSettings = field(default_factory=QdrantSettings)
-    mysql: MySQLSettings = field(default_factory=MySQLSettings)
+    postgres: PostgresSettings = field(default_factory=PostgresSettings)
+    s3: S3Settings = field(default_factory=S3Settings)
+    mysql: MySQLSettings = field(default_factory=MySQLSettings)  # deprecated M2
     allowed_content_types: frozenset[str] = field(
         default_factory=lambda: frozenset(
             {

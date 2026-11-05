@@ -1,39 +1,53 @@
 from __future__ import annotations
 
-"""Qdrant vector store — SSOT: docs/image-search-mvp-data-contract.md
+"""Qdrant vector store — SSOT: docs/image-search-pg-v01-data-contract.md
 
-- collection: image_embeddings
-- distance: Cosine
-- VECTOR_DIM: 1024 (cls_emb, L2-normalized)
-- point id: unsigned int == MySQL images.id (no path / UUID)
-- payload: empty by default; cards join MySQL (optional image_id only)
+- one collection per embedding_models row (name from registry; not hard-coded)
+- named vector: global
+- dim/distance from embedding_models current row
+- point id: uuid == images.id (first 16 bytes of content SHA-256)
+- payload: category_id / scenes(code[]) / food_state / label_status + indexes
+- score_threshold: MVP defaults (0.55; explicit 0 disables)
 """
 
 import logging
+import uuid
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 
 import numpy as np
 
 logger = logging.getLogger("qdrant_store")
 
-VECTOR_DIM = 1024
-DEFAULT_DISTANCE = "Cosine"
+NAMED_VECTOR = "global"
 DEFAULT_URL = "http://localhost:6333"
-DEFAULT_COLLECTION = "image_embeddings"
-# Back-compat alias used by settings / older config keys
-DEFAULT_VECTOR_SIZE = VECTOR_DIM
+DEFAULT_DISTANCE = "cosine"
+# Food-finetuned ONNX default; overridden by embedding_models.dim when wired.
+DEFAULT_VECTOR_DIM = 1024
+DEFAULT_SCORE_THRESHOLD = 0.55
 
 
 class VectorDimMismatchError(ValueError):
-    """Raised when embedding / collection dim != VECTOR_DIM (contract VECTOR_DIM_MISMATCH)."""
+    """Raised when embedding / collection dim mismatch (VECTOR_DIM_MISMATCH)."""
 
     error_code = "VECTOR_DIM_MISMATCH"
 
 
 class BadEmbeddingError(ValueError):
-    """Illegal embedding (dim / NaN / zero) — INDEX_BAD_EMBEDDING / SEARCH_BAD_EMBEDDING."""
+    """Illegal embedding (dim / NaN / zero)."""
 
     error_code = "BAD_EMBEDDING"
+
+
+class BadPayloadError(ValueError):
+    """Missing or illegal Qdrant payload fields."""
+
+    error_code = "BAD_PAYLOAD"
+
+
+# Back-compat aliases used by older imports / settings
+VECTOR_DIM = DEFAULT_VECTOR_DIM
+DEFAULT_COLLECTION = ""  # no longer hard-coded; must come from embedding_models
+DEFAULT_VECTOR_SIZE = DEFAULT_VECTOR_DIM
 
 
 def _resolve_url(conf: Mapping[str, Any]) -> str:
@@ -47,59 +61,174 @@ def _resolve_url(conf: Mapping[str, Any]) -> str:
     return DEFAULT_URL
 
 
-def _resolve_vector_dim(conf: Mapping[str, Any]) -> int:
-    # Contract prefers vector_dim; settings still use vector_size.
-    raw = conf.get("vector_dim", conf.get("vector_size", VECTOR_DIM))
-    dim = int(raw)
-    if dim != VECTOR_DIM:
-        raise VectorDimMismatchError(
-            f"QDRANT_CONFIG vector dim={dim} != locked VECTOR_DIM={VECTOR_DIM}"
-        )
-    return dim
-
-
-def _normalize_point_id(point_id: Union[str, int]) -> int:
-    """Point id must equal MySQL images.id (unsigned integer)."""
-    if isinstance(point_id, bool):
-        raise TypeError("point id must be an unsigned integer, not bool")
-    if isinstance(point_id, int):
-        value = point_id
-    elif isinstance(point_id, str) and point_id.isdigit():
-        value = int(point_id)
-    else:
+def _normalize_point_id(point_id: Union[str, uuid.UUID]) -> str:
+    """Point id must equal images.id (uuid). Returns canonical str form for Qdrant."""
+    if isinstance(point_id, uuid.UUID):
+        return str(point_id)
+    if isinstance(point_id, str):
+        text = point_id.strip()
+        if not text:
+            raise TypeError("point id uuid string is empty")
+        return str(uuid.UUID(text))
+    if isinstance(point_id, bool) or isinstance(point_id, int):
         raise TypeError(
-            f"point id must be unsigned int (== MySQL images.id), got {point_id!r}"
+            f"point id must be uuid (== images.id), got int/bool {point_id!r} "
+            "(PG v0.1 no longer uses BIGINT MySQL ids)"
         )
-    if value < 0:
-        raise ValueError(f"point id must be >= 0, got {value}")
-    return value
+    raise TypeError(f"point id must be uuid, got {type(point_id).__name__}: {point_id!r}")
+
+
+def _normalize_payload(payload: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+    """Require PG v0.1 filter payload; drop presentation-only keys."""
+    if payload is None:
+        raise BadPayloadError(
+            "payload required: category_id, scenes, food_state, label_status"
+        )
+    raw = dict(payload)
+    for key in (
+        "path",
+        "url",
+        "original_url",
+        "thumb_url",
+        "title",
+        "tags",
+        "width",
+        "height",
+        "created_at",
+        "updated_at",
+        "status",
+        "image_id",
+        "sha256",
+    ):
+        raw.pop(key, None)
+
+    if "category_id" not in raw:
+        raise BadPayloadError("payload.category_id is required (int|null)")
+    category_id = raw.get("category_id")
+    if category_id is not None:
+        category_id = int(category_id)
+
+    if "scenes" not in raw:
+        raise BadPayloadError("payload.scenes is required (list[str] codes)")
+    scenes = raw.get("scenes")
+    if scenes is None:
+        scenes = []
+    if not isinstance(scenes, (list, tuple)):
+        raise BadPayloadError("payload.scenes must be a list of scene codes")
+    scenes_out = [str(s) for s in scenes]
+
+    if "food_state" not in raw:
+        raise BadPayloadError("payload.food_state is required (str|null)")
+    food_state = raw.get("food_state")
+    if food_state is not None:
+        food_state = str(food_state)
+
+    if "label_status" not in raw:
+        raise BadPayloadError("payload.label_status is required (str)")
+    label_status = raw.get("label_status")
+    if label_status is None or str(label_status).strip() == "":
+        raise BadPayloadError("payload.label_status must be a non-empty string")
+    label_status = str(label_status)
+
+    return {
+        "category_id": category_id,
+        "scenes": scenes_out,
+        "food_state": food_state,
+        "label_status": label_status,
+    }
 
 
 class QdrantStore:
-    """Thin Qdrant client: ensure collection, upsert, cosine top-k search."""
+    """Thin Qdrant client: ensure collection, upsert, search, delete.
 
-    def __init__(self, config: Mapping[str, Any]):
-        self.load_config(config)
+    collection / vector_dim / distance come from embedding_models (current row).
+    Named vector is always ``global``.
+    """
+
+    def __init__(
+        self,
+        config: Mapping[str, Any] | None = None,
+        *,
+        collection: str | None = None,
+        vector_dim: int | None = None,
+        distance: str | None = None,
+    ):
         self._client = None
+        self.load_config(
+            config or {},
+            collection=collection,
+            vector_dim=vector_dim,
+            distance=distance,
+        )
 
-    def load_config(self, config: Mapping[str, Any]) -> None:
+    def load_config(
+        self,
+        config: Mapping[str, Any],
+        *,
+        collection: str | None = None,
+        vector_dim: int | None = None,
+        distance: str | None = None,
+    ) -> None:
         conf = dict(config.get("QDRANT_CONFIG") or {})
         self.url = _resolve_url(conf)
         self.api_key = conf.get("api_key") or None
-        self.collection = str(conf.get("collection") or DEFAULT_COLLECTION)
-        self.vector_size = _resolve_vector_dim(conf)
+
+        coll = collection or conf.get("collection") or ""
+        self.collection = str(coll).strip()
+        if not self.collection:
+            raise ValueError(
+                "collection is required (= embedding_models.collection for current model)"
+            )
+
+        raw_dim = (
+            vector_dim
+            if vector_dim is not None
+            else conf.get("vector_dim", conf.get("vector_size", DEFAULT_VECTOR_DIM))
+        )
+        self.vector_size = int(raw_dim)
         self.vector_dim = self.vector_size
-        distance = str(conf.get("distance") or DEFAULT_DISTANCE)
-        if distance.lower() not in {"cosine", "euclid", "dot"}:
-            raise ValueError(f"unsupported QDRANT_CONFIG.distance: {distance}")
-        self.distance = distance
+        if self.vector_size <= 0:
+            raise ValueError(f"vector_dim must be > 0, got {self.vector_size}")
+
+        dist = distance or conf.get("distance") or DEFAULT_DISTANCE
+        dist_l = str(dist).lower()
+        if dist_l not in {"cosine", "euclid", "dot"}:
+            raise ValueError(f"unsupported distance: {dist}")
+        self.distance = dist_l
+
         self.timeout = float(conf.get("timeout", 30.0))
-        # Local docker REST on :6333 may 502 via httpx; gRPC :6334 is reliable.
         if "prefer_grpc" in conf:
             self.prefer_grpc = bool(conf.get("prefer_grpc"))
         else:
             self.prefer_grpc = True
         self.check_compatibility = bool(conf.get("check_compatibility", False))
+
+        raw_tau = conf.get("score_threshold", DEFAULT_SCORE_THRESHOLD)
+        self.default_score_threshold = (
+            float(raw_tau) if raw_tau is not None else DEFAULT_SCORE_THRESHOLD
+        )
+
+    def set_collection(
+        self,
+        collection: str,
+        *,
+        vector_dim: int,
+        distance: str,
+    ) -> None:
+        """Switch to another embedding_models row (e.g. new current)."""
+        name = str(collection or "").strip()
+        if not name:
+            raise ValueError("collection is required")
+        dim = int(vector_dim)
+        if dim <= 0:
+            raise ValueError(f"vector_dim must be > 0, got {dim}")
+        dist_l = str(distance).lower()
+        if dist_l not in {"cosine", "euclid", "dot"}:
+            raise ValueError(f"unsupported distance: {distance}")
+        self.collection = name
+        self.vector_size = dim
+        self.vector_dim = dim
+        self.distance = dist_l
 
     def _get_client(self):
         if self._client is not None:
@@ -130,10 +259,37 @@ class QdrantStore:
             "euclid": rest.Distance.EUCLID,
             "dot": rest.Distance.DOT,
         }
-        return mapping[self.distance.lower()]
+        return mapping[self.distance]
+
+    def _create_payload_indexes(self, client) -> None:
+        from qdrant_client.http import models as rest
+
+        specs = (
+            ("scenes", rest.PayloadSchemaType.KEYWORD),
+            ("label_status", rest.PayloadSchemaType.KEYWORD),
+            ("category_id", rest.PayloadSchemaType.INTEGER),
+        )
+        for field_name, schema in specs:
+            try:
+                client.create_payload_index(
+                    collection_name=self.collection,
+                    field_name=field_name,
+                    field_schema=schema,
+                    wait=True,
+                )
+            except Exception as exc:
+                logger.debug(
+                    "create_payload_index %s on %s: %s",
+                    field_name,
+                    self.collection,
+                    exc,
+                )
 
     def ensure_collection(self, *, recreate: bool = False) -> None:
-        """Create collection if missing; reject dim mismatch (VECTOR_DIM_MISMATCH)."""
+        """Create collection if missing; named vector ``global`` + payload indexes.
+
+        recreate=True deletes then recreates (empty-library rebuild).
+        """
         from qdrant_client.http import models as rest
 
         client = self._get_client()
@@ -142,26 +298,36 @@ class QdrantStore:
             if not recreate:
                 info = client.get_collection(self.collection)
                 vectors = getattr(getattr(info.config, "params", None), "vectors", None)
-                actual = getattr(vectors, "size", None) if vectors is not None else None
+                actual = None
+                if isinstance(vectors, dict):
+                    params = vectors.get(NAMED_VECTOR) or next(iter(vectors.values()), None)
+                    actual = getattr(params, "size", None) if params is not None else None
+                else:
+                    actual = getattr(vectors, "size", None) if vectors is not None else None
                 if actual is not None and int(actual) != self.vector_size:
                     raise VectorDimMismatchError(
                         f"collection {self.collection!r} size={actual}, "
-                        f"expected VECTOR_DIM={self.vector_size}"
+                        f"expected vector_dim={self.vector_size}"
                     )
+                self._create_payload_indexes(client)
                 logger.info("qdrant collection ready: %s", self.collection)
                 return
             client.delete_collection(self.collection)
 
         client.create_collection(
             collection_name=self.collection,
-            vectors_config=rest.VectorParams(
-                size=self.vector_size,
-                distance=self._distance_enum(),
-            ),
+            vectors_config={
+                NAMED_VECTOR: rest.VectorParams(
+                    size=self.vector_size,
+                    distance=self._distance_enum(),
+                )
+            },
         )
+        self._create_payload_indexes(client)
         logger.info(
-            "created qdrant collection=%s size=%d distance=%s",
+            "created qdrant collection=%s named_vector=%s size=%d distance=%s",
             self.collection,
+            NAMED_VECTOR,
             self.vector_size,
             self.distance,
         )
@@ -177,65 +343,33 @@ class QdrantStore:
             raise BadEmbeddingError("vector is zero")
         if int(arr.shape[0]) != self.vector_size:
             raise VectorDimMismatchError(
-                f"vector dim={arr.shape[0]} != VECTOR_DIM={self.vector_size}"
+                f"vector dim={arr.shape[0]} != vector_dim={self.vector_size}"
             )
         return arr.astype(np.float32).tolist()
 
-    @staticmethod
-    def _normalize_payload(
-        payload: Optional[Mapping[str, Any]],
-        point_id: int,
-    ) -> Optional[Dict[str, Any]]:
-        """MVP: Qdrant holds neighbors only; optional redundant image_id allowed."""
-        if not payload:
-            return {"image_id": point_id}
-        out = dict(payload)
-        # Drop presentation fields that belong in MySQL only.
-        for key in (
-            "path",
-            "url",
-            "title",
-            "category",
-            "tags",
-            "width",
-            "height",
-            "created_at",
-            "updated_at",
-            "status",
-        ):
-            out.pop(key, None)
-        out["image_id"] = int(out.get("image_id", point_id))
-        if out["image_id"] != point_id:
-            raise ValueError(
-                f"payload.image_id={out['image_id']} must equal point id={point_id}"
-            )
-        return out
-
     def upsert(
         self,
-        point_id: Union[str, int],
+        point_id: Union[str, uuid.UUID],
         vector: Union[np.ndarray, Sequence[float]],
-        payload: Optional[Mapping[str, Any]] = None,
-    ) -> int:
-        """Upsert one point. point_id == MySQL images.id (unsigned int)."""
+        payload: Mapping[str, Any],
+    ) -> str:
+        """Upsert one point. point_id == images.id (uuid). Returns uuid str."""
         from qdrant_client.http import models as rest
 
         client = self._get_client()
         pid = _normalize_point_id(point_id)
         vec = self._as_vector(vector)
+        body = _normalize_payload(payload)
         point = rest.PointStruct(
             id=pid,
-            vector=vec,
-            payload=self._normalize_payload(payload, pid),
+            vector={NAMED_VECTOR: vec},
+            payload=body,
         )
         client.upsert(collection_name=self.collection, points=[point], wait=True)
         return pid
 
-    def upsert_batch(
-        self,
-        points: Sequence[Mapping[str, Any]],
-    ) -> int:
-        """Batch upsert. Each item: {id, vector, payload?} with integer id."""
+    def upsert_batch(self, points: Sequence[Mapping[str, Any]]) -> int:
+        """Batch upsert. Each item: {id, vector, payload} with uuid id."""
         from qdrant_client.http import models as rest
 
         client = self._get_client()
@@ -243,16 +377,59 @@ class QdrantStore:
         for item in points:
             pid = _normalize_point_id(item["id"])
             vec = self._as_vector(item["vector"])
+            body = _normalize_payload(item.get("payload"))
             structs.append(
                 rest.PointStruct(
                     id=pid,
-                    vector=vec,
-                    payload=self._normalize_payload(item.get("payload"), pid),
+                    vector={NAMED_VECTOR: vec},
+                    payload=body,
                 )
             )
         if structs:
             client.upsert(collection_name=self.collection, points=structs, wait=True)
         return len(structs)
+
+    def _build_query_filter(
+        self,
+        *,
+        scene: Optional[str],
+        filters: Optional[Mapping[str, Any]],
+    ):
+        from qdrant_client.http import models as rest
+
+        must: List[Any] = []
+        scene_code = scene
+        if scene_code is None and filters:
+            raw = filters.get("scenes") or filters.get("scene")
+            if isinstance(raw, (list, tuple)) and raw:
+                scene_code = str(raw[0])
+            elif raw is not None:
+                scene_code = str(raw)
+        if scene_code:
+            must.append(
+                rest.FieldCondition(
+                    key="scenes",
+                    match=rest.MatchValue(value=str(scene_code)),
+                )
+            )
+        if filters:
+            if "label_status" in filters and filters["label_status"] is not None:
+                must.append(
+                    rest.FieldCondition(
+                        key="label_status",
+                        match=rest.MatchValue(value=str(filters["label_status"])),
+                    )
+                )
+            if "category_id" in filters and filters["category_id"] is not None:
+                must.append(
+                    rest.FieldCondition(
+                        key="category_id",
+                        match=rest.MatchValue(value=int(filters["category_id"])),
+                    )
+                )
+        if not must:
+            return None
+        return rest.Filter(must=must)
 
     def search(
         self,
@@ -261,46 +438,83 @@ class QdrantStore:
         filters: Optional[Mapping[str, Any]] = None,
         *,
         score_threshold: Optional[float] = None,
+        scene: Optional[str] = None,
         with_payload: bool = True,
     ) -> List[Dict[str, Any]]:
-        """Cosine top-k. Returns [{id, score, payload}, ...].
+        """Top-k on named vector ``global``.
 
-        If score_threshold is set, points with score strictly below it are dropped
-        (Qdrant keeps score >= threshold). ``filters`` reserved; unused in MVP.
+        Returns [{id, score, payload}, ...].
+        - scene / filters.scenes: payload.scenes contains the code
+        - score_threshold None → default 0.55; explicit 0 → no rejection
         """
         if top_k <= 0:
             raise ValueError("top_k must be > 0")
-        if top_k > 50:
-            raise ValueError("top_k must be <= 50 (API contract)")
-        if filters:
-            logger.debug("qdrant filters unused in MVP: %s", filters)
+
         client = self._get_client()
         vec = self._as_vector(vector)
-        # qdrant-client >=1.12 removed Client.search; use query_points.
-        response = client.query_points(
-            collection_name=self.collection,
-            query=vec,
-            limit=int(top_k),
-            score_threshold=score_threshold,
-            with_payload=with_payload,
-        )
-        hits = getattr(response, "points", None)
-        if hits is None:
-            hits = list(response)
-        else:
-            hits = list(hits)
-        results: List[Dict[str, Any]] = []
-        for hit in hits:
-            results.append(
-                {
-                    "id": int(hit.id) if hit.id is not None else hit.id,
-                    "score": float(hit.score),
-                    "payload": dict(hit.payload) if hit.payload else {},
-                }
-            )
-        return results
+        query_filter = self._build_query_filter(scene=scene, filters=filters)
 
-    def count(self) -> int:
+        if score_threshold is None:
+            thr: Optional[float] = float(self.default_score_threshold)
+        else:
+            thr = float(score_threshold)
+        native_thr = None if thr == 0.0 else thr
+
+        try:
+            response = client.query_points(
+                collection_name=self.collection,
+                query=vec,
+                using=NAMED_VECTOR,
+                query_filter=query_filter,
+                limit=int(top_k),
+                score_threshold=native_thr,
+                with_payload=with_payload,
+            )
+            hits = getattr(response, "points", None)
+            if hits is None:
+                hits = response if isinstance(response, list) else []
+        except TypeError:
+            hits = client.search(
+                collection_name=self.collection,
+                query_vector=(NAMED_VECTOR, vec),
+                query_filter=query_filter,
+                limit=int(top_k),
+                score_threshold=native_thr,
+                with_payload=with_payload,
+            )
+
+        out: List[Dict[str, Any]] = []
+        for hit in hits or []:
+            score = float(getattr(hit, "score", 0.0))
+            if native_thr is not None and score < native_thr:
+                continue
+            pid = getattr(hit, "id", None)
+            payload = getattr(hit, "payload", None) or {}
+            out.append({"id": str(pid), "score": score, "payload": dict(payload)})
+        return out
+
+    def delete(self, point_id: Union[str, uuid.UUID]) -> None:
+        """Delete one point by images.id uuid."""
+        from qdrant_client.http import models as rest
+
         client = self._get_client()
-        result = client.count(collection_name=self.collection, exact=True)
-        return int(getattr(result, "count", 0))
+        pid = _normalize_point_id(point_id)
+        client.delete(
+            collection_name=self.collection,
+            points_selector=rest.PointIdsList(points=[pid]),
+            wait=True,
+        )
+
+    def delete_batch(self, point_ids: Sequence[Union[str, uuid.UUID]]) -> None:
+        """Delete many points by uuid."""
+        from qdrant_client.http import models as rest
+
+        if not point_ids:
+            return
+        client = self._get_client()
+        ids = [_normalize_point_id(p) for p in point_ids]
+        client.delete(
+            collection_name=self.collection,
+            points_selector=rest.PointIdsList(points=ids),
+            wait=True,
+        )

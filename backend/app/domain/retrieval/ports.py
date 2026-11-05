@@ -1,13 +1,15 @@
 """Retrieval ports. Implementations live under adapter/.
 
 Vector/ONNX details: 算法逻辑. Table/JSON contract: 数据规范 SSOT.
-Point id == MySQL images.id (unsigned int). VECTOR_DIM=1024 Cosine.
+PG v0.1: point id == images.id (uuid). Collection from embedding_models.current.
+Named vector ``global``. VECTOR_DIM default 1024 (food ONNX); overridden by model row.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import Any, Protocol, runtime_checkable
+from uuid import UUID
 
 
 VECTOR_DIM = 1024
@@ -23,14 +25,14 @@ class EmbeddingPort(Protocol):
 
 
 class VectorStorePort(ABC):
-    """Qdrant read/write. Point ids are unsigned ints (== images.id)."""
+    """Qdrant read/write. Point ids are uuid (== images.id)."""
 
     @abstractmethod
     def upsert(
         self,
-        point_id: int,
+        point_id: UUID | str,
         vector: list[float],
-        payload: dict[str, Any] | None = None,
+        payload: dict[str, Any],
     ) -> None:
         raise NotImplementedError
 
@@ -41,43 +43,39 @@ class VectorStorePort(ABC):
         top_k: int = 10,
         *,
         score_threshold: float | None = None,
+        scene: str | None = None,
         filters: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Return [{id, score, payload}, ...]. Empty list = no neighbors."""
         raise NotImplementedError
 
     @abstractmethod
-    def delete(self, point_id: int) -> None:
+    def delete(self, point_id: UUID | str) -> None:
         raise NotImplementedError
 
 
 class MetadataStorePort(ABC):
-    """MySQL `images` table (SSOT §2)."""
+    """PostgreSQL metadata (PG v0.1). Backend owns implementation."""
 
     @abstractmethod
-    def insert_image(self, row: dict[str, Any]) -> int:
-        """Insert row; return auto id. Sets qdrant_point_id=id after insert if needed."""
+    def insert_image(self, row: dict[str, Any]) -> UUID | str:
         raise NotImplementedError
 
     @abstractmethod
-    def update_image(self, image_id: int, fields: dict[str, Any]) -> None:
+    def update_image(self, image_id: UUID | str, fields: dict[str, Any]) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def mark_deleted(self, image_id: int) -> None:
+    def mark_deleted(self, image_id: UUID | str) -> None:
         raise NotImplementedError
 
     @abstractmethod
     def get_active_by_ids(
         self,
-        image_ids: list[int],
+        image_ids: list[UUID | str],
         *,
         scene: str | None = None,
-    ) -> dict[int, dict[str, Any]]:
-        """id -> row for status='active' only; missing/deleted omitted.
-
-        If scene is set, also require JSON_CONTAINS(scenes, JSON_QUOTE(scene), '$').
-        """
+    ) -> dict[str, dict[str, Any]]:
         raise NotImplementedError
 
     @abstractmethod
@@ -90,16 +88,10 @@ class MetadataStorePort(ABC):
         q: str | None = None,
         category: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
-        """Return (rows, total) for status=active + scene JSON_CONTAINS.
-
-        Sort: created_at DESC, id DESC. page is 1-based.
-        Optional q: title substring OR any tags element substring (not path).
-        Optional category: exact match on images.category.
-        """
         raise NotImplementedError
 
     @abstractmethod
-    def get_by_id(self, image_id: int) -> dict[str, Any] | None:
+    def get_by_id(self, image_id: UUID | str) -> dict[str, Any] | None:
         raise NotImplementedError
 
     @abstractmethod
@@ -108,7 +100,7 @@ class MetadataStorePort(ABC):
 
 
 class FlyBFallbackPort(ABC):
-    """Only when final self-built list length == 0 and scene=normal (§4.1)."""
+    """PG v0.1: FlyB OUT OF SCOPE (M0). Kept for legacy imports only."""
 
     @abstractmethod
     def search_fallback(
@@ -117,5 +109,49 @@ class FlyBFallbackPort(ABC):
         image_url: str | None = None,
         top_k: int = 10,
     ) -> Any:
-        """Return FlyB parse_results shape: list[dict] or empty envelope dict."""
         raise NotImplementedError
+
+
+class ObjectStoragePort(ABC):
+    """S3/OSS object storage (contract §5). Returns full https URLs for DB columns."""
+
+    @abstractmethod
+    def put_original(
+        self,
+        image_id: UUID | str,
+        data: bytes,
+        *,
+        ext: str,
+        content_type: str | None = None,
+    ) -> str:
+        """Upload original/{image_id}.{ext}; return full https original_url."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def put_thumb(
+        self,
+        image_id: UUID | str,
+        data: bytes,
+        *,
+        content_type: str | None = "image/webp",
+    ) -> str:
+        """Upload thumb/{image_id}.webp; return full https thumb_url."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def put_staging(
+        self,
+        candidate_id: UUID | str,
+        data: bytes,
+        *,
+        ext: str,
+        content_type: str | None = None,
+    ) -> str:
+        """Upload staging/{candidate_id}.{ext}; return full https staged_url."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete_by_url_or_key(self, url_or_key: str) -> None:
+        """Best-effort delete by full https URL or object key. Missing object = ok."""
+        raise NotImplementedError
+

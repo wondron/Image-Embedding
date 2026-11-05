@@ -70,7 +70,7 @@ def warmup_models(service, app_settings: Settings = settings) -> None:
 
 
 def initialize_retrieval(runtime: ApplicationState) -> None:
-    """Best-effort wire embedder + Qdrant + MySQL + FlyB. Does not block FoodService."""
+    """Best-effort wire embedder + Qdrant + PostgreSQL. Does not block FoodService."""
     try:
         from app.bootstrap.retrieval_stack import build_retrieval_stack
         from app.domain.retrieval.errors import RetrievalError
@@ -79,11 +79,13 @@ def initialize_retrieval(runtime: ApplicationState) -> None:
         runtime.retrieval_error = None
         runtime.retrieval_error_code = None
         runtime.retrieval_space_mismatch = None
+        cur = getattr(runtime.retrieval, "current_model", None) or {}
         logger.info(
-            "Retrieval stack ready | qdrant=%s | mysql=%s/%s | space_id=%s",
+            "Retrieval stack ready | qdrant=%s | postgres=%s/%s | collection=%s | space_id=%s",
             runtime.settings.qdrant.url,
-            runtime.settings.mysql.host,
-            runtime.settings.mysql.database,
+            runtime.settings.postgres.host,
+            runtime.settings.postgres.database,
+            cur.get("collection"),
             getattr(runtime.retrieval, "embedding_space_id", None),
         )
     except Exception as exc:

@@ -1,12 +1,15 @@
-﻿"""Thin adapter around app.domain.common.qdrant_store.QdrantStore.
+"""Thin adapter around app.domain.common.qdrant_store.QdrantStore.
 
-Do NOT duplicate qdrant-client usage here. Point ids are unsigned ints (== images.id).
+Do NOT duplicate qdrant-client usage here.
+PG v0.1: point ids are uuid (== images.id); collection from embedding_models.current.
 """
 
 from __future__ import annotations
 
 import logging
+from importlib import import_module
 from typing import Any
+from uuid import UUID
 
 from app.domain.retrieval import errors as err
 from app.domain.retrieval.ports import VECTOR_DIM, VectorStorePort
@@ -17,58 +20,58 @@ _DOMAIN_QDRANT_MOD = "app.domain.common.qdrant_store"
 
 
 def _load_domain_store_cls():
-    try:
-        from importlib import import_module
-
-        mod = import_module(_DOMAIN_QDRANT_MOD)
-        return getattr(mod, "QdrantStore", None)
-    except ImportError:
-        return None
+    mod = import_module(_DOMAIN_QDRANT_MOD)
+    return getattr(mod, "QdrantStore", None)
 
 
 class QdrantVectorStore(VectorStorePort):
+    """Adapter: Metadata supplies current collection/dim/distance."""
+
     def __init__(
         self,
-        *,
-        url: str | None = None,
-        host: str = "qdrant",
+        host: str = "localhost",
         port: int = 6333,
-        collection: str = "image_embeddings",
+        *,
+        collection: str,
         vector_size: int = VECTOR_DIM,
-        distance: str = "Cosine",
+        distance: str = "cosine",
+        url: str | None = None,
         config: dict[str, Any] | None = None,
     ) -> None:
-        self.url = url or f"http://{host}:{port}"
-        self.host = host
-        self.port = port
         self.collection = collection
         self.vector_size = int(vector_size)
         self.distance = distance
-        self._impl = None
+        if url:
+            self.url = str(url).rstrip("/")
+        else:
+            self.url = f"http://{host}:{int(port)}"
 
         cls = _load_domain_store_cls()
-        if cls is None:
-            return
-
-        # Domain QdrantStore: local REST :6333 via httpx often 502; prefer gRPC :6334.
+        # Domain QdrantStore: local REST :6333 via httpx often 502; prefer gRPC.
         qdrant_cfg = {
             "url": self.url,
             "collection": collection,
             "vector_size": self.vector_size,
+            "vector_dim": self.vector_size,
             "distance": distance,
             "prefer_grpc": True,
         }
         if config and isinstance(config.get("QDRANT_CONFIG"), dict):
             merged = dict(config.get("QDRANT_CONFIG") or {})
             merged.update(qdrant_cfg)
-            wrapped = dict(config)
+            wrapped: dict[str, Any] = dict(config)
             wrapped["QDRANT_CONFIG"] = merged
         else:
             wrapped = {"QDRANT_CONFIG": qdrant_cfg}
             if config:
                 wrapped.update({k: v for k, v in config.items() if k != "QDRANT_CONFIG"})
         try:
-            self._impl = cls(wrapped)
+            self._impl = cls(
+                wrapped,
+                collection=collection,
+                vector_dim=self.vector_size,
+                distance=distance,
+            )
         except Exception:
             logger.exception("failed to construct domain QdrantStore")
             self._impl = None
@@ -77,20 +80,38 @@ class QdrantVectorStore(VectorStorePort):
     def wired(self) -> bool:
         return self._impl is not None
 
+    def set_collection(
+        self,
+        collection: str,
+        *,
+        vector_dim: int,
+        distance: str,
+    ) -> None:
+        self.collection = collection
+        self.vector_size = int(vector_dim)
+        self.distance = distance
+        if self._impl is not None:
+            self._impl.set_collection(
+                collection, vector_dim=vector_dim, distance=distance
+            )
+
     def ensure_collection(self, *, recreate: bool = False) -> None:
         if self._impl is None:
             raise err.not_ready("QdrantStore not wired")
         try:
             self._impl.ensure_collection(recreate=recreate)
         except ValueError as exc:
-            # dim mismatch from domain ensure
             raise err.vector_dim_mismatch(str(exc)) from exc
         except Exception as exc:
             raise err.not_ready(f"qdrant ensure_collection: {exc}") from exc
 
     def ping(self) -> dict[str, Any]:
         if self._impl is None:
-            return {"ok": False, "detail": "domain QdrantStore unavailable", "collection": self.collection}
+            return {
+                "ok": False,
+                "detail": "domain QdrantStore unavailable",
+                "collection": self.collection,
+            }
         try:
             client = self._impl._get_client()
             names = {c.name for c in client.get_collections().collections}
@@ -104,6 +125,7 @@ class QdrantVectorStore(VectorStorePort):
                 "collection": self.collection,
                 "points_count": points_count,
                 "vector_size": self.vector_size,
+                "named_vector": "global",
             }
         except Exception as exc:
             return {
@@ -115,14 +137,14 @@ class QdrantVectorStore(VectorStorePort):
 
     def upsert(
         self,
-        point_id: int,
+        point_id: UUID | str,
         vector: list[float],
-        payload: dict[str, Any] | None = None,
+        payload: dict[str, Any],
     ) -> None:
         if self._impl is None:
             raise err.index_qdrant_failed("QdrantStore not wired")
         try:
-            self._impl.upsert(int(point_id), vector, payload)
+            self._impl.upsert(point_id, vector, payload)
         except Exception as exc:
             raise err.index_qdrant_failed(f"{type(exc).__name__}: {exc}") from exc
 
@@ -132,6 +154,7 @@ class QdrantVectorStore(VectorStorePort):
         top_k: int = 10,
         *,
         score_threshold: float | None = None,
+        scene: str | None = None,
         filters: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         if self._impl is None:
@@ -142,24 +165,25 @@ class QdrantVectorStore(VectorStorePort):
                 top_k=top_k,
                 filters=filters,
                 score_threshold=score_threshold,
+                scene=scene,
             )
-        except TypeError:
-            # older signature fallback
-            try:
-                return self._impl.search(vector, top_k=top_k, filters=filters)
-            except Exception as exc:
-                raise err.search_qdrant_failed(f"{type(exc).__name__}: {exc}") from exc
         except Exception as exc:
             raise err.search_qdrant_failed(f"{type(exc).__name__}: {exc}") from exc
 
-    def delete(self, point_id: int) -> None:
+    def delete(self, point_id: UUID | str) -> None:
         if self._impl is None:
             raise err.index_qdrant_failed("QdrantStore not wired")
         try:
-            client = self._impl._get_client()
-            client.delete(
-                collection_name=self.collection,
-                points_selector=[int(point_id)],
-            )
+            self._impl.delete(point_id)
         except Exception as exc:
             raise err.index_qdrant_failed(f"delete: {type(exc).__name__}: {exc}") from exc
+
+    def delete_batch(self, point_ids: list[UUID | str]) -> None:
+        if self._impl is None:
+            raise err.index_qdrant_failed("QdrantStore not wired")
+        try:
+            self._impl.delete_batch(point_ids)
+        except Exception as exc:
+            raise err.index_qdrant_failed(
+                f"delete_batch: {type(exc).__name__}: {exc}"
+            ) from exc

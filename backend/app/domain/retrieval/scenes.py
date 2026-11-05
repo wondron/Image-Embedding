@@ -1,6 +1,9 @@
-"""Scene registry + resolve helpers (SSOT §2 / §3 / §4 · 2026-10-28).
+"""Scene registry + resolve helpers (PG v0.1 contract §2.6 / A5).
 
-MVP registered: normal, device. Domain owns validation; adapters only persist/filter.
+Registered seeds: general, oven, range_hood, us_diet, cn_diet, jp_diet.
+MVP aliases (map+document): normal→general, device→oven.
+Default search/list/index scene = general.
+FlyB: OUT OF SCOPE (A4) — allows_flyb_fallback always False.
 """
 
 from __future__ import annotations
@@ -9,39 +12,63 @@ from typing import Any, Optional, Sequence
 
 from app.domain.retrieval import errors as err
 
-REGISTERED_SCENES = frozenset({"normal", "device"})
-DEFAULT_SCENE = "normal"
+# Contract §2.6 seed codes
+REGISTERED_SCENES = frozenset(
+    {"general", "oven", "range_hood", "us_diet", "cn_diet", "jp_diet"}
+)
+DEFAULT_SCENE = "general"
 DEFAULT_SCENES: list[str] = [DEFAULT_SCENE]
+
+# MVP → v0.1 product mapping (A5)
+SCENE_ALIASES: dict[str, str] = {
+    "normal": "general",
+    "device": "oven",
+}
+
+
+def canonicalize_scene_code(raw: str) -> str:
+    """Strip + apply MVP alias map. Does not validate registration."""
+    s = raw.strip()
+    return SCENE_ALIASES.get(s, s)
 
 
 def is_registered(scene: str) -> bool:
-    return scene in REGISTERED_SCENES
+    return canonicalize_scene_code(scene) in REGISTERED_SCENES
 
 
 def _as_short_str(value: Any, *, where: str) -> str:
     if not isinstance(value, str):
-        raise err.validation_error(f"{where} must be a string, got {type(value).__name__}")
+        raise err.validation_error(
+            f"{where} must be a string, got {type(value).__name__}"
+        )
     s = value.strip()
     if not s:
         raise err.validation_error(f"{where} must be a non-empty short string")
     return s
 
 
+def _raise_unknown(s: str, *, code_for_unknown: str) -> None:
+    detail = (
+        f"unknown scene: {s!r}; registered={sorted(REGISTERED_SCENES)}; "
+        f"aliases={SCENE_ALIASES}"
+    )
+    if code_for_unknown == "INDEX_UNKNOWN_SCENE":
+        raise err.index_unknown_scene(detail)
+    if code_for_unknown == "SEARCH_UNKNOWN_SCENE":
+        raise err.search_unknown_scene(detail)
+    if code_for_unknown == "LIST_UNKNOWN_SCENE":
+        raise err.list_unknown_scene(detail)
+    raise err.validation_error(detail)
+
+
 def _validate_registered(scenes: Sequence[str], *, code_for_unknown: str) -> list[str]:
-    """Deduplicate preserving order; raise on unknown."""
+    """Alias-map, dedupe preserving order; raise on unknown."""
     out: list[str] = []
     seen: set[str] = set()
     for raw in scenes:
-        s = _as_short_str(raw, where="scene")
+        s = canonicalize_scene_code(_as_short_str(raw, where="scene"))
         if s not in REGISTERED_SCENES:
-            detail = f"unknown scene: {s!r}; registered={sorted(REGISTERED_SCENES)}"
-            if code_for_unknown == "INDEX_UNKNOWN_SCENE":
-                raise err.index_unknown_scene(detail)
-            if code_for_unknown == "SEARCH_UNKNOWN_SCENE":
-                raise err.search_unknown_scene(detail)
-            if code_for_unknown == "LIST_UNKNOWN_SCENE":
-                raise err.list_unknown_scene(detail)
-            raise err.validation_error(detail)
+            _raise_unknown(s, code_for_unknown=code_for_unknown)
         if s not in seen:
             seen.add(s)
             out.append(s)
@@ -52,11 +79,10 @@ def resolve_index_scenes(
     scene: Optional[str] = None,
     scenes: Optional[Sequence[Any]] = None,
 ) -> list[str]:
-    """Resolve index write set per SSOT section 3.1.
+    """Resolve optional client hint scenes for index.
 
-    Priority: scenes array if provided; else scene single; else default [normal].
-    Both provided must be consistent (scenes normalizes to [scene]); else 422.
-    Empty array / unknown -> INDEX_UNKNOWN_SCENE or VALIDATION_ERROR.
+    PG v0.1: effective membership is recomputed from rules/image_scenes after insert.
+    Client-supplied scene(s) remain validated hints (legacy multipart); empty → [general].
     """
     has_scene = scene is not None and str(scene).strip() != ""
     has_scenes = scenes is not None
@@ -71,50 +97,44 @@ def resolve_index_scenes(
             code_for_unknown="INDEX_UNKNOWN_SCENE",
         )
         if has_scene:
-            single = _as_short_str(scene, where="scene")
+            single = canonicalize_scene_code(_as_short_str(scene, where="scene"))
             if single not in REGISTERED_SCENES:
-                raise err.index_unknown_scene(
-                    f"unknown scene: {single!r}; registered={sorted(REGISTERED_SCENES)}"
-                )
-            # Consistent means scenes == [scene] after normalize
+                _raise_unknown(single, code_for_unknown="INDEX_UNKNOWN_SCENE")
             if set(resolved_from_array) != {single}:
                 raise err.validation_error(
-                    f"scene and scenes inconsistent: scene={single!r} scenes={resolved_from_array!r}"
+                    f"scene and scenes inconsistent: scene={single!r} "
+                    f"scenes={resolved_from_array!r}"
                 )
             return [single]
         return resolved_from_array
 
     if has_scene:
-        single = _as_short_str(scene, where="scene")
+        single = canonicalize_scene_code(_as_short_str(scene, where="scene"))
         return _validate_registered([single], code_for_unknown="INDEX_UNKNOWN_SCENE")
 
     return list(DEFAULT_SCENES)
 
 
 def normalize_search_scene(scene: Optional[str] = None) -> str:
-    """Search filter scene; omit/blank -> normal. Unknown -> SEARCH_UNKNOWN_SCENE."""
+    """Search filter scene; omit/blank → general. Unknown → SEARCH_UNKNOWN_SCENE."""
     if scene is None or (isinstance(scene, str) and scene.strip() == ""):
         return DEFAULT_SCENE
-    s = _as_short_str(scene, where="scene")
+    s = canonicalize_scene_code(_as_short_str(scene, where="scene"))
     if s not in REGISTERED_SCENES:
-        raise err.search_unknown_scene(
-            f"unknown scene: {s!r}; registered={sorted(REGISTERED_SCENES)}"
-        )
+        _raise_unknown(s, code_for_unknown="SEARCH_UNKNOWN_SCENE")
     return s
 
 
 def normalize_list_scene(scene: Optional[str] = None) -> str:
-    """List filter scene; omit/blank -> normal. Unknown -> LIST_UNKNOWN_SCENE."""
+    """List filter scene; omit/blank → general. Unknown → LIST_UNKNOWN_SCENE."""
     if scene is None or (isinstance(scene, str) and scene.strip() == ""):
         return DEFAULT_SCENE
-    s = _as_short_str(scene, where="scene")
+    s = canonicalize_scene_code(_as_short_str(scene, where="scene"))
     if s not in REGISTERED_SCENES:
-        raise err.list_unknown_scene(
-            f"unknown scene: {s!r}; registered={sorted(REGISTERED_SCENES)}"
-        )
+        _raise_unknown(s, code_for_unknown="LIST_UNKNOWN_SCENE")
     return s
 
 
 def allows_flyb_fallback(scene: str) -> bool:
-    """FlyB only when scene is normal (after normalize)."""
-    return scene == DEFAULT_SCENE
+    """PG v0.1 A4 / M0: FlyB OUT — never fall back."""
+    return False

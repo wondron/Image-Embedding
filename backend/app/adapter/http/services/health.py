@@ -36,7 +36,7 @@ def _providers(component: Any) -> list[str]:
 
 
 def dependency_stubs(runtime: ApplicationState | None = None) -> dict[str, Any]:
-    """Report Qdrant/MySQL wiring; does not affect model readiness (/readyz)."""
+    """Report Qdrant/PostgreSQL wiring; does not affect model readiness (/readyz)."""
     retrieval = getattr(runtime, "retrieval", None) if runtime is not None else None
     if retrieval is None:
         detail = None
@@ -44,20 +44,25 @@ def dependency_stubs(runtime: ApplicationState | None = None) -> dict[str, Any]:
             detail = getattr(runtime, "retrieval_error", None) or "not initialized"
         return {
             "qdrant": {"status": "not_wired", "detail": detail or "unchecked"},
-            "mysql": {"status": "not_wired", "detail": detail or "unchecked"},
+            "postgres": {"status": "not_wired", "detail": detail or "unchecked"},
         }
     q = retrieval.vectors.ping() if hasattr(retrieval.vectors, "ping") else {"ok": False}
     m = retrieval.metadata.ping() if hasattr(retrieval.metadata, "ping") else {"ok": False}
+    current = getattr(retrieval, "current_model", None) or {}
     return {
         "qdrant": {
             "status": "ok" if q.get("ok") else "error",
             "detail": q.get("detail"),
-            "collection": q.get("collection"),
+            "collection": q.get("collection") or current.get("collection"),
             "points_count": q.get("points_count"),
         },
-        "mysql": {
+        "postgres": {
             "status": "ok" if m.get("ok") else "error",
             "detail": m.get("detail"),
+            "host": m.get("host"),
+            "database": m.get("database"),
+            "current_model": current.get("name"),
+            "current_collection": current.get("collection"),
         },
     }
 

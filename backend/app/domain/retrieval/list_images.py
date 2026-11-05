@@ -1,13 +1,14 @@
-"""List-images use case (SSOT section 3.5).
+"""List-images use case (PG v0.1).
 
-Library pagination: active + scene JSON_CONTAINS, optional q/category.
-Does not soft-delete. image_url prefers stored url else /api/images/file?id=.
+Library pagination via image_scenes membership for the active scene code.
+Default scene = general. Attach heating_group when scene.outputs_heating.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
+from uuid import UUID
 
 from app.domain.retrieval import errors as err
 from app.domain.retrieval.ports import MetadataStorePort
@@ -16,40 +17,40 @@ from app.domain.retrieval.scenes import normalize_list_scene
 logger = logging.getLogger("retrieval.list")
 
 
-def _image_url(
-    public_file_base: str | None,
-    image_id: int,
-    stored_url: str | None,
-) -> str | None:
-    if stored_url:
-        return stored_url
-    if public_file_base:
-        return f"{public_file_base.rstrip('/')}/api/images/file?id={image_id}"
-    return f"/api/images/file?id={image_id}"
+def _as_id(value: Any) -> str:
+    if isinstance(value, UUID):
+        return str(value)
+    return str(value)
 
 
 def _item_from_row(
     row: dict[str, Any],
     *,
-    public_file_base: str | None,
+    scene_meta: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    image_id = int(row["id"])
-    return {
+    image_id = _as_id(row["id"])
+    item: dict[str, Any] = {
         "id": image_id,
-        "qdrant_point_id": int(row.get("qdrant_point_id") or image_id),
-        "path": row.get("path"),
-        "url": row.get("url"),
-        "image_url": _image_url(public_file_base, image_id, row.get("url")),
-        "title": row.get("title"),
-        "category": row.get("category"),
-        "tags": row.get("tags"),
+        "qdrant_point_id": image_id,
+        "original_url": row.get("original_url"),
+        "thumb_url": row.get("thumb_url"),
+        "image_url": row.get("original_url") or row.get("url"),
+        "thumbnail_url": row.get("thumb_url"),
+        "title": row.get("title") or row.get("category_name"),
+        "category_id": row.get("category_id"),
+        "category": row.get("category_name") or row.get("category"),
         "scenes": row.get("scenes"),
+        "food_state": row.get("food_state"),
+        "label_status": row.get("label_status"),
         "width": row.get("width"),
         "height": row.get("height"),
-        "status": row.get("status") or "active",
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
     }
+    if scene_meta and scene_meta.get("outputs_heating"):
+        item["heating_group"] = row.get("heating_group")
+        item["food_state"] = row.get("food_state")
+    return item
 
 
 class ListImagesUseCase:
@@ -67,6 +68,7 @@ class ListImagesUseCase:
         public_file_base: str | None = None,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
+        del public_file_base
         active_scene = normalize_list_scene(scene)
 
         try:
@@ -86,7 +88,6 @@ class ListImagesUseCase:
             if q_s:
                 q_norm = q_s
 
-        # Empty category must not act as a filter (SSOT section 3.5).
         cat_norm: str | None = None
         if category is not None:
             c = str(category).strip()
@@ -100,9 +101,16 @@ class ListImagesUseCase:
             q=q_norm,
             category=cat_norm,
         )
-        items = [
-            _item_from_row(row, public_file_base=public_file_base) for row in rows
-        ]
+
+        scene_meta = None
+        get_scene = getattr(self._metadata, "get_scene_by_code", None)
+        if callable(get_scene):
+            try:
+                scene_meta = get_scene(active_scene)
+            except Exception:
+                logger.exception("get_scene_by_code failed scene=%s", active_scene)
+
+        items = [_item_from_row(row, scene_meta=scene_meta) for row in rows]
         return {
             "ok": True,
             "trace_id": trace_id,

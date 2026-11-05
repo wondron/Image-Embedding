@@ -1,1 +1,1 @@
-"""Persistence adapters: Qdrant (thin wrap), MySQL images, FlyB fallback."""
+"""Persistence adapters (PG metadata, Qdrant, object storage)."""

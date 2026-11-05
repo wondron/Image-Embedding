@@ -7,6 +7,8 @@
 > **编码**：UTF-8（无 BOM）  
 > **范围**：本地 Docker Compose（Qdrant + MySQL）；不 push；实现方不自测验收、不 commit（PM 测 PASS 后统一 commit）
 
+
+> **作废交叉引用（2026-11-04）**：旧 **§9 / ALIGNMENT-ASK（path+OSS 双轨入库优化）已被 `docs/image-search-pg-v01-data-contract.md`（PG v0.1 · M1 草案）取代**；元数据目标态改 PostgreSQL，勿再按 §9 实现。
 ---
 
 ## 0. 现网对照摘要（扫仓结论）

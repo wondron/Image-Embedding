@@ -1,25 +1,38 @@
-"""Index-image use case (SSOT §3.1).
+"""Index-image use case (PG v0.1).
 
-Flow: decode → embed(+dim check) → MySQL insert → Qdrant upsert(point_id=id).
-On Qdrant failure: mark MySQL row deleted (best-effort rollback).
+Flow: bytes → sha256/uuid → S3 original+thumb (if storage wired) → insert images
+→ recompute image_scenes (write-time materialize) → embed → Qdrant upsert with
+payload {category_id, scenes, food_state, label_status}.
+Ledger image_embeddings.synced_version via EmbeddingLedgerVectorStore (M2).
+
+Path-based local disk store is legacy MVP; when storage is present we prefer
+put_original_and_thumb and DB https URLs (no path column in PG).
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 from pathlib import Path
 from typing import Any, Optional, Sequence
+from uuid import UUID
 
+from app.domain.retrieval.image_ids import uuid_from_sha256
 from app.domain.retrieval import errors as err
 from app.domain.retrieval.embedding_validate import validate_embedding
-from app.domain.retrieval.ports import EmbeddingPort, MetadataStorePort, VectorStorePort
+from app.domain.retrieval.ports import (
+    EmbeddingPort,
+    MetadataStorePort,
+    ObjectStoragePort,
+    VectorStorePort,
+)
+from app.domain.retrieval.scene_membership import build_qdrant_payload
 from app.domain.retrieval.scenes import resolve_index_scenes
+from app.domain.retrieval.storage_keys import guess_ext_from_bytes_header
+from app.domain.retrieval.storage_upload import put_original_and_thumb
 
 logger = logging.getLogger("retrieval.index")
-
-# Align with SSOT D4 / UNIQUE(path(768))
-PATH_MAX_FOR_UNIQUE = 768
 
 
 def _decode_size(image_bytes: bytes) -> tuple[int | None, int | None]:
@@ -47,11 +60,6 @@ def _decode_size(image_bytes: bytes) -> tuple[int | None, int | None]:
 
 
 def _read_image_file(path: str) -> bytes:
-    """Unicode-safe file read for Windows 中文路径.
-
-    Do NOT use cv2.imread(path) — it breaks on non-ASCII paths.
-    Prefer Path.read_bytes(); fallback np.fromfile (算法烟测同款).
-    """
     p = Path(path)
     try:
         return p.read_bytes()
@@ -61,24 +69,6 @@ def _read_image_file(path: str) -> bytes:
         return np.fromfile(path, dtype=np.uint8).tobytes()
 
 
-def _normalize_path(path: str) -> str:
-    """Normalize path for storage + D4 length check (full path uniqueness)."""
-    return str(Path(path).expanduser())
-
-
-def _reject_if_path_too_long(path: str) -> str:
-    normalized = _normalize_path(path)
-    if len(normalized) > PATH_MAX_FOR_UNIQUE:
-        raise err.index_path_too_long(
-            f"path length {len(normalized)} > {PATH_MAX_FOR_UNIQUE} after normalize"
-        )
-    return normalized
-
-
-def _title_from_path(path: str) -> str:
-    return Path(path).name or path
-
-
 class IndexImageUseCase:
     def __init__(
         self,
@@ -86,11 +76,13 @@ class IndexImageUseCase:
         vectors: VectorStorePort,
         metadata: MetadataStorePort,
         *,
+        storage: ObjectStoragePort | None = None,
         indexed_dir: str = "save_images/indexed",
     ) -> None:
         self._embedding = embedding
         self._vectors = vectors
         self._metadata = metadata
+        self._storage = storage
         self._indexed_dir = indexed_dir
 
     def execute_one(
@@ -100,19 +92,24 @@ class IndexImageUseCase:
         source_path: str | None = None,
         filename: str | None = None,
         category: str | None = None,
+        category_id: int | None = None,
         tags: list[Any] | None = None,
         scene: str | None = None,
         scenes: Sequence[Any] | None = None,
+        food_state: str | None = None,
+        label_status: str | None = None,
+        source_type: str | None = None,
+        license: str | None = None,
         public_file_base: str | None = None,
     ) -> dict[str, Any]:
-        """Index a single image. Raises RetrievalError on hard failure."""
-        path_mode = bool(source_path and not image_bytes)
+        del tags, public_file_base
+        # Validate optional client scene hints (membership still recomputed from rules)
+        _ = resolve_index_scenes(scene=scene, scenes=scenes)
+
         if image_bytes is None and not source_path:
             raise err.index_empty_request()
 
-        resolved_scenes = resolve_index_scenes(scene=scene, scenes=scenes)
-
-        if path_mode:
+        if image_bytes is None:
             p = Path(source_path)
             if not p.is_file():
                 raise err.index_bad_image(f"path not found: {source_path}")
@@ -120,18 +117,80 @@ class IndexImageUseCase:
                 image_bytes = _read_image_file(str(p))
             except OSError as exc:
                 raise err.index_bad_image(f"cannot read path: {exc}") from exc
-            store_path = _reject_if_path_too_long(str(p.resolve() if p.exists() else p))
-            title = _title_from_path(store_path)
+            title = p.name
         else:
-            assert image_bytes is not None
             title = filename or "upload.bin"
-            # Persist under indexed_dir using a temp name; finalize after MySQL id.
-            os.makedirs(self._indexed_dir, exist_ok=True)
-            store_path = ""  # filled after id
 
         width, height = _decode_size(image_bytes)
         if width is None or height is None:
             raise err.index_bad_image("cannot decode image")
+
+        sha = hashlib.sha256(image_bytes).digest()
+        image_id: UUID = uuid_from_sha256(sha)
+        ext = guess_ext_from_bytes_header(image_bytes)
+
+        # Resolve category_id: prefer explicit; optional code lookup on metadata
+        resolved_category_id = category_id
+        if resolved_category_id is None and category:
+            lookup = getattr(self._metadata, "get_category_id_by_code", None)
+            if callable(lookup):
+                resolved_category_id = lookup(str(category).strip())
+
+        label = (label_status or ("auto" if resolved_category_id else "unlabeled")).strip()
+        if label == "unlabeled" and resolved_category_id is not None:
+            raise err.validation_error(
+                "label_status=unlabeled requires category_id IS NULL"
+            )
+        if label != "unlabeled" and resolved_category_id is None and category:
+            # code unknown — leave unlabeled rather than invent
+            label = "unlabeled"
+
+        original_url: str
+        thumb_url: str
+        if self._storage is not None:
+            urls = put_original_and_thumb(
+                self._storage, image_id, image_bytes, ext=ext
+            )
+            original_url = urls["original_url"]
+            thumb_url = urls["thumb_url"]
+        else:
+            # TODO(M5+): require ObjectStoragePort in production; stub https for dry-run
+            base = "https://cdn.example.local/image-embedding"
+            original_url = f"{base}/original/{image_id}.{ext}"
+            thumb_url = f"{base}/thumb/{image_id}.webp"
+            logger.warning(
+                "index without ObjectStoragePort; stub URLs id=%s (wire storage in stack)",
+                image_id,
+            )
+            # Best-effort local mirror for debug
+            try:
+                os.makedirs(self._indexed_dir, exist_ok=True)
+                Path(self._indexed_dir, f"{image_id}.{ext}").write_bytes(image_bytes)
+            except OSError:
+                pass
+
+        row = {
+            "id": image_id,
+            "sha256": sha,
+            "original_url": original_url,
+            "thumb_url": thumb_url,
+            "width": width,
+            "height": height,
+            "source_type": source_type or "user_upload",
+            "license": license or "unknown",
+            "category_id": resolved_category_id,
+            "food_state": food_state,
+            "label_status": label,
+        }
+        inserted_id = self._metadata.insert_image(row)
+        image_id = inserted_id if isinstance(inserted_id, UUID) else UUID(str(inserted_id))
+
+        # Write-time materialize effective scenes → image_scenes + payload_version
+        recompute = getattr(self._metadata, "recompute_image_scenes", None)
+        if not callable(recompute):
+            raise err.index_mysql_failed("metadata lacks recompute_image_scenes (M5)")
+        membership = recompute(image_id, bump_version=False)
+        scene_codes = list(membership.get("scene_codes") or [])
 
         try:
             vector = self._embedding.embed_bytes(image_bytes)
@@ -141,58 +200,15 @@ class IndexImageUseCase:
             raise err.index_bad_image(f"embed failed: {exc}") from exc
         vector = validate_embedding(vector, for_search=False)
 
-        # For multipart: provisional unique path; rewritten after id if needed
-        if not path_mode:
-            safe_name = Path(title).name.replace("\x00", "")
-            # unique-ish pre-id path to satisfy UNIQUE(path) until we know id
-            import uuid as _uuid
-
-            provisional = os.path.join(
-                self._indexed_dir, f"pending_{_uuid.uuid4().hex}_{safe_name}"
-            )
-            Path(provisional).write_bytes(image_bytes)
-            store_path = _reject_if_path_too_long(provisional)
-
-        row = {
-            "path": store_path,
-            "url": None,
-            "title": title,
-            "category": category,
-            "tags": tags,
-            "scenes": resolved_scenes,
-            "width": width,
-            "height": height,
-            "status": "active",
-        }
-        image_id = self._metadata.insert_image(row)
-
-        # Finalize path for uploads: indexed/{id}_{filename}
-        if not path_mode:
-            ext = Path(title).suffix or ".bin"
-            final_path = os.path.join(self._indexed_dir, f"{image_id}{ext}")
-            try:
-                os.replace(store_path, final_path)
-                store_path = _reject_if_path_too_long(final_path)
-                self._metadata.update_image(image_id, {"path": store_path})
-            except OSError as exc:
-                logger.warning("rename indexed file failed id=%s: %s", image_id, exc)
-
-        url = None
-        if public_file_base:
-            url = f"{public_file_base.rstrip('/')}/api/images/file?id={image_id}"
-            try:
-                self._metadata.update_image(image_id, {"url": url})
-            except Exception:
-                logger.warning("failed to persist url for id=%s", image_id)
-
+        payload = build_qdrant_payload(
+            category_id=resolved_category_id,
+            scene_codes=scene_codes,
+            food_state=food_state,
+            label_status=label,
+        )
         try:
-            self._vectors.upsert(
-                image_id,
-                vector,
-                payload={"image_id": image_id},  # optional redundancy only
-            )
+            self._vectors.upsert(image_id, vector, payload)
         except err.RetrievalError:
-            # Best-effort rollback: soft-delete MySQL row
             try:
                 self._metadata.mark_deleted(image_id)
             except Exception:
@@ -207,17 +223,23 @@ class IndexImageUseCase:
 
         created = self._metadata.get_by_id(image_id) or {}
         return {
-            "id": image_id,
-            "qdrant_point_id": image_id,
-            "path": created.get("path") or store_path,
-            "url": created.get("url") or url,
-            "title": created.get("title") or title,
-            "category": created.get("category") or category,
-            "tags": created.get("tags") if created.get("tags") is not None else tags,
-            "scenes": created.get("scenes") if created.get("scenes") is not None else resolved_scenes,
+            "id": str(image_id),
+            "qdrant_point_id": str(image_id),
+            "original_url": created.get("original_url") or original_url,
+            "thumb_url": created.get("thumb_url") or thumb_url,
+            "title": title,
+            "category_id": created.get("category_id")
+            if created.get("category_id") is not None
+            else resolved_category_id,
+            "scenes": created.get("scenes") or scene_codes,
+            "food_state": created.get("food_state")
+            if "food_state" in created
+            else food_state,
+            "label_status": created.get("label_status") or label,
             "width": created.get("width") or width,
             "height": created.get("height") or height,
-            "status": created.get("status") or "active",
+            "payload_version": created.get("payload_version")
+            or membership.get("payload_version"),
             "created_at": created.get("created_at"),
         }
 
@@ -227,7 +249,6 @@ class IndexImageUseCase:
         *,
         public_file_base: str | None = None,
     ) -> dict[str, Any]:
-        """Process many items; partial success → 200 + failed[]."""
         if not items:
             raise err.index_empty_request()
         indexed: list[dict[str, Any]] = []
@@ -241,9 +262,14 @@ class IndexImageUseCase:
                         source_path=item.get("source_path"),
                         filename=item.get("filename"),
                         category=item.get("category"),
+                        category_id=item.get("category_id"),
                         tags=item.get("tags"),
                         scene=item.get("scene"),
                         scenes=item.get("scenes"),
+                        food_state=item.get("food_state"),
+                        label_status=item.get("label_status"),
+                        source_type=item.get("source_type"),
+                        license=item.get("license"),
                         public_file_base=public_file_base,
                     )
                 )
@@ -264,6 +290,5 @@ class IndexImageUseCase:
                     }
                 )
         if not indexed and failed:
-            # Entire batch failed → all_failed so HTTP can promote codes (D4-3 PATH_TOO_LONG etc.)
             return {"ok": False, "indexed": [], "failed": failed, "all_failed": True}
         return {"ok": True, "indexed": indexed, "failed": failed, "all_failed": False}
