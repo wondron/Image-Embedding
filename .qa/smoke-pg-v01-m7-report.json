@@ -1,0 +1,219 @@
+{
+  "suite": "pg-v01-m7",
+  "title": "图搜图 PG v0.1 M7 整线综合验收",
+  "timestamp": "2026-11-05T14:51:22+08:00",
+  "timezone": "Asia/Shanghai",
+  "verdict": "PASS_WITH_ENV_BLOCKER",
+  "git_head": "097618b4146f5523cf50b1cf981ea1dbdedb3a59",
+  "git_head_short": "097618b",
+  "git_note": "HEAD 097618b matches expected (~097618b); main ahead 4 of origin; worktree clean for product code (only untracked .qa helpers / root _d3/_d6 scripts). QA did NOT commit.",
+  "machine": {
+    "id": "fada9197-1d47-44f2-8e45-fdb157d8e181",
+    "label": "wondron"
+  },
+  "hard_conditions": {
+    "empty_db_rebuild_path": "PASS_STATIC_LIVE_SKIP",
+    "no_mysql_to_pg_migration_script": "PASS",
+    "retrieval_no_live_flyb": "PASS",
+    "prior_slices_green": "PASS_WITH_REVERIFY",
+    "no_old_path_regression": "PASS"
+  },
+  "items": [
+    {
+      "id": "A1",
+      "name": "Alembic initial migration present (PG v0.1 12 tables)",
+      "result": "PASS",
+      "detail": "backend/alembic/versions/20261104_0001_pg_v01_initial_12_tables.py parses; revision 20261104_0001 down_revision=None; CREATE TABLE x12 (heating_groups,categories,category_names,images,image_deletions,scenes,scene_labels,scene_rules,image_scenes,embedding_models,image_embeddings,external_candidates); sha256[:16] bind-param trap absent.",
+      "evidence": [
+        "backend/alembic/versions/20261104_0001_pg_v01_initial_12_tables.py",
+        "alembic history: <base> -> 20261104_0001 (head)"
+      ]
+    },
+    {
+      "id": "A2",
+      "name": "Compose PG empty-rebuild path documented/configured",
+      "result": "PASS",
+      "detail": "backend/docker-compose.yml defines postgres:16 service roki-imageembedding-postgres with POSTGRES_* + DATABASE_URL for api; comment states 空库重建，无 MySQL. volumes postgres_data.",
+      "evidence": [
+        "backend/docker-compose.yml"
+      ]
+    },
+    {
+      "id": "A3",
+      "name": "No MySQL→PG data migration script as delivery path",
+      "result": "PASS",
+      "detail": "Repo hunt found only OUT OF SCOPE declarations in docs (image-search-pg-v01-data-contract.md A3/§7; frontend acceptance M6). No migrate_mysql / mysql2pg tool as formal path.",
+      "evidence": [
+        "docs/image-search-pg-v01-data-contract.md:18,435"
+      ]
+    },
+    {
+      "id": "A4",
+      "name": "alembic upgrade head (live empty DB)",
+      "result": "SKIP",
+      "detail": "Docker Desktop engine unreachable this turn (npipe dockerDesktopLinuxEngine missing); tcp 127.0.0.1:5432 closed. Offline SQL render via alembic.EXE upgrade head --sql succeeded (CREATE EXTENSION ltree + CREATE TABLE…). Prior M2 retest CLEARED live upgrade on dirty 0e1a5ee. Not re-run live.",
+      "evidence": [
+        "blocker:docker_daemon_down",
+        ".qa/smoke-pg-v01-m2-retest-report.json prior CLEARED",
+        "alembic offline SQL OK"
+      ]
+    },
+    {
+      "id": "B1",
+      "name": "Retrieval path no live import flybSearch",
+      "result": "PASS",
+      "detail": "AST over application/, endpoints/services retrieval, retrieval_stack, domain/retrieval, worker, flyb_fallback, qdrant_store, pg_metadata: 0 flybSearch/FlyBSearch live imports. flyb_fallback is no-op stub (wired=False). Predict island retains domain.common.flybSearch (out of retrieval).",
+      "evidence": [
+        "AST scan 2026-11-05",
+        "backend/app/adapter/persistence/flyb_fallback.py"
+      ]
+    },
+    {
+      "id": "B2",
+      "name": "Self-built empty → source=empty (no FlyB fallback)",
+      "result": "PASS",
+      "detail": "application/retrieval/search_image.py returns source=\"empty\" with _empty_envelope when self-built join empty; log says FlyB skipped A4. Live HTTP empty-search against DB SKIPPED (PG down).",
+      "evidence": [
+        "backend/app/application/retrieval/search_image.py:211-225"
+      ]
+    },
+    {
+      "id": "C1",
+      "name": "Prior slice M2–M5 cross-check",
+      "result": "PASS",
+      "detail": "smoke-pg-v01-m2-m5-report.json: M3/M4/M5 PASS, M2 FAIL(alembic :16) on head 0e1a5ee; smoke-pg-v01-m2-retest-report.json verdict PASS M2 CLEARED same head. Current HEAD 097618b is descendant (faa1efc M2–M5 commit in ancestry). Live docker re-smoke blocked; static contract paths still present.",
+      "evidence": [
+        ".qa/smoke-pg-v01-m2-m5-report.json",
+        ".qa/smoke-pg-v01-m2-retest-report.json",
+        "git log: faa1efc"
+      ]
+    },
+    {
+      "id": "C2",
+      "name": "Prior slice DDD D1–D6 cross-check + re-verify",
+      "result": "PASS",
+      "detail": "d1-d2 overall PASS (head faa1efc dirty); d3-d6 verdict PASS (git_head 53ab689 dirty then). Now committed: 53ab689 D1+D2, e8a7d4d D3–D6 under 097618b. This turn re-verified: forbidden imports 0; shim deleted; workers import build_retrieval_stack only; create_app ok 21.",
+      "evidence": [
+        ".qa/smoke-ddd-d1-d2-report.json",
+        ".qa/smoke-ddd-d3-d6-report.json",
+        "AST+create_app this turn"
+      ]
+    },
+    {
+      "id": "C3",
+      "name": "Prior slice FE M6 cross-check + tsc",
+      "result": "PASS",
+      "detail": "smoke-fe-pg-v01-m6-report.json verdict PASS (git_head e8a7d4d, then M6 FE uncommitted; now HEAD 097618b commit message M6 FE). Re-ran npx tsc --noEmit exit 0 on current tree.",
+      "evidence": [
+        ".qa/smoke-fe-pg-v01-m6-report.json",
+        "tsc exit 0"
+      ]
+    },
+    {
+      "id": "D1",
+      "name": "No regression: mysql_metadata",
+      "result": "PASS",
+      "detail": "File absent; Select-String/AST live-import hits 0 across backend/app.",
+      "evidence": [
+        "Test-Path False",
+        "AST forbid_hits=0"
+      ]
+    },
+    {
+      "id": "D2",
+      "name": "No regression: domain.common.qdrant_store shim",
+      "result": "PASS",
+      "detail": "File absent; formal path app.adapter.persistence.qdrant_store exists. Only historical docstring mention in adapter module.",
+      "evidence": [
+        "Test-Path domain/common/qdrant_store.py False"
+      ]
+    },
+    {
+      "id": "D3",
+      "name": "No regression: app.usecase / usecases package",
+      "result": "PASS",
+      "detail": "Packages absent; AST live imports of app.usecase/app.usecases = 0. application/ layer present.",
+      "evidence": [
+        "AST forbid_hits=0"
+      ]
+    },
+    {
+      "id": "E1",
+      "name": "create_app smoke",
+      "result": "PASS",
+      "detail": "cd backend && PYTHONPATH=. onnxgpu python -c create_app → ok 21",
+      "evidence": [
+        "ok 21"
+      ]
+    },
+    {
+      "id": "E2",
+      "name": "compose ps / healthz",
+      "result": "SKIP",
+      "detail": "Docker daemon not running; cannot compose ps or hit container healthz.",
+      "evidence": [
+        "docker API npipe missing"
+      ]
+    },
+    {
+      "id": "E3",
+      "name": "predict↔retrieval no live cross-import",
+      "result": "PASS",
+      "detail": "AST bidirectional scan count 0 (D6 island still holds).",
+      "evidence": [
+        "AST cross=0"
+      ]
+    }
+  ],
+  "prior_slices": [
+    {
+      "name": "M2-M5",
+      "report": ".qa/smoke-pg-v01-m2-m5-report.json",
+      "verdict": "FAIL (M2 only; M3-M5 PASS)",
+      "git_head": "0e1a5ee4d094a49d3e55b5f0a05ce73ca7c59f5a",
+      "note": "Superseded for M2 by retest"
+    },
+    {
+      "name": "M2-retest",
+      "report": ".qa/smoke-pg-v01-m2-retest-report.json",
+      "verdict": "PASS",
+      "git_head": "0e1a5ee4d094a49d3e55b5f0a05ce73ca7c59f5a"
+    },
+    {
+      "name": "DDD-D1-D2",
+      "report": ".qa/smoke-ddd-d1-d2-report.json",
+      "verdict": "PASS",
+      "git_head": "faa1efcfbc49e604932b58f25b8550a7c96f3e85"
+    },
+    {
+      "name": "DDD-D3-D6",
+      "report": ".qa/smoke-ddd-d3-d6-report.json",
+      "verdict": "PASS",
+      "git_head": "53ab6897bb71e40888af9468fc056f2b561a4d02"
+    },
+    {
+      "name": "FE-M6",
+      "report": ".qa/smoke-fe-pg-v01-m6-report.json",
+      "verdict": "PASS",
+      "git_head": "e8a7d4d6979b291e712671166761a7fcd95db363"
+    }
+  ],
+  "blockers": [
+    {
+      "id": "ENV-DOCKER",
+      "severity": "blocker",
+      "detail": "Docker Desktop Linux engine not running on wondron; PG :5432 closed; live alembic upgrade / compose ps / DB-backed empty search not re-executed this turn."
+    }
+  ],
+  "smoke": {
+    "create_app": "ok 21",
+    "tsc": "exit 0",
+    "alembic_offline_sql": "PASS",
+    "docker_ps": "UNAVAILABLE"
+  },
+  "notes": [
+    "No dedicated M7 acceptance markdown found; judged against boboji hard conditions + contract docs A2/A3/A4.",
+    "Prior .qa reports predate HEAD 097618b; critical static subsets re-verified on current tree.",
+    "Did not commit or push."
+  ]
+}
