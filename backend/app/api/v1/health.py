@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from app.api.services.health import dependency_stubs, model_paths, readiness_info
 from app.bootstrap.state import get_application_state
+from app.core import errors
+from app.core.errors import AppError
 
 logger = logging.getLogger("svc.health")
 router = APIRouter(prefix="/api", tags=["health"])
@@ -40,13 +42,13 @@ def readyz(request: Request) -> dict[str, Any]:
         try:
             service = runtime.require_food_service()
         except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=f"not ready: {exc}") from exc
+            raise errors.not_ready(f"not ready: {exc}") from exc
         return readiness_info(runtime, service)
-    except HTTPException:
+    except AppError:
         raise
     except Exception as exc:
         logger.exception("readyz failed: %s", exc)
-        raise HTTPException(status_code=503, detail=f"not ready: {exc}") from exc
+        raise errors.not_ready(f"not ready: {exc}") from exc
 
 
 @router.get("/version")

@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.v1 import predict
+from app.core.exceptions import register_exception_handlers
 
 
 class PredictEndpointTests(unittest.TestCase):
@@ -27,6 +28,7 @@ class PredictEndpointTests(unittest.TestCase):
         self.service = self.runtime.require_food_service.return_value
         self.service.detect.return_value = []
         app = FastAPI()
+        register_exception_handlers(app)
         app.include_router(predict.router)
         self.app = app
         self.client = TestClient(app)

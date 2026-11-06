@@ -25,9 +25,6 @@ class EmbeddingPort(Protocol):
     def embed_bytes(self, image_bytes: bytes) -> list[float]:
         ...
 
-    def embed_url(self, image_url: str) -> list[float]:
-        ...
-
 
 class VectorStorePort(ABC):
     """Qdrant read/write. Point ids are uuid (== images.id)."""

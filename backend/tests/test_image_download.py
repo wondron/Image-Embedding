@@ -5,12 +5,14 @@ import unittest
 from io import BytesIO
 from unittest.mock import Mock, patch
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from PIL import Image
 
 from app.api.v1 import image_download as endpoint
-from app.api.services import image_download as downloads
+from app.core.exceptions import register_exception_handlers
+from app.clients import public_image as downloads
+from app.core.errors import AppError
 
 
 def address_record(address="93.184.216.34"):
@@ -65,7 +67,7 @@ class ImageDownloadTests(unittest.TestCase):
         self.addCleanup(resolver.stop)
 
     def assert_http_error(self, status, function, *args):
-        with self.assertRaises(HTTPException) as caught:
+        with self.assertRaises(AppError) as caught:
             function(*args)
         self.assertEqual(caught.exception.status_code, status)
         return caught.exception
@@ -278,6 +280,7 @@ class ImageDownloadTests(unittest.TestCase):
 
     def test_route_returns_image_headers_and_validates_query_without_models(self):
         app = FastAPI()
+        register_exception_handlers(app)
         app.include_router(endpoint.router)
         with TestClient(app) as client, patch.object(downloads, "fetch_image", return_value=(self.png, "image/png")) as fetch:
             response = client.get("/api/images/download", params={"url": "https://images.example/photo.png"})

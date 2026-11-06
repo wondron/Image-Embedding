@@ -65,14 +65,13 @@ def list_library_images(
     category: Optional[str] = Query(None, description="optional category code, name or id"),
     trace_id: Optional[str] = Query(None),
 ) -> JSONResponse:
-    runtime = get_application_state(request)
     return retrieval_service.run_list_images(
-        runtime,
+        get_application_state(request),
+        request,
         scene=scene,
         page=page,
         page_size=page_size,
         q=q,
         category=category,
-        public_file_base=retrieval_service.public_base(request),
         trace_id=trace_id,
     )

@@ -72,12 +72,6 @@ class SearchJsonRequest(BaseModel):
     trace_id: Optional[str] = None
 
 
-class ErrorBody(BaseModel):
-    ok: bool = False
-    error: str
-    detail: str
-    trace_id: Optional[str] = None
-
 
 class SearchHitOut(BaseModel):
     """Search hit (§6.1.1). Forbidden: image_url/thumbnail_url/title/FlyB shell."""

@@ -1,19 +1,15 @@
-"""Retrieval domain errors mapped to contract 搂4.2 codes."""
+"""Retrieval domain errors mapped to contract §4.2 codes."""
 
 from __future__ import annotations
 
-
-class RetrievalError(Exception):
-    """Business/infra error with HTTP status + wire error code."""
-
-    def __init__(self, code: str, detail: str, *, http_status: int = 500) -> None:
-        super().__init__(detail)
-        self.code = code
-        self.detail = detail
-        self.http_status = http_status
+from app.core.errors import AppError
 
 
-# Convenience constructors matching 搂4.2
+class RetrievalError(AppError):
+    """Retrieval error codes (contract §4.2); rendered like any AppError."""
+
+
+# Convenience constructors matching §4.2
 def index_empty_request(detail: str = "no file and no path") -> RetrievalError:
     return RetrievalError("INDEX_EMPTY_REQUEST", detail, http_status=400)
 

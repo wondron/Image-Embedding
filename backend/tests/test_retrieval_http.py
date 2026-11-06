@@ -3,12 +3,13 @@
 import asyncio
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.v1 import retrieval as routes
+from app.core.exceptions import register_exception_handlers
 from app.bootstrap.state import ApplicationState
 from app.services.retrieval.active_model import ActiveModel
 
@@ -27,7 +28,7 @@ class RetrievalHttpTests(unittest.TestCase):
     def setUp(self):
         self.calls = {}
 
-        def execute_batch(items, public_file_base=None):
+        def execute_batch(items):
             self.calls["index"] = {"items": items, "off_loop": _off_event_loop()}
             return {"indexed": [{"id": "abc"}], "failed": []}
 
@@ -53,16 +54,22 @@ class RetrievalHttpTests(unittest.TestCase):
             config_info={},
             http_client=Mock(),
             settings=SimpleNamespace(
-                predict=SimpleNamespace(max_image_bytes=1024 * 1024),
+                predict=SimpleNamespace(max_image_bytes=1024 * 1024, http_timeout=5.0),
                 qdrant=SimpleNamespace(collection=""),
             ),
             retrieval=self.stack,
         )
         app = FastAPI()
+        register_exception_handlers(app)
         app.include_router(routes.router)
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
         p = patch.object(routes, "get_application_state", return_value=self.runtime)
+        p.start()
+        self.addCleanup(p.stop)
+        # img_url inputs are downloaded by the HTTP layer (bounded fetcher), not the use case
+        self.fetch = AsyncMock(return_value=b"downloaded")
+        p = patch("app.api.services.retrieval.read_url_bytes", self.fetch)
         p.start()
         self.addCleanup(p.stop)
 
@@ -89,8 +96,20 @@ class RetrievalHttpTests(unittest.TestCase):
         response = self.client.post("/api/search?top_k=5", json={"img_url": "https://x/a.jpg", "scene": "oven"})
         self.assertEqual(response.status_code, 200, response.text)
         call = self.calls["search"]
-        self.assertEqual((call["image_url"], call["scene"], call["top_k"]), ("https://x/a.jpg", "oven", 5))
+        self.assertEqual((call["image_bytes"], call["scene"], call["top_k"]), (b"downloaded", "oven", 5))
+        self.assertEqual(self.fetch.await_args.args[0], "https://x/a.jpg")
+        self.assertEqual(self.fetch.await_args.kwargs["max_image_bytes"], 1024 * 1024)
         self.assertTrue(call["off_loop"])
+
+    def test_search_trace_id_from_body_is_used_everywhere(self):
+        response = self.client.post("/api/search", json={"img_url": "https://x/a.jpg", "trace_id": "t-42"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.calls["search"]["trace_id"], "t-42")
+
+    def test_bad_score_threshold_literal_has_its_own_code(self):
+        response = self.client.post("/api/search", data={"img_url": "https://x/a.jpg", "score_threshold": "high"})
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"], "SEARCH_BAD_SCORE_THRESHOLD")
 
     def test_search_rejects_bad_top_k_and_missing_image(self):
         self.assertEqual(self.client.post("/api/search?top_k=99", json={"img_url": "https://x"}).status_code, 422)
@@ -104,7 +123,8 @@ class RetrievalHttpTests(unittest.TestCase):
         self.runtime.retrieval_error = "NOT_READY: no current model"
         response = self.client.post("/api/index", files=[("file", ("a.png", b"a", "image/png"))])
         self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json()["detail"]["error"], "NOT_READY")
+        body = response.json()
+        self.assertEqual((body["error"], body["detail"]), ("NOT_READY", "NOT_READY: no current model"))
 
     def test_health_reports_the_active_model(self):
         response = self.client.get("/api/health")

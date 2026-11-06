@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.v1 import tools
+from app.core.exceptions import register_exception_handlers
 
 
 class ToolsEndpointTests(unittest.TestCase):
@@ -15,9 +16,10 @@ class ToolsEndpointTests(unittest.TestCase):
         self.service = self.runtime.require_food_service.return_value
         self.vector = Mock(ndim=1, shape=(3,))
         self.vector.tolist.return_value = [0.1, 0.2, 0.3]
-        self.service.embedding.detect.return_value = self.vector
+        self.service.embeddingTool.detect.return_value = self.vector
 
         app = FastAPI()
+        register_exception_handlers(app)
         app.include_router(tools.router)
         self.client = TestClient(app)
         state_patch = patch.object(tools, "get_application_state", return_value=self.runtime)
@@ -41,7 +43,7 @@ class ToolsEndpointTests(unittest.TestCase):
         self.assertEqual(result["embedding_dim"], 3)
         self.assertEqual(result["embedding"], [0.1, 0.2, 0.3])
         self.assertGreaterEqual(result["latency_ms"], 0)
-        self.service.embedding.detect.assert_called_once_with(b"12345678")
+        self.service.embeddingTool.detect.assert_called_once_with(b"12345678")
 
     def test_tools_reject_unsupported_content_type_before_model_access(self):
         for tool in ("embedding", "segment"):
@@ -76,25 +78,25 @@ class ToolsEndpointTests(unittest.TestCase):
                 self.assertEqual(response.json()["detail"], "service unavailable: models are loading")
 
     def test_embedding_reports_missing_model(self):
-        self.service.embedding = None
+        self.service.embeddingTool = None
         response = self.upload()
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()["detail"], "embedding model is not initialized")
 
     def test_embedding_rejects_invalid_vector_shape(self):
-        self.service.embedding.detect.return_value = Mock(ndim=2, shape=(1, 3))
+        self.service.embeddingTool.detect.return_value = Mock(ndim=2, shape=(1, 3))
         response = self.upload()
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["detail"], "embedding model returned an invalid shape: (1, 3)")
 
     def test_embedding_preserves_model_value_error(self):
-        self.service.embedding.detect.side_effect = ValueError("invalid image bytes")
+        self.service.embeddingTool.detect.side_effect = ValueError("invalid image bytes")
         response = self.upload()
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["detail"], "invalid image bytes")
 
     def test_embedding_reports_unexpected_model_failure(self):
-        self.service.embedding.detect.side_effect = RuntimeError("inference failed")
+        self.service.embeddingTool.detect.side_effect = RuntimeError("inference failed")
         with self.assertLogs("svc.tools", level="ERROR"):
             response = self.upload()
         self.assertEqual(response.status_code, 500)

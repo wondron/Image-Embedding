@@ -105,9 +105,8 @@ class IndexImageUseCase:
         label_status: str | None = None,
         source_type: str | None = None,
         license: str | None = None,
-        public_file_base: str | None = None,
     ) -> dict[str, Any]:
-        del tags, public_file_base
+        del tags
         # Validate optional client scene hints (membership still recomputed from rules)
         _ = resolve_index_scenes(scene=scene, scenes=scenes)
 
@@ -279,8 +278,6 @@ class IndexImageUseCase:
     def execute_batch(
         self,
         items: list[dict[str, Any]],
-        *,
-        public_file_base: str | None = None,
     ) -> dict[str, Any]:
         if not items:
             raise err.index_empty_request()
@@ -303,7 +300,6 @@ class IndexImageUseCase:
                         label_status=item.get("label_status"),
                         source_type=item.get("source_type"),
                         license=item.get("license"),
-                        public_file_base=public_file_base,
                     )
                 )
             except err.RetrievalError as exc:

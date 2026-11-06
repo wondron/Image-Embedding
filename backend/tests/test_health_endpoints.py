@@ -7,28 +7,29 @@ from fastapi.testclient import TestClient
 
 from app.api.v1 import health
 from app.bootstrap.state import ApplicationState
+from app.core.exceptions import register_exception_handlers
+
+NOT_WIRED_DEPS = {
+    "qdrant": {"status": "not_wired", "detail": "not initialized"},
+    "postgres": {"status": "not_wired", "detail": "not initialized"},
+}
 
 
 class HealthEndpointTests(unittest.TestCase):
     def setUp(self):
-        self.service = SimpleNamespace(
-            segmentor=SimpleNamespace(sess=Mock()),
-            clip=SimpleNamespace(sess=Mock()),
-        )
-        self.service.segmentor.sess.get_providers.return_value = [
+        self.service = SimpleNamespace(embeddingTool=SimpleNamespace(sess=Mock()))
+        self.service.embeddingTool.sess.get_providers.return_value = [
             "CUDAExecutionProvider", "CPUExecutionProvider"
         ]
-        self.service.clip.sess.get_providers.return_value = ["CPUExecutionProvider"]
         self.runtime = ApplicationState(
-            config={
-                "SEGMENT_CONFIG": {"model_path": "segment.onnx"}
-            },
+            config={"EMBEDDING_CONFIG": {"model_path": "embedding.onnx"}},
             config_info={"source": "test"},
             http_client=Mock(),
             settings=SimpleNamespace(application=SimpleNamespace(env="test")),
             food_service=self.service,
         )
         app = FastAPI()
+        register_exception_handlers(app)
         app.include_router(health.router)
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
@@ -44,6 +45,12 @@ class HealthEndpointTests(unittest.TestCase):
         info_patch.start()
         self.addCleanup(info_patch.stop)
 
+    def assert_not_ready(self, response, detail):
+        self.assertEqual(response.status_code, 503)
+        body = response.json()
+        self.assertEqual((body["ok"], body["error"], body["detail"]), (False, "NOT_READY", detail))
+        self.assertEqual(body["trace_id"], response.headers["x-trace-id"])
+
     def test_ready_service_reports_models_providers_and_runtime(self):
         response = self.client.get("/api/readyz")
 
@@ -51,18 +58,13 @@ class HealthEndpointTests(unittest.TestCase):
         self.assertEqual(response.json(), {
             "ok": True,
             "components": {
-                "segmentor": {
+                "embedding": {
                     "ok": True,
                     "providers": ["CUDAExecutionProvider", "CPUExecutionProvider"],
-                    "model_path": "segment.onnx",
-                },
-                "clip": {
-                    "ok": True,
-                    "providers": ["CPUExecutionProvider"],
-                    "model_path": "clip.onnx",
-                    "text_model_path": "clip-text.onnx",
+                    "model_path": "embedding.onnx",
                 },
             },
+            "deps": NOT_WIRED_DEPS,
             "warmup_error": None,
             **self.info,
         })
@@ -73,25 +75,14 @@ class HealthEndpointTests(unittest.TestCase):
 
         response = self.client.get("/api/readyz")
 
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json(), {
-            "detail": "not ready: controlled initialization failure"
-        })
+        self.assert_not_ready(response, "not ready: controlled initialization failure")
 
     def test_missing_model_components_are_not_ready(self):
-        for component in ("segmentor", "clip"):
-            with self.subTest(component=component):
-                original = getattr(self.service, component)
-                setattr(self.service, component, None)
-                try:
-                    response = self.client.get("/api/readyz")
-                finally:
-                    setattr(self.service, component, original)
+        self.service.embeddingTool = None
 
-                self.assertEqual(response.status_code, 503)
-                self.assertEqual(response.json(), {
-                    "detail": "model components are not ready"
-                })
+        response = self.client.get("/api/readyz")
+
+        self.assert_not_ready(response, "model components are not ready")
 
     def test_runtime_readiness_failures_preserve_error_precedence(self):
         for initialization_error, warmup_error, stopping, detail in (
@@ -106,21 +97,17 @@ class HealthEndpointTests(unittest.TestCase):
 
                 response = self.client.get("/api/readyz")
 
-                self.assertEqual(response.status_code, 503)
-                self.assertEqual(response.json(), {"detail": detail})
+                self.assert_not_ready(response, detail)
 
     def test_optional_provider_diagnostics_do_not_block_readiness(self):
-        self.service.segmentor.sess.get_providers.side_effect = RuntimeError(
+        self.service.embeddingTool.sess.get_providers.side_effect = RuntimeError(
             "provider inspection failed"
         )
-        self.service.clip.sess.get_providers.return_value = None
 
         response = self.client.get("/api/readyz")
 
         self.assertEqual(response.status_code, 200)
-        components = response.json()["components"]
-        self.assertEqual(components["segmentor"]["providers"], [])
-        self.assertEqual(components["clip"]["providers"], [])
+        self.assertEqual(response.json()["components"]["embedding"]["providers"], [])
         self.assertTrue(response.json()["ok"])
 
     def test_unexpected_readiness_error_is_logged_and_mapped_to_503(self):
@@ -130,29 +117,26 @@ class HealthEndpointTests(unittest.TestCase):
             with self.assertLogs("svc.health", level="ERROR"):
                 response = self.client.get("/api/readyz")
 
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json(), {"detail": "not ready: missing state"})
+        self.assert_not_ready(response, "not ready: missing state")
 
     def test_liveness_version_and_config_do_not_require_models(self):
         self.runtime.food_service = None
         self.runtime.initialization_error = "models are unavailable"
         with patch.object(ApplicationState, "require_food_service") as require_service:
-            for path in ("/api/healthz", "/api/livez"):
-                with self.subTest(path=path):
-                    response = self.client.get(path)
-                    self.assertEqual(response.status_code, 200)
-                    self.assertEqual(response.json(), {"ok": True, **self.info})
+            response = self.client.get("/api/healthz")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json(), {"ok": True, "deps": NOT_WIRED_DEPS, **self.info})
+
+            response = self.client.get("/api/livez")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json(), {"ok": True, **self.info})
 
             response = self.client.get("/api/version")
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json(), {
                 "ok": True,
                 "app_env": "test",
-                "models": {
-                    "segment": "segment.onnx",
-                    "clip": "clip.onnx",
-                    "clip_text": "clip-text.onnx",
-                },
+                "models": {"embedding": "embedding.onnx"},
                 **self.info,
             })
 
@@ -162,22 +146,18 @@ class HealthEndpointTests(unittest.TestCase):
                 "ok": True, "source": "test", **self.info
             })
             require_service.assert_not_called()
-        self.service.segmentor.sess.get_providers.assert_not_called()
-        self.service.clip.sess.get_providers.assert_not_called()
+        self.service.embeddingTool.sess.get_providers.assert_not_called()
 
     def test_missing_optional_model_configuration_returns_null_paths(self):
-        self.runtime.config = {"SEGMENT_CONFIG": None}
+        self.runtime.config = {"EMBEDDING_CONFIG": None}
 
         version = self.client.get("/api/version")
         readiness = self.client.get("/api/readyz")
 
         self.assertEqual(version.status_code, 200)
-        self.assertEqual(version.json()["models"], {
-            "segment": None, "clip": None, "clip_text": None
-        })
+        self.assertEqual(version.json()["models"], {"embedding": None})
         self.assertEqual(readiness.status_code, 200)
-        self.assertIsNone(readiness.json()["components"]["segmentor"]["model_path"])
-        self.assertIsNone(readiness.json()["components"]["clip"]["text_model_path"])
+        self.assertIsNone(readiness.json()["components"]["embedding"]["model_path"])
 
     def test_runtime_fields_keep_precedence_in_diagnostic_responses(self):
         self.runtime.config_info = {"ok": "config", "source": "test"}

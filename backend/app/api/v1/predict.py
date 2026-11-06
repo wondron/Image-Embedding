@@ -5,12 +5,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Body, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Body, File, Query, Request, UploadFile
 
 from app.schemas.predict import PingResponse, PredictResponse, PredictUrlBody
-from app.api.services.image_io import read_file_bytes
+from app.api.uploads import read_upload
 from app.api.services.predict import run_predict, run_url_predict
 from app.bootstrap.state import get_application_state
+from app.core import errors
+from app.core.middleware import bind_trace_id
 
 router = APIRouter(prefix="/api", tags=["predict"])
 
@@ -36,7 +38,8 @@ async def predict_file(
 ) -> dict[str, Any]:
     """使用 multipart/form-data 上传 file 字段进行图片检索。"""
     runtime = get_application_state(request)
-    img_bytes = await read_file_bytes(file, runtime.max_image_bytes)
+    bind_trace_id(request, trace_id)
+    img_bytes = await read_upload(file, runtime.max_image_bytes)
     return await run_predict(
         runtime=runtime,
         img_bytes=img_bytes,
@@ -64,8 +67,9 @@ async def predict_url(
     machine_info = machine_info if machine_info is not None else (body.machine_info if body else None)
     trace_id = trace_id if trace_id is not None else (body.trace_id if body else None)
     save_res = save_res if save_res is not None else (body.save_res if body else None)
+    bind_trace_id(request, trace_id)
     if img_url is None:
-        raise HTTPException(422, "img_url is required (provide in query or JSON body).")
+        raise errors.validation_error("img_url is required (provide in query or JSON body).")
 
     return await run_url_predict(
         runtime=get_application_state(request),

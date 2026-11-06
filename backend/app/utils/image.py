@@ -1,4 +1,4 @@
-import os, random, cv2, io
+import base64, os, random, cv2, io
 import numpy as np
 import requests
 from PIL import Image, ImageDraw, ImageFont
@@ -268,3 +268,26 @@ def draw_cn_text(img, text, pos=(10, 10), font_size=30):
     img = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
     return img
+
+
+def encode_png_base64(image: Any, *, bgr: bool = False) -> str:
+    """Encode a grayscale or three-channel image array without importing model code."""
+    if image is None:
+        raise ValueError("image is empty")
+
+    ndim = getattr(image, "ndim", 0)
+    shape = getattr(image, "shape", ())
+    if ndim == 2:
+        height, width = shape
+        png_image = Image.frombytes("L", (width, height), image.tobytes())
+    elif ndim == 3 and shape[2] == 3:
+        height, width, _ = shape
+        png_image = Image.frombytes(
+            "RGB", (width, height), image.tobytes(), "raw", "BGR" if bgr else "RGB"
+        )
+    else:
+        raise ValueError(f"unsupported image shape for PNG encoding: {shape}")
+
+    output = io.BytesIO()
+    png_image.save(output, format="PNG")
+    return base64.b64encode(output.getvalue()).decode("ascii")

@@ -5,11 +5,14 @@ from __future__ import annotations
 import logging
 import time
 
-from fastapi import HTTPException, UploadFile
+from fastapi import UploadFile
 
 from app.api.deps import require_food_service
 from app.schemas.tools import EmbeddingResponse, SegmentResponse
-from app.api.services.image_io import encode_png_base64, read_file_bytes
+from app.api.uploads import read_upload
+from app.core import errors
+from app.core.errors import AppError
+from app.utils.image import encode_png_base64
 from app.bootstrap.state import ApplicationState
 
 
@@ -17,7 +20,7 @@ logger = logging.getLogger("svc.tools")
 
 
 async def _read_tool_image(file: UploadFile, runtime: ApplicationState) -> bytes:
-    return await read_file_bytes(
+    return await read_upload(
         file,
         runtime.max_image_bytes,
         allowed_content_types=runtime.settings.allowed_content_types,
@@ -37,7 +40,7 @@ async def segment(
 
     segmentor = getattr(service, "segmentor", None)
     if segmentor is None:
-        raise HTTPException(status_code=503, detail="segmentor is not initialized")
+        raise errors.not_ready("segmentor is not initialized")
 
     started = time.perf_counter()
     try:
@@ -59,12 +62,12 @@ async def segment(
             ),
         )
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except HTTPException:
+        raise AppError("INVALID_IMAGE", str(exc), http_status=422) from exc
+    except AppError:
         raise
     except Exception as exc:
         logger.exception("segment tool failed | filename=%s | err=%s", file.filename, exc)
-        raise HTTPException(status_code=500, detail=f"segment failed: {exc}") from exc
+        raise AppError("TOOL_FAILED", f"segment failed: {exc}", http_status=500) from exc
 
     logger.info(
         "segment tool ok | filename=%s | bytes=%d | size=%dx%d | output_vis=%s | latency_ms=%.2f",
@@ -84,7 +87,7 @@ async def embedding(runtime: ApplicationState, file: UploadFile) -> EmbeddingRes
 
     embedding_model = getattr(service, "embeddingTool", None)
     if embedding_model is None:
-        raise HTTPException(status_code=503, detail="embedding model is not initialized")
+        raise errors.not_ready("embedding model is not initialized")
 
     started = time.perf_counter()
     try:
@@ -102,12 +105,12 @@ async def embedding(runtime: ApplicationState, file: UploadFile) -> EmbeddingRes
             embedding=vector.tolist(),
         )
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except HTTPException:
+        raise AppError("INVALID_IMAGE", str(exc), http_status=422) from exc
+    except AppError:
         raise
     except Exception as exc:
         logger.exception("embeddingTool失败 name=%s err=%s", file.filename, exc)
-        raise HTTPException(status_code=500, detail=f"embedding failed: {exc}") from exc
+        raise AppError("TOOL_FAILED", f"embedding failed: {exc}", http_status=500) from exc
 
     logger.info("embedding调用成功 name=%s bytes=%d dim=%d latency_ms=%.2f", response.filename, len(image_bytes), response.embedding_dim, response.latency_ms)
     return response

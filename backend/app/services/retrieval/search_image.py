@@ -111,15 +111,13 @@ class SearchImageUseCase:
         self,
         *,
         image_bytes: bytes | None = None,
-        image_url: str | None = None,
         scene: str | None = None,
         top_k: int = 10,
         score_threshold: float | None = None,
-        public_file_base: str | None = None,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        del public_file_base  # PG stores full https; no local file URL fallback
-        if not image_bytes and not (image_url and str(image_url).strip()):
+        """Search by query image bytes (the HTTP layer downloads img_url inputs)."""
+        if not image_bytes:
             raise err.validation_error("file or img_url is required")
         if not (1 <= int(top_k) <= 50):
             raise err.validation_error("top_k must be in 1..50")
@@ -129,15 +127,11 @@ class SearchImageUseCase:
         native_thr = qdrant_score_threshold(effective_t)
 
         try:
-            if image_bytes:
-                vector = self._embedding.embed_bytes(image_bytes)
-            else:
-                vector = self._embedding.embed_url(str(image_url).strip())
+            vector = self._embedding.embed_bytes(image_bytes)
         except err.RetrievalError:
             raise
         except Exception as exc:
-            what = "embed failed" if image_bytes else "cannot fetch img_url"
-            raise err.search_bad_image(f"{what}: {exc}") from exc
+            raise err.search_bad_image(f"embed failed: {exc}") from exc
 
         vector = validate_embedding(vector, for_search=True, expected_dim=self._model.dim)
 

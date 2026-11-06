@@ -62,10 +62,8 @@ class ListImagesUseCase:
         page_size: int = 24,
         q: str | None = None,
         category: str | None = None,
-        public_file_base: str | None = None,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        del public_file_base
         active_scene = normalize_list_scene(scene)
 
         try:

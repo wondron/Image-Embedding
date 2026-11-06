@@ -1,4 +1,10 @@
-"""Download public raster images without exposing a general-purpose URL proxy."""
+"""Download public raster images without exposing a general-purpose URL proxy.
+
+SSRF-safe: only public addresses (checked after DNS, pinned for the connection),
+ports 80/443, bounded size/time/redirects, content verified as an image.
+Failures raise AppError: INVALID_URL / FORBIDDEN_HOST / FILE_TOO_LARGE /
+UNSUPPORTED_MEDIA_TYPE / DOWNLOAD_TIMEOUT / DOWNLOAD_FAILED.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +19,8 @@ from dataclasses import dataclass
 from io import BytesIO
 from urllib.parse import quote, urljoin, urlsplit
 
-from fastapi import HTTPException
+from app.core import errors
+from app.core.errors import AppError
 from PIL import Image
 
 
@@ -51,7 +58,7 @@ def _is_public(address: str) -> bool:
 
 def _resolve_target(url: str) -> _Target:
     if not url or len(url) > 8192 or any(ord(char) <= 32 or ord(char) == 127 for char in url):
-        raise HTTPException(422, "Invalid image URL.")
+        raise errors.invalid_url("Invalid image URL.")
     try:
         parsed = urlsplit(url)
         if parsed.scheme not in ("http", "https") or not parsed.hostname:
@@ -70,7 +77,7 @@ def _resolve_target(url: str) -> _Target:
                 raise ValueError("host")
             literal = None
     except (UnicodeError, ValueError) as exc:
-        raise HTTPException(422, "Invalid image URL; use HTTP(S), no credentials, and port 80 or 443.") from exc
+        raise errors.invalid_url("Invalid image URL; use HTTP(S), no credentials, and port 80 or 443.") from exc
 
     if literal is not None:
         addresses = (str(literal),)
@@ -79,9 +86,9 @@ def _resolve_target(url: str) -> _Target:
             resolved = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
             addresses = tuple(dict.fromkeys(record[4][0] for record in resolved))
         except OSError as exc:
-            raise HTTPException(502, "Could not resolve the image host.") from exc
+            raise errors.download_failed("Could not resolve the image host.") from exc
     if not addresses or any(not _is_public(address) for address in addresses):
-        raise HTTPException(403, "Only public image hosts are allowed.")
+        raise errors.forbidden_host("Only public image hosts are allowed.")
     path = quote(parsed.path or "/", safe="/%:@!$&'()*+,;=-._~")
     if parsed.query:
         path += "?" + quote(parsed.query, safe="/%?:@!$&'()*+,;=-._~")
@@ -129,7 +136,7 @@ def _verify_image(data: bytes) -> str:
             raise ValueError("Unsupported image format")
         return media_type
     except (OSError, ValueError, SyntaxError, Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
-        raise HTTPException(415, "The remote file is not a valid supported image.") from exc
+        raise errors.unsupported_media_type("The remote file is not a valid supported image.") from exc
 
 
 def fetch_image(url: str) -> tuple[bytes, str]:
@@ -166,11 +173,11 @@ def fetch_image(url: str) -> tuple[bytes, str]:
                     if response.status in (301, 302, 303, 307, 308):
                         location = response.getheader("Location")
                         if redirect >= MAX_REDIRECTS or not location:
-                            raise HTTPException(502, "The image server returned too many or invalid redirects.")
+                            raise errors.download_failed("The image server returned too many or invalid redirects.")
                         url = urljoin(url, location)
                         continue
                     if response.status != 200:
-                        raise HTTPException(502, f"Image download failed (upstream HTTP {response.status}).")
+                        raise errors.download_failed(f"Image download failed (upstream HTTP {response.status}).")
                     length = response.getheader("Content-Length")
                     if length is not None:
                         try:
@@ -178,9 +185,9 @@ def fetch_image(url: str) -> tuple[bytes, str]:
                             if size < 0:
                                 raise ValueError("negative size")
                         except ValueError as exc:
-                            raise HTTPException(502, "The image server returned an invalid content length.") from exc
+                            raise errors.download_failed("The image server returned an invalid content length.") from exc
                         if size > MAX_IMAGE_BYTES:
-                            raise HTTPException(413, "Image exceeds the 15 MB download limit.")
+                            raise errors.file_too_large("Image exceeds the 15 MB download limit.")
                     data = bytearray()
                     while True:
                         timeout = _remaining(deadline)
@@ -191,7 +198,7 @@ def fetch_image(url: str) -> tuple[bytes, str]:
                             break
                         data.extend(chunk)
                         if len(data) > MAX_IMAGE_BYTES:
-                            raise HTTPException(413, "Image exceeds the 15 MB download limit.")
+                            raise errors.file_too_large("Image exceeds the 15 MB download limit.")
                 finally:
                     response.close()
             finally:
@@ -204,10 +211,10 @@ def fetch_image(url: str) -> tuple[bytes, str]:
                         raise TimeoutError("Image response exceeded its deadline")
             content = bytes(data)
             return content, _verify_image(content)
-    except HTTPException:
+    except AppError:
         raise
     except (TimeoutError, socket.timeout) as exc:
-        raise HTTPException(504, "The image download timed out.") from exc
+        raise errors.download_timeout("The image download timed out.") from exc
     except (OSError, http.client.HTTPException, ValueError) as exc:
-        raise HTTPException(502, "Could not download the remote image.") from exc
-    raise HTTPException(502, "The image server returned too many redirects.")
+        raise errors.download_failed("Could not download the remote image.") from exc
+    raise errors.download_failed("The image server returned too many redirects.")

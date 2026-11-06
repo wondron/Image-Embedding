@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from fastapi import HTTPException
-
 from app.bootstrap.state import ApplicationState
+from app.core import errors
 
 if TYPE_CHECKING:
     from app.services.predict.food_service import FoodService
@@ -73,13 +72,10 @@ def readiness_info(runtime: ApplicationState, service: FoodService) -> dict[str,
     ok = runtime.ready and embedding_ok
 
     if not ok:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                runtime.initialization_error
-                or runtime.warmup_error
-                or "model components are not ready"
-            ),
+        raise errors.not_ready(
+            runtime.initialization_error
+            or runtime.warmup_error
+            or "model components are not ready"
         )
 
     return {

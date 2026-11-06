@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.v1 import predict
+from app.core.exceptions import register_exception_handlers
 from app.services.predict.flyb_search import FlyBSearch
 
 
@@ -24,6 +25,7 @@ class PredictUpstreamErrorTests(unittest.TestCase):
         self.service = self.runtime.require_food_service.return_value
         self.service.detect.side_effect = lambda *args, **kwargs: self.search.get_result('private-image-base64')
         app = FastAPI()
+        register_exception_handlers(app)
         app.include_router(predict.router)
         self.client = TestClient(app)
         state_patch = patch.object(predict, 'get_application_state', return_value=self.runtime)

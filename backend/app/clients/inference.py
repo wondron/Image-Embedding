@@ -17,7 +17,6 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Union
 
 import numpy as np
-import requests
 
 from app.clients.inference_onnx import OnnxEmbedding
 
@@ -73,10 +72,9 @@ class Embedder:
     OnnxEmbedding is not, so calls are serialized only when io-binding is on.
     """
 
-    def __init__(self, config: Mapping[str, Any], *, url_timeout: float = 15.0) -> None:
+    def __init__(self, config: Mapping[str, Any]) -> None:
         self._model = OnnxEmbedding(dict(config))  # validates config with precise messages
         self.spec = EmbeddingSpec.from_config(config)
-        self.url_timeout = float(url_timeout)
         self._lock: Any = threading.Lock() if self._model.use_iobinding else contextlib.nullcontext()
 
     # -- diagnostics ----------------------------------------------------------
@@ -118,11 +116,3 @@ class Embedder:
         if not image_bytes:
             raise ValueError("image_bytes is empty")
         return self.detect(image_bytes).astype(np.float32).tolist()
-
-    def embed_url(self, image_url: str) -> list[float]:
-        url = (image_url or "").strip()
-        if not url:
-            raise ValueError("image_url is empty")
-        response = requests.get(url, timeout=self.url_timeout)
-        response.raise_for_status()
-        return self.embed_bytes(response.content)

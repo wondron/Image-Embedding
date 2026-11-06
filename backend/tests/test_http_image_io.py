@@ -4,18 +4,21 @@ from io import BytesIO
 from types import SimpleNamespace
 
 import httpx
-from fastapi import HTTPException, UploadFile
+from fastapi import UploadFile
 from PIL import Image
 from starlette.datastructures import Headers
 
-from app.api.services.image_io import clean_url, encode_png_base64, read_file_bytes, read_url_bytes
+from app.api.uploads import read_upload as read_file_bytes
+from app.clients.image_fetch import clean_url, read_url_bytes
+from app.core.errors import AppError
+from app.utils.image import encode_png_base64
 
 
 class ImageInputTests(unittest.IsolatedAsyncioTestCase):
     async def test_upload_limit_is_enforced_without_reading_the_entire_file(self):
         stream = BytesIO(b"x" * 100)
         file = UploadFile(stream, filename="large.png")
-        with self.assertRaises(HTTPException) as caught:
+        with self.assertRaises(AppError) as caught:
             await read_file_bytes(file, 10)
         self.assertEqual(caught.exception.status_code, 413)
         self.assertEqual(stream.tell(), 11)
@@ -23,14 +26,14 @@ class ImageInputTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_upload_accepts_exact_limit_and_rejects_empty(self):
         self.assertEqual(await read_file_bytes(UploadFile(BytesIO(b"image")), 5), b"image")
-        with self.assertRaises(HTTPException) as caught:
+        with self.assertRaises(AppError) as caught:
             await read_file_bytes(UploadFile(BytesIO()), 5)
         self.assertEqual(caught.exception.status_code, 400)
 
     async def test_mime_validation_is_optional_and_precedes_reading(self):
         stream = BytesIO(b"image")
         file = UploadFile(stream, headers=Headers({"content-type": "text/html"}))
-        with self.assertRaises(HTTPException) as caught:
+        with self.assertRaises(AppError) as caught:
             await read_file_bytes(file, 10, allowed_content_types={"image/png"})
         self.assertEqual(caught.exception.status_code, 415)
         self.assertEqual(stream.tell(), 0)
@@ -43,7 +46,7 @@ class ImageInputTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_tool_upload_error_details_are_preserved(self):
         for data, status, detail in ((b"", 400, "uploaded file is empty"), (b"123456", 413, "file too large (> 5 bytes)")):
-            with self.subTest(status=status), self.assertRaises(HTTPException) as caught:
+            with self.subTest(status=status), self.assertRaises(AppError) as caught:
                 await read_file_bytes(
                     UploadFile(BytesIO(data)), 5,
                     empty_detail="uploaded file is empty",
@@ -74,7 +77,7 @@ class ImageInputTests(unittest.IsolatedAsyncioTestCase):
                 self.closed = True
 
         stream = UnreadStream()
-        with self.assertRaises(HTTPException) as caught:
+        with self.assertRaises(AppError) as caught:
             await self.download(lambda request: httpx.Response(200, headers={"Content-Length": "11"}, stream=stream))
         self.assertEqual(caught.exception.status_code, 413)
         self.assertTrue(stream.closed)
@@ -92,14 +95,14 @@ class ImageInputTests(unittest.IsolatedAsyncioTestCase):
 
         for headers in ({}, {"Content-Length": "1"}, {"Content-Length": "invalid"}):
             stream = OversizeStream()
-            with self.subTest(headers=headers), self.assertRaises(HTTPException) as caught:
+            with self.subTest(headers=headers), self.assertRaises(AppError) as caught:
                 await self.download(lambda request: httpx.Response(200, headers=headers, stream=stream))
             self.assertEqual(caught.exception.status_code, 413)
             self.assertTrue(stream.closed)
 
     async def test_url_empty_body_and_upstream_status_are_preserved(self):
         for upstream, body, expected in ((200, b"", 400), (403, b"denied", 403), (404, b"missing", 404)):
-            with self.subTest(upstream=upstream), self.assertRaises(HTTPException) as caught:
+            with self.subTest(upstream=upstream), self.assertRaises(AppError) as caught:
                 await self.download(lambda request: httpx.Response(upstream, content=body))
             self.assertEqual(caught.exception.status_code, expected)
 
@@ -107,7 +110,7 @@ class ImageInputTests(unittest.IsolatedAsyncioTestCase):
         for error, status in ((httpx.ReadTimeout, 504), (httpx.ConnectError, 502), (httpx.UnsupportedProtocol, 422)):
             def handler(request):
                 raise error("controlled transport failure", request=request)
-            with self.subTest(error=error), self.assertRaises(HTTPException) as caught:
+            with self.subTest(error=error), self.assertRaises(AppError) as caught:
                 await self.download(handler)
             self.assertEqual(caught.exception.status_code, status)
             if status == 504:
@@ -119,7 +122,7 @@ class ImageFormatTests(unittest.TestCase):
         for url in (" images.example/a.png\n", "//images.example/a.png", "https://images.example/a.png"):
             self.assertEqual(clean_url(url), "https://images.example/a.png")
         for url in ("", " \n", "file:///tmp/a.png", "ftp://images.example/a.png", "https:///a.png", "https://[invalid"):
-            with self.subTest(url=url), self.assertRaises(HTTPException) as caught:
+            with self.subTest(url=url), self.assertRaises(AppError) as caught:
                 clean_url(url)
             self.assertEqual(caught.exception.status_code, 422)
 

@@ -1,446 +1,261 @@
-"""HTTP adapter for retrieval: parse the wire request, call a use case, map errors.
+"""HTTP adapter for retrieval: parse the wire request and call a use case.
 
 Business flow lives in app.services.retrieval (reached through RetrievalStack).
-Use cases block (ONNX / PG / Qdrant / S3), so async handlers run them in the
-threadpool instead of on the event loop.
+Failures are raised (AppError / RetrievalError) and rendered by
+app.core.exceptions. Use cases block (ONNX / PG / Qdrant / S3), so async
+handlers run them in the threadpool instead of on the event loop.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import uuid
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Type, TypeVar
 
-from fastapi import HTTPException, Request, UploadFile
+from fastapi import Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
-from starlette.datastructures import UploadFile as StarletteUploadFile
 
-from app.schemas.retrieval import (
-    ErrorBody,
-    IndexJsonRequest,
-    IndexResponse,
-    SearchJsonRequest,
-    dump_model,
-)
+from app.api.deps import require_retrieval
+from app.api.uploads import form_upload, read_upload
 from app.bootstrap.state import ApplicationState
-from app.services.retrieval.errors import RetrievalError
+from app.clients.image_fetch import read_url_bytes
+from app.core.middleware import bind_trace_id
+from app.schemas.retrieval import IndexJsonRequest, IndexResponse, SearchJsonRequest, dump_model
+from app.services.retrieval import errors as err
 
 logger = logging.getLogger("svc.retrieval")
 
-
-def _trace_id(explicit: Optional[str] = None) -> str:
-    return (explicit or "").strip() or str(uuid.uuid4())
-
-
-def error_response(
-    code: str,
-    detail: str,
-    *,
-    status_code: int,
-    trace_id: Optional[str] = None,
-) -> JSONResponse:
-    body = ErrorBody(ok=False, error=code, detail=detail, trace_id=trace_id or _trace_id())
-    return JSONResponse(status_code=status_code, content=dump_model(body))
+MAX_INDEX_FILES = 100
+M = TypeVar("M", bound=BaseModel)
 
 
-def retrieval_error_response(
-    exc: RetrievalError, *, trace_id: Optional[str] = None
-) -> JSONResponse:
-    return error_response(
-        exc.code,
-        exc.detail,
-        status_code=exc.http_status,
-        trace_id=trace_id,
-    )
+# -- wire parsing -------------------------------------------------------------------
+
+def _is_json(request: Request) -> bool:
+    return "application/json" in (request.headers.get("content-type") or "").lower()
 
 
-def public_base(request: Request) -> str:
-    return str(request.base_url).rstrip("/")
-
-
-def require_retrieval(runtime: ApplicationState):
+async def _json_body(request: Request, model: Type[M]) -> M:
     try:
-        return runtime.require_retrieval()
-    except RuntimeError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={"ok": False, "error": "NOT_READY", "detail": str(exc)},
-        ) from exc
+        return model(**(await request.json()))
+    except (ValueError, TypeError) as exc:  # bad JSON or schema (pydantic errors are ValueErrors)
+        raise err.validation_error(str(exc)) from exc
 
 
-def parse_tags(raw: Optional[str]) -> Optional[List[Any]]:
+def _json_array(raw: Any, field: str) -> Optional[List[Any]]:
+    """Multipart field holding a JSON array; None when omitted."""
     if raw is None or raw == "":
         return None
     try:
-        val = json.loads(raw)
+        value = json.loads(str(raw))
     except json.JSONDecodeError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "ok": False,
-                "error": "VALIDATION_ERROR",
-                "detail": f"tags JSON invalid: {exc}",
-            },
-        ) from exc
-    if not isinstance(val, list):
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "ok": False,
-                "error": "VALIDATION_ERROR",
-                "detail": "tags must be a JSON array",
-            },
-        )
-    return val
+        raise err.validation_error(f"{field} JSON invalid: {exc}") from exc
+    if not isinstance(value, list):
+        raise err.validation_error(f"{field} must be a JSON array")
+    return value
 
 
-def parse_scenes_json(raw: Optional[str]) -> Optional[List[Any]]:
-    """Parse multipart `scenes` JSON array; None if omitted. Domain validates registry."""
-    if raw is None or raw == "":
-        return None
+def _int_param(raw: Any, field: str) -> int:
     try:
-        val = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "ok": False,
-                "error": "VALIDATION_ERROR",
-                "detail": f"scenes JSON invalid: {exc}",
-            },
-        ) from exc
-    if not isinstance(val, list):
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "ok": False,
-                "error": "VALIDATION_ERROR",
-                "detail": "scenes must be a JSON array",
-            },
-        )
-    return val
+        return int(str(raw).strip())
+    except ValueError as exc:
+        raise err.validation_error(f"{field} must be an integer, got {raw!r}") from exc
 
 
-def parse_score_threshold_raw(raw: Any) -> Optional[float]:
-    """Parse wire score_threshold; invalid literal -> SEARCH_BAD_SCORE_THRESHOLD.
-
-    Empty / missing -> None (application default 0.55). Range checks stay in usecase.
-    """
+def parse_score_threshold(raw: Any) -> Optional[float]:
+    """Wire score_threshold -> float | None (range rules live in the use case)."""
     if raw is None:
         return None
     if isinstance(raw, (int, float)):
         return float(raw)
-    s = str(raw).strip()
-    if s == "":
+    text = str(raw).strip()
+    if not text:
         return None
     try:
-        return float(s)
-    except (TypeError, ValueError) as exc:
-        from app.services.retrieval import errors as err
-
-        raise err.search_bad_score_threshold(
-            f"score_threshold must be a finite float; got {raw!r}"
-        ) from exc
+        return float(text)
+    except ValueError as exc:
+        raise err.search_bad_score_threshold(f"score_threshold must be a finite float; got {raw!r}") from exc
 
 
-async def read_upload(file: UploadFile, max_bytes: int) -> bytes:
-    data = await file.read(max_bytes + 1)
-    if not data:
-        raise RetrievalError("INDEX_BAD_IMAGE", "Uploaded file is empty", http_status=422)
-    if len(data) > max_bytes:
-        raise RetrievalError(
-            "INDEX_BAD_IMAGE",
-            f"File too large (> {max_bytes} bytes)",
-            http_status=422,
-        )
-    return data
-
-
-def _as_upload(value: Any) -> Optional[UploadFile]:
-    if isinstance(value, (UploadFile, StarletteUploadFile)):
-        return value  # type: ignore[return-value]
-    return None
-
+# -- POST /api/index ------------------------------------------------------------------
 
 async def index_from_request(runtime: ApplicationState, request: Request) -> JSONResponse:
-    """POST /api/index: multipart file/files (<=100) or JSON {path, category, tags, scene(s)}."""
-    base = public_base(request)
-    content_type = (request.headers.get("content-type") or "").lower()
-    items: List[dict] = []
+    """multipart file/files (<= 100) or JSON {path, category, tags, scene, scenes}."""
+    trace_id = bind_trace_id(request)
+    if _is_json(request):
+        raw = await _json_body(request, IndexJsonRequest)
+        items = [{
+            "source_path": raw.path,
+            "filename": raw.path,
+            "category": raw.category,
+            "tags": raw.tags,
+            "scene": raw.scene,
+            "scenes": raw.scenes,
+        }]
+    else:
+        items = await _index_items_from_form(request, runtime.max_image_bytes)
 
-    try:
-        if "application/json" in content_type:
-            payload = await request.json()
-            raw = IndexJsonRequest(**payload)
-            items.append(
-                {
-                    "source_path": raw.path,
-                    "filename": raw.path,
-                    "category": raw.category,
-                    "tags": raw.tags,
-                    "scene": raw.scene,
-                    "scenes": raw.scenes,
-                }
-            )
-        else:
-            form = await request.form()
-            category = form.get("category")
-            category_s = str(category) if category is not None else None
-            tags_raw = form.get("tags")
-            tag_list = parse_tags(str(tags_raw) if tags_raw is not None else None)
-            scene_raw = form.get("scene")
-            scene_s = str(scene_raw).strip() if scene_raw not in (None, "") else None
-            scenes_raw = form.get("scenes")
-            scenes_list = parse_scenes_json(str(scenes_raw) if scenes_raw is not None else None)
-
-            uploads: List[UploadFile] = []
-            for item in [form.get("file"), *form.getlist("files"), *form.getlist("file")]:
-                up = _as_upload(item)
-                if up is not None and up not in uploads:
-                    uploads.append(up)
-
-            if len(uploads) > 100:
-                return error_response(
-                    "VALIDATION_ERROR",
-                    "too many files (max 100)",
-                    status_code=422,
-                )
-            if not uploads:
-                return error_response(
-                    "INDEX_EMPTY_REQUEST",
-                    "no file and no path",
-                    status_code=400,
-                )
-            for up in uploads:
-                data = await read_upload(up, runtime.max_image_bytes)
-                items.append(
-                    {
-                        "image_bytes": data,
-                        "filename": up.filename or "upload.bin",
-                        "category": category_s,
-                        "tags": tag_list,
-                        "scene": scene_s,
-                        "scenes": scenes_list,
-                    }
-                )
-    except RetrievalError as exc:
-        return retrieval_error_response(exc)
-    except Exception as exc:
-        return error_response("VALIDATION_ERROR", str(exc), status_code=422)
-
-    return await run_in_threadpool(run_index, runtime, items, public_file_base=base)
-
-
-async def search_from_request(runtime: ApplicationState, request: Request) -> JSONResponse:
-    """POST /api/search: multipart file / img_url or JSON {img_url}; query params override."""
-    base = public_base(request)
-    content_type = (request.headers.get("content-type") or "").lower()
-
-    image_bytes = None
-    image_url = None
-    scene = None
-    k = 10
-    thr = None
-    tid = None
-
-    try:
-        if "application/json" in content_type:
-            payload = await request.json()
-            raw = SearchJsonRequest(**payload)
-            image_url = raw.img_url
-            scene = raw.scene
-            k = int(raw.top_k)
-            thr = parse_score_threshold_raw(raw.score_threshold)
-            tid = raw.trace_id
-        else:
-            form = await request.form()
-            up = _as_upload(form.get("file"))
-            if up is not None:
-                image_bytes = await read_upload(up, runtime.max_image_bytes)
-            img_url_val = form.get("img_url")
-            if img_url_val and image_bytes is None:
-                image_url = str(img_url_val)
-            scene_val = form.get("scene")
-            if scene_val not in (None, ""):
-                scene = str(scene_val)
-            if form.get("top_k") is not None:
-                k = int(str(form.get("top_k")))
-            if form.get("score_threshold") not in (None, ""):
-                thr = parse_score_threshold_raw(form.get("score_threshold"))
-            if form.get("trace_id") is not None:
-                tid = str(form.get("trace_id"))
-
-        # query overrides
-        qp = request.query_params
-        if qp.get("scene") not in (None, ""):
-            scene = qp.get("scene")
-        if qp.get("top_k") is not None:
-            k = int(qp.get("top_k"))
-        if qp.get("score_threshold") not in (None, ""):
-            thr = parse_score_threshold_raw(qp.get("score_threshold"))
-        if qp.get("trace_id"):
-            tid = qp.get("trace_id")
-
-        if image_bytes is None and not image_url:
-            return error_response(
-                "VALIDATION_ERROR",
-                "file or img_url is required",
-                status_code=422,
-                trace_id=tid,
-            )
-        if not (1 <= k <= 50):
-            return error_response(
-                "VALIDATION_ERROR",
-                "top_k must be in 1..50",
-                status_code=422,
-                trace_id=tid,
-            )
-    except RetrievalError as exc:
-        return retrieval_error_response(exc, trace_id=tid)
-    except Exception as exc:
-        return error_response("VALIDATION_ERROR", str(exc), status_code=422, trace_id=tid)
-
-    return await run_in_threadpool(
-        run_search,
-        runtime,
-        image_bytes=image_bytes,
-        image_url=image_url,
-        scene=scene,
-        top_k=k,
-        score_threshold=thr,
-        public_file_base=base,
-        trace_id=tid,
-    )
-
-
-def run_index(
-    runtime: ApplicationState,
-    items: List[Dict[str, Any]],
-    *,
-    public_file_base: str,
-    trace_id: Optional[str] = None,
-) -> JSONResponse:
-    """Invoke IndexImageUseCase; map batch outcome to HTTP."""
-    tid = _trace_id(trace_id)
     stack = require_retrieval(runtime)
-    try:
-        outcome = stack.index_uc.execute_batch(items, public_file_base=public_file_base)
-    except RetrievalError as exc:
-        return retrieval_error_response(exc, trace_id=tid)
-    except Exception as exc:
-        logger.exception("index failed: %s", exc)
-        return error_response("INTERNAL_ERROR", str(exc), status_code=500, trace_id=tid)
-
-    failed = outcome.get("failed") or []
-    indexed = outcome.get("indexed") or []
-    # Uniform whole-batch failures -> top-level error (HTTP mapping only)
-    if (not indexed) and failed and all(f.get("error") == "INDEX_PATH_TOO_LONG" for f in failed):
-        return error_response(
-            "INDEX_PATH_TOO_LONG",
-            (failed[0].get("message") or "path too long after normalize"),
-            status_code=422,
-            trace_id=tid,
-        )
-    if (not indexed) and failed and all(f.get("error") == "INDEX_UNKNOWN_SCENE" for f in failed):
-        return error_response(
-            "INDEX_UNKNOWN_SCENE",
-            (failed[0].get("message") or "unknown scene"),
-            status_code=422,
-            trace_id=tid,
-        )
-    if (not indexed) and failed and all(f.get("error") == "VALIDATION_ERROR" for f in failed):
-        return error_response(
-            "VALIDATION_ERROR",
-            (failed[0].get("message") or "validation error"),
-            status_code=422,
-            trace_id=tid,
-        )
-    if outcome.get("all_failed") and not indexed:
-        if not failed or all(
-            f.get("error") in {"INDEX_EMPTY_REQUEST", "INDEX_BAD_IMAGE"} for f in failed
-        ):
-            return error_response(
-                "INDEX_EMPTY_REQUEST",
-                "no decodable image in request",
-                status_code=400,
-                trace_id=tid,
-            )
-
-    resp = IndexResponse(
+    outcome = await run_in_threadpool(stack.index_uc.execute_batch, items)
+    _raise_if_batch_failed_uniformly(outcome)
+    body = IndexResponse(
         ok=True,
-        trace_id=tid,
+        trace_id=trace_id,
         indexed=outcome.get("indexed") or [],
         failed=outcome.get("failed") or [],
     )
-    return JSONResponse(status_code=200, content=dump_model(resp))
+    return JSONResponse(content=dump_model(body))
 
 
-def run_search(
-    runtime: ApplicationState,
-    *,
-    image_bytes: Optional[bytes] = None,
-    image_url: Optional[str] = None,
-    scene: Optional[str] = None,
-    top_k: int = 10,
-    score_threshold: Optional[float] = None,
-    public_file_base: str,
-    trace_id: Optional[str] = None,
-) -> JSONResponse:
-    """Invoke SearchImageUseCase; return envelope as-is."""
-    tid = _trace_id(trace_id)
+async def _index_items_from_form(request: Request, max_bytes: int) -> List[Dict[str, Any]]:
+    form = await request.form()
+    category = form.get("category")
+    scene = form.get("scene")
+    shared = {
+        "category": str(category) if category is not None else None,
+        "tags": _json_array(form.get("tags"), "tags"),
+        "scene": str(scene).strip() if scene not in (None, "") else None,
+        "scenes": _json_array(form.get("scenes"), "scenes"),
+    }
+    uploads = []
+    for value in [form.get("file"), *form.getlist("files"), *form.getlist("file")]:
+        upload = form_upload(value)
+        if upload is not None and upload not in uploads:
+            uploads.append(upload)
+    if len(uploads) > MAX_INDEX_FILES:
+        raise err.validation_error(f"too many files (max {MAX_INDEX_FILES})")
+    if not uploads:
+        raise err.index_empty_request("no file and no path")
+
+    items = []
+    for upload in uploads:
+        data = await read_upload(upload, max_bytes)
+        items.append({"image_bytes": data, "filename": upload.filename or "upload.bin", **shared})
+    return items
+
+
+def _raise_if_batch_failed_uniformly(outcome: Dict[str, Any]) -> None:
+    """Nothing indexed and every item failed the same way -> report that error."""
+    if outcome.get("indexed"):
+        return
+    failed = outcome.get("failed") or []
+    for code, fallback in (
+        ("INDEX_PATH_TOO_LONG", "path too long after normalize"),
+        ("INDEX_UNKNOWN_SCENE", "unknown scene"),
+        ("VALIDATION_ERROR", "validation error"),
+    ):
+        if failed and all(f.get("error") == code for f in failed):
+            raise err.RetrievalError(code, failed[0].get("message") or fallback, http_status=422)
+    if outcome.get("all_failed") and all(
+        f.get("error") in {"INDEX_EMPTY_REQUEST", "INDEX_BAD_IMAGE"} for f in failed
+    ):
+        raise err.index_empty_request("no decodable image in request")
+
+
+# -- POST /api/search -------------------------------------------------------------------
+
+@dataclass
+class _SearchParams:
+    image_bytes: Optional[bytes] = None
+    image_url: Optional[str] = None
+    scene: Optional[str] = None
+    top_k: int = 10
+    score_threshold: Optional[float] = None
+    trace_id: Optional[str] = None
+
+
+async def search_from_request(runtime: ApplicationState, request: Request) -> JSONResponse:
+    """multipart file / img_url or JSON {img_url}; query params override body fields."""
+    params = await _search_params(request, runtime.max_image_bytes)
+    trace_id = bind_trace_id(request, params.trace_id)
+    if params.image_bytes is None and not params.image_url:
+        raise err.validation_error("file or img_url is required")
+    if not 1 <= params.top_k <= 50:
+        raise err.validation_error("top_k must be in 1..50")
+
     stack = require_retrieval(runtime)
-    try:
-        payload = stack.search_uc.execute(
-            image_bytes=image_bytes,
-            image_url=image_url,
-            scene=scene,
-            top_k=top_k,
-            score_threshold=score_threshold,
-            public_file_base=public_file_base,
-            trace_id=tid,
+    image_bytes = params.image_bytes
+    if image_bytes is None:
+        image_bytes = await read_url_bytes(
+            params.image_url,
+            client=runtime.http_client,
+            max_image_bytes=runtime.max_image_bytes,
+            timeout_s=runtime.http_timeout,
         )
-        return JSONResponse(status_code=200, content=payload)
-    except RetrievalError as exc:
-        return retrieval_error_response(exc, trace_id=tid)
-    except Exception as exc:
-        logger.exception("search failed: %s", exc)
-        return error_response("INTERNAL_ERROR", str(exc), status_code=500, trace_id=tid)
+    payload = await run_in_threadpool(
+        stack.search_uc.execute,
+        image_bytes=image_bytes,
+        scene=params.scene,
+        top_k=params.top_k,
+        score_threshold=params.score_threshold,
+        trace_id=trace_id,
+    )
+    return JSONResponse(content=payload)
 
+
+async def _search_params(request: Request, max_bytes: int) -> _SearchParams:
+    params = _SearchParams()
+    if _is_json(request):
+        raw = await _json_body(request, SearchJsonRequest)
+        params.image_url = raw.img_url
+        params.scene = raw.scene
+        params.top_k = int(raw.top_k)
+        params.score_threshold = parse_score_threshold(raw.score_threshold)
+        params.trace_id = raw.trace_id
+    else:
+        form = await request.form()
+        upload = form_upload(form.get("file"))
+        if upload is not None:
+            params.image_bytes = await read_upload(upload, max_bytes)
+        if form.get("img_url") and params.image_bytes is None:
+            params.image_url = str(form.get("img_url"))
+        if form.get("scene") not in (None, ""):
+            params.scene = str(form.get("scene"))
+        if form.get("top_k") is not None:
+            params.top_k = _int_param(form.get("top_k"), "top_k")
+        if form.get("score_threshold") not in (None, ""):
+            params.score_threshold = parse_score_threshold(form.get("score_threshold"))
+        if form.get("trace_id") is not None:
+            params.trace_id = str(form.get("trace_id"))
+
+    query = request.query_params
+    if query.get("scene") not in (None, ""):
+        params.scene = query.get("scene")
+    if query.get("top_k") is not None:
+        params.top_k = _int_param(query.get("top_k"), "top_k")
+    if query.get("score_threshold") not in (None, ""):
+        params.score_threshold = parse_score_threshold(query.get("score_threshold"))
+    if query.get("trace_id"):
+        params.trace_id = query.get("trace_id")
+    return params
+
+
+# -- GET /api/images ---------------------------------------------------------------------
 
 def run_list_images(
     runtime: ApplicationState,
+    request: Request,
     *,
     scene: Optional[str] = None,
     page: int = 1,
     page_size: int = 24,
     q: Optional[str] = None,
     category: Optional[str] = None,
-    public_file_base: str,
     trace_id: Optional[str] = None,
 ) -> JSONResponse:
-    """Invoke ListImagesUseCase."""
-    tid = _trace_id(trace_id)
+    trace_id = bind_trace_id(request, trace_id)
     stack = require_retrieval(runtime)
-    try:
-        payload = stack.list_uc.execute(
-            scene=scene,
-            page=page,
-            page_size=page_size,
-            q=q,
-            category=category,
-            public_file_base=public_file_base,
-            trace_id=tid,
-        )
-        return JSONResponse(status_code=200, content=payload)
-    except RetrievalError as exc:
-        return retrieval_error_response(exc, trace_id=tid)
-    except Exception as exc:
-        logger.exception("list images failed: %s", exc)
-        return error_response("INTERNAL_ERROR", str(exc), status_code=500, trace_id=tid)
+    payload = stack.list_uc.execute(
+        scene=scene, page=page, page_size=page_size, q=q, category=category, trace_id=trace_id
+    )
+    return JSONResponse(content=payload)
 
+
+# -- GET /api/health ---------------------------------------------------------------------
 
 _FLYB_DISABLED = {"ok": False, "optional": True, "disabled": True, "detail": "out of scope"}
 
