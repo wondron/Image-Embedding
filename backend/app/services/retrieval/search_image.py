@@ -114,7 +114,6 @@ class SearchImageUseCase:
         scene: str | None = None,
         top_k: int = 10,
         score_threshold: float | None = None,
-        trace_id: str | None = None,
     ) -> dict[str, Any]:
         """Search by query image bytes (the HTTP layer downloads img_url inputs)."""
         if not image_bytes:
@@ -196,8 +195,6 @@ class SearchImageUseCase:
 
         if items:
             return {
-                "ok": True,
-                "trace_id": trace_id,
                 "source": "self",
                 "scene": active_scene,
                 "outputs_heating": heating,
@@ -209,8 +206,6 @@ class SearchImageUseCase:
             active_scene,
         )
         return {
-            "ok": True,
-            "trace_id": trace_id,
             "source": "empty",
             "scene": active_scene,
             "outputs_heating": heating,

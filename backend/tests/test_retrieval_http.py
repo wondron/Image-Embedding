@@ -30,11 +30,18 @@ class RetrievalHttpTests(unittest.TestCase):
 
         def execute_batch(items):
             self.calls["index"] = {"items": items, "off_loop": _off_event_loop()}
-            return {"indexed": [{"id": "abc"}], "failed": []}
+            return {
+                "indexed": [{
+                    "id": "abc", "filename": "a.png", "original_url": "https://cdn/o/abc.png",
+                    "thumb_url": "https://cdn/t/abc.webp", "scenes": ["general"],
+                    "label_status": "unlabeled", "width": 8, "height": 6,
+                }],
+                "failed": [],
+            }
 
         def search(**kwargs):
             self.calls["search"] = {**kwargs, "off_loop": _off_event_loop()}
-            return {"ok": True, "source": "empty", "scene": "general", "items": []}
+            return {"source": "empty", "scene": "general", "outputs_heating": False, "items": []}
 
         infra = MagicMock()
         infra.ping.return_value = {
@@ -104,7 +111,8 @@ class RetrievalHttpTests(unittest.TestCase):
     def test_search_trace_id_from_body_is_used_everywhere(self):
         response = self.client.post("/api/search", json={"img_url": "https://x/a.jpg", "trace_id": "t-42"})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.calls["search"]["trace_id"], "t-42")
+        self.assertEqual(response.json()["trace_id"], "t-42")
+        self.assertNotIn("trace_id", self.calls["search"])  # use cases know nothing about the wire
 
     def test_bad_score_threshold_literal_has_its_own_code(self):
         response = self.client.post("/api/search", data={"img_url": "https://x/a.jpg", "score_threshold": "high"})

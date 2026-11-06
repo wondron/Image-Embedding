@@ -1,10 +1,10 @@
-"""Response contracts for low-level model tools."""
+"""Tools wire: low-level model diagnostics."""
 
 from pydantic import BaseModel
 
 
 class SegmentResponse(BaseModel):
-    ok: bool
+    ok: bool = True
     filename: str
     width: int
     height: int
@@ -14,7 +14,7 @@ class SegmentResponse(BaseModel):
 
 
 class EmbeddingResponse(BaseModel):
-    ok: bool
+    ok: bool = True
     filename: str
     embedding_dim: int
     latency_ms: float

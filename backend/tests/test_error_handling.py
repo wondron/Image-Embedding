@@ -91,7 +91,7 @@ class TraceIdTests(unittest.TestCase):
     def test_every_response_carries_a_trace_id(self):
         first = self.client.get("/ok").headers["x-trace-id"]
         second = self.client.get("/ok").headers["x-trace-id"]
-        self.assertRegex(first, r"^[0-9a-f]{32}$")
+        self.assertRegex(first, r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
         self.assertNotEqual(first, second)
 
     def test_valid_client_trace_id_is_adopted(self):
@@ -104,7 +104,7 @@ class TraceIdTests(unittest.TestCase):
             with self.subTest(bad=bad):
                 trace_id = self.client.get("/app-error", headers={"X-Trace-Id": bad}).json()["trace_id"]
                 self.assertNotEqual(trace_id, bad)
-                self.assertRegex(trace_id, r"^[0-9a-f]{32}$")
+                self.assertRegex(trace_id, r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 
     def test_endpoint_can_rebind_the_trace_id(self):
         response = self.client.get("/rebind?trace_id=t-77")

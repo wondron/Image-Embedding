@@ -44,7 +44,7 @@ class PredictEndpointTests(unittest.TestCase):
             json={"img_url": "https://body.example/b.png", "machine_info": "body-machine", "trace_id": "body-trace", "save_res": True},
         )
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json(), {"result": [], "trace_id": "query-trace"})
+        self.assertEqual(response.json(), {"ok": True, "result": [], "trace_id": "query-trace"})
         self.assertEqual(str(self.requests[0].url), "https://query.example/a.png")
         self.service.detect.assert_called_once_with(b"query-image", machine_info="", trace_id="query-trace", save_result=False)
 
@@ -73,13 +73,15 @@ class PredictEndpointTests(unittest.TestCase):
         self.assertEqual(self.requests, [])
         self.service.detect.assert_not_called()
 
-    def test_file_search_preserves_list_and_envelope_results_and_nullable_trace(self):
+    def test_file_search_preserves_list_and_envelope_results_with_generated_trace(self):
         for result in ([{"title": "image", "custom": {"rank": 3}}], {"results": [], "status": "upstream_empty_response", "upstream_error": {"code": 500}}):
             self.service.detect.return_value = result
             with self.subTest(result=result):
                 response = self.client.post("/api/predict/searchImage_file", files={"file": ("query.png", b"query-image", "image/png")})
                 self.assertEqual(response.status_code, 200, response.text)
-                self.assertEqual(response.json(), {"result": result, "trace_id": None})
+                body = response.json()
+                self.assertEqual((body["ok"], body["result"]), (True, result))
+                self.assertEqual(str(UUID(body["trace_id"])), body["trace_id"])
 
     def test_file_input_errors_and_unavailable_service_keep_http_statuses(self):
         self.runtime.max_image_bytes = 4

@@ -21,7 +21,7 @@ def _clean_trace_id(value: Any) -> str | None:
 
 
 def _new_trace_id() -> str:
-    return uuid.uuid4().hex
+    return str(uuid.uuid4())  # same format as show_text / historical trace ids
 
 
 def get_trace_id(request: Request) -> str:

@@ -19,6 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.errors import AppError, code_for_status
 from app.core.middleware import TRACE_HEADER, get_trace_id
+from app.schemas.common import ErrorResponse
 
 logger = logging.getLogger("api.errors")
 
@@ -33,12 +34,10 @@ def error_response(
     headers: Mapping[str, str] | None = None,
 ) -> JSONResponse:
     trace_id = get_trace_id(request)
-    content: dict[str, Any] = {"ok": False, "error": code, "detail": detail, "trace_id": trace_id}
-    if errors is not None:
-        content["errors"] = errors
+    body = ErrorResponse(error=code, detail=detail, trace_id=trace_id, errors=errors)
     return JSONResponse(
         status_code=status_code,
-        content=content,
+        content=body.model_dump(exclude_none=True),
         headers={**(headers or {}), TRACE_HEADER: trace_id},
     )
 

@@ -22,7 +22,7 @@ def ping(request: Request) -> dict[str, Any]:
     runtime = get_application_state(request)
     return {
         "ok": True,
-        "ts": datetime.now().isoformat(timespec="seconds"),
+        "ts": datetime.now().astimezone().isoformat(timespec="seconds"),
         "timeout_s": runtime.http_timeout,
         "max_image_bytes": runtime.max_image_bytes,
     }
@@ -38,7 +38,7 @@ async def predict_file(
 ) -> dict[str, Any]:
     """使用 multipart/form-data 上传 file 字段进行图片检索。"""
     runtime = get_application_state(request)
-    bind_trace_id(request, trace_id)
+    trace_id = bind_trace_id(request, trace_id)
     img_bytes = await read_upload(file, runtime.max_image_bytes)
     return await run_predict(
         runtime=runtime,
@@ -67,7 +67,7 @@ async def predict_url(
     machine_info = machine_info if machine_info is not None else (body.machine_info if body else None)
     trace_id = trace_id if trace_id is not None else (body.trace_id if body else None)
     save_res = save_res if save_res is not None else (body.save_res if body else None)
-    bind_trace_id(request, trace_id)
+    trace_id = bind_trace_id(request, trace_id)
     if img_url is None:
         raise errors.validation_error("img_url is required (provide in query or JSON body).")
 

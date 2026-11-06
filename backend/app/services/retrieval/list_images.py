@@ -62,7 +62,6 @@ class ListImagesUseCase:
         page_size: int = 24,
         q: str | None = None,
         category: str | None = None,
-        trace_id: str | None = None,
     ) -> dict[str, Any]:
         active_scene = normalize_list_scene(scene)
 
@@ -105,8 +104,6 @@ class ListImagesUseCase:
 
         items = [_item_from_row(row, scene_meta=scene_meta) for row in rows]
         return {
-            "ok": True,
-            "trace_id": trace_id,
             "scene": active_scene,
             "page": page_i,
             "page_size": page_size_i,

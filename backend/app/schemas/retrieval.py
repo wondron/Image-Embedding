@@ -1,131 +1,129 @@
-"""Image index/search/list DTOs (SSOT + §6.1 Wire).
+"""Retrieval wire: index / search / list (search and list follow contract §6.1).
 
-Pydantic v1 compatible (host has pydantic==1.10.x). Prefer .dict() / getattr dump.
-
-Index request/response shapes are outside §6.1 Search/List wire; List/Search
-response models align with docs/image-search-pg-v01-data-contract.md §6.1.
+Routes declare these as response_model; search/list use exclude_unset so the
+fields §6.1 makes conditional (scene_label, food_state, heating_group) appear
+only when the use case set them.
 """
 
-from __future__ import annotations
-
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 
-def dump_model(model: BaseModel) -> Dict[str, Any]:
-    """pydantic v1/v2 compatible model -> dict (D1: never bare model_dump)."""
-    return getattr(model, "model_dump", model.dict)()
-
+# -- requests ---------------------------------------------------------------------------
 
 class IndexJsonRequest(BaseModel):
-    """JSON body when file already on a service-reachable path (§3.1)."""
+    """JSON body when the file is already on a path the API process can read (§3.1)."""
 
     path: str = Field(..., description="Local path reachable by the API process")
-    category: Optional[str] = None
-    tags: Optional[List[Any]] = None
-    scene: Optional[str] = None
-    scenes: Optional[List[Any]] = None
-
-
-class IndexItemOut(BaseModel):
-    id: Union[int, str]
-    qdrant_point_id: Optional[Union[int, str]] = None
-    path: Optional[str] = None
-    url: Optional[str] = None
-    original_url: Optional[str] = None
-    thumb_url: Optional[str] = None
-    title: Optional[str] = None
-    category: Optional[str] = None
-    category_id: Optional[int] = None
-    tags: Optional[Any] = None
-    scenes: Optional[List[Any]] = None
-    width: Optional[int] = None
-    height: Optional[int] = None
-    status: Optional[str] = "active"
-    created_at: Optional[str] = None
-
-
-class IndexFailedItem(BaseModel):
-    filename_or_path: str
-    error: str
-    message: str
-
-
-class IndexResponse(BaseModel):
-    ok: bool = True
-    trace_id: Optional[str] = None
-    indexed: List[IndexItemOut] = Field(default_factory=list)
-    failed: List[IndexFailedItem] = Field(default_factory=list)
+    category: str | None = None
+    tags: list[Any] | None = None
+    scene: str | None = None
+    scenes: list[Any] | None = None
 
 
 class SearchJsonRequest(BaseModel):
     """JSON search body (§3.2 B)."""
 
     img_url: str = Field(..., description="Remote query image URL")
-    scene: Optional[str] = None
+    scene: str | None = None
     top_k: int = Field(default=10, ge=1, le=50)
-    score_threshold: Optional[float] = Field(
+    score_threshold: float | None = Field(
         default=None,
         description="omit/null=0.55 reject; 0=off; else [0.30,1] (inclusive). SSOT section 3.2.1",
     )
-    trace_id: Optional[str] = None
+    trace_id: str | None = None
 
 
+# -- shared parts -----------------------------------------------------------------------
 
-class SearchHitOut(BaseModel):
-    """Search hit (§6.1.1). Forbidden: image_url/thumbnail_url/title/FlyB shell."""
+class HeatingGroup(BaseModel):
+    id: int
+    code: str
+    name: str
 
+
+# -- POST /api/index ----------------------------------------------------------------------
+
+class IndexedImage(BaseModel):
     id: str
-    original_url: Optional[str] = None
-    thumb_url: Optional[str] = None
-    similarity: Optional[float] = None
-    category_id: Optional[int] = None
-    category: Optional[str] = None
-    scenes: Optional[List[Any]] = None
-    scene_label: Optional[str] = None
-    label_status: Optional[str] = None
-    width: Optional[int] = None
-    height: Optional[int] = None
-    food_state: Optional[str] = None
-    heating_group: Optional[str] = None
+    filename: str
+    original_url: str
+    thumb_url: str
+    category_id: int | None = None
+    scenes: list[str] = Field(default_factory=list)
+    label_status: str
+    food_state: str | None = None
+    width: int
+    height: int
+    payload_version: int | None = None
+    created_at: str | None = None
+
+
+class IndexFailure(BaseModel):
+    filename: str
+    error: str
+    detail: str
+
+
+class IndexResponse(BaseModel):
+    ok: bool = True
+    trace_id: str
+    indexed: list[IndexedImage] = Field(default_factory=list)
+    failed: list[IndexFailure] = Field(default_factory=list)
+
+
+# -- POST /api/search (§6.1.1) ------------------------------------------------------------
+
+class SearchHit(BaseModel):
+    id: str
+    original_url: str | None = None
+    thumb_url: str | None = None
+    similarity: float | None = None
+    category_id: int | None = None
+    category: str | None = None
+    scenes: list[str] | None = None
+    scene_label: str | None = None
+    label_status: str | None = None
+    width: int | None = None
+    height: int | None = None
+    food_state: str | None = None
+    heating_group: HeatingGroup | None = None
 
 
 class SearchResponse(BaseModel):
-    """Search envelope (§6.1.1). Array key is items; no result/results."""
-
     ok: bool = True
-    trace_id: Optional[str] = None
-    source: str = "self"
-    scene: str = "general"
+    trace_id: str
+    source: Literal["self", "empty"]
+    scene: str
     outputs_heating: bool = False
-    items: List[SearchHitOut] = Field(default_factory=list)
-    message: Optional[str] = None
+    items: list[SearchHit] = Field(default_factory=list)
+    message: str | None = None
 
+
+# -- GET /api/images (§6.1.2) -------------------------------------------------------------
 
 class ListImageItem(BaseModel):
-    """Library list item (§6.1.2). Authoritative URL fields only (P2/P5/P11)."""
-
     id: str
-    original_url: Optional[str] = None
-    thumb_url: Optional[str] = None
-    category_id: Optional[int] = None
-    category: Optional[str] = None
-    scenes: Optional[List[Any]] = None
-    label_status: Optional[str] = None
-    width: Optional[int] = None
-    height: Optional[int] = None
-    food_state: Optional[str] = None
-    heating_group: Optional[str] = None
-    created_at: Optional[Any] = None
-    updated_at: Optional[Any] = None
+    original_url: str | None = None
+    thumb_url: str | None = None
+    category_id: int | None = None
+    category: str | None = None
+    scenes: list[str] | None = None
+    label_status: str | None = None
+    width: int | None = None
+    height: int | None = None
+    food_state: str | None = None
+    heating_group: HeatingGroup | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class ListImagesResponse(BaseModel):
     ok: bool = True
-    trace_id: Optional[str] = None
-    scene: str = "general"
-    page: int = 1
-    page_size: int = 24
-    total: int = 0
-    items: List[ListImageItem] = Field(default_factory=list)
+    trace_id: str
+    scene: str
+    page: int
+    page_size: int
+    total: int
+    items: list[ListImageItem] = Field(default_factory=list)

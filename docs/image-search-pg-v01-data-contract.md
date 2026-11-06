@@ -430,6 +430,8 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 
 **错误码**：MVP 已定码能复用的复用（如 `SEARCH_BAD_SCORE_THRESHOLD`）；uuid/sha 冲突、未知 scene code、无 current 模型等 **TBD 补表**。
 
+**成功响应（2026-11-06 起）**：每个 JSON 响应体带 `ok`；predict / 检索的响应体同时带 `trace_id`（与响应头 `X-Trace-Id` 一致，客户端未传时由服务端生成）。Index 结果字段与 List 对齐：`filename` 取代 `title`，去掉 `qdrant_point_id`；失败项为 `{filename, error, detail}`。字段定义见 `backend/app/schemas/`。
+
 **错误响应（2026-11-06 起全部接口统一）**：`{"ok": false, "error": "<CODE>", "detail": "<说明>", "trace_id": "<id>"}`，请求参数校验失败另带 `errors`（字段级列表）；响应头 `X-Trace-Id` 与 `trace_id` 相同（客户端可用请求头 `X-Trace-Id` 指定）。通用码：`VALIDATION_ERROR` 422、`NOT_READY` 503、`EMPTY_FILE` 400、`FILE_TOO_LARGE` 413、`UNSUPPORTED_MEDIA_TYPE` 415、`INVALID_URL` 422、`FORBIDDEN_HOST` 403、`DOWNLOAD_FAILED` 502（或上游状态码）、`DOWNLOAD_TIMEOUT` 504、`UPSTREAM_ERROR` 502、`UPSTREAM_TIMEOUT` 504、`INTERNAL_ERROR` 500（不回传异常原文）；检索专用码见 `backend/app/services/retrieval/errors.py`，定义见 `backend/app/core/errors.py`。
 
 ---

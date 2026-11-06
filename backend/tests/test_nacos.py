@@ -104,7 +104,8 @@ class NacosLoadingTests(unittest.TestCase):
                     self.assertEqual(source["source"], "yaml")
                     self.assertEqual(source["nacos_status"], "fallback")
                     self.assertEqual(source["nacos_profile"], selected)
-                    self.assertFalse(source["nacos_polling"])
+                    # polling keeps running after a fallback so Nacos is picked up once it recovers
+                    self.assertTrue(source["nacos_polling"])
                     self.assert_only_selected_profile_requested(factory, session, selected)
 
     def test_disabled_nacos_reads_local_yaml_without_remote_requests(self):
@@ -140,6 +141,106 @@ class NacosLoadingTests(unittest.TestCase):
         provider, _, _ = self.make_provider("prod", error=requests.Timeout())
         with self.assertRaises(FileNotFoundError):
             provider.load(str(self.yaml_path.with_name("missing.yaml")))
+
+
+def _response(text="", status=200):
+    response = requests.Response()
+    response.status_code = status
+    response._content = text.encode("utf-8")
+    response.encoding = "utf-8"
+    return response
+
+
+class NacosLayeringAndPollingTests(unittest.TestCase):
+    def setUp(self):
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        self.yaml_path = Path(temporary_directory.name) / "config.yaml"
+        self.yaml_path.write_text(
+            "marker: local\nonly_local: {a: 1, b: 2}\nlocal_list: [1, 2]\n", encoding="utf-8"
+        )
+        platform_log = patch("app.core.config.nacos.show_text")
+        platform_log.start()
+        self.addCleanup(platform_log.stop)
+
+    def provider(self, *results, **settings):
+        session = Mock(spec=requests.Session)
+        session.request.side_effect = list(results)
+        options = {"enabled": True, "poll_enabled": True, **settings}
+        provider = NacosConfigProvider(
+            NacosSettings(profile="test", profiles=PROFILES, **options),
+            lambda selected, nacos_settings: NacosConfigClient(selected, nacos_settings, session),
+        )
+        self.addCleanup(provider.close)
+        return provider, session
+
+    def run_polls(self, provider, on_update, waits):
+        provider._stop_event = Mock()
+        provider._stop_event.wait.side_effect = waits
+        provider._poll_loop(on_update)
+        return [c.args[0] for c in provider._stop_event.wait.call_args_list]
+
+    def test_nacos_values_override_yaml_key_by_key(self):
+        provider, _ = self.provider(_response("marker: remote\nonly_local: {b: 20}\nlocal_list: [9]\n"))
+        config, source = provider.load(str(self.yaml_path))
+        self.assertEqual(config, {"marker": "remote", "only_local": {"a": 1, "b": 20}, "local_list": [9]})
+        self.assertTrue(source["yaml_base"])
+
+    def test_polling_survives_a_transient_failure_and_applies_the_next_change(self):
+        provider, _ = self.provider(
+            _response("marker: remote\n"),          # startup
+            requests.ConnectionError("blip"),        # poll 1 fails
+            _response("marker: changed\n"),         # poll 2 (after the retry wait)
+        )
+        provider.load(str(self.yaml_path))
+        on_update = Mock(return_value=True)
+        waits = self.run_polls(provider, on_update, [False, False, True])
+        self.assertEqual(waits, [provider.poll_interval_seconds, provider.retry_interval_seconds,
+                                 provider.poll_interval_seconds])
+        on_update.assert_called_once()
+        self.assertEqual(on_update.call_args.args[0].config["marker"], "changed")
+        self.assertEqual(on_update.call_args.args[0].config["only_local"], {"a": 1, "b": 2})
+
+    def test_after_yaml_fallback_polling_switches_to_nacos_when_it_recovers(self):
+        provider, _ = self.provider(requests.Timeout("down"), _response("marker: remote\n"))
+        config, source = provider.load(str(self.yaml_path))
+        self.assertEqual((config["marker"], source["source"]), ("local", "yaml"))
+        on_update = Mock(return_value=True)
+        self.run_polls(provider, on_update, [False, True])
+        on_update.assert_called_once()
+        self.assertEqual(on_update.call_args.args[0].config["marker"], "remote")
+        self.assertIs(provider._active, on_update.call_args.args[0])
+
+    def test_rejected_config_is_not_offered_again_until_it_changes(self):
+        provider, _ = self.provider(
+            _response("marker: remote\n"),
+            _response("marker: broken\n"),
+            _response("marker: broken\n"),
+            _response("marker: fixed\n"),
+        )
+        provider.load(str(self.yaml_path))
+        on_update = Mock(side_effect=lambda snapshot: snapshot.config["marker"] != "broken")
+        self.run_polls(provider, on_update, [False, False, False, True])
+        self.assertEqual([c.args[0].config["marker"] for c in on_update.call_args_list], ["broken", "fixed"])
+        self.assertEqual(provider._active.config["marker"], "fixed")
+
+    def test_disabled_polling_does_not_start_a_thread(self):
+        provider, _ = self.provider(_response("marker: remote\n"), poll_enabled=False)
+        provider.load(str(self.yaml_path))
+        provider.start_polling(Mock())
+        self.assertIsNone(provider._thread)
+
+
+class NacosEnvironmentOverrideTests(unittest.TestCase):
+    def test_credentials_and_data_ids_come_from_environment(self):
+        env = {"NACOS_ENV": "test", "NACOS_USERNAME": "env-user", "NACOS_PASSWORD": "env-secret",
+               "NACOS_DATA_IDS": "a, b", "NACOS_ENABLED": "0"}
+        with patch.dict(os.environ, env):
+            nacos = NacosSettings()
+        selected = next(p for p in nacos.profiles if p["profile"] == "test")
+        self.assertEqual((selected["username"], selected["password"]), ("env-user", "env-secret"))
+        self.assertEqual(selected["data_id_list"], ["a", "b"])
+        self.assertFalse(nacos.enabled)
 
 
 if __name__ == "__main__":

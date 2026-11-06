@@ -97,18 +97,41 @@ class ConcurrencySettings:
     thread_name_prefix: str = "det-pool"
 
 
+_NACOS_ENV_OVERRIDES = (
+    ("server_addresses", "NACOS_SERVER_ADDR"),
+    ("namespace", "NACOS_NAMESPACE"),
+    ("username", "NACOS_USERNAME"),
+    ("password", "NACOS_PASSWORD"),
+    ("group", "NACOS_GROUP"),
+)
+
+
+def _nacos_profiles() -> tuple[NacosProfile, ...]:
+    """Built-in profiles with NACOS_* environment overrides (credentials belong in env)."""
+    overrides = {key: os.getenv(env, "").strip() for key, env in _NACOS_ENV_OVERRIDES}
+    data_ids = [item.strip() for item in os.getenv("NACOS_DATA_IDS", "").split(",") if item.strip()]
+    profiles = []
+    for base in NACOS_CONFIG_PROFILES:
+        profile = dict(base)
+        profile.update({key: value for key, value in overrides.items() if value})
+        if data_ids:
+            profile["data_id_list"] = data_ids
+        profiles.append(profile)
+    return tuple(profiles)  # type: ignore[return-value]
+
+
 @dataclass(frozen=True, slots=True)
 class NacosSettings:
     profile: str = field(
         default_factory=lambda: os.getenv("NACOS_ENV", "").strip().lower() or "prod"
     )
-    enabled: bool = NACOS_ENABLED
-    poll_enabled: bool = NACOS_POLL_ENABLED
+    enabled: bool = field(default_factory=lambda: _env_bool("NACOS_ENABLED", NACOS_ENABLED))
+    poll_enabled: bool = field(default_factory=lambda: _env_bool("NACOS_POLL_ENABLED", NACOS_POLL_ENABLED))
     connect_timeout_seconds: float = NACOS_CONNECT_TIMEOUT_SECONDS
     request_timeout_seconds: float = NACOS_REQUEST_TIMEOUT_SECONDS
     poll_interval_seconds: float = NACOS_POLL_INTERVAL_SECONDS
     retry_interval_seconds: float = NACOS_RETRY_INTERVAL_SECONDS
-    profiles: tuple[NacosProfile, ...] = field(default_factory=lambda: NACOS_CONFIG_PROFILES)
+    profiles: tuple[NacosProfile, ...] = field(default_factory=_nacos_profiles)
 
     def __post_init__(self) -> None:
         if self.profile not in {"prod", "test"}:

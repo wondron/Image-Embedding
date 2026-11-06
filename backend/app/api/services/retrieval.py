@@ -1,6 +1,8 @@
 """HTTP adapter for retrieval: parse the wire request and call a use case.
 
 Business flow lives in app.services.retrieval (reached through RetrievalStack).
+Functions return the response body as a dict ({ok, trace_id, ...result}); the
+routes' response_model (app.schemas.retrieval) validates and serializes it.
 Failures are raised (AppError / RetrievalError) and rendered by
 app.core.exceptions. Use cases block (ONNX / PG / Qdrant / S3), so async
 handlers run them in the threadpool instead of on the event loop.
@@ -24,7 +26,7 @@ from app.api.uploads import form_upload, read_upload
 from app.bootstrap.state import ApplicationState
 from app.clients.image_fetch import read_url_bytes
 from app.core.middleware import bind_trace_id
-from app.schemas.retrieval import IndexJsonRequest, IndexResponse, SearchJsonRequest, dump_model
+from app.schemas.retrieval import IndexJsonRequest, SearchJsonRequest
 from app.services.retrieval import errors as err
 
 logger = logging.getLogger("svc.retrieval")
@@ -83,7 +85,7 @@ def parse_score_threshold(raw: Any) -> Optional[float]:
 
 # -- POST /api/index ------------------------------------------------------------------
 
-async def index_from_request(runtime: ApplicationState, request: Request) -> JSONResponse:
+async def index_from_request(runtime: ApplicationState, request: Request) -> Dict[str, Any]:
     """multipart file/files (<= 100) or JSON {path, category, tags, scene, scenes}."""
     trace_id = bind_trace_id(request)
     if _is_json(request):
@@ -102,13 +104,7 @@ async def index_from_request(runtime: ApplicationState, request: Request) -> JSO
     stack = require_retrieval(runtime)
     outcome = await run_in_threadpool(stack.index_uc.execute_batch, items)
     _raise_if_batch_failed_uniformly(outcome)
-    body = IndexResponse(
-        ok=True,
-        trace_id=trace_id,
-        indexed=outcome.get("indexed") or [],
-        failed=outcome.get("failed") or [],
-    )
-    return JSONResponse(content=dump_model(body))
+    return {"ok": True, "trace_id": trace_id, "indexed": outcome["indexed"], "failed": outcome["failed"]}
 
 
 async def _index_items_from_form(request: Request, max_bytes: int) -> List[Dict[str, Any]]:
@@ -140,19 +136,17 @@ async def _index_items_from_form(request: Request, max_bytes: int) -> List[Dict[
 
 def _raise_if_batch_failed_uniformly(outcome: Dict[str, Any]) -> None:
     """Nothing indexed and every item failed the same way -> report that error."""
-    if outcome.get("indexed"):
+    if outcome["indexed"]:
         return
-    failed = outcome.get("failed") or []
+    failed = outcome["failed"]
     for code, fallback in (
         ("INDEX_PATH_TOO_LONG", "path too long after normalize"),
         ("INDEX_UNKNOWN_SCENE", "unknown scene"),
         ("VALIDATION_ERROR", "validation error"),
     ):
         if failed and all(f.get("error") == code for f in failed):
-            raise err.RetrievalError(code, failed[0].get("message") or fallback, http_status=422)
-    if outcome.get("all_failed") and all(
-        f.get("error") in {"INDEX_EMPTY_REQUEST", "INDEX_BAD_IMAGE"} for f in failed
-    ):
+            raise err.RetrievalError(code, failed[0].get("detail") or fallback, http_status=422)
+    if all(f.get("error") in {"INDEX_EMPTY_REQUEST", "INDEX_BAD_IMAGE"} for f in failed):
         raise err.index_empty_request("no decodable image in request")
 
 
@@ -168,7 +162,7 @@ class _SearchParams:
     trace_id: Optional[str] = None
 
 
-async def search_from_request(runtime: ApplicationState, request: Request) -> JSONResponse:
+async def search_from_request(runtime: ApplicationState, request: Request) -> Dict[str, Any]:
     """multipart file / img_url or JSON {img_url}; query params override body fields."""
     params = await _search_params(request, runtime.max_image_bytes)
     trace_id = bind_trace_id(request, params.trace_id)
@@ -186,15 +180,14 @@ async def search_from_request(runtime: ApplicationState, request: Request) -> JS
             max_image_bytes=runtime.max_image_bytes,
             timeout_s=runtime.http_timeout,
         )
-    payload = await run_in_threadpool(
+    result = await run_in_threadpool(
         stack.search_uc.execute,
         image_bytes=image_bytes,
         scene=params.scene,
         top_k=params.top_k,
         score_threshold=params.score_threshold,
-        trace_id=trace_id,
     )
-    return JSONResponse(content=payload)
+    return {"ok": True, "trace_id": trace_id, **result}
 
 
 async def _search_params(request: Request, max_bytes: int) -> _SearchParams:
@@ -246,13 +239,11 @@ def run_list_images(
     q: Optional[str] = None,
     category: Optional[str] = None,
     trace_id: Optional[str] = None,
-) -> JSONResponse:
+) -> Dict[str, Any]:
     trace_id = bind_trace_id(request, trace_id)
     stack = require_retrieval(runtime)
-    payload = stack.list_uc.execute(
-        scene=scene, page=page, page_size=page_size, q=q, category=category, trace_id=trace_id
-    )
-    return JSONResponse(content=payload)
+    result = stack.list_uc.execute(scene=scene, page=page, page_size=page_size, q=q, category=category)
+    return {"ok": True, "trace_id": trace_id, **result}
 
 
 # -- GET /api/health ---------------------------------------------------------------------

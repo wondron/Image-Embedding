@@ -7,35 +7,39 @@ Content-Type (avoids FastAPI File+Body conflicts).
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
 from app.api.services import retrieval as retrieval_service
 from app.bootstrap.state import get_application_state
+from app.schemas.retrieval import IndexResponse, ListImagesResponse, SearchResponse
 
 router = APIRouter(prefix="/api", tags=["retrieval"])
 
 
 @router.post(
     "/index",
+    response_model=IndexResponse,
     summary="Index image(s)",
     description="multipart file/files or JSON {path,category,tags,scene,scenes}. SSOT §3.1.",
 )
-async def index_image(request: Request) -> JSONResponse:
+async def index_image(request: Request) -> Any:
     return await retrieval_service.index_from_request(get_application_state(request), request)
 
 
 @router.post(
     "/search",
+    response_model=SearchResponse,
+    response_model_exclude_unset=True,  # §6.1: conditional fields stay absent
     summary="Search by image",
     description=(
         "multipart file OR JSON {img_url,scene}. Self-built-first; "
         "PG v0.1: empty self-built -> source=empty (FlyB OUT) and final list length==0. SSOT §3.2/§4."
     ),
 )
-async def search_image(request: Request) -> JSONResponse:
+async def search_image(request: Request) -> Any:
     return await retrieval_service.search_from_request(get_application_state(request), request)
 
 
@@ -50,6 +54,8 @@ def mvp_health(request: Request) -> JSONResponse:
 
 @router.get(
     "/images",
+    response_model=ListImagesResponse,
+    response_model_exclude_unset=True,
     summary="List library images",
     description=(
         "Paginated images filtered by scene (default general). "
@@ -64,7 +70,7 @@ def list_library_images(
     q: Optional[str] = Query(None, description="optional category name / url / id substring"),
     category: Optional[str] = Query(None, description="optional category code, name or id"),
     trace_id: Optional[str] = Query(None),
-) -> JSONResponse:
+) -> Any:
     return retrieval_service.run_list_images(
         get_application_state(request),
         request,

@@ -1,4 +1,4 @@
-"""Shared config loading for worker entry points."""
+"""Shared config loading for worker entry points (same sources as the API)."""
 
 from __future__ import annotations
 
@@ -9,11 +9,21 @@ logger = logging.getLogger("workers")
 
 
 def load_worker_config() -> dict[str, Any]:
-    """Local yaml config (QDRANT_CONFIG etc.); {} if it cannot be loaded."""
-    try:
-        from app.core.config.loader import load_config
+    """Local YAML base + Nacos (when reachable), loaded once without polling.
 
-        return load_config() or {}
+    Falls back to {} if neither source is usable: workers can still run on the
+    environment Settings (PG / Qdrant endpoints) alone.
+    """
+    from app.core.config.nacos import NacosConfigProvider
+    from app.core.config.settings import settings
+
+    provider = NacosConfigProvider(settings.nacos)
+    try:
+        config, source = provider.load(settings.config.yaml_path)
+        logger.info("worker config loaded | source=%s", source.get("source"))
+        return config
     except Exception as exc:
         logger.warning("config not loaded, using defaults: %s: %s", type(exc).__name__, exc)
         return {}
+    finally:
+        provider.close()

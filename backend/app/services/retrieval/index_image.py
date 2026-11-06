@@ -257,10 +257,9 @@ class IndexImageUseCase:
         created = stored or {}
         return {
             "id": str(image_id),
-            "qdrant_point_id": str(image_id),
+            "filename": title,
             "original_url": created.get("original_url") or original_url,
             "thumb_url": created.get("thumb_url") or thumb_url,
-            "title": title,
             "category_id": created.get("category_id")
             if created.get("category_id") is not None
             else resolved_category_id,
@@ -303,21 +302,9 @@ class IndexImageUseCase:
                     )
                 )
             except err.RetrievalError as exc:
-                failed.append(
-                    {
-                        "filename_or_path": label,
-                        "error": exc.code,
-                        "message": exc.detail,
-                    }
-                )
-            except Exception as exc:
-                failed.append(
-                    {
-                        "filename_or_path": label,
-                        "error": "INTERNAL_ERROR",
-                        "message": str(exc),
-                    }
-                )
-        if not indexed and failed:
-            return {"ok": False, "indexed": [], "failed": failed, "all_failed": True}
-        return {"ok": True, "indexed": indexed, "failed": failed, "all_failed": False}
+                failed.append({"filename": label, "error": exc.code, "detail": exc.detail})
+            except Exception:
+                # Details go to the log; the item reports a generic failure.
+                logger.exception("index item failed: %s", label)
+                failed.append({"filename": label, "error": "INTERNAL_ERROR", "detail": "internal error"})
+        return {"indexed": indexed, "failed": failed}

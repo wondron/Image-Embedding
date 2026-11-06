@@ -1,4 +1,4 @@
-"""Request and response contracts for image search."""
+"""Predict wire: image search through FoodService."""
 
 from typing import Any
 
@@ -13,13 +13,14 @@ class PredictUrlBody(BaseModel):
 
 
 class PredictResponse(BaseModel):
+    ok: bool = True
+    trace_id: str
     # Search results may be a document list or an upstream status envelope.
     result: Any
-    trace_id: str | None = None
 
 
 class PingResponse(BaseModel):
-    ok: bool
+    ok: bool = True
     ts: str
     timeout_s: float
     max_image_bytes: int
