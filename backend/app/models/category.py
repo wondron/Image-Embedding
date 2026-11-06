@@ -44,15 +44,10 @@ class Category(TimestampMixin, Base):
         unique=True, comment="稳定编码，如 dish.pizza；配置和规则里用它引用类别"
     )
     parent_id: Mapped[int | None] = mapped_column(
-        ForeignKey("categories.id", ondelete="RESTRICT"),
-        index=True,
-        comment="父节点，根节点为空",
+        ForeignKey("categories.id", ondelete="RESTRICT"), index=True, comment="父节点，根节点为空",
     )
     path: Mapped[str] = mapped_column(
-        LtreeType(),
-        unique=True,
-        server_default=FetchedValue(),
-        server_onupdate=FetchedValue(),
+        LtreeType(), unique=True, server_default=FetchedValue(), server_onupdate=FetchedValue(),
         comment="ID 链，如 2.15.137；插入或移动节点时自动重算整棵子树，不手动写",
     )
     cuisines: Mapped[list[str]] = mapped_column(
