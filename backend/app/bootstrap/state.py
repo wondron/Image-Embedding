@@ -59,8 +59,7 @@ class ApplicationState:
             and self.initialization_error is None
             and self.warmup_error is None
             and service is not None
-            and getattr(service, "segmentor", None) is not None
-            and getattr(service, "clip", None) is not None
+            and getattr(service, "embeddingTool", None) is not None
         )
 
     def require_food_service(self) -> FoodService:

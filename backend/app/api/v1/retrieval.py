@@ -59,15 +59,11 @@ async def index_image(request: Request) -> JSONResponse:
             category = form.get("category")
             category_s = str(category) if category is not None else None
             tags_raw = form.get("tags")
-            tag_list = retrieval_service.parse_tags(
-                str(tags_raw) if tags_raw is not None else None
-            )
+            tag_list = retrieval_service.parse_tags( str(tags_raw) if tags_raw is not None else None )
             scene_raw = form.get("scene")
             scene_s = str(scene_raw).strip() if scene_raw not in (None, "") else None
             scenes_raw = form.get("scenes")
-            scenes_list = retrieval_service.parse_scenes_json(
-                str(scenes_raw) if scenes_raw is not None else None
-            )
+            scenes_list = retrieval_service.parse_scenes_json( str(scenes_raw) if scenes_raw is not None else None )
 
             uploads: List[UploadFile] = []
             single = _as_upload(form.get("file"))
@@ -85,17 +81,10 @@ async def index_image(request: Request) -> JSONResponse:
                     uploads.append(up)
 
             if len(uploads) > 100:
-                return retrieval_service.error_response(
-                    "VALIDATION_ERROR",
-                    "too many files (max 100)",
-                    status_code=422,
-                )
+                return retrieval_service.error_response("VALIDATION_ERROR", "too many files (max 100)", status_code=422)
             if not uploads:
-                return retrieval_service.error_response(
-                    "INDEX_EMPTY_REQUEST",
-                    "no file and no path",
-                    status_code=400,
-                )
+                return retrieval_service.error_response("INDEX_EMPTY_REQUEST", "no file and no path", status_code=400,)
+            
             for up in uploads:
                 data = await retrieval_service.read_upload(up, runtime.max_image_bytes)
                 items.append(

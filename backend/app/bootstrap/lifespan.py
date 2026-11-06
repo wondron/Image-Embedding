@@ -7,17 +7,12 @@ import httpx
 from fastapi import FastAPI
 
 from app.bootstrap.state import ApplicationState
-from app.core.config.nacos import (
-    NacosConfigProvider,
-    NacosConfigSnapshot,
-)
-
+from app.core.config.nacos import NacosConfigProvider, NacosConfigSnapshot
 from app.core.config.settings import Settings, settings
 from app.core.observability.logging import setup_logger
 
 
 logger = logging.getLogger("lifespan")
-
 
 def create_http_client(app_settings: Settings = settings) -> httpx.AsyncClient:
     return httpx.AsyncClient(
@@ -51,7 +46,6 @@ def load_application_config(
 
 
 def create_food_service(config: dict):
-    # Keep model dependencies out of module import and initialize them at startup.
     from app.services.predict.food_service import FoodService
     return FoodService(config)
 

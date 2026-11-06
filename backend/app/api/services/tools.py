@@ -82,7 +82,7 @@ async def embedding(runtime: ApplicationState, file: UploadFile) -> EmbeddingRes
     image_bytes = await _read_tool_image(file, runtime)
     service = require_food_service(runtime)
 
-    embedding_model = getattr(service, "embedding", None)
+    embedding_model = getattr(service, "embeddingTool", None)
     if embedding_model is None:
         raise HTTPException(status_code=503, detail="embedding model is not initialized")
 
@@ -106,14 +106,8 @@ async def embedding(runtime: ApplicationState, file: UploadFile) -> EmbeddingRes
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("embedding tool failed | filename=%s | err=%s", file.filename, exc)
+        logger.exception("embeddingTool失败 name=%s err=%s", file.filename, exc)
         raise HTTPException(status_code=500, detail=f"embedding failed: {exc}") from exc
 
-    logger.info(
-        "embedding tool ok | filename=%s | bytes=%d | dim=%d | latency_ms=%.2f",
-        response.filename,
-        len(image_bytes),
-        response.embedding_dim,
-        response.latency_ms,
-    )
+    logger.info("embedding调用成功 name=%s bytes=%d dim=%d latency_ms=%.2f", response.filename, len(image_bytes), response.embedding_dim, response.latency_ms)
     return response

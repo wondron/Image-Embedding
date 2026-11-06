@@ -1,15 +1,3 @@
-"""Build retrieval stack (embedder + Qdrant + PostgreSQL + S3 + use cases).
-
-M2: MySQL removed. Collection/dim/distance from embedding_models.status='current'.
-QdrantVectorStore thin-wraps app.clients.qdrant.QdrantStore (no second client).
-After vector upsert success → image_embeddings.synced_version = images.payload_version.
-
-M4: ObjectStoragePort (mock by default) + DeleteImageUseCase + DeletionWorker.
-Qdrant delete scope = current collection only (multi-collection TBD).
-D5/R3: QdrantStore under app.clients; FlyB removed from retrieval stack (search source=empty).
-D6/R3: retrieval island — do not import app.services.predict / pipeline / flyb_search here.
-"""
-
 from __future__ import annotations
 
 import logging
