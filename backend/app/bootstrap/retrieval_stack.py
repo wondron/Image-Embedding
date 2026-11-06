@@ -30,7 +30,7 @@ from app.services.retrieval.list_images import ListImagesUseCase
 from app.services.retrieval.recompute_scenes import RecomputeScenesUseCase
 from app.services.retrieval.search_image import SearchImageUseCase
 
-logger = logging.getLogger("bootstrap.retrieval")
+logger = logging.getLogger("retrieval")
 
 
 @dataclass

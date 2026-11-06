@@ -22,7 +22,7 @@ from app.services.retrieval.storage_keys import (
     thumb_key,
 )
 
-logger = logging.getLogger("object_storage")
+logger = logging.getLogger("object_store")
 
 
 def _key_from_url_or_key(url_or_key: str, public_base_url: str) -> str:

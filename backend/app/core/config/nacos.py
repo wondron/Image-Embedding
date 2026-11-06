@@ -344,7 +344,7 @@ class NacosConfigProvider:
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._poll_loop, args=(on_update,), name="nacos-config-poller", daemon=True)
         self._thread.start()
-        _log(logging.INFO, f"Nacos 配置轮询启动  间隔={self.poll_interval_seconds:.3f}s")
+        # _log(logging.INFO, f"Nacos 配置轮询启动  间隔={self.poll_interval_seconds:.3f}s")
 
     def _poll_loop(self, on_update: UpdateCallback) -> None:
         profile = self._selected_profile()
@@ -355,8 +355,7 @@ class NacosConfigProvider:
                 try:
                     candidate = self._fetch(profile)
                 except Exception as exc:
-                    _log(logging.WARNING, f"Nacos 配置轮询失败，保留当前配置，{self.retry_interval_seconds:.1f}s 后重试 | "
-                                          f"error={type(exc).__name__}: {exc}")
+                    # _log(logging.WARNING, f"Nacos 配置轮询失败，保留当前配置，{self.retry_interval_seconds:.1f}s 后重试 | error={type(exc).__name__}: {exc}")
                     wait = self.retry_interval_seconds
                     continue
                 self._offer(candidate, on_update)

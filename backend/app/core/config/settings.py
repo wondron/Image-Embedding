@@ -194,21 +194,6 @@ class PostgresSettings:
 
 
 @dataclass(frozen=True, slots=True)
-class MySQLSettings:
-    """DEPRECATED (M2): MySQL removed from compose. Kept briefly for old imports."""
-
-    host: str = field(default_factory=lambda: os.getenv("MYSQL_HOST", "mysql"))
-    port: int = field(default_factory=lambda: int(os.getenv("MYSQL_PORT", "3306")))
-    user: str = field(default_factory=lambda: os.getenv("MYSQL_USER", "image_emb"))
-    password: str = field(
-        default_factory=lambda: os.getenv("MYSQL_PASSWORD", "image_emb")
-    )
-    database: str = field(
-        default_factory=lambda: os.getenv("MYSQL_DATABASE", "image_embedding")
-    )
-
-
-@dataclass(frozen=True, slots=True)
 class S3Settings:
     """Object storage (contract §5). Secrets only via env; mock by default.
 
@@ -262,7 +247,6 @@ class Settings:
     qdrant: QdrantSettings = field(default_factory=QdrantSettings)
     postgres: PostgresSettings = field(default_factory=PostgresSettings)
     s3: S3Settings = field(default_factory=S3Settings)
-    mysql: MySQLSettings = field(default_factory=MySQLSettings)  # deprecated M2
     allowed_content_types: frozenset[str] = field(
         default_factory=lambda: frozenset(
             {
