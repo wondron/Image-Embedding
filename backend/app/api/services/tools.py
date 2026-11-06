@@ -41,7 +41,7 @@ async def segment(
 
     started = time.perf_counter()
     try:
-        # mask, visual, original = segmentor.detect(image_bytes, output_vis=output_vis)
+        mask, visual, original = segmentor.detect(image_bytes, output_vis=output_vis)
         original = None
         if original is None or getattr(original, "ndim", 0) < 2:
             raise ValueError("segmentor returned an invalid original image")
