@@ -14,14 +14,11 @@ from app.services.predict.pipeline.c_embedding import GlobalFilter
 
 class GlobalFilterTests(unittest.TestCase):
     def setUp(self):
-        self.model_patch = patch('app.services.predict.pipeline.c_embedding.OnnxEmbedding')
-        self.model_type = self.model_patch.start()
-        self.addCleanup(self.model_patch.stop)
-        self.model = self.model_type.return_value
+        self.model = Mock()  # the shared Embedder is injected, not constructed here
         self.resolver_patch = patch('app.services.predict.pipeline.c_embedding.resolve_image_bgr', return_value=(None, None))
         self.resolve = self.resolver_patch.start()
         self.addCleanup(self.resolver_patch.stop)
-        self.filter = GlobalFilter({'GLOBAL_FILTER': {'threshold': 0.7, 'switch': True}})
+        self.filter = GlobalFilter({'GLOBAL_FILTER': {'threshold': 0.7, 'switch': True}}, self.model)
         self.image = np.zeros((2, 3, 3), dtype=np.uint8)
 
     def test_filters_candidates_in_original_order_and_embeds_query_once(self):

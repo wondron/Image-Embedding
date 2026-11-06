@@ -31,10 +31,11 @@ def is_uuid(value: str) -> bool:
     
 
 class FoodService:
-    def __init__(self, cfg):
+    def __init__(self, cfg, embedding):
+        """embedding: the process-wide Embedder (built by bootstrap.lifespan)."""
         self.searchTool = GetGlobalData(cfg)
-        self.searchFilter = GlobalFilter(cfg)
-        self.embeddingTool = self.searchFilter.embedding
+        self.searchFilter = GlobalFilter(cfg, embedding)
+        self.embeddingTool = embedding
 
 
     def detect(self, image_data: bytes, machine_info: str = "", trace_id: str = "", save_result: bool = False):
@@ -65,6 +66,7 @@ class FoodService:
     
 
 if __name__ == '__main__':
+    from app.clients.inference import Embedder
     from app.core.config.store import get_cfg
     from app.core.observability.logging import setup_logger
     
@@ -74,6 +76,6 @@ if __name__ == '__main__':
     image_path = '/data/wangzhuo/01-code/02-project/mainfooddetect/config/images/segment_0902_0892.jpg'
     with open(image_path, 'rb') as f:
         image_data = f.read()
-        food_service = FoodService(config)
+        food_service = FoodService(config, Embedder(config))
         res = food_service.detect(image_data, 'test', False)
         logger.info('res: %s', res)

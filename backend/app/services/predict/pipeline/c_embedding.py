@@ -2,24 +2,31 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
 
 import numpy as np
 
-from app.clients.inference_onnx import OnnxEmbedding
 from app.utils.image import resolve_image_bgr
+
+if TYPE_CHECKING:
+    from app.clients.inference import Embedder
 
 logger = logging.getLogger("embedding")
 
 class GlobalFilter:
-    def __init__(self, config: Dict[str, Any]):
+    """Keep search candidates whose embedding similarity to the query exceeds threshold.
+
+    The encoder is injected (shared with retrieval); this class never loads a model.
+    """
+
+    def __init__(self, config: Dict[str, Any], embedding: "Embedder"):
+        self.embedding = embedding
         self.load_config(config)
 
     def load_config(self, config: Dict[str, Any]) -> None:
         conf = config["GLOBAL_FILTER"]
         self.threshold = float(conf["threshold"])
         self.switch = bool(conf["switch"])
-        self.embedding = OnnxEmbedding(config)
 
     def get_similar(self, input_vect: np.ndarray, refer_bgr: np.ndarray) -> float:
         refer_vect = self.embedding.detect(refer_bgr)

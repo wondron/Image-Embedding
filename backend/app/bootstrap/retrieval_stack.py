@@ -3,7 +3,8 @@
     build_retrieval_infra   PG -> active embedding model -> Qdrant collection -> S3
                             (no ONNX; enough for workers)
     build_retrieval_stack   infra + encoder (dim checked against the model) + use cases
-                            (API process)
+                            (API process; the encoder is the process-wide Embedder
+                            passed in by bootstrap.lifespan, shared with predict)
 
 Business rules live in app.services.retrieval; adapters in app.repositories /
 app.clients. Both builders release what they opened if a later step fails.
@@ -15,12 +16,13 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from app.clients.inference import EmbedderPortImpl
-from app.clients.qdrant import QdrantVectorStore
+from app.clients.inference import Embedder
+from app.clients.qdrant import QdrantConnection, QdrantStore
 from app.clients.s3 import build_object_storage
 from app.core.config.settings import Settings
 from app.repositories.metadata import PgMetadataStore
 from app.repositories.ports import ObjectStoragePort
+from app.repositories.vectors import QdrantVectorStore
 from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.delete_image import DeleteImageUseCase, DeletionWorker
 from app.services.retrieval.index_image import IndexImageUseCase
@@ -61,7 +63,7 @@ class RetrievalStack:
     """Everything the retrieval HTTP layer calls."""
 
     infra: RetrievalInfra
-    embedding: EmbedderPortImpl
+    embedding: Embedder
     index_uc: IndexImageUseCase
     search_uc: SearchImageUseCase
     list_uc: ListImagesUseCase
@@ -93,14 +95,19 @@ def build_retrieval_infra(settings: Settings, config: dict[str, Any] | None = No
         metadata.ensure_schema()
         model = ActiveModel.from_row(metadata.get_current_embedding_model())
         q = settings.qdrant
+        # Endpoint from Settings (env); api_key / timeout from QDRANT_CONFIG.
+        connection = QdrantConnection.from_mapping(
+            dict((config or {}).get("QDRANT_CONFIG") or {}),
+            url=q.url or f"http://{q.host}:{int(q.port)}",
+            prefer_grpc=q.prefer_grpc,
+        )
         vectors = QdrantVectorStore(
-            url=q.url,
-            host=q.host,
-            port=q.port,
-            collection=model.collection,
-            vector_size=model.dim,
-            distance=model.distance,
-            config=config,
+            QdrantStore(
+                connection,
+                collection=model.collection,
+                vector_dim=model.dim,
+                distance=model.distance,
+            )
         )
         vectors.ensure_collection(recreate=False)
         storage = build_object_storage(settings.s3)
@@ -125,12 +132,17 @@ def build_retrieval_stack(
     config: dict[str, Any],
     settings: Settings,
     *,
+    embedder: Optional[Embedder] = None,
     indexed_dir: Optional[str] = None,
 ) -> RetrievalStack:
-    """Infra + ONNX encoder for the active model + use cases."""
+    """Infra + encoder + use cases.
+
+    embedder: the process-wide encoder (shared with predict). Only standalone
+    callers omit it, in which case one is built from config.
+    """
     infra = build_retrieval_infra(settings, config)
     try:
-        embedding = EmbedderPortImpl(config=config)
+        embedding = embedder if embedder is not None else Embedder(config)
         # Encoder and collection must belong to the same model version.
         infra.model.check_encoder_dim(embedding.probe_dim())
     except BaseException:

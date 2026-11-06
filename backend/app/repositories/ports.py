@@ -1,7 +1,8 @@
 """Retrieval ports: what services/retrieval needs from the outside world.
 
-Implementations: PgMetadataStore (repositories), QdrantVectorStore (clients.qdrant),
-Mock/Boto3ObjectStorage (clients.s3), EmbedderPortImpl (clients.inference).
+Implementations: PgMetadataStore (repositories.metadata), QdrantVectorStore
+(repositories.vectors, over clients.qdrant.QdrantStore), Mock/Boto3ObjectStorage
+(clients.s3), Embedder (clients.inference; one instance shared with predict).
 Wiring: app.bootstrap.retrieval_stack.
 
 PG v0.1: point id == images.id (uuid). Collection/dim/distance come from the

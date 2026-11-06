@@ -1,68 +1,109 @@
-"""EmbeddingPort implementation via existing OnnxEmbedding (do not rewrite)."""
+"""Shared ONNX embedding encoder: one session per model spec per process.
+
+The composition root (app.bootstrap.lifespan) builds one Embedder from
+EMBEDDING_CONFIG and injects it into predict (FoodService / GlobalFilter) and
+retrieval (index / search use cases). A config reload keeps the same instance
+unless the EmbeddingSpec changed, so the model is never loaded twice for the
+same weights.
+"""
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
 import threading
-from typing import Any, Mapping
+from dataclasses import dataclass
+from typing import Any, Mapping, Union
 
-import cv2
 import numpy as np
 import requests
 
 from app.clients.inference_onnx import OnnxEmbedding
-from app.repositories.ports import EmbeddingPort
 
-logger = logging.getLogger("embedder_port")
-
-DEFAULT_MODEL_PATH = "config/model/dino/multitask_cls.onnx"
-# Measured: multitask_cls.onnx output cls_emb -> (1024,) L2-normalized
-EMBEDDING_DIM = 1024
+logger = logging.getLogger("embedder")
 
 
-def _default_embedding_config(model_path: str) -> dict[str, Any]:
-    return {
-        "TOTAL_CONFIG": {"device_id": 0},
-        "EMBEDDING_CONFIG": {
-            "model_path": model_path,
-            "output_name": "cls_emb",
-            "scale": [224, 224],
-            "mean": [0.485, 0.456, 0.406],
-            "std": [0.229, 0.224, 0.225],
-            "img_interp": "cubic",
-            "use_gpu": True,
-            "use_iobinding": False,
-        },
-    }
+@dataclass(frozen=True, slots=True)
+class EmbeddingSpec:
+    """Everything that makes two encoders interchangeable.
 
-
-class EmbedderPortImpl:
-    """ONNX global embedding; satisfies EmbeddingPort.
-
-    Calls are serialized: OnnxEmbedding may reuse one cached io-binding, and
-    HTTP handlers run use cases in a threadpool.
+    Defaults mirror OnnxEmbedding.load_config so equal specs mean equal sessions.
     """
 
-    def __init__(
-        self,
-        model_path: str = DEFAULT_MODEL_PATH,
-        config: Mapping[str, Any] | None = None,
-        *,
-        url_timeout: float = 15.0,
-    ) -> None:
-        self.model_path = model_path
+    model_path: str
+    output_name: str
+    scale: tuple[int, ...]
+    mean: tuple[float, ...]
+    std: tuple[float, ...]
+    img_interp: str
+    use_gpu: bool
+    use_iobinding: bool
+    device_id: int
+
+    @classmethod
+    def from_config(cls, config: Mapping[str, Any]) -> "EmbeddingSpec":
+        emb = dict(config.get("EMBEDDING_CONFIG") or {})
+        total = dict(config.get("TOTAL_CONFIG") or {})
+        return cls(
+            model_path=os.path.normpath(str(emb.get("model_path") or "")),
+            output_name=str(emb.get("output_name", "cls_emb")),
+            scale=tuple(int(v) for v in emb.get("scale", (224, 224))),
+            mean=tuple(float(v) for v in emb.get("mean", (0.485, 0.456, 0.406))),
+            std=tuple(float(v) for v in emb.get("std", (0.229, 0.224, 0.225))),
+            img_interp=str(emb.get("img_interp", "cubic")).strip().lower(),
+            use_gpu=bool(emb.get("use_gpu", False)),
+            use_iobinding=bool(emb.get("use_iobinding", False)),
+            device_id=int(total.get("device_id", 0)),
+        )
+
+    @classmethod
+    def try_from_config(cls, config: Mapping[str, Any]) -> "EmbeddingSpec | None":
+        """None when EMBEDDING_CONFIG is malformed (building the encoder will say why)."""
+        try:
+            return cls.from_config(config)
+        except (TypeError, ValueError):
+            return None
+
+
+class Embedder:
+    """One ONNX embedding session shared by predict and retrieval.
+
+    ORT ``Session.run`` is thread-safe; the cached io-binding path in
+    OnnxEmbedding is not, so calls are serialized only when io-binding is on.
+    """
+
+    def __init__(self, config: Mapping[str, Any], *, url_timeout: float = 15.0) -> None:
+        self._model = OnnxEmbedding(dict(config))  # validates config with precise messages
+        self.spec = EmbeddingSpec.from_config(config)
         self.url_timeout = float(url_timeout)
-        if config is None:
-            cfg = _default_embedding_config(model_path)
-        else:
-            cfg = dict(config)
-            emb = dict(cfg.get("EMBEDDING_CONFIG") or {})
-            emb.setdefault("model_path", model_path)
-            cfg["EMBEDDING_CONFIG"] = emb
-            cfg.setdefault("TOTAL_CONFIG", {"device_id": 0})
-        self._model = OnnxEmbedding(cfg)
-        self.model_path = self._model.model_path
-        self._lock = threading.Lock()
+        self._lock: Any = threading.Lock() if self._model.use_iobinding else contextlib.nullcontext()
+
+    # -- diagnostics ----------------------------------------------------------
+
+    @property
+    def model_path(self) -> str:
+        return self._model.model_path
+
+    @property
+    def sess(self) -> Any:
+        """Underlying ORT session (provider diagnostics in /api/readyz)."""
+        return self._model.sess
+
+    def providers(self) -> list[str]:
+        sess = self._model.sess
+        return list(sess.get_providers() or []) if sess is not None else []
+
+    # -- predict island (OnnxEmbedding-compatible) -----------------------------
+
+    def detect(self, img_data: Union[np.ndarray, bytes]) -> np.ndarray:
+        """L2-normalized embedding ``(dim,)`` from a BGR array or encoded image bytes."""
+        with self._lock:
+            return self._model.detect(img_data)
+
+    def warmup(self, runs: int = 3) -> None:
+        with self._lock:
+            self._model.warmup(runs)
 
     def probe_dim(self) -> int:
         """Run one inference on a gray image and return the output dim (also warms up)."""
@@ -71,12 +112,12 @@ class EmbedderPortImpl:
             out = self._model.infer(dummy)
         return int(np.asarray(out).shape[-1])
 
+    # -- retrieval EmbeddingPort -------------------------------------------------
+
     def embed_bytes(self, image_bytes: bytes) -> list[float]:
         if not image_bytes:
             raise ValueError("image_bytes is empty")
-        with self._lock:
-            vector = self._model.detect(image_bytes)
-        return vector.astype(np.float32).tolist()
+        return self.detect(image_bytes).astype(np.float32).tolist()
 
     def embed_url(self, image_url: str) -> list[float]:
         url = (image_url or "").strip()
@@ -85,7 +126,3 @@ class EmbedderPortImpl:
         response = requests.get(url, timeout=self.url_timeout)
         response.raise_for_status()
         return self.embed_bytes(response.content)
-
-
-def _assert_protocol() -> None:
-    _: EmbeddingPort = EmbedderPortImpl()  # type: ignore[assignment]

@@ -45,21 +45,58 @@ def load_application_config(
     }
 
 
-def create_food_service(config: dict):
+def create_embedder(config: dict):
+    """The process-wide embedding encoder; predict and retrieval share this instance."""
+    from app.clients.inference import Embedder
+    return Embedder(config)
+
+
+def create_food_service(config: dict, embedder):
     from app.services.predict.food_service import FoodService
-    return FoodService(config)
+    return FoodService(config, embedder)
 
 
-def warmup_models(service, app_settings: Settings = settings) -> None:
+def warmup_embedder(embedder, app_settings: Settings = settings) -> None:
     logger.info("Warmup enabled: %s", app_settings.warmup.enabled)
     if not app_settings.warmup.enabled:
         return
-
-    if getattr(service, "embeddingTool", None):
-        times = app_settings.warmup.embedding_runs
-        logger.info("预热中 | embedding=%d 次", times)
-        service.embeddingTool.warmup(times)
+    times = app_settings.warmup.embedding_runs
+    logger.info("预热中 | embedding=%d 次", times)
+    embedder.warmup(times)
     logger.info("预热配置 | warmup=%s", app_settings.warmup)
+
+
+def initialize_embedder(runtime: ApplicationState):
+    """Load and warm the encoder once; None (with initialization_error set) on failure."""
+    try:
+        embedder = create_embedder(runtime.config)
+    except Exception as exc:
+        runtime.initialization_error = f"{type(exc).__name__}: {exc}"
+        logger.exception("Embedding model initialization failed: %s", exc)
+        return None
+    try:
+        warmup_embedder(embedder, runtime.settings)
+    except Exception as exc:
+        runtime.warmup_error = f"{type(exc).__name__}: {exc}"
+        logger.exception("Warmup failed: %s", exc)
+    return embedder
+
+
+def _loaded_embedder_for(runtime: ApplicationState, config: dict):
+    """An encoder already in memory whose spec matches config, else None."""
+    from app.clients.inference import EmbeddingSpec
+
+    spec = EmbeddingSpec.try_from_config(config)
+    if spec is None:
+        return None
+    holders = (
+        getattr(runtime.food_service, "embeddingTool", None),
+        getattr(runtime.retrieval, "embedding", None),
+    )
+    for embedder in holders:
+        if embedder is not None and getattr(embedder, "spec", None) == spec:
+            return embedder
+    return None
 
 
 def _retrieval_enabled() -> bool:
@@ -98,8 +135,8 @@ def _retrieval_local_debug_hint(settings: Settings) -> str:
     )
 
 
-def initialize_retrieval(runtime: ApplicationState) -> None:
-    """Build the retrieval stack; on failure keep serving predict and record why."""
+def initialize_retrieval(runtime: ApplicationState, embedder) -> None:
+    """Build the retrieval stack on the shared encoder; on failure keep serving predict."""
     runtime.retrieval = None
     runtime.retrieval_error = None
     runtime.retrieval_error_code = None
@@ -108,12 +145,17 @@ def initialize_retrieval(runtime: ApplicationState) -> None:
         runtime.retrieval_error_code = "RETRIEVAL_DISABLED"
         logger.info("Retrieval stack skipped | RETRIEVAL_ENABLED=0 | postgres_host=%s | qdrant=%s", runtime.settings.postgres.host, runtime.settings.qdrant.url,)
         return
+    if embedder is None:
+        runtime.retrieval_error = f"embedding model unavailable: {runtime.initialization_error}"
+        runtime.retrieval_error_code = "NOT_READY"
+        logger.warning("Retrieval stack skipped | %s", runtime.retrieval_error)
+        return
 
     from app.bootstrap.retrieval_stack import build_retrieval_stack
     from app.services.retrieval.errors import RetrievalError
 
     try:
-        runtime.retrieval = build_retrieval_stack(runtime.config, runtime.settings)
+        runtime.retrieval = build_retrieval_stack(runtime.config, runtime.settings, embedder=embedder)
     except Exception as exc:
         if isinstance(exc, RetrievalError):
             runtime.retrieval_error = f"{exc.code}: {exc.detail}"
@@ -132,27 +174,34 @@ def initialize_retrieval(runtime: ApplicationState) -> None:
         model.collection, model.space_id)
 
 
-def initialize_food_service(runtime: ApplicationState) -> None:
+def initialize_food_service(runtime: ApplicationState, embedder) -> None:
+    if embedder is None:
+        return  # initialization_error already says why
     try:
-        runtime.food_service = create_food_service(runtime.config)
+        runtime.food_service = create_food_service(runtime.config, embedder)
     except Exception as exc:
         runtime.initialization_error = f"{type(exc).__name__}: {exc}"
         logger.exception("Food service initialization failed: %s", exc)
-        return
-    try:
-        warmup_models(runtime.food_service, runtime.settings)
-    except Exception as exc:
-        runtime.warmup_error = f"{type(exc).__name__}: {exc}"
-        logger.exception("Warmup failed: %s", exc)
 
 
 def apply_nacos_config_update(runtime: ApplicationState, provider: NacosConfigProvider, snapshot: NacosConfigSnapshot,) -> bool:
-    """Build and warm a replacement before atomically publishing it."""
+    """Build the replacement predict service before atomically publishing it.
+
+    The encoder is reused when EMBEDDING_CONFIG describes an already-loaded model,
+    so ordinary config changes never reload ONNX. A different model is loaded for
+    predict only: retrieval stays on the encoder paired with its Qdrant collection.
+    """
     if runtime.stopping:
         return False
     try:
-        service = create_food_service(snapshot.config)
-        warmup_models(service, runtime.settings)
+        embedder = _loaded_embedder_for(runtime, snapshot.config)
+        if embedder is None:
+            embedder = create_embedder(snapshot.config)
+            warmup_embedder(embedder, runtime.settings)
+            if runtime.retrieval is not None:
+                logger.warning("EMBEDDING_CONFIG changed: predict switches to %s; retrieval stays on %s (collection %s) until the current embedding model is switched and the service restarts",
+                    embedder.model_path, runtime.retrieval.model.space_id, runtime.retrieval.model.collection)
+        service = create_food_service(snapshot.config, embedder)
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
         runtime.record_config_reload_error(error)
@@ -184,8 +233,9 @@ async def lifespan(app: FastAPI):
     )
     app.state.runtime = runtime
     logger.info("App starting ENV=%s cfg=%s", runtime.settings.application.env, runtime.config_info,)
-    initialize_food_service(runtime)
-    initialize_retrieval(runtime)
+    embedder = initialize_embedder(runtime)  # one ONNX session for predict + retrieval
+    initialize_food_service(runtime, embedder)
+    initialize_retrieval(runtime, embedder)
     config_provider.start_polling(lambda snapshot: apply_nacos_config_update(runtime, config_provider, snapshot))
     try:
         yield

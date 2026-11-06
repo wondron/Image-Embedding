@@ -27,7 +27,7 @@ SETTINGS = SimpleNamespace(
     postgres=SimpleNamespace(
         dsn=lambda: "postgresql+psycopg://u:p@h/db", host="h", port=5432, user="u", password="p", database="db"
     ),
-    qdrant=SimpleNamespace(url="http://q:6333", host="q", port=6333, collection=""),
+    qdrant=SimpleNamespace(url="http://q:6333", host="q", port=6333, collection="", prefer_grpc=True),
     s3=SimpleNamespace(),
     paths=SimpleNamespace(save_images_dir="save_images"),
 )
@@ -58,30 +58,44 @@ class BuildStackTests(unittest.TestCase):
         self.metadata = MagicMock()
         self.metadata.get_current_embedding_model.return_value = dict(ROW)
         self.vectors = MagicMock()
+        self.qstore = MagicMock()
         self.storage = MagicMock()
         self.embedder = MagicMock()
         self.embedder.probe_dim.return_value = 1024
         self.embedder_cls = Mock(return_value=self.embedder)
         for name, value in (
             ("PgMetadataStore", Mock(return_value=self.metadata)),
+            ("QdrantStore", Mock(return_value=self.qstore)),
             ("QdrantVectorStore", Mock(return_value=self.vectors)),
             ("build_object_storage", Mock(return_value=self.storage)),
-            ("EmbedderPortImpl", self.embedder_cls),
+            ("Embedder", self.embedder_cls),
         ):
             p = patch.object(rs, name, value)
             p.start()
             self.addCleanup(p.stop)
 
     def test_stack_wires_the_active_model_into_collection_and_use_cases(self):
-        stack = rs.build_retrieval_stack({"QDRANT_CONFIG": {}}, SETTINGS)
+        stack = rs.build_retrieval_stack({"QDRANT_CONFIG": {"api_key": "k", "url": "http://ignored:1"}}, SETTINGS)
         self.assertEqual(stack.model.collection, "c_dino_v2")
-        kwargs = rs.QdrantVectorStore.call_args.kwargs
-        self.assertEqual((kwargs["collection"], kwargs["vector_size"], kwargs["distance"]), ("c_dino_v2", 1024, "cosine"))
+        args, kwargs = rs.QdrantStore.call_args
+        self.assertEqual((kwargs["collection"], kwargs["vector_dim"], kwargs["distance"]), ("c_dino_v2", 1024, "cosine"))
+        connection = args[0]
+        self.assertEqual((connection.url, connection.api_key, connection.prefer_grpc), ("http://q:6333", "k", True))
+        rs.QdrantVectorStore.assert_called_once_with(self.qstore)
         self.vectors.ensure_collection.assert_called_once_with(recreate=False)
         self.assertIs(stack.index_uc._model, stack.model)
         self.assertIs(stack.search_uc._model, stack.model)
         self.assertIs(stack.index_uc._vectors, self.vectors)  # no hidden decorator
         self.embedder.probe_dim.assert_called_once()
+
+    def test_shared_embedder_is_used_instead_of_loading_a_second_model(self):
+        shared = MagicMock()
+        shared.probe_dim.return_value = 1024
+        stack = rs.build_retrieval_stack({}, SETTINGS, embedder=shared)
+        self.assertIs(stack.embedding, shared)
+        self.assertIs(stack.index_uc._embedding, shared)
+        self.assertIs(stack.search_uc._embedding, shared)
+        self.embedder_cls.assert_not_called()
 
     def test_encoder_for_another_model_fails_startup_and_releases_connections(self):
         self.embedder.probe_dim.return_value = 768

@@ -19,7 +19,7 @@ pillow
 requests
 
 # ==== Retrieval / Storage (image-search PG v0.1) ====
-qdrant-client>=1.9,<2.0
+qdrant-client>=1.10,<2.0   # query_points API
 # PostgreSQL metadata (M2); MySQL adapter removed (DDD D2)
 psycopg[binary]>=3.1,<4.0
 SQLAlchemy>=2.0,<3.0
