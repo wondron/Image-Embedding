@@ -525,6 +525,15 @@ class QdrantStore:
             wait=True,
         )
 
+    def close(self) -> None:
+        """Close the underlying client (idempotent)."""
+        client, self._client = self._client, None
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                logger.debug("qdrant client close failed", exc_info=True)
+
 
 # ---------------------------------------------------------------------------
 # VectorStorePort adapter (retrieval stack) — wraps QdrantStore above
@@ -533,11 +542,12 @@ class QdrantStore:
 from app.services.retrieval import errors as err
 from app.repositories.ports import VECTOR_DIM, VectorStorePort
 
-_adapter_logger = logging.getLogger("qdrant_adapter")
-
-
 class QdrantVectorStore(VectorStorePort):
-    """Adapter: Metadata supplies current collection/dim/distance."""
+    """VectorStorePort over QdrantStore; maps failures to RetrievalError codes.
+
+    collection / vector_size / distance come from the current embedding_models row.
+    Construction only validates config (no network); config errors propagate.
+    """
 
     def __init__(
         self,
@@ -576,39 +586,14 @@ class QdrantVectorStore(VectorStorePort):
             wrapped = {"QDRANT_CONFIG": qdrant_cfg}
             if config:
                 wrapped.update({k: v for k, v in config.items() if k != "QDRANT_CONFIG"})
-        try:
-            self._impl = QdrantStore(
-                wrapped,
-                collection=collection,
-                vector_dim=self.vector_size,
-                distance=distance,
-            )
-        except Exception:
-            _adapter_logger.exception("failed to construct QdrantStore")
-            self._impl = None
-
-    @property
-    def wired(self) -> bool:
-        return self._impl is not None
-
-    def set_collection(
-        self,
-        collection: str,
-        *,
-        vector_dim: int,
-        distance: str,
-    ) -> None:
-        self.collection = collection
-        self.vector_size = int(vector_dim)
-        self.distance = distance
-        if self._impl is not None:
-            self._impl.set_collection(
-                collection, vector_dim=vector_dim, distance=distance
-            )
+        self._impl = QdrantStore(
+            wrapped,
+            collection=collection,
+            vector_dim=self.vector_size,
+            distance=distance,
+        )
 
     def ensure_collection(self, *, recreate: bool = False) -> None:
-        if self._impl is None:
-            raise err.not_ready("QdrantStore not wired")
         try:
             self._impl.ensure_collection(recreate=recreate)
         except ValueError as exc:
@@ -617,12 +602,6 @@ class QdrantVectorStore(VectorStorePort):
             raise err.not_ready(f"qdrant ensure_collection: {exc}") from exc
 
     def ping(self) -> dict[str, Any]:
-        if self._impl is None:
-            return {
-                "ok": False,
-                "detail": "QdrantStore unavailable",
-                "collection": self.collection,
-            }
         try:
             client = self._impl._get_client()
             names = {c.name for c in client.get_collections().collections}
@@ -636,7 +615,7 @@ class QdrantVectorStore(VectorStorePort):
                 "collection": self.collection,
                 "points_count": points_count,
                 "vector_size": self.vector_size,
-                "named_vector": "global",
+                "named_vector": NAMED_VECTOR,
             }
         except Exception as exc:
             return {
@@ -646,14 +625,15 @@ class QdrantVectorStore(VectorStorePort):
                 "collection": self.collection,
             }
 
+    def close(self) -> None:
+        self._impl.close()
+
     def upsert(
         self,
         point_id: UUID | str,
         vector: list[float],
         payload: dict[str, Any],
     ) -> None:
-        if self._impl is None:
-            raise err.index_qdrant_failed("QdrantStore not wired")
         try:
             self._impl.upsert(point_id, vector, payload)
         except Exception as exc:
@@ -668,8 +648,6 @@ class QdrantVectorStore(VectorStorePort):
         scene: str | None = None,
         filters: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        if self._impl is None:
-            raise err.search_qdrant_failed("QdrantStore not wired")
         try:
             return self._impl.search(
                 vector,
@@ -682,16 +660,12 @@ class QdrantVectorStore(VectorStorePort):
             raise err.search_qdrant_failed(f"{type(exc).__name__}: {exc}") from exc
 
     def delete(self, point_id: UUID | str) -> None:
-        if self._impl is None:
-            raise err.index_qdrant_failed("QdrantStore not wired")
         try:
             self._impl.delete(point_id)
         except Exception as exc:
             raise err.index_qdrant_failed(f"delete: {type(exc).__name__}: {exc}") from exc
 
     def delete_batch(self, point_ids: list[UUID | str]) -> None:
-        if self._impl is None:
-            raise err.index_qdrant_failed("QdrantStore not wired")
         try:
             self._impl.delete_batch(point_ids)
         except Exception as exc:

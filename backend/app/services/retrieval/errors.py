@@ -78,18 +78,6 @@ def vector_dim_mismatch(detail: str) -> RetrievalError:
     return RetrievalError("VECTOR_DIM_MISMATCH", detail, http_status=503)
 
 
-def vector_space_mismatch(
-    detail: str,
-    *,
-    configured: str | None = None,
-    stored: str | None = None,
-) -> RetrievalError:
-    """Configured embedding_space_id != collection meta (SSOT §1.5)."""
-    exc = RetrievalError("VECTOR_SPACE_MISMATCH", detail, http_status=503)
-    exc.configured = configured  # type: ignore[attr-defined]
-    exc.stored = stored  # type: ignore[attr-defined]
-    return exc
-
 
 def not_ready(detail: str) -> RetrievalError:
     return RetrievalError("NOT_READY", detail, http_status=503)

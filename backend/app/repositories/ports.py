@@ -1,8 +1,12 @@
-"""Retrieval ports. Implementations live under adapter/.
+"""Retrieval ports: what services/retrieval needs from the outside world.
 
-Vector/ONNX details: 算法逻辑. Table/JSON contract: 数据规范 SSOT.
-PG v0.1: point id == images.id (uuid). Collection from embedding_models.current.
-Named vector ``global``. VECTOR_DIM default 1024 (food ONNX); overridden by model row.
+Implementations: PgMetadataStore (repositories), QdrantVectorStore (clients.qdrant),
+Mock/Boto3ObjectStorage (clients.s3), EmbedderPortImpl (clients.inference).
+Wiring: app.bootstrap.retrieval_stack.
+
+PG v0.1: point id == images.id (uuid). Collection/dim/distance come from the
+embedding_models row with status='current' (services.retrieval.active_model).
+VECTOR_DIM is only the fallback default (food ONNX = 1024).
 """
 
 from __future__ import annotations
@@ -53,6 +57,14 @@ class VectorStorePort(ABC):
     def delete(self, point_id: UUID | str) -> None:
         raise NotImplementedError
 
+    @abstractmethod
+    def ping(self) -> dict[str, Any]:
+        """{ok, collection, points_count, ...}; never raises."""
+        raise NotImplementedError
+
+    def close(self) -> None:
+        """Release the client (idempotent)."""
+
 
 class MetadataStorePort(ABC):
     """PostgreSQL metadata (PG v0.1). Backend owns implementation."""
@@ -94,9 +106,69 @@ class MetadataStorePort(ABC):
     def get_by_id(self, image_id: UUID | str) -> dict[str, Any] | None:
         raise NotImplementedError
 
+    # -- categories / scenes ------------------------------------------------
+
+    @abstractmethod
+    def get_category_id_by_code(self, code: str) -> int | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_scene_by_code(self, code: str) -> dict[str, Any] | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def recompute_image_scenes(
+        self, image_id: UUID | str, *, bump_version: bool = True
+    ) -> dict[str, Any]:
+        """Materialize image_scenes; returns {scene_codes, payload_version, ...}."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def map_category_to_scene_label(
+        self, scene_code: str, category_id: int
+    ) -> dict[str, Any] | None:
+        raise NotImplementedError
+
+    # -- embedding models / ledger -----------------------------------------
+
+    @abstractmethod
+    def get_current_embedding_model(self) -> dict[str, Any]:
+        """The single embedding_models row with status='current' (NOT_READY if none)."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_image_embedding(
+        self,
+        *,
+        model_id: int,
+        image_id: UUID | str,
+        synced_version: int | None = None,
+    ) -> None:
+        """Record that image_id's payload at synced_version is in model_id's collection."""
+        raise NotImplementedError
+
+    # -- deletion queue -----------------------------------------------------
+
+    @abstractmethod
+    def enqueue_image_deletion(self, image_id: UUID | str) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_pending_deletions(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def complete_deletion(self, image_id: UUID | str) -> None:
+        raise NotImplementedError
+
+    # -- lifecycle ------------------------------------------------------------
+
     @abstractmethod
     def ping(self) -> dict[str, Any]:
         raise NotImplementedError
+
+    def close(self) -> None:
+        """Release the connection pool (idempotent)."""
 
 
 class FlyBFallbackPort(ABC):
@@ -153,5 +225,10 @@ class ObjectStoragePort(ABC):
     @abstractmethod
     def delete_by_url_or_key(self, url_or_key: str) -> None:
         """Best-effort delete by full https URL or object key. Missing object = ok."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def ping(self) -> dict[str, Any]:
+        """{ok, driver, bucket, ...}; never raises."""
         raise NotImplementedError
 

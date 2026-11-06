@@ -9,8 +9,11 @@ import uuid
 from PIL import Image as PILImage
 
 from app.repositories.ports import VECTOR_DIM
+from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.errors import RetrievalError
 from app.services.retrieval.index_image import IndexImageUseCase
+
+MODEL = ActiveModel(id=3, name="dino", version="v1", collection="c_dino_v1", dim=VECTOR_DIM, distance="cosine")
 
 
 def _png(color=(200, 30, 30)) -> bytes:
@@ -50,7 +53,14 @@ class FakeMetadata:
     def __init__(self, categories=None):
         self.rows = {}
         self.deleted = []
+        self.ledger = {}
+        self.ledger_fails = False
         self.categories = categories or {}
+
+    def upsert_image_embedding(self, *, model_id, image_id, synced_version=None):
+        if self.ledger_fails:
+            raise RetrievalError("INDEX_MYSQL_FAILED", "ledger down", http_status=502)
+        self.ledger[(model_id, str(image_id))] = synced_version
 
     def get_category_id_by_code(self, code):
         return self.categories.get(code)
@@ -94,7 +104,7 @@ class IndexImageIdentityTests(unittest.TestCase):
 
     def use_case(self, vectors=None):
         return IndexImageUseCase(
-            FakeEmbedding(), vectors or self.vectors, self.meta, indexed_dir=self.tmp.name
+            FakeEmbedding(), vectors or self.vectors, self.meta, model=MODEL, indexed_dir=self.tmp.name
         )
 
     def test_id_is_sha256_prefix_and_label_follows_category(self):
@@ -144,6 +154,27 @@ class IndexImageIdentityTests(unittest.TestCase):
             self.use_case().execute_one(image_bytes=_png(), label_status="verified")
         self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
         self.assertEqual(self.meta.rows, {})
+
+    def test_ledger_records_the_pushed_payload_version_for_the_active_model(self):
+        out = self.use_case().execute_one(image_bytes=_png())
+        self.assertEqual(self.meta.ledger, {(MODEL.id, out["id"]): 1})
+
+    def test_ledger_failure_reports_db_error_and_keeps_the_indexed_image(self):
+        self.meta.ledger_fails = True
+        with self.assertRaises(RetrievalError) as ctx:
+            self.use_case().execute_one(image_bytes=_png())
+        self.assertEqual(ctx.exception.code, "INDEX_MYSQL_FAILED")
+        self.assertEqual(self.meta.deleted, [])  # point + row stay; ledger re-sync later
+        self.assertEqual(len(self.vectors.upserts), 1)
+
+    def test_vector_of_wrong_dim_for_the_active_model_is_rejected(self):
+        small = ActiveModel(id=4, name="m", version="v", collection="c", dim=8, distance="cosine")
+        uc = IndexImageUseCase(FakeEmbedding(), self.vectors, self.meta, model=small, indexed_dir=self.tmp.name)
+        with self.assertRaises(RetrievalError) as ctx:
+            uc.execute_one(image_bytes=_png())
+        self.assertEqual(ctx.exception.code, "INDEX_BAD_EMBEDDING")
+        self.assertEqual(self.vectors.upserts, [])
+        self.assertEqual(self.meta.rows, {})  # embedding runs before any write
 
     def test_unknown_category_code_is_stored_unlabeled(self):
         out = self.use_case().execute_one(image_bytes=_png(), category="no.such.code", label_status="auto")

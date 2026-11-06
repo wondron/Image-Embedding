@@ -1,9 +1,9 @@
 """Index-image use case (PG v0.1).
 
-Flow: bytes → sha256/uuid → S3 original+thumb (if storage wired) → insert images
-→ recompute image_scenes (write-time materialize) → embed → Qdrant upsert with
-payload {category_id, scenes, food_state, label_status}.
-Ledger image_embeddings.synced_version via EmbeddingLedgerVectorStore (M2).
+Flow: bytes → sha256/uuid → validate labels → embed (no side effects yet) →
+S3 original+thumb → insert images → recompute image_scenes → Qdrant upsert with
+payload {category_id, scenes, food_state, label_status} into the active model's
+collection → image_embeddings ledger records the payload_version just pushed.
 
 Path-based local disk store is legacy MVP; when storage is present we prefer
 put_original_and_thumb and DB https URLs (no path column in PG).
@@ -19,6 +19,7 @@ from typing import Any, Optional, Sequence
 from uuid import UUID
 
 from app.core.enums import FoodState, LabelStatus, License, SourceType
+from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.enum_fields import coerce_enum, coerce_optional_enum
 from app.services.retrieval.image_ids import uuid_from_sha256
 from app.services.retrieval import errors as err
@@ -78,12 +79,14 @@ class IndexImageUseCase:
         vectors: VectorStorePort,
         metadata: MetadataStorePort,
         *,
+        model: ActiveModel,
         storage: ObjectStoragePort | None = None,
         indexed_dir: str = "save_images/indexed",
     ) -> None:
         self._embedding = embedding
         self._vectors = vectors
         self._metadata = metadata
+        self._model = model
         self._storage = storage
         self._indexed_dir = indexed_dir
 
@@ -140,9 +143,7 @@ class IndexImageUseCase:
         # Resolve category_id: prefer explicit; optional code lookup on metadata
         resolved_category_id = category_id
         if resolved_category_id is None and category:
-            lookup = getattr(self._metadata, "get_category_id_by_code", None)
-            if callable(lookup):
-                resolved_category_id = lookup(str(category).strip())
+            resolved_category_id = self._metadata.get_category_id_by_code(str(category).strip())
             if resolved_category_id is None:
                 logger.warning("index: unknown category code %r; storing unlabeled", category)
 
@@ -162,6 +163,15 @@ class IndexImageUseCase:
                     )
                 # category code given but unknown — keep the image, drop the label
                 label = LabelStatus.UNLABELED
+
+        # Embed before any write: a failure here leaves no S3 objects or rows behind.
+        try:
+            vector = self._embedding.embed_bytes(image_bytes)
+        except err.RetrievalError:
+            raise
+        except Exception as exc:
+            raise err.index_bad_image(f"embed failed: {exc}") from exc
+        vector = validate_embedding(vector, for_search=False, expected_dim=self._model.dim)
 
         original_url: str
         thumb_url: str
@@ -208,10 +218,7 @@ class IndexImageUseCase:
         image_id = inserted_id if isinstance(inserted_id, UUID) else UUID(str(inserted_id))
 
         # Write-time materialize effective scenes → image_scenes + payload_version
-        recompute = getattr(self._metadata, "recompute_image_scenes", None)
-        if not callable(recompute):
-            raise err.index_mysql_failed("metadata lacks recompute_image_scenes (M5)")
-        membership = recompute(image_id, bump_version=False)
+        membership = self._metadata.recompute_image_scenes(image_id, bump_version=False)
         scene_codes = list(membership.get("scene_codes") or [])
 
         # Qdrant payload mirrors the stored row (differs from the request on re-upload)
@@ -220,14 +227,7 @@ class IndexImageUseCase:
             resolved_category_id = stored.get("category_id")
             food = stored.get("food_state")
             label = stored.get("label_status") or label
-
-        try:
-            vector = self._embedding.embed_bytes(image_bytes)
-        except err.RetrievalError:
-            raise
-        except Exception as exc:
-            raise err.index_bad_image(f"embed failed: {exc}") from exc
-        vector = validate_embedding(vector, for_search=False)
+        payload_version = stored.get("payload_version") or membership.get("payload_version")
 
         payload = build_qdrant_payload(
             category_id=resolved_category_id,
@@ -247,6 +247,14 @@ class IndexImageUseCase:
                 raise
             raise err.index_qdrant_failed(f"{type(exc).__name__}: {exc}") from exc
 
+        # Ledger: which payload_version is now in this model's collection. A missing
+        # row only means "not synced" (re-push later), so no rollback on failure.
+        self._metadata.upsert_image_embedding(
+            model_id=self._model.id,
+            image_id=image_id,
+            synced_version=int(payload_version) if payload_version is not None else None,
+        )
+
         created = stored or {}
         return {
             "id": str(image_id),
@@ -264,8 +272,7 @@ class IndexImageUseCase:
             "label_status": str(created.get("label_status") or label),
             "width": created.get("width") or width,
             "height": created.get("height") or height,
-            "payload_version": created.get("payload_version")
-            or membership.get("payload_version"),
+            "payload_version": payload_version,
             "created_at": created.get("created_at"),
         }
 

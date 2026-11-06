@@ -100,12 +100,10 @@ class ListImagesUseCase:
         )
 
         scene_meta = None
-        get_scene = getattr(self._metadata, "get_scene_by_code", None)
-        if callable(get_scene):
-            try:
-                scene_meta = get_scene(active_scene)
-            except Exception:
-                logger.exception("get_scene_by_code failed scene=%s", active_scene)
+        try:
+            scene_meta = self._metadata.get_scene_by_code(active_scene)
+        except Exception:
+            logger.exception("get_scene_by_code failed scene=%s", active_scene)
 
         items = [_item_from_row(row, scene_meta=scene_meta) for row in rows]
         return {

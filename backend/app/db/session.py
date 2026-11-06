@@ -53,6 +53,13 @@ class PgConnectionMixin:
         except Exception as exc:
             raise err.index_mysql_failed(f"{type(exc).__name__}: {exc}") from exc
 
+    def close(self) -> None:
+        """Dispose the connection pool (idempotent); next call reconnects lazily."""
+        engine, self._engine = self._engine, None
+        self._schema_ready = False
+        if engine is not None:
+            engine.dispose()
+
     def ping(self) -> dict[str, Any]:
         try:
             from sqlalchemy import text

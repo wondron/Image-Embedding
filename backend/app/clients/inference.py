@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Mapping
 
 import cv2
@@ -36,9 +37,11 @@ def _default_embedding_config(model_path: str) -> dict[str, Any]:
 
 
 class EmbedderPortImpl:
-    """ONNX global embedding; satisfies EmbeddingPort."""
+    """ONNX global embedding; satisfies EmbeddingPort.
 
-    embedding_dim: int = EMBEDDING_DIM
+    Calls are serialized: OnnxEmbedding may reuse one cached io-binding, and
+    HTTP handlers run use cases in a threadpool.
+    """
 
     def __init__(
         self,
@@ -58,11 +61,21 @@ class EmbedderPortImpl:
             cfg["EMBEDDING_CONFIG"] = emb
             cfg.setdefault("TOTAL_CONFIG", {"device_id": 0})
         self._model = OnnxEmbedding(cfg)
+        self.model_path = self._model.model_path
+        self._lock = threading.Lock()
+
+    def probe_dim(self) -> int:
+        """Run one inference on a gray image and return the output dim (also warms up)."""
+        dummy = np.full((self._model.input_h, self._model.input_w, 3), 127, dtype=np.uint8)
+        with self._lock:
+            out = self._model.infer(dummy)
+        return int(np.asarray(out).shape[-1])
 
     def embed_bytes(self, image_bytes: bytes) -> list[float]:
         if not image_bytes:
             raise ValueError("image_bytes is empty")
-        vector = self._model.detect(image_bytes)
+        with self._lock:
+            vector = self._model.detect(image_bytes)
         return vector.astype(np.float32).tolist()
 
     def embed_url(self, image_url: str) -> list[float]:

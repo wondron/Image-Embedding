@@ -14,7 +14,7 @@ from typing import Any
 from uuid import UUID
 
 from app.services.retrieval import errors as err
-from app.repositories.ports import ObjectStoragePort, VectorStorePort
+from app.repositories.ports import MetadataStorePort, ObjectStoragePort, VectorStorePort
 
 logger = logging.getLogger("retrieval.delete")
 
@@ -22,7 +22,7 @@ logger = logging.getLogger("retrieval.delete")
 class DeleteImageUseCase:
     """Enqueue hard-delete into image_deletions (metadata TX)."""
 
-    def __init__(self, metadata: Any) -> None:
+    def __init__(self, metadata: MetadataStorePort) -> None:
         self._metadata = metadata
 
     def execute(self, image_id: UUID | str) -> dict[str, Any]:
@@ -39,7 +39,7 @@ class DeleteImageUseCase:
 
 
 def process_deletion_queue(
-    metadata: Any,
+    metadata: MetadataStorePort,
     vectors: VectorStorePort,
     storage: ObjectStoragePort,
     *,
@@ -90,7 +90,7 @@ class DeletionWorker:
 
     def __init__(
         self,
-        metadata: Any,
+        metadata: MetadataStorePort,
         vectors: VectorStorePort,
         storage: ObjectStoragePort,
     ) -> None:

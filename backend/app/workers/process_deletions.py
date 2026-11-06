@@ -1,15 +1,15 @@
 """Drain image_deletions once (contract §2.5).
 
-Goes through composition root (build_retrieval_stack → deletion_worker),
-not adapter ctors.
+Needs only PG + Qdrant + object storage, so it builds RetrievalInfra (no ONNX
+model, no GPU) and closes it when done.
 
 Invoke from backend/:
 
   python -m app.workers.process_deletions
   python -m app.workers.process_deletions --limit 20
 
-Uses same Settings + Nacos/config bootstrap path as the API when available;
-falls back to Settings() defaults + empty config dict.
+Config: local yaml via app.core.config.loader (for QDRANT_CONFIG); falls back
+to {} when it cannot be loaded.
 """
 
 from __future__ import annotations
@@ -29,20 +29,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=50, help="max rows this pass")
     args = parser.parse_args(argv)
 
+    from app.bootstrap.retrieval_stack import build_retrieval_infra
     from app.core.config.settings import Settings
-    from app.bootstrap.retrieval_stack import build_retrieval_stack
+    from app.services.retrieval.delete_image import DeletionWorker
+    from app.workers._config import load_worker_config
 
-    settings = Settings()
-    config: dict = {}
+    infra = build_retrieval_infra(Settings(), load_worker_config())
     try:
-        from app.core.config.loader import load_config  # type: ignore
-
-        config = load_config() or {}
-    except Exception:
-        config = {}
-
-    stack = build_retrieval_stack(config, settings)
-    result = stack.deletion_worker.run_once(limit=args.limit)
+        worker = DeletionWorker(infra.metadata, infra.vectors, infra.storage)
+        result = worker.run_once(limit=args.limit)
+    finally:
+        infra.close()
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     return 0 if result.get("ok") else 1
 

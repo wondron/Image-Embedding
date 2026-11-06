@@ -1,7 +1,8 @@
-"""HTTP adapter for retrieval: wire parse + call application usecases + map errors.
+"""HTTP adapter for retrieval: parse the wire request, call a use case, map errors.
 
-DDD D3: business flow lives in app.services.retrieval (via RetrievalStack).
-This module does not open DB/Qdrant clients or re-implement index/search/list rules.
+Business flow lives in app.services.retrieval (reached through RetrievalStack).
+Use cases block (ONNX / PG / Qdrant / S3), so async handlers run them in the
+threadpool instead of on the event loop.
 """
 
 from __future__ import annotations
@@ -10,13 +11,20 @@ import json
 import logging
 import uuid
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
-from app.schemas.retrieval import dump_model, ErrorBody, IndexResponse
+from app.schemas.retrieval import (
+    ErrorBody,
+    IndexJsonRequest,
+    IndexResponse,
+    SearchJsonRequest,
+    dump_model,
+)
 from app.bootstrap.state import ApplicationState
 from app.services.retrieval.errors import RetrievalError
 
@@ -151,6 +159,163 @@ async def read_upload(file: UploadFile, max_bytes: int) -> bytes:
     return data
 
 
+def _as_upload(value: Any) -> Optional[UploadFile]:
+    if isinstance(value, (UploadFile, StarletteUploadFile)):
+        return value  # type: ignore[return-value]
+    return None
+
+
+async def index_from_request(runtime: ApplicationState, request: Request) -> JSONResponse:
+    """POST /api/index: multipart file/files (<=100) or JSON {path, category, tags, scene(s)}."""
+    base = public_base(request)
+    content_type = (request.headers.get("content-type") or "").lower()
+    items: List[dict] = []
+
+    try:
+        if "application/json" in content_type:
+            payload = await request.json()
+            raw = IndexJsonRequest(**payload)
+            items.append(
+                {
+                    "source_path": raw.path,
+                    "filename": raw.path,
+                    "category": raw.category,
+                    "tags": raw.tags,
+                    "scene": raw.scene,
+                    "scenes": raw.scenes,
+                }
+            )
+        else:
+            form = await request.form()
+            category = form.get("category")
+            category_s = str(category) if category is not None else None
+            tags_raw = form.get("tags")
+            tag_list = parse_tags(str(tags_raw) if tags_raw is not None else None)
+            scene_raw = form.get("scene")
+            scene_s = str(scene_raw).strip() if scene_raw not in (None, "") else None
+            scenes_raw = form.get("scenes")
+            scenes_list = parse_scenes_json(str(scenes_raw) if scenes_raw is not None else None)
+
+            uploads: List[UploadFile] = []
+            for item in [form.get("file"), *form.getlist("files"), *form.getlist("file")]:
+                up = _as_upload(item)
+                if up is not None and up not in uploads:
+                    uploads.append(up)
+
+            if len(uploads) > 100:
+                return error_response(
+                    "VALIDATION_ERROR",
+                    "too many files (max 100)",
+                    status_code=422,
+                )
+            if not uploads:
+                return error_response(
+                    "INDEX_EMPTY_REQUEST",
+                    "no file and no path",
+                    status_code=400,
+                )
+            for up in uploads:
+                data = await read_upload(up, runtime.max_image_bytes)
+                items.append(
+                    {
+                        "image_bytes": data,
+                        "filename": up.filename or "upload.bin",
+                        "category": category_s,
+                        "tags": tag_list,
+                        "scene": scene_s,
+                        "scenes": scenes_list,
+                    }
+                )
+    except RetrievalError as exc:
+        return retrieval_error_response(exc)
+    except Exception as exc:
+        return error_response("VALIDATION_ERROR", str(exc), status_code=422)
+
+    return await run_in_threadpool(run_index, runtime, items, public_file_base=base)
+
+
+async def search_from_request(runtime: ApplicationState, request: Request) -> JSONResponse:
+    """POST /api/search: multipart file / img_url or JSON {img_url}; query params override."""
+    base = public_base(request)
+    content_type = (request.headers.get("content-type") or "").lower()
+
+    image_bytes = None
+    image_url = None
+    scene = None
+    k = 10
+    thr = None
+    tid = None
+
+    try:
+        if "application/json" in content_type:
+            payload = await request.json()
+            raw = SearchJsonRequest(**payload)
+            image_url = raw.img_url
+            scene = raw.scene
+            k = int(raw.top_k)
+            thr = parse_score_threshold_raw(raw.score_threshold)
+            tid = raw.trace_id
+        else:
+            form = await request.form()
+            up = _as_upload(form.get("file"))
+            if up is not None:
+                image_bytes = await read_upload(up, runtime.max_image_bytes)
+            img_url_val = form.get("img_url")
+            if img_url_val and image_bytes is None:
+                image_url = str(img_url_val)
+            scene_val = form.get("scene")
+            if scene_val not in (None, ""):
+                scene = str(scene_val)
+            if form.get("top_k") is not None:
+                k = int(str(form.get("top_k")))
+            if form.get("score_threshold") not in (None, ""):
+                thr = parse_score_threshold_raw(form.get("score_threshold"))
+            if form.get("trace_id") is not None:
+                tid = str(form.get("trace_id"))
+
+        # query overrides
+        qp = request.query_params
+        if qp.get("scene") not in (None, ""):
+            scene = qp.get("scene")
+        if qp.get("top_k") is not None:
+            k = int(qp.get("top_k"))
+        if qp.get("score_threshold") not in (None, ""):
+            thr = parse_score_threshold_raw(qp.get("score_threshold"))
+        if qp.get("trace_id"):
+            tid = qp.get("trace_id")
+
+        if image_bytes is None and not image_url:
+            return error_response(
+                "VALIDATION_ERROR",
+                "file or img_url is required",
+                status_code=422,
+                trace_id=tid,
+            )
+        if not (1 <= k <= 50):
+            return error_response(
+                "VALIDATION_ERROR",
+                "top_k must be in 1..50",
+                status_code=422,
+                trace_id=tid,
+            )
+    except RetrievalError as exc:
+        return retrieval_error_response(exc, trace_id=tid)
+    except Exception as exc:
+        return error_response("VALIDATION_ERROR", str(exc), status_code=422, trace_id=tid)
+
+    return await run_in_threadpool(
+        run_search,
+        runtime,
+        image_bytes=image_bytes,
+        image_url=image_url,
+        scene=scene,
+        top_k=k,
+        score_threshold=thr,
+        public_file_base=base,
+        trace_id=tid,
+    )
+
+
 def run_index(
     runtime: ApplicationState,
     items: List[Dict[str, Any]],
@@ -277,168 +442,68 @@ def run_list_images(
         return error_response("INTERNAL_ERROR", str(exc), status_code=500, trace_id=tid)
 
 
-def mvp_health(runtime: ApplicationState) -> JSONResponse:
-    """GET /api/health aggregate via RetrievalStack ports (no direct adapter ctor).
+_FLYB_DISABLED = {"ok": False, "optional": True, "disabled": True, "detail": "out of scope"}
 
-    Wire shape kept: components.api/embedding/qdrant/mysql/flyb (mysql key = metadata
-    ping; implementation is PostgreSQL). Does not replace healthz/readyz.
+
+def mvp_health(runtime: ApplicationState) -> JSONResponse:
+    """GET /api/health: embedding / qdrant / metadata status of the retrieval stack.
+
+    Wire keys kept for compatibility: "mysql" = PostgreSQL metadata; "flyb" always
+    disabled. Does not replace /api/healthz or /api/readyz.
     """
     ts = datetime.now().astimezone().isoformat(timespec="seconds")
-    components: Dict[str, Any] = {"api": {"ok": True}}
-
-    retrieval = getattr(runtime, "retrieval", None)
-    retrieval_error = getattr(runtime, "retrieval_error", None)
-    err_code = getattr(runtime, "retrieval_error_code", None)
-    mismatch = getattr(runtime, "retrieval_space_mismatch", None) or {}
-
-    configured_space: Optional[str] = None
-    if retrieval is not None:
-        configured_space = getattr(retrieval, "embedding_space_id", None)
-    if not configured_space and isinstance(mismatch, dict):
-        configured_space = mismatch.get("configured")
-
-    space_mismatch = err_code == "VECTOR_SPACE_MISMATCH"
-    stored_space = mismatch.get("stored") if isinstance(mismatch, dict) else None
-    if space_mismatch and isinstance(mismatch, dict) and mismatch.get("configured"):
-        configured_space = mismatch.get("configured") or configured_space
-
-    # embedding — from stack only
-    emb_ok = False
-    if retrieval is not None and getattr(retrieval, "embedding", None) is not None:
-        emb = retrieval.embedding
-        emb_ok = True
-        emb_info: Dict[str, Any] = {
-            "ok": True,
-            "model_path": getattr(emb, "model_path", None),
-            "vector_dim": getattr(emb, "embedding_dim", 1024),
-            "embedding_space_id": configured_space,
+    stack = runtime.retrieval
+    if stack is None:
+        detail = runtime.retrieval_error or "not wired"
+        components: Dict[str, Any] = {
+            "api": {"ok": True},
+            "embedding": {"ok": False, "detail": detail, "embedding_space_id": None},
+            "qdrant": {
+                "ok": False,
+                "detail": detail,
+                "collection": runtime.settings.qdrant.collection,
+                "embedding_space_id": None,
+            },
+            "mysql": {"ok": False, "detail": detail},
+            "flyb": dict(_FLYB_DISABLED),
         }
-        current = getattr(retrieval, "current_model", None) or {}
-        if current.get("name"):
-            emb_info["current_model"] = current.get("name")
-        if current.get("collection"):
-            emb_info["current_collection"] = current.get("collection")
-    elif retrieval_error:
-        emb_info = {
-            "ok": False,
-            "detail": retrieval_error,
-            "embedding_space_id": configured_space,
-        }
-        if space_mismatch:
-            emb_info["detail"] = {
-                "error": "VECTOR_SPACE_MISMATCH",
-                "configured": configured_space,
-                "stored": stored_space,
-                "message": retrieval_error,
-            }
-    else:
-        emb_info = {
-            "ok": False,
-            "detail": "not wired",
-            "embedding_space_id": configured_space,
-        }
-    components["embedding"] = emb_info
+        return JSONResponse(status_code=503, content={"ok": False, "ts": ts, "components": components})
 
-    # qdrant — VectorStorePort.ping via stack
-    q_info: Dict[str, Any] = {"ok": False, "detail": "not wired"}
-    if retrieval is not None and getattr(retrieval, "vectors", None) is not None:
-        ping = retrieval.vectors.ping()
-        current = getattr(retrieval, "current_model", None) or {}
-        q_info = {
-            "ok": bool(ping.get("ok")),
-            "collection": ping.get("collection")
-            or current.get("collection")
-            or "image_embeddings",
-            "points_count": ping.get("points_count"),
-            "embedding_space_id": configured_space,
-        }
-        if not q_info["ok"]:
-            q_info["detail"] = ping.get("detail")
-    else:
-        q_info = {
-            "ok": False,
-            "detail": retrieval_error or "not wired",
-            "collection": runtime.settings.qdrant.collection,
-            "embedding_space_id": configured_space,
-        }
-        if space_mismatch:
-            q_info["ok"] = False
-            q_info["detail"] = {
-                "error": "VECTOR_SPACE_MISMATCH",
-                "configured": configured_space,
-                "stored": stored_space,
-                "message": retrieval_error,
-            }
-    components["qdrant"] = q_info
-
-    # metadata (wire key remains "mysql" for API compatibility; backend is PG)
-    m_info: Dict[str, Any] = {"ok": False, "detail": "not wired"}
-    if retrieval is not None and getattr(retrieval, "metadata", None) is not None:
-        ping = retrieval.metadata.ping()
-        m_info = {
-            "ok": bool(ping.get("ok")),
-            "driver": ping.get("driver") or "postgresql",
-            "host": ping.get("host"),
-            "database": ping.get("database"),
-        }
-        if not m_info["ok"]:
-            m_info["detail"] = ping.get("detail")
-    elif retrieval_error and not space_mismatch:
-        m_info = {"ok": False, "detail": retrieval_error}
-    components["mysql"] = m_info
-
-    # flyb wire key kept for API compat; retrieval path no longer wires FlyB (D5)
-    components["flyb"] = {
-        "ok": False,
-        "optional": True,
-        "disabled": True,
-        "detail": "out of scope",
+    model = stack.model
+    pings = stack.infra.ping()
+    q, pg = pings["qdrant"], pings["postgres"]
+    qdrant: Dict[str, Any] = {
+        "ok": bool(q.get("ok")),
+        "collection": q.get("collection") or model.collection,
+        "points_count": q.get("points_count"),
+        "embedding_space_id": model.space_id,
     }
-
-    if space_mismatch:
-        emb_ok = False
-        q_info["ok"] = False
-
-    ok = bool(emb_ok and q_info.get("ok") and m_info.get("ok"))
-    status_code = 200 if ok else 503
+    if not qdrant["ok"]:
+        qdrant["detail"] = q.get("detail")
+    metadata: Dict[str, Any] = {
+        "ok": bool(pg.get("ok")),
+        "driver": pg.get("driver") or "postgresql",
+        "host": pg.get("host"),
+        "database": pg.get("database"),
+    }
+    if not metadata["ok"]:
+        metadata["detail"] = pg.get("detail")
+    components = {
+        "api": {"ok": True},
+        "embedding": {
+            "ok": True,
+            "model_path": stack.embedding.model_path,
+            "vector_dim": model.dim,
+            "embedding_space_id": model.space_id,
+            "current_model": model.name,
+            "current_collection": model.collection,
+        },
+        "qdrant": qdrant,
+        "mysql": metadata,
+        "flyb": dict(_FLYB_DISABLED),
+    }
+    ok = qdrant["ok"] and metadata["ok"]
     return JSONResponse(
-        status_code=status_code,
+        status_code=200 if ok else 503,
         content={"ok": ok, "ts": ts, "components": components},
     )
-
-
-def serve_image_file(runtime: ApplicationState, image_id: int) -> FileResponse:
-    """Legacy local-file serve via stack MetadataStorePort (no PgMetadataStore import).
-
-    PG rows use https URLs and may omit local `path`; missing path -> 404 (unchanged).
-    """
-    stack = require_retrieval(runtime)
-    row = stack.metadata.get_by_id(int(image_id))
-    if not row or row.get("status") != "active":
-        raise HTTPException(
-            status_code=404,
-            detail={"ok": False, "error": "NOT_FOUND", "detail": f"image id={image_id}"},
-        )
-    path = row.get("path")
-    if not path:
-        raise HTTPException(
-            status_code=404,
-            detail={"ok": False, "error": "NOT_FOUND", "detail": "path missing"},
-        )
-    p = Path(path)
-    if not p.is_file():
-        raise HTTPException(
-            status_code=404,
-            detail={"ok": False, "error": "NOT_FOUND", "detail": f"file missing: {path}"},
-        )
-    media = "application/octet-stream"
-    suffix = p.suffix.lower()
-    if suffix in {".jpg", ".jpeg"}:
-        media = "image/jpeg"
-    elif suffix == ".png":
-        media = "image/png"
-    elif suffix == ".webp":
-        media = "image/webp"
-    elif suffix == ".gif":
-        media = "image/gif"
-    return FileResponse(path=str(p), media_type=media, filename=p.name)

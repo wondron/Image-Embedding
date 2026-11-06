@@ -1,6 +1,7 @@
 """Recompute image_scenes for one image (write-time materialize).
 
-Goes through composition root (build_retrieval_stack), not adapter ctors.
+Needs only PG, but builds RetrievalInfra like the other workers so the schema
+and current model are checked the same way; no ONNX model is loaded.
 
 Invoke from backend/:
 
@@ -21,9 +22,7 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    parser = argparse.ArgumentParser(
-        description="Recompute image_scenes via RetrievalStack"
-    )
+    parser = argparse.ArgumentParser(description="Recompute image_scenes for one image")
     parser.add_argument("--image-id", required=True)
     parser.add_argument(
         "--no-bump",
@@ -32,22 +31,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    from app.bootstrap.retrieval_stack import build_retrieval_infra
     from app.core.config.settings import Settings
-    from app.bootstrap.retrieval_stack import build_retrieval_stack
+    from app.services.retrieval.recompute_scenes import RecomputeScenesUseCase
+    from app.workers._config import load_worker_config
 
-    settings = Settings()
-    config: dict = {}
+    infra = build_retrieval_infra(Settings(), load_worker_config())
     try:
-        from app.core.config.loader import load_config  # type: ignore
-
-        config = load_config() or {}
-    except Exception:
-        config = {}
-
-    stack = build_retrieval_stack(config, settings)
-    out = stack.recompute_scenes_uc.execute(
-        args.image_id, bump_version=not args.no_bump
-    )
+        out = RecomputeScenesUseCase(infra.metadata).execute(
+            args.image_id, bump_version=not args.no_bump
+        )
+    finally:
+        infra.close()
     print(json.dumps(out, ensure_ascii=False, indent=2, default=str))
     return 0
 

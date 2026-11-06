@@ -3,7 +3,7 @@
 Registered seeds: general, oven, range_hood, us_diet, cn_diet, jp_diet.
 MVP aliases (map+document): normal→general, device→oven.
 Default search/list/index scene = general.
-FlyB: OUT OF SCOPE (A4) — allows_flyb_fallback always False.
+FlyB: OUT OF SCOPE (A4).
 """
 
 from __future__ import annotations
@@ -133,8 +133,3 @@ def normalize_list_scene(scene: Optional[str] = None) -> str:
     if s not in REGISTERED_SCENES:
         _raise_unknown(s, code_for_unknown="LIST_UNKNOWN_SCENE")
     return s
-
-
-def allows_flyb_fallback(scene: str) -> bool:
-    """PG v0.1 A4 / M0: FlyB OUT — never fall back."""
-    return False

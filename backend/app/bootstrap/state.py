@@ -36,7 +36,6 @@ class ApplicationState:
     retrieval: Optional["RetrievalStack"] = None
     retrieval_error: str | None = None
     retrieval_error_code: str | None = None
-    retrieval_space_mismatch: dict[str, Any] | None = None
     stopping: bool = False
     config_provider: NacosConfigProvider | None = None
     configuration_lock: threading.RLock = field(
@@ -117,6 +116,7 @@ class ApplicationState:
         if self.config_provider is not None:
             self.config_provider.close()
         service = self.food_service
+        retrieval, self.retrieval = self.retrieval, None
         try:
             service_close = getattr(service, "close", None)
             if callable(service_close):
@@ -125,7 +125,11 @@ class ApplicationState:
                     await result
         finally:
             self.food_service = None
-            await self.http_client.aclose()
+            try:
+                if retrieval is not None:
+                    retrieval.close()
+            finally:
+                await self.http_client.aclose()
 
 
 def get_application_state(request: Request) -> ApplicationState:

@@ -15,6 +15,7 @@ from typing import Any
 from uuid import UUID
 
 from app.services.retrieval import errors as err
+from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.embedding_validate import validate_embedding
 from app.repositories.ports import (
     EmbeddingPort,
@@ -98,10 +99,13 @@ class SearchImageUseCase:
         embedding: EmbeddingPort,
         vectors: VectorStorePort,
         metadata: MetadataStorePort,
+        *,
+        model: ActiveModel,
     ) -> None:
         self._embedding = embedding
         self._vectors = vectors
         self._metadata = metadata
+        self._model = model
 
     def execute(
         self,
@@ -128,23 +132,14 @@ class SearchImageUseCase:
             if image_bytes:
                 vector = self._embedding.embed_bytes(image_bytes)
             else:
-                url = str(image_url).strip()
-                try:
-                    import requests
-
-                    resp = requests.get(url, timeout=15.0)
-                    resp.raise_for_status()
-                    vector = self._embedding.embed_bytes(resp.content)
-                except err.RetrievalError:
-                    raise
-                except Exception as exc:
-                    raise err.search_bad_image(f"cannot fetch img_url: {exc}") from exc
+                vector = self._embedding.embed_url(str(image_url).strip())
         except err.RetrievalError:
             raise
         except Exception as exc:
-            raise err.search_bad_image(f"embed failed: {exc}") from exc
+            what = "embed failed" if image_bytes else "cannot fetch img_url"
+            raise err.search_bad_image(f"{what}: {exc}") from exc
 
-        vector = validate_embedding(vector, for_search=True)
+        vector = validate_embedding(vector, for_search=True, expected_dim=self._model.dim)
 
         raw_hits = self._vectors.search(
             vector,
@@ -172,15 +167,12 @@ class SearchImageUseCase:
         )
 
         scene_meta = None
-        get_scene = getattr(self._metadata, "get_scene_by_code", None)
-        if callable(get_scene):
-            try:
-                scene_meta = get_scene(active_scene)
-            except Exception:
-                logger.exception("get_scene_by_code failed scene=%s", active_scene)
+        try:
+            scene_meta = self._metadata.get_scene_by_code(active_scene)
+        except Exception:
+            logger.exception("get_scene_by_code failed scene=%s", active_scene)
 
         heating = _outputs_heating(scene_meta)
-        map_label = getattr(self._metadata, "map_category_to_scene_label", None)
 
         items: list[dict[str, Any]] = []
         for pid in ids:
@@ -189,9 +181,11 @@ class SearchImageUseCase:
                 continue
             scene_label = None
             mapped = False
-            if callable(map_label) and row.get("category_id") is not None:
+            if row.get("category_id") is not None:
                 try:
-                    scene_label = map_label(active_scene, int(row["category_id"]))
+                    scene_label = self._metadata.map_category_to_scene_label(
+                        active_scene, int(row["category_id"])
+                    )
                     mapped = True
                 except Exception:
                     logger.exception("scene label map failed id=%s", pid)

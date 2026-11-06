@@ -43,14 +43,14 @@ def dependency_stubs(runtime: ApplicationState | None = None) -> dict[str, Any]:
             "qdrant": {"status": "not_wired", "detail": detail or "unchecked"},
             "postgres": {"status": "not_wired", "detail": detail or "unchecked"},
         }
-    q = retrieval.vectors.ping() if hasattr(retrieval.vectors, "ping") else {"ok": False}
-    m = retrieval.metadata.ping() if hasattr(retrieval.metadata, "ping") else {"ok": False}
-    current = getattr(retrieval, "current_model", None) or {}
+    pings = retrieval.infra.ping()
+    q, m = pings["qdrant"], pings["postgres"]
+    model = retrieval.model
     return {
         "qdrant": {
             "status": "ok" if q.get("ok") else "error",
             "detail": q.get("detail"),
-            "collection": q.get("collection") or current.get("collection"),
+            "collection": q.get("collection") or model.collection,
             "points_count": q.get("points_count"),
         },
         "postgres": {
@@ -58,8 +58,8 @@ def dependency_stubs(runtime: ApplicationState | None = None) -> dict[str, Any]:
             "detail": m.get("detail"),
             "host": m.get("host"),
             "database": m.get("database"),
-            "current_model": current.get("name"),
-            "current_collection": current.get("collection"),
+            "current_model": model.name,
+            "current_collection": model.collection,
         },
     }
 

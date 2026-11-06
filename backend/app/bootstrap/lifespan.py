@@ -99,45 +99,37 @@ def _retrieval_local_debug_hint(settings: Settings) -> str:
 
 
 def initialize_retrieval(runtime: ApplicationState) -> None:
+    """Build the retrieval stack; on failure keep serving predict and record why."""
+    runtime.retrieval = None
+    runtime.retrieval_error = None
+    runtime.retrieval_error_code = None
     if not _retrieval_enabled():
-        runtime.retrieval = None
         runtime.retrieval_error = "RETRIEVAL_ENABLED=0"
         runtime.retrieval_error_code = "RETRIEVAL_DISABLED"
-        runtime.retrieval_space_mismatch = None
         logger.info("Retrieval stack skipped | RETRIEVAL_ENABLED=0 | postgres_host=%s | qdrant=%s", runtime.settings.postgres.host, runtime.settings.qdrant.url,)
         return
+
+    from app.bootstrap.retrieval_stack import build_retrieval_stack
+    from app.services.retrieval.errors import RetrievalError
+
     try:
-        from app.bootstrap.retrieval_stack import build_retrieval_stack
-        from app.services.retrieval.errors import RetrievalError
         runtime.retrieval = build_retrieval_stack(runtime.config, runtime.settings)
-        runtime.retrieval_error = None
-        runtime.retrieval_error_code = None
-        runtime.retrieval_space_mismatch = None
-        cur = getattr(runtime.retrieval, "current_model", None) or {}
-        logger.info("Retrieval stack ready  qdrant=%s  postgres=%s/%s  collection=%s  space_id=%s",
-            runtime.settings.qdrant.url, runtime.settings.postgres.host, runtime.settings.postgres.database,
-            cur.get("collection"), getattr(runtime.retrieval, "embedding_space_id", None))
     except Exception as exc:
-        runtime.retrieval = None
-        from app.services.retrieval.errors import RetrievalError
         if isinstance(exc, RetrievalError):
             runtime.retrieval_error = f"{exc.code}: {exc.detail}"
             runtime.retrieval_error_code = exc.code
-            configured = getattr(exc, "configured", None)
-            stored = getattr(exc, "stored", None)
-            if configured is not None or stored is not None:
-                runtime.retrieval_space_mismatch = { "configured": configured, "stored": stored}
-            else:
-                runtime.retrieval_space_mismatch = None
         else:
             runtime.retrieval_error = f"{type(exc).__name__}: {exc}"
-            runtime.retrieval_error_code = None
-            runtime.retrieval_space_mismatch = None
-        detail = runtime.retrieval_error or str(exc)
         if _is_infra_unreachable(exc):
-            logger.warning("Retrieval stack unavailable (infra) | %s | host=%s | %s", detail, runtime.settings.postgres.host, _retrieval_local_debug_hint(runtime.settings))
+            logger.warning("Retrieval stack unavailable (infra) | %s | host=%s | %s", runtime.retrieval_error, runtime.settings.postgres.host, _retrieval_local_debug_hint(runtime.settings))
         else:
             logger.exception("Retrieval stack initialization failed: %s", exc)
+        return
+
+    model = runtime.retrieval.model
+    logger.info("Retrieval stack ready  qdrant=%s  postgres=%s/%s  collection=%s  model=%s",
+        runtime.settings.qdrant.url, runtime.settings.postgres.host, runtime.settings.postgres.database,
+        model.collection, model.space_id)
 
 
 def initialize_food_service(runtime: ApplicationState) -> None:
