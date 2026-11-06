@@ -1,10 +1,53 @@
-"""SQLAlchemy declarative base for app.models."""
+"""ORM 基类：约束命名规则、类型映射、时间字段。"""
+
 from __future__ import annotations
 
-from sqlalchemy.orm import DeclarativeBase
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import DateTime, MetaData, Text, func
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+# 约束和索引按统一规则命名，迁移脚本里的名字稳定可读
+NAMING_CONVENTION: dict[str, str] = {
+    "ix": "ix_%(table_name)s_%(column_0_N_name)s",
+    "uq": "uq_%(table_name)s_%(column_0_N_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_N_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
 
 
 class Base(DeclarativeBase):
-    """Shared metadata for declarative table mirrors."""
+    """所有表的基类。"""
 
-    pass
+    metadata = MetaData(naming_convention=NAMING_CONVENTION)
+    type_annotation_map = {
+        str: Text,
+        datetime: DateTime(timezone=True),
+        dict[str, Any]: JSONB,
+    }
+
+
+class CreatedAtMixin:
+    """创建时间。"""
+
+    # 插入后立即取回数据库生成的值，异步会话里不会触发懒加载
+    __mapper_args__ = {"eager_defaults": True}
+
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), comment="创建时间")
+
+
+class UpdatedAtMixin:
+    """更新时间。"""
+
+    __mapper_args__ = {"eager_defaults": True}
+
+    updated_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), onupdate=func.now(), comment="更新时间"
+    )
+
+
+class TimestampMixin(CreatedAtMixin, UpdatedAtMixin):
+    """创建时间 + 更新时间。"""

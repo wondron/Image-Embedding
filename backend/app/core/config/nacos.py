@@ -18,7 +18,7 @@ from app.core.config.constant import NacosProfile
 from app.core.config.loader import load_config, parse_config_text, prepare_config
 from app.core.config.settings import NacosSettings
 
-logger = logging.getLogger("main.config.nacos")
+logger = logging.getLogger("nacos")
 _MARKDOWN_URL = re.compile(r"\[(https?://[^\]]+)\]\([^)]+\)")
 
 class NacosConfigError(RuntimeError):
@@ -103,10 +103,7 @@ class NacosConfigClient:
 
         response = self.session.post(
             self._url("auth/login"),
-            data={
-                "username": username,
-                "password": password,
-            },
+            data={"username": username, "password": password,},
             timeout=self._timeout,
         )
 
@@ -127,9 +124,7 @@ class NacosConfigClient:
 
         token = payload.get("accessToken") or payload.get("access_token")
         if not token:
-            raise NacosConfigError(
-                "Nacos authentication response has no access token"
-            )
+            raise NacosConfigError("Nacos authentication response has no access token")
 
         self._access_token = str(token)
 
@@ -324,24 +319,16 @@ class NacosConfigProvider:
     def start_polling(self, on_update: UpdateCallback) -> None:
         """Start periodic normal-GET polling."""
         if not self.settings.enabled or not self.poll_enabled:
-            logger.info(
-                "Nacos configuration polling disabled | "
-                "enabled=%s | poll_enabled=%s",
-                self.settings.enabled,
-                self.poll_enabled,
-            )
-            show_text(
-                f"Nacos configuration polling disabled | enabled={self.settings.enabled} | "
-                f"poll_enabled={self.poll_enabled}",
-            )
+            logger.info("Nacos 配置轮询已禁用  配置开关=%s  轮询开关=%s", self.settings.enabled, self.poll_enabled)
+            show_text(f"Nacos 配置轮询已禁用  配置开关={self.settings.enabled}  轮询开关={self.poll_enabled}")
             return
 
         with self._lock:
             has_active_snapshot = self._active is not None
 
         if not has_active_snapshot:
-            logger.info("Nacos configuration polling skipped | reason=no_available_profile")
-            show_text("Nacos configuration polling skipped | reason=no_available_profile")
+            logger.info("Nacos 配置轮询已跳过，原因：没有可用的配置环境")
+            show_text("Nacos 配置轮询已跳过，原因：没有可用的配置环境")
             return
 
         if self._thread is not None and self._thread.is_alive():
@@ -350,8 +337,8 @@ class NacosConfigProvider:
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._poll_loop, args=(on_update,), name="nacos-config-poller", daemon=True)
         self._thread.start()
-        logger.info("Nacos configuration polling started | interval=%.3fs", self.poll_interval_seconds,)
-        show_text(f"Nacos configuration polling started | interval={self.poll_interval_seconds:.3f}s")
+        logger.info("Nacos 配置轮询 启动  间隔=%.3fs", self.poll_interval_seconds,)
+        show_text(f"Nacos 配置轮询 启动  间隔={self.poll_interval_seconds:.3f}s")
 
     def _poll_loop(self, on_update: UpdateCallback) -> None:
         try:
@@ -362,70 +349,38 @@ class NacosConfigProvider:
                 try:
                     candidate = self._fetch_selected_profile(log_success=False)
                 except Exception as exc:
-                    logger.warning("Nacos configuration poll failed | error=%s: %s", type(exc).__name__,exc)
-                    show_text(
-                        f"Nacos configuration poll failed | error={type(exc).__name__}: {exc}",
-                        logger_level=logging.WARNING,
-                    )
+                    logger.warning("Nacos 配置轮询失败 | error=%s: %s", type(exc).__name__,exc)
+                    show_text(f"Nacos 配置轮询失败 | error={type(exc).__name__}: {exc}", logger_level=logging.WARNING,)
                     if self._stop_event.wait(self.retry_interval_seconds):
                         break
                     continue
                 if candidate is None:
-                    logger.warning("Nacos configuration polling stopped | reason=no_available_profile")
-                    show_text(
-                        "Nacos configuration polling stopped | reason=no_available_profile",
-                        logger_level=logging.WARNING,
-                    )
+                    logger.warning("Nacos 配置轮询已停止 | 原因：没有可用的配置环境")
+                    show_text("Nacos 配置轮询已停止 | 原因：没有可用的配置环境", logger_level=logging.WARNING,)
                     break
                 with self._lock:
                     active = self._active
                 if active is None:
-                    logger.warning("Nacos configuration polling stopped | reason=no_active_snapshot")
-                    show_text(
-                        "Nacos configuration polling stopped | reason=no_active_snapshot",
-                        logger_level=logging.WARNING,
-                    )
+                    logger.warning("Nacos 配置轮询已停止 | 原因：没有活动的配置快照")
+                    show_text("Nacos 配置轮询已停止 | 原因：没有活动的配置快照", logger_level=logging.WARNING,)
                     break
 
                 if candidate.fingerprint == active.fingerprint:
-                    logger.debug("Nacos configuration unchanged | profile=%s", candidate.profile["profile"])
-                    show_text(
-                        f"Nacos configuration unchanged | profile={candidate.profile['profile']}",
-                        logger_level=logging.DEBUG,
-                    )
+                    logger.debug("Nacos 配置未变更 | profile=%s", candidate.profile["profile"])
+                    show_text(f"Nacos 配置未变更 | profile={candidate.profile['profile']}", logger_level=logging.DEBUG,)
                     continue
 
-                logger.info(
-                    "Nacos configuration change detected by polling | "
-                    "old_profile=%s | new_profile=%s",
-                    active.profile["profile"],
-                    candidate.profile["profile"],
-                )
-                show_text(
-                    "Nacos configuration change detected by polling | "
-                    f"old_profile={active.profile['profile']} | new_profile={candidate.profile['profile']}",
-                )
+                logger.info("Nacos 配置变更被检测到  old_profile=%s | new_profile=%s", active.profile["profile"], candidate.profile["profile"],)
+                show_text( "Nacos 配置变更被检测到  old_profile={active.profile['profile']} | new_profile={candidate.profile['profile']}")
 
                 if on_update(candidate):
                     with self._lock:
                         self._active = candidate
-
-                    logger.info(
-                        "Nacos configuration update applied | profile=%s",
-                        candidate.profile["profile"],
-                    )
-                    show_text(f"Nacos configuration update applied | profile={candidate.profile['profile']}")
+                    logger.info("Nacos 配置更新已应用  profile=%s", candidate.profile["profile"],)
+                    show_text(f"Nacos 配置更新已应用  profile={candidate.profile['profile']}")
                 else:
-                    logger.warning(
-                        "Nacos configuration update rejected; "
-                        "keeping last working snapshot | profile=%s",
-                        candidate.profile["profile"],
-                    )
-                    show_text(
-                        "Nacos configuration update rejected; "
-                        f"keeping last working snapshot | profile={candidate.profile['profile']}",
-                        logger_level=logging.WARNING,
-                    )
+                    logger.warning("Nacos 配置更新被拒绝; 保留最后一个正常运行的快照 | profile=%s", candidate.profile["profile"])
+                    show_text("Nacos 配置更新被拒绝; 保留最后一个正常运行的快照 | profile={candidate.profile['profile']}",logger_level=logging.WARNING)
         finally:
             self._close_clients()
 
@@ -446,16 +401,11 @@ class NacosConfigProvider:
 
         thread = self._thread
         if thread is not None and thread.is_alive():
-            join_timeout = max(
-                2.0,
-                float(self.settings.connect_timeout_seconds)
-                + float(self.settings.request_timeout_seconds)
-                + 1.0,
-            )
+            join_timeout = max(2.0, float(self.settings.connect_timeout_seconds) + float(self.settings.request_timeout_seconds) + 1.0,)
             thread.join(timeout=join_timeout)
 
         if thread is None or not thread.is_alive():
             self._close_clients()
 
-        logger.info("Nacos configuration polling stopped")
-        show_text("Nacos configuration polling stopped")
+        logger.info("Nacos 配置轮询已停止")
+        show_text("Nacos 配置轮询已停止")

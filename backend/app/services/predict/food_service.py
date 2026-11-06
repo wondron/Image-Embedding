@@ -34,6 +34,7 @@ class FoodService:
     def __init__(self, cfg):
         self.searchTool = GetGlobalData(cfg)
         self.searchFilter = GlobalFilter(cfg)
+        self.embeddingTool = self.searchFilter.embedding
 
 
     def detect(self, image_data: bytes, machine_info: str = "", trace_id: str = "", save_result: bool = False):

@@ -4,19 +4,60 @@ import uuid
 from typing import Any
 from uuid import UUID
 
-from app.db.common import _as_uuid, _row_to_dict
+from app.core.enums import SceneOrigin
+from app.db.common import _as_uuid, _row_to_dict, _uuid_in_clause
 from app.services.retrieval import errors as err
 from app.services.retrieval.scene_membership import (
     apply_manual_overrides,
     compute_rule_member_scene_ids,
     effective_cuisines,
+    include_all_scene_ids,
     most_specific_label_id,
     rule_matches_category,
+)
+
+# Effective scene codes per image: active include_all scenes (implicit, no rows)
+# plus image_scenes member rows of the other scenes. Ordered by scene id.
+_SCENE_CODES_SQL = (
+    "SELECT x.image_id, array_agg(x.code ORDER BY x.scene_id) AS codes FROM ("
+    "  SELECT isc.image_id::text AS image_id, s.id AS scene_id, s.code "
+    "  FROM image_scenes isc JOIN scenes s ON s.id = isc.scene_id "
+    "  WHERE isc.is_member AND NOT s.include_all AND isc.image_id IN {ids} "
+    "  UNION ALL "
+    "  SELECT i.id::text, s.id, s.code "
+    "  FROM images i CROSS JOIN scenes s "
+    "  WHERE s.include_all AND s.is_active AND i.id IN {ids}"
+    ") x GROUP BY x.image_id"
 )
 
 
 class PgScenesMixin:
     """scenes / image_scenes materialize + label mapping."""
+
+    def _scene_codes_by_image(self, conn, image_ids: list[str]) -> dict[str, list[str]]:
+        """{image_id: [scene codes]} for the given ids (see _SCENE_CODES_SQL)."""
+        if not image_ids:
+            return {}
+        from sqlalchemy import text
+
+        id_sql, id_params = _uuid_in_clause(image_ids)
+        rows = conn.execute(
+            text(_SCENE_CODES_SQL.format(ids=id_sql)), id_params
+        ).mappings().fetchall()
+        return {str(r["image_id"]): list(r["codes"] or []) for r in rows}
+
+    def _scene_membership_row(self, conn, code: str) -> dict[str, Any] | None:
+        """id / include_all / is_active for a scene code, or None if unknown."""
+        from sqlalchemy import text
+
+        row = conn.execute(
+            text(
+                "SELECT id, include_all, is_active FROM scenes "
+                "WHERE code = :c LIMIT 1"
+            ),
+            {"c": str(code).strip()},
+        ).mappings().fetchone()
+        return dict(row) if row else None
 
     def list_scene_codes(self, *, active_only: bool = True) -> list[str]:
         self.ensure_schema()
@@ -61,22 +102,11 @@ class PgScenesMixin:
 
     def get_effective_scene_codes(self, image_id: UUID | str) -> list[str]:
         self.ensure_schema()
-        from sqlalchemy import text
 
         uid = str(_as_uuid(image_id))
         engine = self._get_engine()
         with engine.connect() as conn:
-            rows = conn.execute(
-                text(
-                    "SELECT s.code FROM image_scenes isc "
-                    "JOIN scenes s ON s.id = isc.scene_id "
-                    "WHERE isc.image_id = CAST(:id AS uuid) "
-                    "  AND isc.is_member = true "
-                    "ORDER BY s.id"
-                ),
-                {"id": uid},
-            ).fetchall()
-        return [str(r[0]) for r in rows]
+            return self._scene_codes_by_image(conn, [uid]).get(uid, [])
 
     def recompute_image_scenes(
         self,
@@ -87,7 +117,8 @@ class PgScenesMixin:
         """Write-time materialize effective membership into image_scenes.
 
         - Replaces origin='rule' rows; preserves origin='manual'.
-        - Effective codes = rule members with manual overrides applied.
+        - include_all scenes get no rows (they contain every image).
+        - Effective codes = include_all ∪ (rule members with manual overrides applied).
         - Optionally bumps images.payload_version (skip when caller already bumped).
         """
         self.ensure_schema()
@@ -182,33 +213,33 @@ class PgScenesMixin:
                 manual = list(
                     conn.execute(
                         text(
-                            "SELECT scene_id, is_member FROM image_scenes "
-                            "WHERE image_id = CAST(:id AS uuid) "
-                            "  AND origin = 'manual'"
+                            "SELECT isc.scene_id, isc.is_member FROM image_scenes isc "
+                            "JOIN scenes s ON s.id = isc.scene_id "
+                            "WHERE isc.image_id = CAST(:id AS uuid) "
+                            "  AND isc.origin = :manual AND NOT s.include_all"
                         ),
-                        {"id": uid},
+                        {"id": uid, "manual": SceneOrigin.MANUAL.value},
                     ).mappings().fetchall()
                 )
                 manual_scene_ids = {int(m["scene_id"]) for m in manual}
                 effective = apply_manual_overrides(rule_members, manual)
+                effective |= include_all_scene_ids(scenes)
 
                 conn.execute(
                     text(
                         "DELETE FROM image_scenes "
-                        "WHERE image_id = CAST(:id AS uuid) AND origin = 'rule'"
+                        "WHERE image_id = CAST(:id AS uuid) AND origin = :rule"
                     ),
-                    {"id": uid},
+                    {"id": uid, "rule": SceneOrigin.RULE.value},
                 )
-                for sid in sorted(rule_members):
-                    if sid in manual_scene_ids:
-                        continue
+                for sid in sorted(rule_members - manual_scene_ids):
                     conn.execute(
                         text(
                             "INSERT INTO image_scenes "
                             "(image_id, scene_id, origin, is_member, updated_at) "
-                            "VALUES (CAST(:iid AS uuid), :sid, 'rule', true, now())"
+                            "VALUES (CAST(:iid AS uuid), :sid, :rule, true, now())"
                         ),
-                        {"iid": uid, "sid": sid},
+                        {"iid": uid, "sid": sid, "rule": SceneOrigin.RULE.value},
                     )
 
                 code_by_id = {int(s["id"]): str(s["code"]) for s in scenes}
@@ -250,7 +281,10 @@ class PgScenesMixin:
         *,
         is_member: bool,
     ) -> dict[str, Any]:
-        """Upsert origin=manual override then recompute (bumps payload_version)."""
+        """Upsert origin=manual override then recompute (bumps payload_version).
+
+        include_all scenes contain every image and take no overrides.
+        """
         self.ensure_schema()
         from sqlalchemy import text
 
@@ -258,19 +292,24 @@ class PgScenesMixin:
         scene = self.get_scene_by_code(scene_code)
         if not scene:
             raise err.validation_error(f"unknown scene: {scene_code!r}")
+        if scene.get("include_all"):
+            raise err.validation_error(
+                f"scene {scene_code!r} includes all images; manual membership is not allowed"
+            )
         sid = int(scene["id"])
+        manual = SceneOrigin.MANUAL.value
         engine = self._get_engine()
         with engine.begin() as conn:
             conn.execute(
                 text(
                     "INSERT INTO image_scenes "
                     "(image_id, scene_id, origin, is_member, updated_at) "
-                    "VALUES (CAST(:iid AS uuid), :sid, 'manual', :m, now()) "
+                    "VALUES (CAST(:iid AS uuid), :sid, :manual, :m, now()) "
                     "ON CONFLICT (image_id, scene_id) DO UPDATE SET "
-                    "origin = 'manual', is_member = EXCLUDED.is_member, "
+                    "origin = :manual, is_member = EXCLUDED.is_member, "
                     "updated_at = now()"
                 ),
-                {"iid": uid, "sid": sid, "m": bool(is_member)},
+                {"iid": uid, "sid": sid, "manual": manual, "m": bool(is_member)},
             )
         return self.recompute_image_scenes(uid, bump_version=True)
 

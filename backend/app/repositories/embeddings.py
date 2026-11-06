@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import uuid
 from typing import Any
 from uuid import UUID
 
+from app.core.enums import Distance, ModelStatus
 from app.db.common import _as_uuid, _row_to_dict, logger
 from app.services.retrieval import errors as err
 
@@ -31,8 +31,9 @@ class PgEmbeddingsMixin:
                     "SELECT id, name, version, dim, distance, input_size, "
                     "preprocess, weights_uri, collection, status, "
                     "created_at, activated_at "
-                    "FROM embedding_models WHERE status = 'current' LIMIT 1"
-                )
+                    "FROM embedding_models WHERE status = :current LIMIT 1"
+                ),
+                {"current": ModelStatus.CURRENT.value},
             ).mappings().fetchone()
         if row is None:
             raise err.not_ready(
@@ -41,8 +42,9 @@ class PgEmbeddingsMixin:
             )
         out = _row_to_dict(row)
         out["vector_dim"] = int(out["dim"])
-        # Normalize distance for QdrantStore (cosine/dot/euclid)
-        out["distance"] = str(out.get("distance") or "cosine").lower()
+        # Plain str for QdrantStore (cosine/dot/euclid); ck_embedding_models_distance
+        # guarantees a valid value
+        out["distance"] = Distance(str(out.get("distance") or Distance.COSINE).lower()).value
         return out
 
     def upsert_image_embedding(

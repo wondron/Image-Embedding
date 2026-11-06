@@ -66,6 +66,8 @@
 ## 2. 十二表字段字典（PG 类型 / 约束 / 索引）
 
 > 类型与设计原文一致；下列补齐 **NULL / PK / FK / UNIQUE / 推荐索引** 与实现约束。Wire 字段名英文。时间一律 **`timestamptz`**。
+>
+> **2026-11-05 起表结构权威 = `backend/app/models/`（ORM）**，迁移 `0001` + `0002` 把库变成该结构（`alembic check` 可核对）。枚举列存 `varchar(32)` + CHECK，取值见 `backend/app/core/enums.py`；约束/索引命名 `pk_/fk_/uq_/ck_/ix_`。本节表格与 ORM 冲突时以 ORM 为准。
 
 ### 2.1 `heating_groups`
 
@@ -128,20 +130,20 @@
 | `sha256` | `bytea` | NO | UNIQUE | 全 32 字节；校验与去重 |
 | `original_url` | `text` | NO | — | 完整 https |
 | `thumb_url` | `text` | NO | — | 完整 https；长边 512 WebP |
-| `width` | `integer` | YES | — | 原图像素宽 |
-| `height` | `integer` | YES | — | 原图像素高 |
+| `width` | `integer` | NO | CHECK `> 0` | 原图像素宽 |
+| `height` | `integer` | NO | CHECK `> 0` | 原图像素高 |
 | `source_type` | `text` | NO | CHECK ∈ 见下 | `crawled` / `device` / `open_dataset` / `user_upload` / `external` |
 | `license` | `text` | NO | CHECK ∈ 见下 | `commercial` / `research_only` / `unknown` |
-| `category_id` | `integer` | YES | FK → `categories.id` | 可标到任意层级；未标注为空 |
+| `category_id` | `integer` | YES | FK → `categories.id` ON DELETE RESTRICT | 可标到任意层级；未标注为空 |
 | `food_state` | `text` | YES | CHECK ∈ `raw`/`cooked`/`frozen` 或 NULL | 生/熟/冷冻 |
-| `label_status` | `text` | NO | CHECK ∈ `unlabeled`/`auto`/`verified` | **未标注时一定没有类别**（应用约束：`label_status='unlabeled' ⇒ category_id IS NULL`） |
+| `label_status` | `text` | NO | CHECK ∈ `unlabeled`/`auto`/`verified` | **未标注 ⇔ 没有类别**（库约束 `ck_images_label_matches_category`：`(label_status = 'unlabeled') = (category_id IS NULL)`）；默认 `unlabeled` |
 | `payload_version` | `bigint` | NO | 默认 `1` | 类别/状态/所属场景变化时递增；与 Qdrant payload 同步 |
 | `created_at` | `timestamptz` | NO | 默认 `now()` | |
 | `updated_at` | `timestamptz` | NO | 默认 `now()` | |
 
 **明确取消**：本地 `path`、软删 `status` 枚举挂本表（删除走 `image_deletions` + 物理删行，见 §2.5）。
 
-**索引**：`UNIQUE (sha256)`；`INDEX (category_id)`；`INDEX (label_status)`；`INDEX (source_type)`；`INDEX (created_at DESC)`。
+**索引**：`UNIQUE (sha256)`；`INDEX (category_id)`；`INDEX (label_status)`；`INDEX (source_type)`；`INDEX (license)`；`INDEX (created_at)`（btree 反向扫描服务倒序分页）。另有 CHECK `octet_length(sha256) = 32`。
 
 **id 生成（写死）**：
 
@@ -241,13 +243,13 @@ id = uuid_from_bytes(sha256(original_bytes)[0:16])  # RFC 4122 变体/版本位�
 | 字段 | 类型 | Null | 约束 | 说明 |
 |---|---|---|---|---|
 | `image_id` | `uuid` | NO | FK → `images.id` ON DELETE CASCADE | |
-| `scene_id` | `integer` | NO | FK → `scenes.id` | |
+| `scene_id` | `integer` | NO | FK → `scenes.id` ON DELETE CASCADE | |
 | `origin` | `text` | NO | CHECK ∈ `rule`/`manual` | |
-| `is_member` | `boolean` | NO | — | 人工排除时为 `false` |
+| `is_member` | `boolean` | NO | 默认 `true`；CHECK `is_member OR origin = 'manual'` | 人工排除时为 `false`（只有人工行能排除） |
 | `updated_at` | `timestamptz` | NO | 默认 `now()` | |
 
 **PK**：`(image_id, scene_id)`。  
-**语义**：有效成员 = 规则推导结果，再被本表 `origin='manual'` 行覆盖（含排除）。物化策略（写时展开 vs 读时算）**TBD · 实现刀**；Qdrant payload `scenes` 必须与「有效成员」一致，并在变更时 bump `images.payload_version`。
+**语义**：有效成员 = 规则推导结果，再被本表 `origin='manual'` 行覆盖（含排除）。**物化策略：写时展开**（`recompute_image_scenes`）。**`include_all` 场景（`general`）启用时包含全部图片，不在本表写记录，也不接受人工覆盖**（迁移 `0002` 删除了这类行）。Qdrant payload `scenes` = 启用的 include_all 场景 ∪ 本表成员，必须与「有效成员」一致，并在变更时 bump `images.payload_version`。部分索引 `ix_image_scenes_scene_member (scene_id) WHERE is_member`。
 
 ---
 
@@ -325,6 +327,8 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 ```
 
 完整可跑 DDL **不在 M1 契约必交**；后端落地时以本字典为准出 migration。
+
+**已落地（2026-11-05）**：`backend/app/models/`（ORM，SSOT）+ `backend/alembic/versions/` `0001`（建表 + ltree + path 触发器 + 场景种子）/ `0002`（对齐 ORM：命名、ON DELETE、CHECK、默认值、索引、注释）。
 
 ---
 
@@ -725,6 +729,7 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | 2026-11-04 | **M0 总裁已拍**：空库重建（无迁移脚本）；FlyB 本轮 OUT OF SCOPE；`scene_labels` 纳入冻结；ASSUMPTION A2–A4 改写 |
 | 2026-11-05 | **§6.1 Wire/结果卡草案（FE 对齐刀）**：Search/List 字段表、external_candidates 最小 wire、FE snake→camel 映射、破坏性清单与 P1–P12 待拍板；更新 §6/§7 交叉引用；未 commit |
 | 2026-11-05 | **§6.1 P1–P12 冻结**：全按建议已拍；**一刀切**；禁 `image_url`/`thumbnail_url` 别名与 FlyB 壳（site/page_url/snippets/details 等）；envelope 权威 `items`；禁 title/description/qdrant_point_id；`external_candidates` 仅定最小 wire（落地 TBD）；未 commit |
+| 2026-11-05 | **表结构以 ORM 为准**：`app/models/` 按域拆分（category/image/scene/embedding/external）+ `app/core/enums.py`；迁移 `0002` 补齐约束（images 宽高非空且 >0、unlabeled⇔无类别、sha256 32 字节；scene_rules 每场景类别/菜系唯一、label 必须属于同场景（组合外键）；image_scenes 只有人工行可排除；embedding_models dim/input_size >0；external_candidates 审核时间/入库图一致性）、ON DELETE 行为、默认值、索引与注释；`include_all` 场景不再物化到 `image_scenes`。Wire（§6.1）不变 |
 
 ---
 

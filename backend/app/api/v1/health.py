@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-
 from fastapi import APIRouter, HTTPException, Request
-
 from app.api.services.health import dependency_stubs, model_paths, readiness_info
 from app.bootstrap.state import get_application_state
 

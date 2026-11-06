@@ -1,0 +1,108 @@
+"""ORM schema (app.models) — static checks that need no database."""
+
+import re
+import unittest
+from pathlib import Path
+
+from sqlalchemy import CheckConstraint, Enum
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.orm import configure_mappers
+from sqlalchemy.schema import CreateTable
+
+import app.models  # noqa: F401
+from app.core import enums
+from app.db.base import Base
+from app.db.common import REQUIRED_TABLES
+
+BACKEND = Path(__file__).resolve().parents[1]
+
+
+class ModelsSchemaTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        configure_mappers()  # relationship strings resolve
+        cls.tables = Base.metadata.tables
+
+    def test_models_register_exactly_the_tables_ensure_schema_checks(self):
+        self.assertEqual(set(self.tables), set(REQUIRED_TABLES))
+        self.assertEqual(len(self.tables), 12)
+
+    def test_every_constraint_and_index_follows_the_naming_convention(self):
+        prefixes = ("pk_", "fk_", "uq_", "ck_", "ix_")
+        dialect = postgresql.dialect()
+        for table in self.tables.values():
+            ddl = str(CreateTable(table).compile(dialect=dialect))
+            names = re.findall(r"CONSTRAINT (\w+)", ddl)
+            self.assertTrue(names, table.name)
+            names += [str(ix.name) for ix in table.indexes]
+            for name in names:
+                self.assertTrue(name.startswith(prefixes), f"{table.name}: {name}")
+            # PG truncates identifiers past 63 bytes; keep names exact
+            self.assertTrue(all(len(n) <= 63 for n in names), names)
+
+    def test_enum_columns_store_enum_values_with_check_constraints(self):
+        expected = {
+            ("images", "source_type"): enums.SourceType,
+            ("images", "license"): enums.License,
+            ("images", "food_state"): enums.FoodState,
+            ("images", "label_status"): enums.LabelStatus,
+            ("category_names", "kind"): enums.NameKind,
+            ("image_scenes", "origin"): enums.SceneOrigin,
+            ("embedding_models", "distance"): enums.Distance,
+            ("embedding_models", "status"): enums.ModelStatus,
+            ("external_candidates", "review_status"): enums.ReviewStatus,
+        }
+        for (table, column), enum_cls in expected.items():
+            col_type = self.tables[table].c[column].type
+            self.assertIsInstance(col_type, Enum, f"{table}.{column}")
+            self.assertFalse(col_type.native_enum)
+            self.assertEqual(list(col_type.enums), [m.value for m in enum_cls])
+
+    def test_images_invariants_are_declared(self):
+        checks = {
+            str(c.name): str(c.sqltext)
+            for c in self.tables["images"].constraints
+            if isinstance(c, CheckConstraint) and c.name
+        }
+        self.assertIn("(label_status = 'unlabeled') = (category_id IS NULL)", checks.values())
+        self.assertIn("width > 0 AND height > 0", checks.values())
+        self.assertFalse(self.tables["images"].c.width.nullable)
+
+    def test_compiled_ddl_names_constraints_like_migration_0002(self):
+        ddl = str(CreateTable(self.tables["scene_rules"]).compile(dialect=postgresql.dialect()))
+        self.assertIn("fk_scene_rules_scene_id_label_id_scene_labels", ddl)
+        self.assertIn("uq_scene_rules_scene_id_category_id", ddl)
+        self.assertIn("ck_scene_rules_one_target", ddl)
+
+
+class MigrationChainTests(unittest.TestCase):
+    def test_head_is_0002_on_top_of_0001(self):
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+
+        cfg = Config(str(BACKEND / "alembic.ini"))
+        cfg.set_main_option("script_location", str(BACKEND / "alembic"))
+        script = ScriptDirectory.from_config(cfg)
+        self.assertEqual(script.get_heads(), ["20261105_0002"])
+        self.assertEqual(script.get_revision("20261105_0002").down_revision, "20261104_0001")
+
+    def test_0002_downgrade_clears_every_comment_it_sets(self):
+        import importlib.util
+
+        path = BACKEND / "alembic" / "versions" / "20261105_0002_align_with_orm_models.py"
+        spec = importlib.util.spec_from_file_location("mig_0002", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        set_count = mod.UPGRADE_SQL.count("COMMENT ON ")
+        self.assertGreater(set_count, 80)
+        self.assertEqual(mod.CLEAR_COMMENTS_SQL.count("IS NULL;"), set_count)
+        # every ORM comment is in the migration
+        for table in Base.metadata.tables.values():
+            self.assertIn(f"COMMENT ON TABLE {table.name} IS", mod.UPGRADE_SQL)
+            for col in table.columns:
+                if col.comment:
+                    self.assertIn(f"COMMENT ON COLUMN {table.name}.{col.name} IS", mod.UPGRADE_SQL)
+
+
+if __name__ == "__main__":
+    unittest.main()

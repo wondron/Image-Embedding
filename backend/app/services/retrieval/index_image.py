@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 from uuid import UUID
 
+from app.core.enums import FoodState, LabelStatus, License, SourceType
+from app.services.retrieval.enum_fields import coerce_enum, coerce_optional_enum
 from app.services.retrieval.image_ids import uuid_from_sha256
 from app.services.retrieval import errors as err
 from app.services.retrieval.embedding_validate import validate_embedding
@@ -129,21 +131,37 @@ class IndexImageUseCase:
         image_id: UUID = uuid_from_sha256(sha)
         ext = guess_ext_from_bytes_header(image_bytes)
 
+        src = coerce_enum(
+            SourceType, source_type, field="source_type", default=SourceType.USER_UPLOAD
+        )
+        lic = coerce_enum(License, license, field="license", default=License.UNKNOWN)
+        food = coerce_optional_enum(FoodState, food_state, field="food_state")
+
         # Resolve category_id: prefer explicit; optional code lookup on metadata
         resolved_category_id = category_id
         if resolved_category_id is None and category:
             lookup = getattr(self._metadata, "get_category_id_by_code", None)
             if callable(lookup):
                 resolved_category_id = lookup(str(category).strip())
+            if resolved_category_id is None:
+                logger.warning("index: unknown category code %r; storing unlabeled", category)
 
-        label = (label_status or ("auto" if resolved_category_id else "unlabeled")).strip()
-        if label == "unlabeled" and resolved_category_id is not None:
-            raise err.validation_error(
-                "label_status=unlabeled requires category_id IS NULL"
-            )
-        if label != "unlabeled" and resolved_category_id is None and category:
-            # code unknown — leave unlabeled rather than invent
-            label = "unlabeled"
+        # images invariant: label_status = unlabeled  <=>  category_id IS NULL
+        if label_status is None or not str(label_status).strip():
+            label = LabelStatus.AUTO if resolved_category_id is not None else LabelStatus.UNLABELED
+        else:
+            label = coerce_enum(LabelStatus, label_status, field="label_status")
+            if label is LabelStatus.UNLABELED and resolved_category_id is not None:
+                raise err.validation_error(
+                    "label_status=unlabeled requires category_id IS NULL"
+                )
+            if label is not LabelStatus.UNLABELED and resolved_category_id is None:
+                if not category:
+                    raise err.validation_error(
+                        f"label_status={label.value} requires a category"
+                    )
+                # category code given but unknown — keep the image, drop the label
+                label = LabelStatus.UNLABELED
 
         original_url: str
         thumb_url: str
@@ -169,6 +187,10 @@ class IndexImageUseCase:
             except OSError:
                 pass
 
+        # Same bytes -> same id. If the image is already stored, the first
+        # upload's columns win and a failed upsert must not delete it.
+        already_stored = self._metadata.get_by_id(image_id) is not None
+
         row = {
             "id": image_id,
             "sha256": sha,
@@ -176,10 +198,10 @@ class IndexImageUseCase:
             "thumb_url": thumb_url,
             "width": width,
             "height": height,
-            "source_type": source_type or "user_upload",
-            "license": license or "unknown",
+            "source_type": src,
+            "license": lic,
             "category_id": resolved_category_id,
-            "food_state": food_state,
+            "food_state": food,
             "label_status": label,
         }
         inserted_id = self._metadata.insert_image(row)
@@ -192,6 +214,13 @@ class IndexImageUseCase:
         membership = recompute(image_id, bump_version=False)
         scene_codes = list(membership.get("scene_codes") or [])
 
+        # Qdrant payload mirrors the stored row (differs from the request on re-upload)
+        stored = self._metadata.get_by_id(image_id) or {}
+        if stored:
+            resolved_category_id = stored.get("category_id")
+            food = stored.get("food_state")
+            label = stored.get("label_status") or label
+
         try:
             vector = self._embedding.embed_bytes(image_bytes)
         except err.RetrievalError:
@@ -203,25 +232,22 @@ class IndexImageUseCase:
         payload = build_qdrant_payload(
             category_id=resolved_category_id,
             scene_codes=scene_codes,
-            food_state=food_state,
+            food_state=food,
             label_status=label,
         )
         try:
             self._vectors.upsert(image_id, vector, payload)
-        except err.RetrievalError:
-            try:
-                self._metadata.mark_deleted(image_id)
-            except Exception:
-                logger.exception("rollback mark_deleted failed id=%s", image_id)
-            raise
         except Exception as exc:
-            try:
-                self._metadata.mark_deleted(image_id)
-            except Exception:
-                logger.exception("rollback mark_deleted failed id=%s", image_id)
+            if not already_stored:
+                try:
+                    self._metadata.mark_deleted(image_id)
+                except Exception:
+                    logger.exception("rollback mark_deleted failed id=%s", image_id)
+            if isinstance(exc, err.RetrievalError):
+                raise
             raise err.index_qdrant_failed(f"{type(exc).__name__}: {exc}") from exc
 
-        created = self._metadata.get_by_id(image_id) or {}
+        created = stored or {}
         return {
             "id": str(image_id),
             "qdrant_point_id": str(image_id),
@@ -234,8 +260,8 @@ class IndexImageUseCase:
             "scenes": created.get("scenes") or scene_codes,
             "food_state": created.get("food_state")
             if "food_state" in created
-            else food_state,
-            "label_status": created.get("label_status") or label,
+            else (str(food) if food else None),
+            "label_status": str(created.get("label_status") or label),
             "width": created.get("width") or width,
             "height": created.get("height") or height,
             "payload_version": created.get("payload_version")

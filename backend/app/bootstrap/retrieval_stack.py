@@ -33,18 +33,7 @@ logger = logging.getLogger("bootstrap.retrieval")
 
 
 class EmbeddingLedgerVectorStore(VectorStorePort):
-    """Decorator: on successful upsert, upsert image_embeddings for current model.
-
-    Does not open a second Qdrant client — delegates to QdrantVectorStore → QdrantStore.
-    """
-
-    def __init__(
-        self,
-        inner: QdrantVectorStore,
-        metadata: PgMetadataStore,
-        *,
-        model_id: int,
-    ) -> None:
+    def __init__(self, inner: QdrantVectorStore, metadata: PgMetadataStore, *, model_id: int) -> None:
         self._inner = inner
         self._metadata = metadata
         self._model_id = int(model_id)
@@ -63,55 +52,19 @@ class EmbeddingLedgerVectorStore(VectorStorePort):
     def ping(self) -> dict[str, Any]:
         return self._inner.ping()
 
-    def set_collection(
-        self,
-        collection: str,
-        *,
-        vector_dim: int,
-        distance: str,
-    ) -> None:
-        self._inner.set_collection(
-            collection, vector_dim=vector_dim, distance=distance
-        )
+    def set_collection(self, collection: str, *, vector_dim: int, distance: str,) -> None:
+        self._inner.set_collection(collection, vector_dim=vector_dim, distance=distance)
 
-    def upsert(
-        self,
-        point_id: UUID | str,
-        vector: list[float],
-        payload: dict[str, Any],
-    ) -> None:
+    def upsert(self, point_id: UUID | str, vector: list[float], payload: dict[str, Any],) -> None:
         self._inner.upsert(point_id, vector, payload)
-        # Ledger only after Qdrant success; reads images.payload_version when present.
         try:
-            self._metadata.upsert_image_embedding(
-                model_id=self._model_id,
-                image_id=point_id,
-                synced_version=None,
-            )
+            self._metadata.upsert_image_embedding(model_id=self._model_id, image_id=point_id, synced_version=None, )
         except Exception:
-            logger.exception(
-                "image_embeddings sync failed after upsert point_id=%s model_id=%s",
-                point_id,
-                self._model_id,
-            )
+            logger.exception("image_embeddings sync failed after upsert point_id=%s model_id=%s", point_id, self._model_id,)
             raise
 
-    def search(
-        self,
-        vector: list[float],
-        top_k: int = 10,
-        *,
-        score_threshold: float | None = None,
-        scene: str | None = None,
-        filters: dict[str, Any] | None = None,
-    ) -> list[dict[str, Any]]:
-        return self._inner.search(
-            vector,
-            top_k=top_k,
-            score_threshold=score_threshold,
-            scene=scene,
-            filters=filters,
-        )
+    def search(self, vector: list[float], top_k: int = 10, *, score_threshold: float | None = None, scene: str | None = None, filters: dict[str, Any] | None = None,) -> list[dict[str, Any]]:
+        return self._inner.search(vector, top_k=top_k, score_threshold=score_threshold, scene=scene, filters=filters, )
 
     def delete(self, point_id: UUID | str) -> None:
         self._inner.delete(point_id)

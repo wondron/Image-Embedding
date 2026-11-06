@@ -49,6 +49,14 @@ class OnnxEmbedding:
         self.use_gpu = bool(embedding_config.get("use_gpu", False))
         self.device_id = int(total_config.get("device_id", 0))
         self.use_iobinding = bool(embedding_config.get("use_iobinding", False))
+    
+    def warmup(self, runs: int = 3) -> None:
+        logger.info("embedding 模型预热 %d 次", max(1, runs))
+        started_at = time.time()
+        dummy = np.zeros((self.input_h, self.input_w, 3), dtype=np.uint8)
+        for _ in range(max(1, runs)):
+            self.infer(dummy)
+        logger.info("embedding 模型预热完成，耗时 %.2fs", time.time() - started_at)
 
     @staticmethod
     def _resolve_interpolation(value: Any) -> int:

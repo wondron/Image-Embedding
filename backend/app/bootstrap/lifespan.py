@@ -53,7 +53,6 @@ def load_application_config(
 def create_food_service(config: dict):
     # Keep model dependencies out of module import and initialize them at startup.
     from app.services.predict.food_service import FoodService
-
     return FoodService(config)
 
 
@@ -62,10 +61,10 @@ def warmup_models(service, app_settings: Settings = settings) -> None:
     if not app_settings.warmup.enabled:
         return
 
-    # if getattr(service, "segmentor", None):
-    #     logger.info("预热中 | segment=%d 次", app_settings.warmup.segment_runs)
-    #     service.segmentor.warmup(app_settings.warmup.segment_runs)
-
+    if getattr(service, "embeddingTool", None):
+        times = app_settings.warmup.embedding_runs
+        logger.info("预热中 | embedding=%d 次", times)
+        service.embeddingTool.warmup(times)
     logger.info("预热配置 | warmup=%s", app_settings.warmup)
 
 
@@ -106,71 +105,46 @@ def _retrieval_local_debug_hint(settings: Settings) -> str:
 
 
 def initialize_retrieval(runtime: ApplicationState) -> None:
-    """Best-effort wire embedder + Qdrant + PostgreSQL. Does not block FoodService.
-
-    Infra failures (bad host, DB down) are soft: retrieval stays None, FoodService continues.
-    Full tracebacks are reserved for unexpected bugs; connectivity uses a short warning.
-    """
     if not _retrieval_enabled():
         runtime.retrieval = None
         runtime.retrieval_error = "RETRIEVAL_ENABLED=0"
         runtime.retrieval_error_code = "RETRIEVAL_DISABLED"
         runtime.retrieval_space_mismatch = None
-        logger.info(
-            "Retrieval stack skipped | RETRIEVAL_ENABLED=0 | postgres_host=%s | qdrant=%s",
-            runtime.settings.postgres.host,
-            runtime.settings.qdrant.url,
-        )
+        logger.info("Retrieval stack skipped | RETRIEVAL_ENABLED=0 | postgres_host=%s | qdrant=%s", runtime.settings.postgres.host, runtime.settings.qdrant.url,)
         return
-
     try:
         from app.bootstrap.retrieval_stack import build_retrieval_stack
         from app.services.retrieval.errors import RetrievalError
-
         runtime.retrieval = build_retrieval_stack(runtime.config, runtime.settings)
         runtime.retrieval_error = None
         runtime.retrieval_error_code = None
         runtime.retrieval_space_mismatch = None
         cur = getattr(runtime.retrieval, "current_model", None) or {}
-        logger.info(
-            "Retrieval stack ready | qdrant=%s | postgres=%s/%s | collection=%s | space_id=%s",
-            runtime.settings.qdrant.url,
-            runtime.settings.postgres.host,
-            runtime.settings.postgres.database,
-            cur.get("collection"),
-            getattr(runtime.retrieval, "embedding_space_id", None),
-        )
+        logger.info("Retrieval stack ready  qdrant=%s  postgres=%s/%s  collection=%s  space_id=%s",
+            runtime.settings.qdrant.url, runtime.settings.postgres.host, runtime.settings.postgres.database,
+            cur.get("collection"), getattr(runtime.retrieval, "embedding_space_id", None))
     except Exception as exc:
         runtime.retrieval = None
         from app.services.retrieval.errors import RetrievalError
-
         if isinstance(exc, RetrievalError):
             runtime.retrieval_error = f"{exc.code}: {exc.detail}"
             runtime.retrieval_error_code = exc.code
             configured = getattr(exc, "configured", None)
             stored = getattr(exc, "stored", None)
             if configured is not None or stored is not None:
-                runtime.retrieval_space_mismatch = {
-                    "configured": configured,
-                    "stored": stored,
-                }
+                runtime.retrieval_space_mismatch = { "configured": configured, "stored": stored}
             else:
                 runtime.retrieval_space_mismatch = None
         else:
             runtime.retrieval_error = f"{type(exc).__name__}: {exc}"
             runtime.retrieval_error_code = None
             runtime.retrieval_space_mismatch = None
-
         detail = runtime.retrieval_error or str(exc)
         if _is_infra_unreachable(exc):
-            logger.warning(
-                "Retrieval stack unavailable (infra) | %s | host=%s | %s",
-                detail,
-                runtime.settings.postgres.host,
-                _retrieval_local_debug_hint(runtime.settings),
-            )
+            logger.warning("Retrieval stack unavailable (infra) | %s | host=%s | %s", detail, runtime.settings.postgres.host, _retrieval_local_debug_hint(runtime.settings))
         else:
             logger.exception("Retrieval stack initialization failed: %s", exc)
+
 
 def initialize_food_service(runtime: ApplicationState) -> None:
     try:
@@ -186,11 +160,7 @@ def initialize_food_service(runtime: ApplicationState) -> None:
         logger.exception("Warmup failed: %s", exc)
 
 
-def apply_nacos_config_update(
-    runtime: ApplicationState,
-    provider: NacosConfigProvider,
-    snapshot: NacosConfigSnapshot,
-) -> bool:
+def apply_nacos_config_update(runtime: ApplicationState, provider: NacosConfigProvider, snapshot: NacosConfigSnapshot,) -> bool:
     """Build and warm a replacement before atomically publishing it."""
     if runtime.stopping:
         return False
@@ -200,11 +170,7 @@ def apply_nacos_config_update(
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
         runtime.record_config_reload_error(error)
-        logger.exception(
-            "Nacos configuration reload rejected | profile=%s | error=%s",
-            snapshot.profile["profile"],
-            error,
-        )
+        logger.exception("Nacos配置重读失败 | profile=%s | error=%s", snapshot.profile["profile"], error)
         return False
 
     config_info = {
@@ -214,11 +180,7 @@ def apply_nacos_config_update(
         **provider.source_info(snapshot),
     }
     runtime.replace_configuration(snapshot.config, config_info, service)
-    logger.info(
-        "Nacos configuration reload applied | profile=%s | data_ids=%s",
-        snapshot.profile["profile"],
-        snapshot.profile["data_id_list"],
-    )
+    logger.info("Nacos配置重读成功| profile=%s | data_ids=%s", snapshot.profile["profile"], snapshot.profile["data_id_list"],)
     return True
 
 

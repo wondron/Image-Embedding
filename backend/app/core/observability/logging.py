@@ -100,13 +100,7 @@ def setup_logger(
 
         # 如果还需要额外落文件，再保留文件 handler
         if save_to_file:
-            platform_handler = TimedRotatingFileHandler(
-                filename=str(platform_log_file),
-                when="midnight",
-                interval=1,
-                backupCount=15,
-                encoding="utf-8",
-            )
+            platform_handler = TimedRotatingFileHandler(filename=str(platform_log_file), when="midnight", interval=1, backupCount=15, encoding="utf-8",)
             platform_handler.setFormatter(CustomJsonFormatter("%(message)s"))
             platform_handler.suffix = "%Y-%m-%d"
             platform_logger.addHandler(platform_handler)

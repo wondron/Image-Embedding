@@ -1,79 +1,156 @@
 from __future__ import annotations
 
-import uuid
 from typing import Any
 from uuid import UUID
 
+from app.core.enums import FoodState, LabelStatus, License, NameKind, SourceType
 from app.db.common import (
     _as_uuid,
     _row_to_dict,
     _uuid_in_clause,
 )
 from app.services.retrieval import errors as err
+from app.services.retrieval.enum_fields import coerce_enum, coerce_optional_enum
 from app.services.retrieval.image_ids import uuid_from_sha256
+
+# Category display name (zh primary) + nearest ancestor's heating group.
+# Expects aliases i (images) and c (categories); binds :primary_kind.
+_CATEGORY_NAME_JOIN = (
+    "LEFT JOIN category_names cn "
+    "  ON cn.category_id = c.id AND cn.lang = 'zh' AND cn.kind = :primary_kind "
+)
+_HEATING_GROUP_JOIN = (
+    "LEFT JOIN LATERAL ("
+    "  SELECT h.id, h.code, h.name FROM categories anc "
+    "  JOIN heating_groups h ON h.id = anc.heating_group_id "
+    "  WHERE c.path IS NOT NULL AND anc.path @> c.path "
+    "    AND anc.heating_group_id IS NOT NULL "
+    "  ORDER BY nlevel(anc.path) DESC LIMIT 1"
+    ") hg ON true "
+)
+_HYDRATE_SELECT = (
+    "SELECT i.*, cn.name AS category_name, "
+    "hg.id AS heating_group_id, hg.code AS heating_group_code, "
+    "hg.name AS heating_group_name "
+)
+
+# Enum columns -> enum class (validated before they reach the CHECK constraints)
+_ENUM_COLUMNS = {
+    "source_type": SourceType,
+    "license": License,
+    "label_status": LabelStatus,
+}
+
+
+def _check_label_matches_category(label: LabelStatus, category_id: Any) -> None:
+    """Mirror ck_images_label_matches_category: unlabeled iff no category."""
+    if (label is LabelStatus.UNLABELED) != (category_id is None):
+        raise err.validation_error(
+            "label_status='unlabeled' must go with category_id IS NULL "
+            f"(got label_status={label.value!r}, category_id={category_id!r})"
+        )
+
+
+def _positive_int(value: Any, field: str) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        raise err.validation_error(f"{field} must be a positive integer, got {value!r}") from None
+    if n <= 0:
+        raise err.validation_error(f"{field} must be a positive integer, got {value!r}")
+    return n
+
+
+def _decorate(row: Any, codes_by: dict[str, list[str]]) -> dict[str, Any]:
+    """Row -> wire dict with scenes + heating_group object."""
+    d = _row_to_dict(row)
+    d["scenes"] = codes_by.get(str(d["id"]), [])
+    if d.get("heating_group_id") is not None:
+        d["heating_group"] = {
+            "id": d.get("heating_group_id"),
+            "code": d.get("heating_group_code"),
+            "name": d.get("heating_group_name"),
+        }
+    else:
+        d["heating_group"] = None
+    return d
 
 
 class PgImagesMixin:
     """images table CRUD / list / hydrate helpers."""
 
     def insert_image(self, row: dict[str, Any]) -> UUID | str:
-        """Insert images row (uuid PK). ON CONFLICT sha256 → return existing id (A7)."""
+        """Insert images row (uuid PK = sha256[:16]).
+
+        Identical bytes are stored once: on conflict the existing id is returned
+        and the first upload's columns are kept (app.models.image.Image).
+        """
         self.ensure_schema()
         from sqlalchemy import text
 
         sha = row.get("sha256")
         if isinstance(sha, str):
             sha = bytes.fromhex(sha)
-        if not isinstance(sha, (bytes, bytearray)) or len(sha) < 16:
-            raise err.validation_error("insert_image requires sha256 bytes")
-        image_id = row.get("id") or uuid_from_sha256(bytes(sha))
+        if not isinstance(sha, (bytes, bytearray)) or len(sha) != 32:
+            raise err.validation_error("insert_image requires 32-byte sha256")
+        sha = bytes(sha)
+        image_id = row.get("id") or uuid_from_sha256(sha)
         uid = str(_as_uuid(image_id))
         original_url = str(row.get("original_url") or "").strip()
         thumb_url = str(row.get("thumb_url") or "").strip()
         if not original_url or not thumb_url:
             raise err.validation_error("original_url and thumb_url required")
-        source_type = str(row.get("source_type") or "user_upload")
-        license_v = str(row.get("license") or "unknown")
-        label_status = str(row.get("label_status") or "unlabeled")
+        width = _positive_int(row.get("width"), "width")
+        height = _positive_int(row.get("height"), "height")
+        source_type = coerce_enum(
+            SourceType, row.get("source_type"), field="source_type", default=SourceType.USER_UPLOAD
+        )
+        license_v = coerce_enum(License, row.get("license"), field="license", default=License.UNKNOWN)
+        label_status = coerce_enum(
+            LabelStatus, row.get("label_status"), field="label_status", default=LabelStatus.UNLABELED
+        )
+        food_state = coerce_optional_enum(FoodState, row.get("food_state"), field="food_state")
         category_id = row.get("category_id")
-        food_state = row.get("food_state")
+        _check_label_matches_category(label_status, category_id)
+
         engine = self._get_engine()
         try:
             with engine.begin() as conn:
-                existing = conn.execute(
-                    text(
-                        "SELECT id FROM images WHERE sha256 = :sha LIMIT 1"
-                    ),
-                    {"sha": bytes(sha)},
-                ).fetchone()
-                if existing is not None:
-                    return _as_uuid(existing[0])
-                conn.execute(
+                inserted = conn.execute(
                     text(
                         "INSERT INTO images ("
                         "id, sha256, original_url, thumb_url, width, height, "
-                        "source_type, license, category_id, food_state, "
-                        "label_status, payload_version"
+                        "source_type, license, category_id, food_state, label_status"
                         ") VALUES ("
                         "CAST(:id AS uuid), :sha, :ou, :tu, :w, :h, "
-                        ":st, :lic, :cid, :fs, :ls, 1"
-                        ")"
+                        ":st, :lic, :cid, :fs, :ls"
+                        ") ON CONFLICT DO NOTHING RETURNING id"
                     ),
                     {
                         "id": uid,
-                        "sha": bytes(sha),
+                        "sha": sha,
                         "ou": original_url,
                         "tu": thumb_url,
-                        "w": row.get("width"),
-                        "h": row.get("height"),
-                        "st": source_type,
-                        "lic": license_v,
+                        "w": width,
+                        "h": height,
+                        "st": source_type.value,
+                        "lic": license_v.value,
                         "cid": category_id,
-                        "fs": food_state,
-                        "ls": label_status,
+                        "fs": food_state.value if food_state else None,
+                        "ls": label_status.value,
                     },
+                ).fetchone()
+                if inserted is not None:
+                    return _as_uuid(inserted[0])
+                existing = conn.execute(
+                    text("SELECT id FROM images WHERE sha256 = :sha LIMIT 1"),
+                    {"sha": sha},
+                ).fetchone()
+            if existing is None:
+                raise err.index_mysql_failed(
+                    f"insert_image: conflict on id={uid} but no row with this sha256"
                 )
-            return _as_uuid(uid)
+            return _as_uuid(existing[0])
         except err.RetrievalError:
             raise
         except Exception as exc:
@@ -85,6 +162,7 @@ class PgImagesMixin:
         """Patch allowed image columns; bump payload_version on membership-relevant fields."""
         self.ensure_schema()
         from sqlalchemy import text
+        from sqlalchemy.exc import IntegrityError
 
         allowed = {
             "original_url",
@@ -104,12 +182,21 @@ class PgImagesMixin:
         for key, val in (fields or {}).items():
             if key not in allowed:
                 continue
+            if key in _ENUM_COLUMNS:
+                val = coerce_enum(_ENUM_COLUMNS[key], val, field=key).value
+            elif key == "food_state":
+                fs = coerce_optional_enum(FoodState, val, field=key)
+                val = fs.value if fs else None
+            elif key in ("width", "height"):
+                val = _positive_int(val, key)
             sets.append(f"{key} = :{key}")
             params[key] = val
             if key in bump_keys:
                 bump = True
         if not sets:
             return
+        if "label_status" in params and "category_id" in params:
+            _check_label_matches_category(LabelStatus(params["label_status"]), params["category_id"])
         sets.append("updated_at = now()")
         if bump:
             sets.append("payload_version = payload_version + 1")
@@ -126,6 +213,12 @@ class PgImagesMixin:
                 self.recompute_image_scenes(image_id, bump_version=False)
         except err.RetrievalError:
             raise
+        except IntegrityError as exc:
+            # e.g. only one of label_status / category_id patched and the pair
+            # no longer satisfies ck_images_label_matches_category
+            raise err.validation_error(
+                f"update_image violates a constraint: {exc.orig}"
+            ) from exc
         except Exception as exc:
             raise err.index_mysql_failed(
                 f"update_image: {type(exc).__name__}: {exc}"
@@ -141,7 +234,7 @@ class PgImagesMixin:
         *,
         scene: str | None = None,
     ) -> dict[str, dict[str, Any]]:
-        """Hydrate images by uuid; optional scene membership check via image_scenes."""
+        """Hydrate images by uuid; optional scene membership filter."""
         self.ensure_schema()
         from sqlalchemy import text
 
@@ -152,75 +245,30 @@ class PgImagesMixin:
         engine = self._get_engine()
         try:
             with engine.connect() as conn:
-                rows = conn.execute(
-                    text(
-                        "SELECT i.*, "
-                        "cn.name AS category_name, "
-                        "hg.id AS heating_group_id, hg.code AS heating_group_code, "
-                        "hg.name AS heating_group_name "
-                        "FROM images i "
-                        "LEFT JOIN categories c ON c.id = i.category_id "
-                        "LEFT JOIN category_names cn "
-                        "  ON cn.category_id = c.id AND cn.lang = 'zh' "
-                        " AND cn.kind = 'primary' "
-                        "LEFT JOIN LATERAL ("
-                        "  SELECT h.id, h.code, h.name FROM categories anc "
-                        "  JOIN heating_groups h ON h.id = anc.heating_group_id "
-                        "  WHERE c.path IS NOT NULL AND anc.path @> c.path "
-                        "    AND anc.heating_group_id IS NOT NULL "
-                        "  ORDER BY nlevel(anc.path) DESC LIMIT 1"
-                        ") hg ON true "
-                        f"WHERE i.id IN {id_sql}"
-                    ),
-                    id_params,
-                ).mappings().fetchall()
-
                 member_ids: set[str] | None = None
                 if scene:
-                    mparams = dict(id_params)
-                    mparams["code"] = scene
-                    mrows = conn.execute(
-                        text(
-                            "SELECT isc.image_id::text AS image_id "
-                            "FROM image_scenes isc "
-                            "JOIN scenes s ON s.id = isc.scene_id "
-                            "WHERE s.code = :code AND isc.is_member = true "
-                            f"  AND isc.image_id IN {id_sql}"
-                        ),
-                        mparams,
-                    ).fetchall()
-                    member_ids = {str(r[0]) for r in mrows}
-
-                sc_rows = conn.execute(
+                    member_ids = self._scene_member_ids(conn, scene, id_sql, id_params)
+                    if not member_ids:
+                        return {}
+                rows = conn.execute(
                     text(
-                        "SELECT isc.image_id::text AS image_id, "
-                        "array_agg(s.code ORDER BY s.id) AS codes "
-                        "FROM image_scenes isc "
-                        "JOIN scenes s ON s.id = isc.scene_id "
-                        "WHERE isc.is_member = true "
-                        f"  AND isc.image_id IN {id_sql} "
-                        "GROUP BY isc.image_id"
+                        _HYDRATE_SELECT
+                        + "FROM images i "
+                        "LEFT JOIN categories c ON c.id = i.category_id "
+                        + _CATEGORY_NAME_JOIN
+                        + _HEATING_GROUP_JOIN
+                        + f"WHERE i.id IN {id_sql}"
                     ),
-                    id_params,
+                    {**id_params, "primary_kind": NameKind.PRIMARY.value},
                 ).mappings().fetchall()
-                codes_by = {r["image_id"]: list(r["codes"] or []) for r in sc_rows}
+                codes_by = self._scene_codes_by_image(conn, ids)
 
             out: dict[str, dict[str, Any]] = {}
             for row in rows:
-                d = _row_to_dict(row)
-                iid = str(d["id"])
+                iid = str(row["id"])
                 if member_ids is not None and iid not in member_ids:
                     continue
-                d["scenes"] = codes_by.get(iid, [])
-                if d.get("heating_group_id") is not None:
-                    d["heating_group"] = {
-                        "id": d.get("heating_group_id"),
-                        "code": d.get("heating_group_code"),
-                        "name": d.get("heating_group_name"),
-                    }
-                else:
-                    d["heating_group"] = None
-                out[iid] = d
+                out[iid] = _decorate(row, codes_by)
             return out
         except err.RetrievalError:
             raise
@@ -228,6 +276,31 @@ class PgImagesMixin:
             raise err.search_mysql_failed(
                 f"get_active_by_ids: {type(exc).__name__}: {exc}"
             ) from exc
+
+    def _scene_member_ids(
+        self, conn, scene: str, id_sql: str, id_params: dict[str, str]
+    ) -> set[str]:
+        """Which of the given ids are members of scene code (empty if unknown)."""
+        from sqlalchemy import text
+
+        meta = self._scene_membership_row(conn, scene)
+        if meta is None:
+            return set()
+        if meta["include_all"]:
+            if not meta["is_active"]:
+                return set()
+            rows = conn.execute(
+                text(f"SELECT id::text FROM images WHERE id IN {id_sql}"), id_params
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                text(
+                    "SELECT image_id::text FROM image_scenes "
+                    f"WHERE scene_id = :sid AND is_member AND image_id IN {id_sql}"
+                ),
+                {**id_params, "sid": int(meta["id"])},
+            ).fetchall()
+        return {str(r[0]) for r in rows}
 
     def list_images(
         self,
@@ -245,93 +318,65 @@ class PgImagesMixin:
         page_i = max(1, int(page))
         size = max(1, min(int(page_size), 100))
         offset = (page_i - 1) * size
-        where = [
-            "s.code = :scene",
-            "isc.is_member = true",
-        ]
-        params: dict[str, Any] = {"scene": scene, "lim": size, "off": offset}
-        if category:
-            where.append(
-                "(c.code = :cat OR cn.name ILIKE :cat_like OR "
-                "CAST(i.category_id AS text) = :cat)"
-            )
-            params["cat"] = category
-            params["cat_like"] = f"%{category}%"
-        if q:
-            where.append(
-                "(cn.name ILIKE :q OR i.original_url ILIKE :q OR "
-                "CAST(i.id AS text) ILIKE :q)"
-            )
-            params["q"] = f"%{q}%"
-        where_sql = " AND ".join(where)
-        base_from = (
-            "FROM images i "
-            "JOIN image_scenes isc ON isc.image_id = i.id "
-            "JOIN scenes s ON s.id = isc.scene_id "
-            "LEFT JOIN categories c ON c.id = i.category_id "
-            "LEFT JOIN category_names cn "
-            "  ON cn.category_id = c.id AND cn.lang = 'zh' AND cn.kind = 'primary' "
-        )
         engine = self._get_engine()
         try:
             with engine.connect() as conn:
+                meta = self._scene_membership_row(conn, scene)
+                if meta is None or (meta["include_all"] and not meta["is_active"]):
+                    return [], 0
+
+                params: dict[str, Any] = {
+                    "lim": size,
+                    "off": offset,
+                    "primary_kind": NameKind.PRIMARY.value,
+                }
+                if meta["include_all"]:
+                    member_join = ""
+                else:
+                    # served by ix_image_scenes_scene_member (partial on is_member)
+                    member_join = (
+                        "JOIN image_scenes isc ON isc.image_id = i.id "
+                        "AND isc.scene_id = :sid AND isc.is_member "
+                    )
+                    params["sid"] = int(meta["id"])
+                where = ["true"]
+                if category:
+                    where.append(
+                        "(c.code = :cat OR cn.name ILIKE :cat_like OR "
+                        "CAST(i.category_id AS text) = :cat)"
+                    )
+                    params["cat"] = category
+                    params["cat_like"] = f"%{category}%"
+                if q:
+                    where.append(
+                        "(cn.name ILIKE :q OR i.original_url ILIKE :q OR "
+                        "CAST(i.id AS text) ILIKE :q)"
+                    )
+                    params["q"] = f"%{q}%"
+                where_sql = " AND ".join(where)
+                base_from = (
+                    "FROM images i "
+                    + member_join
+                    + "LEFT JOIN categories c ON c.id = i.category_id "
+                    + _CATEGORY_NAME_JOIN
+                )
                 total = conn.execute(
                     text(f"SELECT COUNT(*) {base_from} WHERE {where_sql}"),
                     params,
                 ).scalar_one()
                 rows = conn.execute(
                     text(
-                        "SELECT i.*, cn.name AS category_name, "
-                        "hg.id AS heating_group_id, hg.code AS heating_group_code, "
-                        "hg.name AS heating_group_name "
-                        f"{base_from} "
-                        "LEFT JOIN LATERAL ("
-                        "  SELECT h.id, h.code, h.name FROM categories anc "
-                        "  JOIN heating_groups h ON h.id = anc.heating_group_id "
-                        "  WHERE c.path IS NOT NULL AND anc.path @> c.path "
-                        "    AND anc.heating_group_id IS NOT NULL "
-                        "  ORDER BY nlevel(anc.path) DESC LIMIT 1"
-                        ") hg ON true "
-                        f"WHERE {where_sql} "
+                        _HYDRATE_SELECT
+                        + base_from
+                        + _HEATING_GROUP_JOIN
+                        + f"WHERE {where_sql} "
                         "ORDER BY i.created_at DESC "
                         "LIMIT :lim OFFSET :off"
                     ),
                     params,
                 ).mappings().fetchall()
-                ids = [str(r["id"]) for r in rows]
-                codes_by: dict[str, list[str]] = {}
-                if ids:
-                    id_sql, id_params = _uuid_in_clause(ids)
-                    sc_rows = conn.execute(
-                        text(
-                            "SELECT isc.image_id::text AS image_id, "
-                            "array_agg(s.code ORDER BY s.id) AS codes "
-                            "FROM image_scenes isc "
-                            "JOIN scenes s ON s.id = isc.scene_id "
-                            "WHERE isc.is_member = true "
-                            f"  AND isc.image_id IN {id_sql} "
-                            "GROUP BY isc.image_id"
-                        ),
-                        id_params,
-                    ).mappings().fetchall()
-                    codes_by = {
-                        r["image_id"]: list(r["codes"] or []) for r in sc_rows
-                    }
-            items: list[dict[str, Any]] = []
-            for row in rows:
-                d = _row_to_dict(row)
-                iid = str(d["id"])
-                d["scenes"] = codes_by.get(iid, [])
-                if d.get("heating_group_id") is not None:
-                    d["heating_group"] = {
-                        "id": d.get("heating_group_id"),
-                        "code": d.get("heating_group_code"),
-                        "name": d.get("heating_group_name"),
-                    }
-                else:
-                    d["heating_group"] = None
-                items.append(d)
-            return items, int(total or 0)
+                codes_by = self._scene_codes_by_image(conn, [str(r["id"]) for r in rows])
+            return [_decorate(row, codes_by) for row in rows], int(total or 0)
         except Exception as exc:
             raise err.list_mysql_failed(
                 f"list_images: {type(exc).__name__}: {exc}"

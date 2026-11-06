@@ -1,14 +1,16 @@
 """Effective scene membership (contract §2.8–2.9 / §4.2).
 
 STRATEGY (M5 choice — write-time materialize):
-  1. Derive rule membership per active scene:
-       - include_all=true → member
-       - else any scene_rules hit: category subtree (ltree path <@ rule path)
-         OR cuisine in effective category.cuisines (own else nearest ancestor)
-  2. Apply image_scenes origin=manual overrides (include/exclude) on top.
-  3. Persist: replace origin=rule rows for the image; leave manual rows intact.
-  4. Effective codes → Qdrant payload.scenes; bump images.payload_version when
-     membership/category/food_state/label_status changes.
+  1. include_all scenes (general) contain every image while active. They are
+     never written to image_scenes and cannot be overridden manually
+     (app.models.scene.ImageScene).
+  2. Derive rule membership per other active scene: any scene_rules hit —
+     category subtree (ltree path <@ rule path) OR cuisine in effective
+     category.cuisines (own else nearest ancestor).
+  3. Apply image_scenes origin=manual overrides (include/exclude) on top.
+  4. Persist: replace origin=rule rows for the image; leave manual rows intact.
+  5. Effective codes (include_all ∪ rule/manual) → Qdrant payload.scenes; bump
+     images.payload_version when membership/category/food_state/label_status changes.
 
 Recompute entrypoint: MetadataStore / PgMetadataStore.recompute_image_scenes(image_id).
 """
@@ -16,6 +18,13 @@ Recompute entrypoint: MetadataStore / PgMetadataStore.recompute_image_scenes(ima
 from __future__ import annotations
 
 from typing import Any, Iterable, Mapping, Sequence
+
+from app.core.enums import FoodState, LabelStatus
+
+
+def include_all_scene_ids(scenes: Sequence[Mapping[str, Any]]) -> set[int]:
+    """Scenes that implicitly contain every image (no image_scenes rows)."""
+    return {int(sc["id"]) for sc in scenes if sc.get("include_all")}
 
 
 def effective_cuisines(
@@ -74,11 +83,11 @@ def compute_rule_member_scene_ids(
     image_path: str | None,
     image_cuisines: Sequence[str],
 ) -> set[int]:
+    """Rule-derived members among non-include_all scenes (the rows to persist)."""
     members: set[int] = set()
     for sc in scenes:
         sid = int(sc["id"])
         if sc.get("include_all"):
-            members.add(sid)
             continue
         for rule in rules_by_scene.get(sid, ()):
             rcat = rule.get("category_id")
@@ -132,13 +141,13 @@ def build_qdrant_payload(
     *,
     category_id: int | None,
     scene_codes: Sequence[str],
-    food_state: str | None,
-    label_status: str,
+    food_state: FoodState | str | None,
+    label_status: LabelStatus | str | None,
 ) -> dict[str, Any]:
-    """Contract §4.2 filter payload."""
+    """Contract §4.2 filter payload (plain JSON strings, same values as PG)."""
     return {
         "category_id": category_id,
-        "scenes": list(scene_codes),
-        "food_state": food_state,
-        "label_status": str(label_status or "unlabeled"),
+        "scenes": [str(c) for c in scene_codes],
+        "food_state": str(food_state) if food_state else None,
+        "label_status": str(label_status or LabelStatus.UNLABELED),
     }
