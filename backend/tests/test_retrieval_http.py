@@ -12,6 +12,7 @@ from app.api.v1 import retrieval as routes
 from app.core.exceptions import register_exception_handlers
 from app.bootstrap.state import ApplicationState
 from app.services.retrieval.active_model import ActiveModel
+from app.services.retrieval.errors import RetrievalError
 
 MODEL = ActiveModel(id=1, name="dino", version="v1", collection="c1", dim=1024, distance="cosine")
 
@@ -39,6 +40,14 @@ class RetrievalHttpTests(unittest.TestCase):
                 "failed": [],
             }
 
+        def execute_one(**kwargs):
+            self.calls["index_file"] = {**kwargs, "off_loop": _off_event_loop()}
+            return {
+                "id": "single", "filename": kwargs["filename"],
+                "original_url": "https://cdn/o/single.png", "thumb_url": "https://cdn/t/single.webp",
+                "scenes": ["general"], "label_status": "unlabeled", "width": 8, "height": 6,
+            }
+
         def search(**kwargs):
             self.calls["search"] = {**kwargs, "off_loop": _off_event_loop()}
             return {"source": "empty", "scene": "general", "outputs_heating": False, "items": []}
@@ -53,7 +62,7 @@ class RetrievalHttpTests(unittest.TestCase):
             infra=infra,
             model=MODEL,
             embedding=SimpleNamespace(model_path="config/model/dino/multitask_cls.onnx"),
-            index_uc=SimpleNamespace(execute_batch=execute_batch),
+            index_uc=SimpleNamespace(execute_batch=execute_batch, execute_one=execute_one),
             search_uc=SimpleNamespace(execute=search),
         )
         self.runtime = ApplicationState(
@@ -98,6 +107,77 @@ class RetrievalHttpTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"], "INDEX_EMPTY_REQUEST")
         self.assertNotIn("index", self.calls)
+
+    def test_index_file_upload_runs_the_single_image_use_case_off_the_event_loop(self):
+        response = self.client.post("/api/index/file", files={"file": ("single.png", b"image-bytes", "image/png")})
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertTrue(body["ok"])
+        self.assertTrue(body["trace_id"])
+        self.assertEqual(len(body["indexed"]), 1)
+        self.assertEqual(body["indexed"][0]["id"], "single")
+        self.assertEqual(body["indexed"][0]["filename"], "single.png")
+        self.assertEqual(body["failed"], [])
+        self.assertEqual(self.calls["index_file"], {
+            "image_bytes": b"image-bytes", "filename": "single.png", "off_loop": True,
+        })
+        self.assertNotIn("index", self.calls)
+
+    def test_index_file_requires_the_file_field(self):
+        response = self.client.post("/api/index/file")
+        self.assertEqual(response.status_code, 422, response.text)
+        body = response.json()
+        self.assertEqual(body["error"], "VALIDATION_ERROR")
+        self.assertTrue(any(e["loc"] == ["body", "file"] for e in body["errors"]))
+        self.assertNotIn("index_file", self.calls)
+
+    def test_index_file_rejects_an_empty_upload(self):
+        response = self.client.post("/api/index/file", files={"file": ("empty.png", b"", "image/png")})
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertEqual(response.json()["error"], "EMPTY_FILE")
+        self.assertNotIn("index_file", self.calls)
+
+    def test_index_file_rejects_an_upload_over_the_size_limit(self):
+        self.runtime.settings.predict.max_image_bytes = 3
+        response = self.client.post("/api/index/file", files={"file": ("large.png", b"abcd", "image/png")})
+        self.assertEqual(response.status_code, 413, response.text)
+        self.assertEqual(response.json()["error"], "FILE_TOO_LARGE")
+        self.assertNotIn("index_file", self.calls)
+
+    def test_index_file_without_a_retrieval_stack_is_503(self):
+        self.runtime.retrieval = None
+        self.runtime.retrieval_error = "no current model"
+        response = self.client.post("/api/index/file", files={"file": ("single.png", b"image", "image/png")})
+        self.assertEqual(response.status_code, 503, response.text)
+        body = response.json()
+        self.assertEqual((body["error"], body["detail"]), ("NOT_READY", "no current model"))
+        self.assertNotIn("index_file", self.calls)
+
+    def test_index_file_preserves_use_case_error_codes_and_statuses(self):
+        for code, status in (("INDEX_BAD_IMAGE", 422), ("INDEX_QDRANT_FAILED", 502)):
+            with self.subTest(code=code):
+                execute_one = Mock(side_effect=RetrievalError(code, "index failed", http_status=status))
+                self.stack.index_uc.execute_one = execute_one
+                response = self.client.post("/api/index/file", files={"file": ("single.png", b"image", "image/png")})
+                self.assertEqual(response.status_code, status, response.text)
+                body = response.json()
+                self.assertEqual((body["error"], body["detail"]), (code, "index failed"))
+                execute_one.assert_called_once_with(image_bytes=b"image", filename="single.png")
+
+    def test_index_file_openapi_declares_only_one_required_binary_file(self):
+        document = self.client.get("/openapi.json").json()
+        operation = document["paths"]["/api/index/file"]["post"]
+        self.assertEqual(operation.get("parameters", []), [])
+        request_body = operation["requestBody"]
+        self.assertTrue(request_body["required"])
+        self.assertEqual(set(request_body["content"]), {"multipart/form-data"})
+        schema = request_body["content"]["multipart/form-data"]["schema"]
+        if "$ref" in schema:
+            schema = document["components"]["schemas"][schema["$ref"].rsplit("/", 1)[-1]]
+        self.assertEqual(schema["required"], ["file"])
+        self.assertEqual(set(schema["properties"]), {"file"})
+        file_schema = schema["properties"]["file"]
+        self.assertEqual((file_schema["type"], file_schema["format"]), ("string", "binary"))
 
     def test_search_json_with_query_override(self):
         response = self.client.post("/api/search?top_k=5", json={"img_url": "https://x/a.jpg", "scene": "oven"})
@@ -156,6 +236,19 @@ class RetrievalHttpTests(unittest.TestCase):
     def test_legacy_file_route_is_gone(self):
         self.assertEqual(self.client.get("/api/images/file?id=1").status_code, 404)
 
+
+    def test_index_description_from_form_and_json_reaches_the_use_case(self):
+        self.client.post("/api/index", files=[("file", ("a.png", b"aaa", "image/png"))], data={"description": "红烧肉"})
+        self.assertEqual(self.calls["index"]["items"][0]["description"], "红烧肉")
+
+        response = self.client.post("/api/index", files=[("file", ("a.png", b"aaa", "image/png"))])
+        self.assertIsNone(self.calls["index"]["items"][0]["description"])  # use case stores ""
+        self.assertEqual(response.json()["indexed"][0]["description"], "")
+
+        self.client.post("/api/index", json={"path": "/data/a.png", "description": "清蒸鱼"})
+        self.assertEqual(self.calls["index"]["items"][0]["description"], "清蒸鱼")
+        self.client.post("/api/index", json={"path": "/data/a.png"})
+        self.assertEqual(self.calls["index"]["items"][0]["description"], "")
 
 if __name__ == "__main__":
     unittest.main()

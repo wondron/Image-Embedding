@@ -63,6 +63,10 @@ class Image(TimestampMixin, Base):
         index=True,
         comment="标注状态",
     )
+    description: Mapped[str] = mapped_column(
+        server_default=text("''"),
+        comment="图片描述，默认空字符串；不进 Qdrant payload，修改不影响 payload_version",
+    )
     payload_version: Mapped[int] = mapped_column(
         BigInteger,
         server_default=text("1"),

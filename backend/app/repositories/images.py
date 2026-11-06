@@ -12,6 +12,7 @@ from app.db.common import (
 from app.services.retrieval import errors as err
 from app.services.retrieval.enum_fields import coerce_enum, coerce_optional_enum
 from app.services.retrieval.image_ids import uuid_from_sha256
+from app.services.retrieval.text_fields import normalize_description
 
 # Category display name (zh primary) + nearest ancestor's heating group.
 # Expects aliases i (images) and c (categories); binds :primary_kind.
@@ -112,6 +113,7 @@ class PgImagesMixin:
         food_state = coerce_optional_enum(FoodState, row.get("food_state"), field="food_state")
         category_id = row.get("category_id")
         _check_label_matches_category(label_status, category_id)
+        description = normalize_description(row.get("description"))
 
         engine = self._get_engine()
         try:
@@ -120,10 +122,10 @@ class PgImagesMixin:
                     text(
                         "INSERT INTO images ("
                         "id, sha256, original_url, thumb_url, width, height, "
-                        "source_type, license, category_id, food_state, label_status"
+                        "source_type, license, category_id, food_state, label_status, description"
                         ") VALUES ("
                         "CAST(:id AS uuid), :sha, :ou, :tu, :w, :h, "
-                        ":st, :lic, :cid, :fs, :ls"
+                        ":st, :lic, :cid, :fs, :ls, :desc"
                         ") ON CONFLICT DO NOTHING RETURNING id"
                     ),
                     {
@@ -138,6 +140,7 @@ class PgImagesMixin:
                         "cid": category_id,
                         "fs": food_state.value if food_state else None,
                         "ls": label_status.value,
+                        "desc": description,
                     },
                 ).fetchone()
                 if inserted is not None:
@@ -174,7 +177,9 @@ class PgImagesMixin:
             "label_status",
             "source_type",
             "license",
+            "description",
         }
+        # description is not in the Qdrant payload, so it does not bump payload_version
         bump_keys = {"category_id", "food_state", "label_status"}
         sets: list[str] = []
         params: dict[str, Any] = {"id": str(_as_uuid(image_id))}
@@ -189,6 +194,8 @@ class PgImagesMixin:
                 val = fs.value if fs else None
             elif key in ("width", "height"):
                 val = _positive_int(val, key)
+            elif key == "description":
+                val = normalize_description(val)
             sets.append(f"{key} = :{key}")
             params[key] = val
             if key in bump_keys:

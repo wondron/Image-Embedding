@@ -81,6 +81,7 @@ def _hit_from_row(
         "category": row.get("category_name") or row.get("category"),
         "scenes": row.get("scenes"),
         "label_status": row.get("label_status"),
+        "description": row.get("description") or "",
         "width": row.get("width"),
         "height": row.get("height"),
     }

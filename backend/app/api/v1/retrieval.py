@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, File, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 
 from app.api.services import retrieval as retrieval_service
@@ -23,10 +23,26 @@ router = APIRouter(prefix="/api", tags=["retrieval"])
     "/index",
     response_model=IndexResponse,
     summary="Index image(s)",
-    description="multipart file/files or JSON {path,category,tags,scene,scenes}. SSOT §3.1.",
+    description=(
+        "通过 multipart/form-data 上传单张 file 或多张 files，"
+        "或使用 JSON 提交 {path,category,tags,scene,scenes}。参见 SSOT §3.1。"
+    ),
 )
 async def index_image(request: Request) -> Any:
     return await retrieval_service.index_from_request(get_application_state(request), request)
+
+
+@router.post(
+    "/index/file",
+    response_model=IndexResponse,
+    summary="单张图像入库",
+    description="通过 multipart/form-data 上传单张 file，生成 embedding 并保存图像、元数据和向量。",
+)
+async def index_image_file(
+    request: Request,
+    file: UploadFile = File(..., description="待入库的单张图像文件"),
+) -> Any:
+    return await retrieval_service.index_from_upload(get_application_state(request), request, file)
 
 
 @router.post(
@@ -35,8 +51,9 @@ async def index_image(request: Request) -> Any:
     response_model_exclude_unset=True,  # §6.1: conditional fields stay absent
     summary="Search by image",
     description=(
-        "multipart file OR JSON {img_url,scene}. Self-built-first; "
-        "PG v0.1: empty self-built -> source=empty (FlyB OUT) and final list length==0. SSOT §3.2/§4."
+        "通过 multipart/form-data 上传 file，或使用 JSON 提交 {img_url,scene}。"
+        "优先检索自建图库；PG v0.1 中，自建图库无匹配结果时返回 source=empty 和空结果列表，"
+        "不调用 FlyB。参见 SSOT §3.2/§4。"
     ),
 )
 async def search_image(request: Request) -> Any:
@@ -46,7 +63,10 @@ async def search_image(request: Request) -> Any:
 @router.get(
     "/health",
     summary="MVP dependency health",
-    description="Aggregate embedding/qdrant/metadata(PG); flyb key disabled. Does not replace healthz/readyz.",
+    description=(
+        "汇总 embedding 模型、Qdrant 和 PostgreSQL 元数据存储的健康状态；flyb 字段已禁用。"
+        "此接口不替代 /api/healthz 和 /api/readyz。"
+    ),
 )
 def mvp_health(request: Request) -> JSONResponse:
     return retrieval_service.mvp_health(get_application_state(request))
@@ -58,17 +78,18 @@ def mvp_health(request: Request) -> JSONResponse:
     response_model_exclude_unset=True,
     summary="List library images",
     description=(
-        "Paginated images filtered by scene (default general). "
-        "Optional q (category name / url / id substring) and category (code / name / id). SSOT §3.5."
+        "按场景分页查询图库图片，默认场景为 general。"
+        "可通过 q 按分类名称、图片 URL 或 ID 进行子串匹配，"
+        "通过 category 按分类代码、名称或 ID 筛选。参见 SSOT §3.5。"
     ),
 )
 def list_library_images(
     request: Request,
-    scene: Optional[str] = Query(None, description="default general; unknown -> LIST_UNKNOWN_SCENE"),
-    page: int = Query(1, description="1-based page"),
-    page_size: int = Query(24, description="default 24, range 1..100"),
-    q: Optional[str] = Query(None, description="optional category name / url / id substring"),
-    category: Optional[str] = Query(None, description="optional category code, name or id"),
+    scene: Optional[str] = Query(None, description="场景代码，默认为 general；未知场景返回 LIST_UNKNOWN_SCENE"),
+    page: int = Query(1, description="页码，从 1 开始"),
+    page_size: int = Query(24, description="每页数量，默认 24，范围 1～100"),
+    q: Optional[str] = Query(None, description="可选搜索关键词，按分类名称、图片 URL 或 ID 进行子串匹配"),
+    category: Optional[str] = Query(None, description="可选分类筛选，支持分类代码、名称或 ID"),
     trace_id: Optional[str] = Query(None),
 ) -> Any:
     return retrieval_service.run_list_images(

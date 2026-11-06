@@ -34,6 +34,7 @@ from app.services.retrieval.scene_membership import build_qdrant_payload
 from app.services.retrieval.scenes import resolve_index_scenes
 from app.services.retrieval.storage_keys import guess_ext_from_bytes_header
 from app.services.retrieval.storage_upload import put_original_and_thumb
+from app.services.retrieval.text_fields import normalize_description
 
 logger = logging.getLogger("retrieval.index")
 
@@ -105,6 +106,7 @@ class IndexImageUseCase:
         label_status: str | None = None,
         source_type: str | None = None,
         license: str | None = None,
+        description: str | None = None,
     ) -> dict[str, Any]:
         del tags
         # Validate optional client scene hints (membership still recomputed from rules)
@@ -138,6 +140,7 @@ class IndexImageUseCase:
         )
         lic = coerce_enum(License, license, field="license", default=License.UNKNOWN)
         food = coerce_optional_enum(FoodState, food_state, field="food_state")
+        desc = normalize_description(description)
 
         # Resolve category_id: prefer explicit; optional code lookup on metadata
         resolved_category_id = category_id
@@ -212,6 +215,7 @@ class IndexImageUseCase:
             "category_id": resolved_category_id,
             "food_state": food,
             "label_status": label,
+            "description": desc,
         }
         inserted_id = self._metadata.insert_image(row)
         image_id = inserted_id if isinstance(inserted_id, UUID) else UUID(str(inserted_id))
@@ -270,6 +274,7 @@ class IndexImageUseCase:
             "label_status": str(created.get("label_status") or label),
             "width": created.get("width") or width,
             "height": created.get("height") or height,
+            "description": created.get("description", desc),
             "payload_version": payload_version,
             "created_at": created.get("created_at"),
         }
@@ -299,6 +304,7 @@ class IndexImageUseCase:
                         label_status=item.get("label_status"),
                         source_type=item.get("source_type"),
                         license=item.get("license"),
+                        description=item.get("description"),
                     )
                 )
             except err.RetrievalError as exc:

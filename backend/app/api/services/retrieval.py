@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Type, TypeVar
 
-from fastapi import Request
+from fastapi import Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
@@ -85,8 +85,23 @@ def parse_score_threshold(raw: Any) -> Optional[float]:
 
 # -- POST /api/index ------------------------------------------------------------------
 
+async def index_from_upload(
+    runtime: ApplicationState, request: Request, file: UploadFile
+) -> Dict[str, Any]:
+    """Read one uploaded image and run the existing indexing use case."""
+    trace_id = bind_trace_id(request)
+    data = await read_upload(file, runtime.max_image_bytes)
+    stack = require_retrieval(runtime)
+    indexed = await run_in_threadpool(
+        stack.index_uc.execute_one,
+        image_bytes=data,
+        filename=file.filename or "upload.bin",
+    )
+    return {"ok": True, "trace_id": trace_id, "indexed": [indexed], "failed": []}
+
+
 async def index_from_request(runtime: ApplicationState, request: Request) -> Dict[str, Any]:
-    """multipart file/files (<= 100) or JSON {path, category, tags, scene, scenes}."""
+    """multipart file/files (<= 100) or JSON {path, description, category, tags, scene, scenes}."""
     trace_id = bind_trace_id(request)
     if _is_json(request):
         raw = await _json_body(request, IndexJsonRequest)
@@ -97,6 +112,7 @@ async def index_from_request(runtime: ApplicationState, request: Request) -> Dic
             "tags": raw.tags,
             "scene": raw.scene,
             "scenes": raw.scenes,
+            "description": raw.description,
         }]
     else:
         items = await _index_items_from_form(request, runtime.max_image_bytes)
@@ -116,6 +132,7 @@ async def _index_items_from_form(request: Request, max_bytes: int) -> List[Dict[
         "tags": _json_array(form.get("tags"), "tags"),
         "scene": str(scene).strip() if scene not in (None, "") else None,
         "scenes": _json_array(form.get("scenes"), "scenes"),
+        "description": form.get("description"),  # normalized (and validated) by the use case
     }
     uploads = []
     for value in [form.get("file"), *form.getlist("files"), *form.getlist("file")]:

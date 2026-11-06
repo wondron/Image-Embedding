@@ -79,6 +79,7 @@ class FakeMetadata:
                 "label_status": str(row["label_status"]),
                 "source_type": str(row["source_type"]),
                 "license": str(row["license"]),
+                "description": row.get("description", ""),
                 "payload_version": 1,
             }
         return iid
@@ -175,6 +176,24 @@ class IndexImageIdentityTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "INDEX_BAD_EMBEDDING")
         self.assertEqual(self.vectors.upserts, [])
         self.assertEqual(self.meta.rows, {})  # embedding runs before any write
+
+    def test_description_defaults_to_empty_and_is_stored_stripped(self):
+        self.assertEqual(self.use_case().execute_one(image_bytes=_png((9, 9, 9)))["description"], "")
+        out = self.use_case().execute_one(image_bytes=_png((8, 8, 8)), description="  红烧肉，酱色  ")
+        self.assertEqual(out["description"], "红烧肉，酱色")
+        self.assertEqual(self.meta.rows[uuid.UUID(out["id"])]["description"], "红烧肉，酱色")
+
+    def test_reupload_keeps_the_first_description(self):
+        data = _png()
+        self.use_case().execute_one(image_bytes=data, description="first")
+        out = self.use_case().execute_one(image_bytes=data, description="second")
+        self.assertEqual(out["description"], "first")
+
+    def test_too_long_description_is_rejected_before_any_write(self):
+        with self.assertRaises(RetrievalError) as ctx:
+            self.use_case().execute_one(image_bytes=_png(), description="x" * 1001)
+        self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
+        self.assertEqual((self.meta.rows, self.vectors.upserts), ({}, []))
 
     def test_unknown_category_code_is_stored_unlabeled(self):
         out = self.use_case().execute_one(image_bytes=_png(), category="no.such.code", label_status="auto")

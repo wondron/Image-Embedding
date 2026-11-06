@@ -16,6 +16,7 @@ class IndexJsonRequest(BaseModel):
     """JSON body when the file is already on a path the API process can read (§3.1)."""
 
     path: str = Field(..., description="Local path reachable by the API process")
+    description: str = Field(default="", description="图片描述，默认空字符串")
     category: str | None = None
     tags: list[Any] | None = None
     scene: str | None = None
@@ -54,6 +55,7 @@ class IndexedImage(BaseModel):
     scenes: list[str] = Field(default_factory=list)
     label_status: str
     food_state: str | None = None
+    description: str = ""
     width: int
     height: int
     payload_version: int | None = None
@@ -85,6 +87,7 @@ class SearchHit(BaseModel):
     scenes: list[str] | None = None
     scene_label: str | None = None
     label_status: str | None = None
+    description: str = ""
     width: int | None = None
     height: int | None = None
     food_state: str | None = None
@@ -111,6 +114,7 @@ class ListImageItem(BaseModel):
     category: str | None = None
     scenes: list[str] | None = None
     label_status: str | None = None
+    description: str = ""
     width: int | None = None
     height: int | None = None
     food_state: str | None = None

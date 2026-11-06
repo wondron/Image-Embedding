@@ -258,5 +258,18 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual(status, "building")
 
 
+    def test_description_round_trip_without_payload_bump(self):
+        store = self.store()
+        default_id = self.insert(store, 1)
+        self.assertEqual(store.get_image_by_uuid(default_id)["description"], "")
+        iid = self.insert(store, 2, description="  酱色红烧肉 ")
+        self.assertEqual(store.get_image_by_uuid(iid)["description"], "酱色红烧肉")
+        before = store.get_image_by_uuid(iid)["payload_version"]
+        store.update_image(iid, {"description": "改过的描述"})
+        row = store.get_image_by_uuid(iid)
+        self.assertEqual((row["description"], row["payload_version"]), ("改过的描述", before))
+        items, _ = store.list_images(scene="general")
+        self.assertEqual({i["id"]: i["description"] for i in items}, {default_id: "", iid: "改过的描述"})
+
 if __name__ == "__main__":
     unittest.main()

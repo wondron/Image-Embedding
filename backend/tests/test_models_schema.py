@@ -76,14 +76,15 @@ class ModelsSchemaTests(unittest.TestCase):
 
 
 class MigrationChainTests(unittest.TestCase):
-    def test_head_is_0002_on_top_of_0001(self):
+    def test_migration_chain_is_linear(self):
         from alembic.config import Config
         from alembic.script import ScriptDirectory
 
         cfg = Config(str(BACKEND / "alembic.ini"))
         cfg.set_main_option("script_location", str(BACKEND / "alembic"))
         script = ScriptDirectory.from_config(cfg)
-        self.assertEqual(script.get_heads(), ["20261105_0002"])
+        self.assertEqual(script.get_heads(), ["20261106_0003"])
+        self.assertEqual(script.get_revision("20261106_0003").down_revision, "20261105_0002")
         self.assertEqual(script.get_revision("20261105_0002").down_revision, "20261104_0001")
 
     def test_0002_downgrade_clears_every_comment_it_sets(self):
@@ -96,12 +97,26 @@ class MigrationChainTests(unittest.TestCase):
         set_count = mod.UPGRADE_SQL.count("COMMENT ON ")
         self.assertGreater(set_count, 80)
         self.assertEqual(mod.CLEAR_COMMENTS_SQL.count("IS NULL;"), set_count)
-        # every ORM comment is in the migration
+
+    def test_every_orm_comment_is_written_by_some_migration(self):
+        import importlib.util
+
+        upgrade_sql = ""
+        for path in sorted((BACKEND / "alembic" / "versions").glob("*.py")):
+            spec = importlib.util.spec_from_file_location(f"mig_{path.stem}", path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            upgrade_sql += getattr(mod, "UPGRADE_SQL", "")
         for table in Base.metadata.tables.values():
-            self.assertIn(f"COMMENT ON TABLE {table.name} IS", mod.UPGRADE_SQL)
+            self.assertIn(f"COMMENT ON TABLE {table.name} IS", upgrade_sql)
             for col in table.columns:
                 if col.comment:
-                    self.assertIn(f"COMMENT ON COLUMN {table.name}.{col.name} IS", mod.UPGRADE_SQL)
+                    self.assertIn(f"COMMENT ON COLUMN {table.name}.{col.name} IS", upgrade_sql)
+
+    def test_images_description_defaults_to_empty_string(self):
+        column = Base.metadata.tables["images"].c.description
+        self.assertFalse(column.nullable)
+        self.assertEqual(str(column.server_default.arg), "''")
 
 
 if __name__ == "__main__":

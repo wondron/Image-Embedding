@@ -11,6 +11,23 @@
             "envFile": "${workspaceFolder}/backend/.env",
             "justMyCode": true,
             "subProcess": true
+        },
+        {
+            "name": "Python: Test Image Index Identity",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "unittest",
+            "args": [
+                "discover",
+                "-s",
+                "tests",
+                "-p",
+                "test_index_image_identity.py",
+                "-v"
+            ],
+            "cwd": "${workspaceFolder}/backend",
+            "console": "integratedTerminal",
+            "justMyCode": true
         }
     ]
 }

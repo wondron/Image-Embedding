@@ -137,6 +137,7 @@
 | `category_id` | `integer` | YES | FK → `categories.id` ON DELETE RESTRICT | 可标到任意层级；未标注为空 |
 | `food_state` | `text` | YES | CHECK ∈ `raw`/`cooked`/`frozen` 或 NULL | 生/熟/冷冻 |
 | `label_status` | `text` | NO | CHECK ∈ `unlabeled`/`auto`/`verified` | **未标注 ⇔ 没有类别**（库约束 `ck_images_label_matches_category`：`(label_status = 'unlabeled') = (category_id IS NULL)`）；默认 `unlabeled` |
+| `description` | `text` | NO | 默认 `''` | 图片描述（迁移 `0003`）；API 侧上限 1000 字符；不进 Qdrant payload，修改不 bump `payload_version`；同图重复上传保留首次的描述 |
 | `payload_version` | `bigint` | NO | 默认 `1` | 类别/状态/所属场景变化时递增；与 Qdrant payload 同步 |
 | `created_at` | `timestamptz` | NO | 默认 `now()` | |
 | `updated_at` | `timestamptz` | NO | 默认 `now()` | |
