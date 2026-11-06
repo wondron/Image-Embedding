@@ -16,7 +16,7 @@ from app.core.config.settings import Settings, settings
 from app.core.observability.logging import setup_logger
 
 
-logger = logging.getLogger("main.lifespan")
+logger = logging.getLogger("lifespan")
 
 
 def create_http_client(app_settings: Settings = settings) -> httpx.AsyncClient:
@@ -69,8 +69,60 @@ def warmup_models(service, app_settings: Settings = settings) -> None:
     logger.info("预热配置 | warmup=%s", app_settings.warmup)
 
 
+def _retrieval_enabled() -> bool:
+    """Host-side debug: set RETRIEVAL_ENABLED=0 to skip PG/Qdrant init (predict-only)."""
+    import os
+
+    raw = os.getenv("RETRIEVAL_ENABLED", "1").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _is_infra_unreachable(exc: BaseException) -> bool:
+    """DNS / refused / timeout while reaching compose service names from the host."""
+    text = f"{type(exc).__name__}: {exc}".lower()
+    markers = (
+        "getaddrinfo failed",
+        "failed to resolve host",
+        "name or service not known",
+        "nodename nor servname",
+        "connection refused",
+        "actively refused",
+        "could not connect",
+        "timeout expired",
+        "operationalerror",
+    )
+    return any(m in text for m in markers)
+
+
+def _retrieval_local_debug_hint(settings: Settings) -> str:
+    return (
+        "host-side debug: docker DNS names (postgres/qdrant) only work inside compose; "
+        "set POSTGRES_HOST=localhost DATABASE_URL=postgresql+psycopg://"
+        f"{settings.postgres.user}:***@localhost:5432/{settings.postgres.database} "
+        "QDRANT_HOST=localhost QDRANT_URL=http://localhost:6333 "
+        "(and `docker compose up -d postgres qdrant`), "
+        "or RETRIEVAL_ENABLED=0 for predict-only"
+    )
+
+
 def initialize_retrieval(runtime: ApplicationState) -> None:
-    """Best-effort wire embedder + Qdrant + PostgreSQL. Does not block FoodService."""
+    """Best-effort wire embedder + Qdrant + PostgreSQL. Does not block FoodService.
+
+    Infra failures (bad host, DB down) are soft: retrieval stays None, FoodService continues.
+    Full tracebacks are reserved for unexpected bugs; connectivity uses a short warning.
+    """
+    if not _retrieval_enabled():
+        runtime.retrieval = None
+        runtime.retrieval_error = "RETRIEVAL_ENABLED=0"
+        runtime.retrieval_error_code = "RETRIEVAL_DISABLED"
+        runtime.retrieval_space_mismatch = None
+        logger.info(
+            "Retrieval stack skipped | RETRIEVAL_ENABLED=0 | postgres_host=%s | qdrant=%s",
+            runtime.settings.postgres.host,
+            runtime.settings.qdrant.url,
+        )
+        return
+
     try:
         from app.bootstrap.retrieval_stack import build_retrieval_stack
         from app.services.retrieval.errors import RetrievalError
@@ -108,7 +160,17 @@ def initialize_retrieval(runtime: ApplicationState) -> None:
             runtime.retrieval_error = f"{type(exc).__name__}: {exc}"
             runtime.retrieval_error_code = None
             runtime.retrieval_space_mismatch = None
-        logger.exception("Retrieval stack initialization failed: %s", exc)
+
+        detail = runtime.retrieval_error or str(exc)
+        if _is_infra_unreachable(exc):
+            logger.warning(
+                "Retrieval stack unavailable (infra) | %s | host=%s | %s",
+                detail,
+                runtime.settings.postgres.host,
+                _retrieval_local_debug_hint(runtime.settings),
+            )
+        else:
+            logger.exception("Retrieval stack initialization failed: %s", exc)
 
 def initialize_food_service(runtime: ApplicationState) -> None:
     try:
@@ -173,7 +235,7 @@ async def lifespan(app: FastAPI):
         config_provider=config_provider,
     )
     app.state.runtime = runtime
-    logger.info("App starting | APP_ENV=%s | cfg=%s", runtime.settings.application.env, runtime.config_info,)
+    logger.info("App starting ENV=%s cfg=%s", runtime.settings.application.env, runtime.config_info,)
     initialize_food_service(runtime)
     initialize_retrieval(runtime)
     config_provider.start_polling(lambda snapshot: apply_nacos_config_update(runtime, config_provider, snapshot))

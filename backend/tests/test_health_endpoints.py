@@ -21,11 +21,7 @@ class HealthEndpointTests(unittest.TestCase):
         self.service.clip.sess.get_providers.return_value = ["CPUExecutionProvider"]
         self.runtime = ApplicationState(
             config={
-                "SEGMENT_CONFIG": {"model_path": "segment.onnx"},
-                "CLIP_CONFIG": {
-                    "model_path": "clip.onnx",
-                    "text_model_path": "clip-text.onnx",
-                },
+                "SEGMENT_CONFIG": {"model_path": "segment.onnx"}
             },
             config_info={"source": "test"},
             http_client=Mock(),

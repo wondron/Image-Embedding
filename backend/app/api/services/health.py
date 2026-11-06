@@ -15,11 +15,8 @@ if TYPE_CHECKING:
 def model_paths(config: dict[str, Any]) -> dict[str, Any]:
     """Read model locations without inspecting or initializing model sessions."""
     segment_config = config.get("SEGMENT_CONFIG") or {}
-    clip_config = config.get("CLIP_CONFIG") or {}
     return {
-        "segment": segment_config.get("model_path"),
-        "clip": clip_config.get("model_path"),
-        "clip_text": clip_config.get("text_model_path"),
+        "segment": segment_config.get("model_path")
     }
 
 

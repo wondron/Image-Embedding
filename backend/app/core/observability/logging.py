@@ -19,7 +19,7 @@ def _align(text: str, width: int, align: str) -> str:
 
 
 class CustomFormatter(logging.Formatter):
-    def __init__(self, name_width: int = 16):
+    def __init__(self, name_width: int = 12):
         super().__init__(
             fmt="%(asctime)s | %(levelname)-4s | %(name_fmt)s | %(message)s",
             datefmt="%m-%d %H:%M:%S",
@@ -35,7 +35,7 @@ class CustomFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         record.levelname = record.levelname[:4]
-        record.name_fmt = _align(record.name, self.name_width, "left")
+        record.name_fmt = _align(record.name, self.name_width, "center")
         return super().format(record)
 
 
@@ -60,7 +60,7 @@ def setup_logger(
     app_log_file = log_dir / "app.log"
     platform_log_file = log_dir / "platform.log"
 
-    formatter = CustomFormatter(name_width=16)
+    formatter = CustomFormatter(name_width=12)
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
 
