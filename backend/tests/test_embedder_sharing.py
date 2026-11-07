@@ -33,8 +33,6 @@ class FakeEmbedder:
 def settings():
     return SimpleNamespace(
         warmup=SimpleNamespace(enabled=True, embedding_runs=2),
-        postgres=SimpleNamespace(host="h", database="db", user="u"),
-        qdrant=SimpleNamespace(url="http://q:6333"),
         application=SimpleNamespace(env="test"),
         config=SimpleNamespace(yaml_path="config/param/config.yaml"),
     )
@@ -52,13 +50,12 @@ class EmbedderSharingTests(unittest.TestCase):
         def build_stack(config, app_settings, *, embedder=None, indexed_dir=None):
             return SimpleNamespace(embedding=embedder, model=MODEL, close=Mock())
 
-        for target, value in (
-            (patch.object(lifespan, "create_embedder", side_effect=create), None),
-            (patch("app.bootstrap.retrieval_stack.build_retrieval_stack", side_effect=build_stack), None),
-            (patch.dict("os.environ", {"RETRIEVAL_ENABLED": "1"}), None),
-        ):
-            target.start()
-            self.addCleanup(target.stop)
+        embedder_patch = patch.object(lifespan, "create_embedder", side_effect=create)
+        stack_patch = patch("app.bootstrap.retrieval_stack.build_retrieval_stack", side_effect=build_stack)
+        embedder_patch.start()
+        self.build_stack = stack_patch.start()
+        self.addCleanup(embedder_patch.stop)
+        self.addCleanup(stack_patch.stop)
         self.runtime = ApplicationState(
             config=copy.deepcopy(CONFIG), config_info={}, http_client=Mock(), settings=settings()
         )
@@ -114,6 +111,22 @@ class EmbedderSharingTests(unittest.TestCase):
         self.assertIn("no onnx", self.runtime.initialization_error)
         self.assertEqual(self.runtime.retrieval_error_code, "NOT_READY")
         self.assertIn("no onnx", self.runtime.retrieval_error)
+
+    def test_retrieval_can_be_switched_off_in_config_without_touching_predict(self):
+        self.runtime.config["TOTAL_CONFIG"]["retrieval_enabled"] = False
+        embedder = self.start()
+        self.assertIsNone(self.runtime.retrieval)
+        self.assertEqual(self.runtime.retrieval_error_code, "RETRIEVAL_DISABLED")
+        self.build_stack.assert_not_called()
+        self.assertIs(self.runtime.food_service.embeddingTool, embedder)
+
+    def test_bad_retrieval_switch_degrades_retrieval_only(self):
+        self.runtime.config["TOTAL_CONFIG"]["retrieval_enabled"] = "flase"
+        embedder = self.start()  # must not raise out of startup
+        self.assertIsNone(self.runtime.retrieval)
+        self.assertEqual(self.runtime.retrieval_error_code, "NOT_READY")
+        self.assertIn("TOTAL_CONFIG.retrieval_enabled", self.runtime.retrieval_error)
+        self.assertIs(self.runtime.food_service.embeddingTool, embedder)
 
 
 class EmbeddingSpecTests(unittest.TestCase):

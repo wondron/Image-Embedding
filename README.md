@@ -21,21 +21,36 @@ Global 搜索阶段直接保留上游 `image_url`，不下载或验证候选图�
 
 本次新增 `GET /api/images/download?url=…`，用于第三方图片跨域读取失败时的下载回退。接口仅访问公网 HTTP(S) 图片、80/443 端口，逐次校验重定向，限制单图 15 MB 并验证图片格式。**需要重启包含本次代码的后端；Docker 部署需使用重新构建或已包含新代码的镜像。** 该接口不提供图片入库功能。
 
+## 配置来源
+
+后端参数只有两个来源，不读 `.env`：
+
+- `backend/app/core/config/constant.py`：项目定下来后基本不变的值（服务名、端口、Nacos 接入点、PG 驱动名等）；
+- 生效配置：本地 `backend/config/param/config.yaml` 打底，所选 Nacos 环境的 dataId 逐键覆盖。密码、连接参数、模型等都在这里。
+
+连接相关的配置段（API、workers、Alembic 共用）：
+
+| 配置段 | 内容 |
+|---|---|
+| `POSTGRES_CONFIG` | `host`、`user`、`database` 必填；`password`、`port`（默认 5432）、`connect_timeout`（默认 5 秒） |
+| `QDRANT_CONFIG` | `url`（或 `host` + `port`）必填；`api_key`、`timeout`、`prefer_grpc` 等 |
+| `IMAGE_STORAGE_CONFIG` | `use_boto3`（默认 false，即 mock 不上传）、`endpoint_url`、`bucket`、`public_base_url`、`region`、`access_key_id`、`secret_access_key`、`mock_mirror_dir` |
+| `TOTAL_CONFIG.retrieval_enabled` | 设为 `false` 时只跑 predict，不初始化 PG / Qdrant |
+
+这些连接参数只在启动时读取，Nacos 里修改后需要重启服务；predict 的模型配置仍支持热更新。
+
+Alembic 和 workers 也按 `NACOS_ENV` 取库，而它默认是 prod：本机执行 `alembic upgrade head` 前先设
+`NACOS_ENV=test`，或用 `NACOS_ENABLED=0` 只读本地 YAML。Alembic 会在日志里打印目标库（密码已隐去）。
+
 ## Nacos 配置环境
 
-通过环境变量 `NACOS_ENV` 选择 Nacos 环境：未设置或为空时默认 `prod`，
+通过环境变量 `NACOS_ENV` 选择 Nacos 环境，这是部署时唯一需要指定的变量：未设置或为空时默认 `prod`，
 设置为 `test` 时只读取 test 配置。启动时如果所选 Nacos 环境不可用、配置为空或
-配置解析失败，则直接读取本地 `backend/config/param/config.yaml`，不再尝试其他环境。
-本地 YAML 也必须存在且有效。轮询同样只读取所选环境。
+配置解析失败，则只使用本地 `backend/config/param/config.yaml`，不再尝试其他环境。
+本地 YAML 也必须存在且有效。轮询同样只读取所选环境。日志里的 `env` 和 `/version` 的 `app_env` 与它一致。
 
-Docker Compose 已透传该变量，可在 `backend/.env` 中设置：
-
-```dotenv
-NACOS_ENV=test
-```
-
-也可直接将 `backend/docker-compose.yml` 中的 `NACOS_ENV` 值改为 `test`。
-未设置时保留默认 prod。修改后重新创建容器：
+Docker Compose 中直接修改 `backend/docker-compose.yml` 的 `NACOS_ENV`（默认 `test`），
+或在执行 compose 的终端里设置该变量。修改后重新创建容器：
 
 ```shell
 docker compose -f backend/docker-compose.yml up -d --force-recreate
@@ -58,7 +73,7 @@ docker build -t roki-ai-image-embedding:local
 说明：当前 `backend/docker-compose.yml` 的 `api` 使用远端 Harbor 镜像，不会自动走本地 Dockerfile。仅起本地依赖：
 
 ```bat
-docker compose -f backend/docker-compose.yml up -d qdrant mysql
+docker compose -f backend/docker-compose.yml up -d qdrant postgres
 ```
 
 若要让 compose 使用刚构建的本地镜像，把 `api` 的 `image:` 改成 `roki-ai-image-embedding:local`，或为 `api` 增加 `build: .` 后再执行：

@@ -8,7 +8,7 @@ from fastapi import FastAPI
 
 from app.bootstrap.state import ApplicationState
 from app.core.config.nacos import NacosConfigProvider, NacosConfigSnapshot
-from app.core.config.settings import Settings, settings
+from app.core.config.settings import Settings, config_flag, settings
 from app.core.observability.logging import setup_logger
 
 
@@ -99,12 +99,9 @@ def _loaded_embedder_for(runtime: ApplicationState, config: dict):
     return None
 
 
-def _retrieval_enabled() -> bool:
-    """Host-side debug: set RETRIEVAL_ENABLED=0 to skip PG/Qdrant init (predict-only)."""
-    import os
-
-    raw = os.getenv("RETRIEVAL_ENABLED", "1").strip().lower()
-    return raw not in {"0", "false", "no", "off"}
+def _retrieval_enabled(config: dict) -> bool:
+    """TOTAL_CONFIG.retrieval_enabled: false skips PG / Qdrant init (predict-only, e.g. host-side debug)."""
+    return config_flag(config, "TOTAL_CONFIG", "retrieval_enabled", True)
 
 
 def _is_infra_unreachable(exc: BaseException) -> bool:
@@ -124,14 +121,12 @@ def _is_infra_unreachable(exc: BaseException) -> bool:
     return any(m in text for m in markers)
 
 
-def _retrieval_local_debug_hint(settings: Settings) -> str:
+def _retrieval_local_debug_hint() -> str:
     return (
-        "host-side debug: docker DNS names (postgres/qdrant) only work inside compose; "
-        "set POSTGRES_HOST=localhost DATABASE_URL=postgresql+psycopg://"
-        f"{settings.postgres.user}:***@localhost:5432/{settings.postgres.database} "
-        "QDRANT_HOST=localhost QDRANT_URL=http://localhost:6333 "
+        "host-side debug: compose service names (postgres/qdrant) only resolve inside docker; "
+        "point POSTGRES_CONFIG.host / QDRANT_CONFIG.url at localhost in Nacos or the local YAML "
         "(and `docker compose up -d postgres qdrant`), "
-        "or RETRIEVAL_ENABLED=0 for predict-only"
+        "or set TOTAL_CONFIG.retrieval_enabled: false for predict-only"
     )
 
 
@@ -140,10 +135,17 @@ def initialize_retrieval(runtime: ApplicationState, embedder) -> None:
     runtime.retrieval = None
     runtime.retrieval_error = None
     runtime.retrieval_error_code = None
-    if not _retrieval_enabled():
-        runtime.retrieval_error = "RETRIEVAL_ENABLED=0"
+    try:
+        enabled = _retrieval_enabled(runtime.config)
+    except ValueError as exc:  # a bad switch value degrades retrieval only, like any other retrieval error
+        runtime.retrieval_error = f"{type(exc).__name__}: {exc}"
+        runtime.retrieval_error_code = "NOT_READY"
+        logger.warning("Retrieval stack skipped | %s", runtime.retrieval_error)
+        return
+    if not enabled:
+        runtime.retrieval_error = "TOTAL_CONFIG.retrieval_enabled is false"
         runtime.retrieval_error_code = "RETRIEVAL_DISABLED"
-        logger.info("Retrieval stack skipped | RETRIEVAL_ENABLED=0 | postgres_host=%s | qdrant=%s", runtime.settings.postgres.host, runtime.settings.qdrant.url,)
+        logger.info("Retrieval stack skipped | TOTAL_CONFIG.retrieval_enabled is false")
         return
     if embedder is None:
         runtime.retrieval_error = f"embedding model unavailable: {runtime.initialization_error}"
@@ -163,15 +165,13 @@ def initialize_retrieval(runtime: ApplicationState, embedder) -> None:
         else:
             runtime.retrieval_error = f"{type(exc).__name__}: {exc}"
         if _is_infra_unreachable(exc):
-            logger.warning("Retrieval stack unavailable (infra) | %s | host=%s | %s", runtime.retrieval_error, runtime.settings.postgres.host, _retrieval_local_debug_hint(runtime.settings))
+            logger.warning("Retrieval stack unavailable (infra) | %s | %s", runtime.retrieval_error, _retrieval_local_debug_hint())
         else:
             logger.exception("Retrieval stack initialization failed: %s", exc)
         return
 
-    model = runtime.retrieval.model
-    logger.info("Retrieval stack ready  qdrant=%s  postgres=%s/%s  collection=%s  model=%s",
-        runtime.settings.qdrant.url, runtime.settings.postgres.host, runtime.settings.postgres.database,
-        model.collection, model.space_id)
+    model = runtime.retrieval.model  # endpoints are logged by build_retrieval_infra
+    logger.info("Retrieval stack ready  collection=%s  model=%s", model.collection, model.space_id)
 
 
 def initialize_food_service(runtime: ApplicationState, embedder) -> None:

@@ -29,29 +29,8 @@ services:
     environment:
       # Set NACOS_ENV=test to use test; unset or empty defaults to prod.
       NACOS_ENV: ${NACOS_ENV:-test}
-      # 本地 compose 联调：api 经服务名访问
-      QDRANT_HOST: ${QDRANT_HOST:-qdrant}
-      QDRANT_PORT: ${QDRANT_PORT:-6333}
-      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
-      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-image_embeddings}
-      QDRANT_VECTOR_SIZE: ${QDRANT_VECTOR_SIZE:-1024}
-      QDRANT_DISTANCE: ${QDRANT_DISTANCE:-Cosine}
-      # PG v0.1 M2: PostgreSQL metadata (replaces MySQL)
-      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
-      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
-      POSTGRES_USER: ${POSTGRES_USER:-image_emb}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-image_emb}
-      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-image_embedding}
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://image_emb:image_emb@postgres:5432/image_embedding}
-      # PG v0.1 M4: object storage (mock by default; no secrets in repo)
-      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
-      S3_BUCKET: ${S3_BUCKET:-image-embedding}
-      S3_PUBLIC_BASE_URL: ${S3_PUBLIC_BASE_URL:-https://cdn.example.local/image-embedding}
-      S3_REGION: ${S3_REGION:-us-east-1}
-      S3_ACCESS_KEY_ENV: ${S3_ACCESS_KEY_ENV:-S3_ACCESS_KEY_ID}
-      S3_SECRET_KEY_ENV: ${S3_SECRET_KEY_ENV:-S3_SECRET_ACCESS_KEY}
-      S3_USE_BOTO3: ${S3_USE_BOTO3:-0}
-      S3_MOCK_MIRROR_DIR: ${S3_MOCK_MIRROR_DIR:-}
+      # PG / Qdrant / 对象存储的连接参数都在 Nacos 里（读不到时用镜像里的 config/param/config.yaml），
+      # 不再通过环境变量传。要连本文件里的 postgres / qdrant，把配置里的 host 写成服务名。
     volumes:
       - ./save_images:/app/save_imagesoutput
       - ./output:/app/output

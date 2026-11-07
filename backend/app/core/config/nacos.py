@@ -407,3 +407,16 @@ class NacosConfigProvider:
         if thread is None or not thread.is_alive():
             self._close_clients()
         logger.info("Nacos 配置轮询已停止")
+
+
+def load_config_once(settings: NacosSettings, yaml_path: str) -> dict:
+    """One-shot processes (workers, Alembic): local YAML base + Nacos, loaded once, no polling.
+
+    Same rules as application startup; raises when neither source is usable.
+    """
+    provider = NacosConfigProvider(settings)
+    try:
+        config, _source = provider.load(yaml_path)
+        return config
+    finally:
+        provider.close()

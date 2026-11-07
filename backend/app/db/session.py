@@ -3,35 +3,25 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL, make_url
 
+from app.core.config.constant import PG_CONNECT_TIMEOUT_SECONDS
 from app.db.common import REQUIRED_TABLES, logger
 from app.services.retrieval import errors as err
 
 
 class PgConnectionMixin:
-    """Connection, ping, and Alembic schema verification."""
+    """Connection, ping, and Alembic schema verification.
 
-    def __init__(
-        self,
-        *,
-        dsn: str | None = None,
-        host: str = "postgres",
-        port: int = 5432,
-        user: str = "image_emb",
-        password: str = "image_emb",
-        database: str = "image_embedding",
-        connect_timeout: float = 5.0,
-    ) -> None:
-        if dsn and str(dsn).strip():
-            self.dsn = str(dsn).strip()
-        else:
-            self.dsn = (
-                f"postgresql+psycopg://{user}:{password}@{host}:{port}/{database}"
-            )
-        self.host = host
-        self.port = int(port)
-        self.user = user
-        self.database = database
+    url: normally PostgresSettings.url() (POSTGRES_CONFIG in Nacos / local YAML).
+    host / database reported by ping() are read from that URL, so they always
+    describe the database this store actually connects to.
+    """
+
+    def __init__(self, *, url: URL | str, connect_timeout: float = PG_CONNECT_TIMEOUT_SECONDS) -> None:
+        self.url = make_url(url)
+        self.host = self.url.host or ""
+        self.database = self.url.database or ""
         self.connect_timeout = float(connect_timeout)
         self._engine = None
         self._schema_ready = False
@@ -41,9 +31,10 @@ class PgConnectionMixin:
             return self._engine
         try:
             self._engine = create_engine(
-                self.dsn,
+                self.url,
                 pool_pre_ping=True,
-                connect_args={"connect_timeout": int(self.connect_timeout)},
+                # libpq 只认整数秒，0 表示无限等待，所以至少给 1
+                connect_args={"connect_timeout": max(1, int(self.connect_timeout))},
             )
             return self._engine
         except Exception as exc:
@@ -79,7 +70,7 @@ class PgConnectionMixin:
     def ensure_schema(self) -> None:
         """Verify Alembic-applied 12 tables + ltree. Does NOT auto-migrate.
 
-        Run: `cd backend && alembic upgrade head` (DATABASE_URL / POSTGRES_*).
+        Run: `cd backend && alembic upgrade head` (same POSTGRES_CONFIG as the app).
         """
         if self._schema_ready:
             return

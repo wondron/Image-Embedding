@@ -8,7 +8,6 @@
             "program": "${workspaceFolder}/backend/main.py",
             "cwd": "${workspaceFolder}/backend",
             "console": "integratedTerminal",
-            "envFile": "${workspaceFolder}/backend/.env",
             "justMyCode": true,
             "subProcess": true
         },

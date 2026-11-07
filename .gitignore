@@ -10,3 +10,5 @@ backend/logs/
 frontend/dist/
 logs/
 backend/config
+# 后端不读 .env：参数只来自 constant.py 和 Nacos / config.yaml；防止把密钥再提交进来
+backend/.env

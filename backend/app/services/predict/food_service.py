@@ -8,7 +8,6 @@ Pipeline stages live under domain.pipeline (predict island).
 import logging, cv2
 import numpy as np
 import app.utils.timer as timerUtils
-from app.core.config.settings import settings
 from app.core.observability.log_helper import show_text
 from app.services.predict.pipeline.b_getGlobalData import GetGlobalData
 from app.services.predict.pipeline.c_embedding import GlobalFilter
@@ -39,7 +38,7 @@ class FoodService:
 
 
     def detect(self, image_data: bytes, machine_info: str = "", trace_id: str = "", save_result: bool = False):
-        logger.info('start, trace_id: %s, save_result: %s, save_env: %s, machine_info: %s', trace_id, save_result, settings.paths.save_images_enabled, machine_info)
+        logger.info('start, trace_id: %s, save_result: %s, machine_info: %s', trace_id, save_result, machine_info)
         timer_tools = timerUtils.timer_tool()
         
         img_bgr = None

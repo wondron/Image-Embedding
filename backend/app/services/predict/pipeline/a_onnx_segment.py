@@ -26,7 +26,9 @@ class OnnxSegmentPy:
         self.use_gpu = seg_config.get("use_gpu", False)
         self.model_path = seg_config.get("model_path")
         self.use_iobinding = seg_config.get("use_iobinding", False)     # 开启 iobinding
-        self.resize_mode = seg_config.get("resize_mode", 'resize') 
+        self.resize_mode = seg_config.get("resize_mode", 'resize')
+        # 和 embedding 模型一样取 TOTAL_CONFIG.device_id；CUDA provider 和 iobinding 用同一张卡
+        self.device_id = int((config.get("TOTAL_CONFIG") or {}).get("device_id", 0))
 
 
 
@@ -52,7 +54,7 @@ class OnnxSegmentPy:
 
             # 先构造一个“理想”的 provider 列表
             cuda_options = {
-                "device_id": 0,
+                "device_id": self.device_id,
                 "arena_extend_strategy": "kNextPowerOfTwo",
                 "cudnn_conv_use_max_workspace": "1",
                 "cudnn_conv1d_pad_to_nc1d": "1",
@@ -164,8 +166,7 @@ class OnnxSegmentPy:
         use_iob = bool(self.use_iobinding and using_cuda and self._supports_bind_ortvalue_input())
 
         if use_iob:
-            gpu_id = int(os.environ.get("ORT_CUDA_DEVICE_ID", "0"))
-            x_ov = ort.OrtValue.ortvalue_from_numpy(x, "cuda", gpu_id)
+            x_ov = ort.OrtValue.ortvalue_from_numpy(x, "cuda", self.device_id)
 
             need_rebind = True
             if self._cached_io is not None and self._cached_shape == tuple(x.shape):
@@ -180,7 +181,7 @@ class OnnxSegmentPy:
                 io = self.sess.io_binding()
                 io.bind_ortvalue_input(self.input_name, x_ov)
                 for o in self.sess.get_outputs():
-                    io.bind_output(o.name, "cuda", gpu_id)   # 统一绑定到 CUDA
+                    io.bind_output(o.name, "cuda", self.device_id)   # 统一绑定到 CUDA
                 self._cached_io = io
                 self._cached_shape = tuple(x.shape)
 

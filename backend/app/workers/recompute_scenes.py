@@ -32,11 +32,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     from app.bootstrap.retrieval_stack import build_retrieval_infra
-    from app.core.config.settings import Settings
     from app.services.retrieval.recompute_scenes import RecomputeScenesUseCase
     from app.workers._config import load_worker_config
 
-    infra = build_retrieval_infra(Settings(), load_worker_config())
+    infra = build_retrieval_infra(load_worker_config())
     try:
         out = RecomputeScenesUseCase(infra.metadata).execute(
             args.image_id, bump_version=not args.no_bump

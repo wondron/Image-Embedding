@@ -1,9 +1,35 @@
+"""进程级设置，以及从生效配置里解析连接参数。
+
+参数只有两个来源：
+- app.core.config.constant：项目定下来后基本不变的值（服务名、端口、Nacos 接入点、驱动名……）；
+- 生效配置：Nacos 逐键覆盖本地 YAML（config/param/config.yaml），见 app.core.config.nacos。
+  密码、连接参数、模型等随环境变化的都在这里。
+
+Settings 只由常量组成，import 时创建一次。连接参数在用到时从生效配置解析：
+PostgresSettings.from_config（POSTGRES_CONFIG）、ImageStorageSettings.from_config
+（IMAGE_STORAGE_CONFIG）；Qdrant 直接用 QDRANT_CONFIG（app.clients.qdrant.QdrantConnection）。
+
+环境变量只剩 Nacos 自己的引导参数（NACOS_ENV 选 prod / test 等）：它们决定去哪个
+namespace 读配置，没法放进配置本身。
+"""
+
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import Any, Callable, TypeVar
+
+from sqlalchemy.engine import URL
 
 from app.core.config.constant import (
+    DEFAULT_PORT,
+    DEFAULT_TIME_OUT,
+    DEFAULT_YAML_PATH,
+    IMAGE_STORAGE_DEFAULT_BUCKET,
+    IMAGE_STORAGE_DEFAULT_PUBLIC_BASE_URL,
+    IMAGE_STORAGE_DEFAULT_REGION,
+    LOGGER_NAME,
     NACOS_CONFIG_PROFILES,
     NACOS_CONNECT_TIMEOUT_SECONDS,
     NACOS_ENABLED,
@@ -11,27 +37,36 @@ from app.core.config.constant import (
     NACOS_POLL_INTERVAL_SECONDS,
     NACOS_REQUEST_TIMEOUT_SECONDS,
     NACOS_RETRY_INTERVAL_SECONDS,
+    PG_CONNECT_TIMEOUT_SECONDS,
+    PG_DEFAULT_PORT,
+    PG_DRIVER,
     SERVICE_NAME,
     VERSION,
-    DEFAULT_PORT,
-    DEFAULT_YAML_PATH,
-    LOGGER_NAME,
-    DEFAULT_TIME_OUT,
     NacosProfile,
 )
+
+_T = TypeVar("_T")
+_TRUE = {"1", "true", "yes", "y", "on"}
+_FALSE = {"0", "false", "no", "n", "off", ""}
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
     if value is None:
         return default
-    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return value.strip().lower() in _TRUE
+
+
+def _nacos_profile_name() -> str:
+    """NACOS_ENV 选中的 profile（prod / test），也就是本进程的运行环境。"""
+    return os.getenv("NACOS_ENV", "").strip().lower() or "prod"
 
 
 @dataclass(frozen=True, slots=True)
 class ApplicationSettings:
     service_name: str = SERVICE_NAME
-    env: str = "dev"
+    # 和 Nacos profile 一致（prod / test），日志、/version、/config_info 都报这个
+    env: str = field(default_factory=_nacos_profile_name)
     version: str = VERSION
     host: str = "0.0.0.0"
     port: int = DEFAULT_PORT
@@ -59,9 +94,6 @@ class WarmupSettings:
 class PathSettings:
     output_dir: str = "output"
     save_images_dir: str = "save_images"
-    save_images_enabled: bool = field(
-        default_factory=lambda: _env_bool("SAVE_IMAGES_ENABLED", False)
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,9 +154,7 @@ def _nacos_profiles() -> tuple[NacosProfile, ...]:
 
 @dataclass(frozen=True, slots=True)
 class NacosSettings:
-    profile: str = field(
-        default_factory=lambda: os.getenv("NACOS_ENV", "").strip().lower() or "prod"
-    )
+    profile: str = field(default_factory=_nacos_profile_name)
     enabled: bool = field(default_factory=lambda: _env_bool("NACOS_ENABLED", NACOS_ENABLED))
     poll_enabled: bool = field(default_factory=lambda: _env_bool("NACOS_POLL_ENABLED", NACOS_POLL_ENABLED))
     connect_timeout_seconds: float = NACOS_CONNECT_TIMEOUT_SECONDS
@@ -138,101 +168,129 @@ class NacosSettings:
             raise ValueError("NACOS_ENV must be 'prod' or 'test'")
 
 
-@dataclass(frozen=True, slots=True)
-class QdrantSettings:
-    """本地/compose 默认；可用环境变量覆盖。collection / 表结构最终归数据规范。
-    向量客户端实现: app.clients.qdrant.QdrantStore；此处仅连接与 collection 形状。
-    """
+# -- 生效配置（Nacos / 本地 YAML）里的连接参数 ------------------------------------------
 
-    host: str = field(default_factory=lambda: os.getenv("QDRANT_HOST", "qdrant"))
-    port: int = field(default_factory=lambda: int(os.getenv("QDRANT_PORT", "6333")))
-    url: str = field(
-        default_factory=lambda: os.getenv("QDRANT_URL", "http://qdrant:6333")
-    )
-    collection: str = field(
-        default_factory=lambda: os.getenv("QDRANT_COLLECTION", "image_embeddings")
-    )
-    vector_size: int = field(
-        default_factory=lambda: int(os.getenv("QDRANT_VECTOR_SIZE", "1024"))
-    )
-    distance: str = field(
-        default_factory=lambda: os.getenv("QDRANT_DISTANCE", "Cosine")
-    )
-    prefer_grpc: bool = field(
-        default_factory=lambda: os.getenv("QDRANT_PREFER_GRPC", "1").strip().lower() in {"1", "true", "yes", "y", "on"}
-    )
+
+def _section(config: Mapping[str, Any], name: str) -> Mapping[str, Any]:
+    section = config.get(name)
+    if section is None:
+        return {}
+    if not isinstance(section, Mapping):
+        raise ValueError(f"{name} must be a mapping, got {type(section).__name__}")
+    return section
+
+
+def _text(section: Mapping[str, Any], key: str) -> str:
+    """YAML 标量不一定是字符串（不加引号的 123456 会解析成 int），统一转成去空白的 str。"""
+    value = section.get(key)
+    return "" if value is None else str(value).strip()
+
+
+def _number(section: Mapping[str, Any], name: str, key: str, default: _T, cast: Callable[[Any], _T]) -> _T:
+    value = section.get(key)
+    if value is None or value == "":
+        return default
+    try:
+        return cast(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name}.{key} must be a number, got {value!r}") from None
+
+
+def _flag(section: Mapping[str, Any], name: str, key: str, default: bool) -> bool:
+    value = section.get(key)
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in _TRUE:
+        return True
+    if text in _FALSE:
+        return False
+    raise ValueError(f"{name}.{key} must be true or false, got {value!r}")
+
+
+def config_flag(config: Mapping[str, Any], name: str, key: str, default: bool) -> bool:
+    """生效配置里的开关，如 config_flag(config, "TOTAL_CONFIG", "retrieval_enabled", True)。"""
+    return _flag(_section(config, name), name, key, default)
 
 
 @dataclass(frozen=True, slots=True)
 class PostgresSettings:
-    """PG v0.1 metadata DB (compose service `postgres`). Prefer DATABASE_URL when set."""
+    """元数据库连接，取自生效配置的 POSTGRES_CONFIG。"""
 
-    host: str = field(default_factory=lambda: os.getenv("POSTGRES_HOST", "postgres"))
-    port: int = field(default_factory=lambda: int(os.getenv("POSTGRES_PORT", "5432")))
-    user: str = field(default_factory=lambda: os.getenv("POSTGRES_USER", "image_emb"))
-    password: str = field(
-        default_factory=lambda: os.getenv("POSTGRES_PASSWORD", "image_emb")
-    )
-    database: str = field(
-        default_factory=lambda: os.getenv("POSTGRES_DATABASE", "image_embedding")
-    )
-    url: str = field(
-        default_factory=lambda: os.getenv(
-            "DATABASE_URL",
-            "postgresql+psycopg://image_emb:image_emb@postgres:5432/image_embedding",
+    host: str
+    user: str
+    database: str
+    password: str = field(default="", repr=False)
+    port: int = PG_DEFAULT_PORT
+    connect_timeout: float = PG_CONNECT_TIMEOUT_SECONDS
+
+    @classmethod
+    def from_config(cls, config: Mapping[str, Any]) -> PostgresSettings:
+        name = "POSTGRES_CONFIG"
+        section = _section(config, name)
+        required = {key: _text(section, key) for key in ("host", "user", "database")}
+        missing = [f"{name}.{key}" for key, value in required.items() if not value]
+        if missing:
+            raise ValueError(f"{', '.join(missing)} missing from the configuration (Nacos / local YAML)")
+        password = section.get("password")
+        return cls(
+            host=required["host"],
+            user=required["user"],
+            database=required["database"],
+            password="" if password is None else str(password),
+            port=_number(section, name, "port", PG_DEFAULT_PORT, int),
+            connect_timeout=_number(section, name, "connect_timeout", PG_CONNECT_TIMEOUT_SECONDS, float),
         )
-    )
 
-    def dsn(self) -> str:
-        """SQLAlchemy URL; DATABASE_URL wins when non-empty."""
-        if self.url and self.url.strip():
-            return self.url.strip()
-        return (
-            f"postgresql+psycopg://{self.user}:{self.password}"
-            f"@{self.host}:{self.port}/{self.database}"
+    def url(self) -> URL:
+        """应用、workers、Alembic 共用的唯一连接串；URL.create 负责转义用户名和密码里的特殊字符。"""
+        return URL.create(
+            PG_DRIVER,
+            username=self.user,
+            password=self.password or None,
+            host=self.host,
+            port=self.port,
+            database=self.database,
         )
 
 
 @dataclass(frozen=True, slots=True)
 class ImageStorageSettings:
-    """Image storage: originals / thumbnails / staging files (contract §5).
+    """Image storage: originals / thumbnails / staging files (contract §5), from IMAGE_STORAGE_CONFIG.
 
-    Any S3-compatible service (AWS S3, MinIO, OSS); env vars keep the S3_* names.
-    Secrets only via env; mock by default.
+    Any S3-compatible service (AWS S3, MinIO, OSS). use_boto3 false (the default) is the
+    mock driver: URLs are built from public_base_url + key and nothing is uploaded. Keys
+    missing from the section fall back to the IMAGE_STORAGE_DEFAULT_* constants.
 
     ASSUMPTION A8: public_base_url is the CDN/bucket HTTPS prefix baked into
     original_url / thumb_url / staged_url. Keys never include scene/category.
     """
 
-    endpoint_url: str = field(
-        default_factory=lambda: os.getenv("S3_ENDPOINT_URL", "").strip()
-    )
-    bucket: str = field(
-        default_factory=lambda: os.getenv("S3_BUCKET", "image-embedding").strip()
-    )
-    public_base_url: str = field(
-        default_factory=lambda: os.getenv(
-            "S3_PUBLIC_BASE_URL", "https://cdn.example.local/image-embedding"
-        ).strip().rstrip("/")
-    )
-    region: str = field(
-        default_factory=lambda: os.getenv("S3_REGION", "us-east-1").strip()
-    )
-    access_key_env: str = field(
-        default_factory=lambda: os.getenv("S3_ACCESS_KEY_ENV", "S3_ACCESS_KEY_ID")
-    )
-    secret_key_env: str = field(
-        default_factory=lambda: os.getenv("S3_SECRET_KEY_ENV", "S3_SECRET_ACCESS_KEY")
-    )
-    # When true, adapter may attempt boto3; default mock (no network).
-    use_boto3: bool = field(
-        default_factory=lambda: os.getenv("S3_USE_BOTO3", "").strip().lower()
-        in {"1", "true", "yes", "y", "on"}
-    )
-    # Local mock also optionally mirrors bytes under this dir (empty = memory only).
-    mock_mirror_dir: str = field(
-        default_factory=lambda: os.getenv("S3_MOCK_MIRROR_DIR", "").strip()
-    )
+    use_boto3: bool = False
+    endpoint_url: str = ""  # S3 兼容服务（MinIO / OSS）的地址；AWS S3 留空
+    bucket: str = IMAGE_STORAGE_DEFAULT_BUCKET
+    public_base_url: str = IMAGE_STORAGE_DEFAULT_PUBLIC_BASE_URL
+    region: str = IMAGE_STORAGE_DEFAULT_REGION
+    access_key_id: str = field(default="", repr=False)
+    secret_access_key: str = field(default="", repr=False)
+    mock_mirror_dir: str = ""  # mock 驱动另存一份字节的目录；空表示只在内存里
+
+    @classmethod
+    def from_config(cls, config: Mapping[str, Any]) -> ImageStorageSettings:
+        name = "IMAGE_STORAGE_CONFIG"
+        section = _section(config, name)
+        return cls(
+            use_boto3=_flag(section, name, "use_boto3", False),
+            endpoint_url=_text(section, "endpoint_url"),
+            bucket=_text(section, "bucket") or IMAGE_STORAGE_DEFAULT_BUCKET,
+            public_base_url=(_text(section, "public_base_url") or IMAGE_STORAGE_DEFAULT_PUBLIC_BASE_URL).rstrip("/"),
+            region=_text(section, "region") or IMAGE_STORAGE_DEFAULT_REGION,
+            access_key_id=_text(section, "access_key_id"),
+            secret_access_key=_text(section, "secret_access_key"),
+            mock_mirror_dir=_text(section, "mock_mirror_dir"),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,9 +305,6 @@ class Settings:
     http_client: HttpClientSettings = field(default_factory=HttpClientSettings)
     concurrency: ConcurrencySettings = field(default_factory=ConcurrencySettings)
     nacos: NacosSettings = field(default_factory=NacosSettings)
-    qdrant: QdrantSettings = field(default_factory=QdrantSettings)
-    postgres: PostgresSettings = field(default_factory=PostgresSettings)
-    image_storage: ImageStorageSettings = field(default_factory=ImageStorageSettings)
     allowed_content_types: frozenset[str] = field(
         default_factory=lambda: frozenset(
             {

@@ -284,7 +284,7 @@ def mvp_health(runtime: ApplicationState) -> JSONResponse:
             "qdrant": {
                 "ok": False,
                 "detail": detail,
-                "collection": runtime.settings.qdrant.collection,
+                "collection": None,  # the real one comes from the current embedding model
                 "embedding_space_id": None,
             },
             "mysql": {"ok": False, "detail": detail},

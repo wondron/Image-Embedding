@@ -8,18 +8,23 @@
 
 Business rules live in app.services.retrieval; adapters in app.repositories /
 app.clients. Both builders release what they opened if a later step fails.
+
+Every connection parameter comes from the effective config (Nacos layered over the
+local YAML): POSTGRES_CONFIG, QDRANT_CONFIG, IMAGE_STORAGE_CONFIG. They are read
+once here, so changing them in Nacos takes effect after a restart.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Optional
 
 from app.clients.inference import Embedder
 from app.clients.qdrant import QdrantConnection, QdrantStore
 from app.clients.image_storage import build_image_storage
-from app.core.config.settings import Settings
+from app.core.config.settings import ImageStorageSettings, PostgresSettings, Settings
 from app.repositories.metadata import PgMetadataStore
 from app.repositories.ports import ImageStoragePort
 from app.repositories.vectors import QdrantVectorStore
@@ -79,28 +84,26 @@ class RetrievalStack:
         self.infra.close()
 
 
-def build_retrieval_infra(settings: Settings, config: dict[str, Any] | None = None) -> RetrievalInfra:
+def _qdrant_connection(config: Mapping[str, Any]) -> QdrantConnection:
+    """QDRANT_CONFIG as-is (url, api_key, timeout, prefer_grpc); the endpoint must be explicit."""
+    section = dict(config.get("QDRANT_CONFIG") or {})
+    if not section.get("url") and not (section.get("host") and section.get("port")):
+        raise ValueError("QDRANT_CONFIG.url (or host + port) missing from the configuration (Nacos / local YAML)")
+    return QdrantConnection.from_mapping(section)
+
+
+def build_retrieval_infra(config: Mapping[str, Any]) -> RetrievalInfra:
     """PG schema check -> current embedding model -> its Qdrant collection -> object storage."""
-    pg = settings.postgres
-    metadata = PgMetadataStore(
-        dsn=pg.dsn(),
-        host=pg.host,
-        port=pg.port,
-        user=pg.user,
-        password=pg.password,
-        database=pg.database,
-    )
+    # Parse every section before opening anything: a config error fails fast with nothing to release.
+    pg = PostgresSettings.from_config(config)
+    connection = _qdrant_connection(config)
+    storage_settings = ImageStorageSettings.from_config(config)
+
+    metadata = PgMetadataStore(url=pg.url(), connect_timeout=pg.connect_timeout)
     vectors: QdrantVectorStore | None = None
     try:
         metadata.ensure_schema()
         model = ActiveModel.from_row(metadata.get_current_embedding_model())
-        q = settings.qdrant
-        # Endpoint from Settings (env); api_key / timeout from QDRANT_CONFIG.
-        connection = QdrantConnection.from_mapping(
-            dict((config or {}).get("QDRANT_CONFIG") or {}),
-            url=q.url or f"http://{q.host}:{int(q.port)}",
-            prefer_grpc=q.prefer_grpc,
-        )
         vectors = QdrantVectorStore(
             QdrantStore(
                 connection,
@@ -110,7 +113,7 @@ def build_retrieval_infra(settings: Settings, config: dict[str, Any] | None = No
             )
         )
         vectors.ensure_collection(recreate=False)
-        storage = build_image_storage(settings.image_storage)
+        storage = build_image_storage(storage_settings)
     except BaseException:
         if vectors is not None:
             vectors.close()
@@ -118,7 +121,10 @@ def build_retrieval_infra(settings: Settings, config: dict[str, Any] | None = No
         raise
 
     logger.info(
-        "retrieval infra ready | model=%s id=%s collection=%s dim=%s distance=%s",
+        "retrieval infra ready | postgres=%s/%s qdrant=%s | model=%s id=%s collection=%s dim=%s distance=%s",
+        metadata.host,
+        metadata.database,
+        connection.url,
         model.space_id,
         model.id,
         model.collection,
@@ -129,7 +135,7 @@ def build_retrieval_infra(settings: Settings, config: dict[str, Any] | None = No
 
 
 def build_retrieval_stack(
-    config: dict[str, Any],
+    config: Mapping[str, Any],
     settings: Settings,
     *,
     embedder: Optional[Embedder] = None,
@@ -140,7 +146,7 @@ def build_retrieval_stack(
     embedder: the process-wide encoder (shared with predict). Only standalone
     callers omit it, in which case one is built from config.
     """
-    infra = build_retrieval_infra(settings, config)
+    infra = build_retrieval_infra(config)
     try:
         embedding = embedder if embedder is not None else Embedder(config)
         # Encoder and collection must belong to the same model version.

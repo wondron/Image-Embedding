@@ -21,15 +21,8 @@ def _alembic(cmd: str, rev: str) -> None:
 
     cfg = Config(str(BACKEND / "alembic.ini"))
     cfg.set_main_option("script_location", str(BACKEND / "alembic"))
-    old = os.environ.get("DATABASE_URL")
-    os.environ["DATABASE_URL"] = TEST_URL  # alembic/env.py reads it
-    try:
-        getattr(command, cmd)(cfg, rev)
-    finally:
-        if old is None:
-            os.environ.pop("DATABASE_URL", None)
-        else:
-            os.environ["DATABASE_URL"] = old
+    cfg.attributes["database_url"] = TEST_URL  # alembic/env.py uses it instead of POSTGRES_CONFIG
+    getattr(command, cmd)(cfg, rev)
 
 
 def _sha(n: int) -> bytes:
@@ -61,7 +54,7 @@ class PgLiveTests(unittest.TestCase):
     def store(self):
         from app.repositories.metadata import PgMetadataStore
 
-        return PgMetadataStore(dsn=TEST_URL)
+        return PgMetadataStore(url=TEST_URL)
 
     # ---- schema ---------------------------------------------------------
 

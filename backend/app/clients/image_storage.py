@@ -2,14 +2,13 @@
 
 Any S3-compatible service (AWS S3, MinIO, Aliyun OSS) behind ImageStoragePort.
 Default: MockImageStorage — builds https URLs from public_base_url + key, no upload.
-S3_USE_BOTO3=1: S3ImageStorage uploads through boto3 (credentials via env names in
-ImageStorageSettings).
+IMAGE_STORAGE_CONFIG.use_boto3 true: S3ImageStorage uploads through boto3, with the
+credentials from the same section (Nacos / local YAML).
 """
 
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -119,7 +118,7 @@ class MockImageStorage(ImageStoragePort):
 
 
 class S3ImageStorage(ImageStoragePort):
-    """Optional real S3 via boto3 when S3_USE_BOTO3=1. No secrets in repo."""
+    """Real S3 via boto3 when IMAGE_STORAGE_CONFIG.use_boto3 is true."""
 
     def __init__(self, settings: ImageStorageSettings) -> None:
         self.settings = settings
@@ -130,14 +129,12 @@ class S3ImageStorage(ImageStoragePort):
             from botocore.client import Config
         except ImportError as exc:
             raise err.not_ready(
-                "boto3 not installed; pip install boto3 or leave S3_USE_BOTO3 unset"
+                "boto3 not installed; pip install boto3 or set IMAGE_STORAGE_CONFIG.use_boto3: false"
             ) from exc
-        access = os.getenv(settings.access_key_env, "")
-        secret = os.getenv(settings.secret_key_env, "")
+        access, secret = settings.access_key_id, settings.secret_access_key
         if not access or not secret:
             raise err.not_ready(
-                f"missing credentials in env {settings.access_key_env}/"
-                f"{settings.secret_key_env}"
+                "missing credentials: IMAGE_STORAGE_CONFIG.access_key_id / secret_access_key"
             )
         kwargs: dict[str, Any] = {
             "service_name": "s3",

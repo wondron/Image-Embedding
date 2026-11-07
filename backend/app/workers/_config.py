@@ -2,28 +2,16 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
-
-logger = logging.getLogger("workers")
 
 
 def load_worker_config() -> dict[str, Any]:
     """Local YAML base + Nacos (when reachable), loaded once without polling.
 
-    Falls back to {} if neither source is usable: workers can still run on the
-    environment Settings (PG / Qdrant endpoints) alone.
+    Workers take every connection parameter from it (POSTGRES_CONFIG, QDRANT_CONFIG,
+    IMAGE_STORAGE_CONFIG), so a config that cannot be loaded is an error.
     """
-    from app.core.config.nacos import NacosConfigProvider
+    from app.core.config.nacos import load_config_once
     from app.core.config.settings import settings
 
-    provider = NacosConfigProvider(settings.nacos)
-    try:
-        config, source = provider.load(settings.config.yaml_path)
-        logger.info("worker config loaded | source=%s", source.get("source"))
-        return config
-    except Exception as exc:
-        logger.warning("config not loaded, using defaults: %s: %s", type(exc).__name__, exc)
-        return {}
-    finally:
-        provider.close()
+    return load_config_once(settings.nacos, settings.config.yaml_path)

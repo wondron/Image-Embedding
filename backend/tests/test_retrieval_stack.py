@@ -5,8 +5,11 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
+from sqlalchemy.engine import make_url
+
 from app.bootstrap import retrieval_stack as rs
 from app.bootstrap.state import ApplicationState
+from app.core.config.settings import ImageStorageSettings
 from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.errors import RetrievalError
 
@@ -23,14 +26,13 @@ ROW = {
     "preprocess": {},
 }
 
-SETTINGS = SimpleNamespace(
-    postgres=SimpleNamespace(
-        dsn=lambda: "postgresql+psycopg://u:p@h/db", host="h", port=5432, user="u", password="p", database="db"
-    ),
-    qdrant=SimpleNamespace(url="http://q:6333", host="q", port=6333, collection="", prefer_grpc=True),
-    image_storage=SimpleNamespace(),
-    paths=SimpleNamespace(save_images_dir="save_images"),
-)
+SETTINGS = SimpleNamespace(paths=SimpleNamespace(save_images_dir="save_images"))
+
+# Effective config (Nacos over local YAML): the only source of connection parameters
+CONFIG = {
+    "POSTGRES_CONFIG": {"host": "pg.internal", "user": "u", "password": "p@ss/w:rd", "database": "meta"},
+    "QDRANT_CONFIG": {"url": "http://q:6333", "api_key": "k"},
+}
 
 
 class ActiveModelTests(unittest.TestCase):
@@ -75,7 +77,7 @@ class BuildStackTests(unittest.TestCase):
             self.addCleanup(p.stop)
 
     def test_stack_wires_the_active_model_into_collection_and_use_cases(self):
-        stack = rs.build_retrieval_stack({"QDRANT_CONFIG": {"api_key": "k", "url": "http://ignored:1"}}, SETTINGS)
+        stack = rs.build_retrieval_stack(CONFIG, SETTINGS)
         self.assertEqual(stack.model.collection, "c_dino_v2")
         args, kwargs = rs.QdrantStore.call_args
         self.assertEqual((kwargs["collection"], kwargs["vector_dim"], kwargs["distance"]), ("c_dino_v2", 1024, "cosine"))
@@ -88,10 +90,33 @@ class BuildStackTests(unittest.TestCase):
         self.assertIs(stack.index_uc._vectors, self.vectors)  # no hidden decorator
         self.embedder.probe_dim.assert_called_once()
 
+    def test_connections_come_from_the_effective_config(self):
+        rs.build_retrieval_infra(CONFIG)
+        kwargs = rs.PgMetadataStore.call_args.kwargs
+        url = make_url(kwargs["url"].render_as_string(hide_password=False))  # survives a round trip
+        self.assertEqual(
+            (url.drivername, url.host, url.port, url.username, url.password, url.database),
+            ("postgresql+psycopg", "pg.internal", 5432, "u", "p@ss/w:rd", "meta"),
+        )
+        self.assertEqual(kwargs["connect_timeout"], 5.0)
+        # No IMAGE_STORAGE_CONFIG: the mock driver with the constant defaults
+        rs.build_image_storage.assert_called_once_with(ImageStorageSettings())
+
+    def test_missing_connection_config_fails_before_opening_anything(self):
+        broken = {
+            "no postgres": {"QDRANT_CONFIG": CONFIG["QDRANT_CONFIG"]},
+            "no qdrant endpoint": {"POSTGRES_CONFIG": CONFIG["POSTGRES_CONFIG"], "QDRANT_CONFIG": {"api_key": "k"}},
+        }
+        for case, config in broken.items():
+            with self.subTest(case), self.assertRaises(ValueError) as ctx:
+                rs.build_retrieval_infra(config)
+            self.assertIn("missing from the configuration", str(ctx.exception))
+        rs.PgMetadataStore.assert_not_called()
+
     def test_shared_embedder_is_used_instead_of_loading_a_second_model(self):
         shared = MagicMock()
         shared.probe_dim.return_value = 1024
-        stack = rs.build_retrieval_stack({}, SETTINGS, embedder=shared)
+        stack = rs.build_retrieval_stack(CONFIG, SETTINGS, embedder=shared)
         self.assertIs(stack.embedding, shared)
         self.assertIs(stack.index_uc._embedding, shared)
         self.assertIs(stack.search_uc._embedding, shared)
@@ -100,7 +125,7 @@ class BuildStackTests(unittest.TestCase):
     def test_encoder_for_another_model_fails_startup_and_releases_connections(self):
         self.embedder.probe_dim.return_value = 768
         with self.assertRaises(RetrievalError) as ctx:
-            rs.build_retrieval_stack({}, SETTINGS)
+            rs.build_retrieval_stack(CONFIG, SETTINGS)
         self.assertEqual(ctx.exception.code, "VECTOR_DIM_MISMATCH")
         self.vectors.close.assert_called_once()
         self.metadata.close.assert_called_once()
@@ -108,19 +133,19 @@ class BuildStackTests(unittest.TestCase):
     def test_infra_failure_closes_what_was_opened(self):
         self.vectors.ensure_collection.side_effect = RetrievalError("NOT_READY", "qdrant down", http_status=503)
         with self.assertRaises(RetrievalError):
-            rs.build_retrieval_infra(SETTINGS, {})
+            rs.build_retrieval_infra(CONFIG)
         self.vectors.close.assert_called_once()
         self.metadata.close.assert_called_once()
 
     def test_no_current_model_closes_pg(self):
         self.metadata.get_current_embedding_model.side_effect = RetrievalError("NOT_READY", "no current", http_status=503)
         with self.assertRaises(RetrievalError):
-            rs.build_retrieval_infra(SETTINGS, {})
+            rs.build_retrieval_infra(CONFIG)
         self.metadata.close.assert_called_once()
         rs.QdrantVectorStore.assert_not_called()
 
     def test_infra_alone_never_loads_the_onnx_encoder(self):
-        infra = rs.build_retrieval_infra(SETTINGS, {})
+        infra = rs.build_retrieval_infra(CONFIG)
         self.assertEqual(infra.model.id, 7)
         self.embedder_cls.assert_not_called()
 
@@ -128,14 +153,14 @@ class BuildStackTests(unittest.TestCase):
         self.metadata.ping.return_value = {"ok": True}
         self.vectors.ping.return_value = {"ok": False, "detail": "down"}
         self.storage.ping.return_value = {"ok": True}
-        stack = rs.build_retrieval_stack({}, SETTINGS)
+        stack = rs.build_retrieval_stack(CONFIG, SETTINGS)
         self.assertEqual(set(stack.infra.ping()), {"postgres", "qdrant", "storage"})
         self.vectors.close.side_effect = RuntimeError("boom")  # one failure must not skip PG
         stack.close()
         self.metadata.close.assert_called_once()
 
     def test_application_shutdown_closes_the_stack(self):
-        stack = rs.build_retrieval_stack({}, SETTINGS)
+        stack = rs.build_retrieval_stack(CONFIG, SETTINGS)
         http_client = MagicMock()
         http_client.aclose = Mock(return_value=asyncio.sleep(0))
         runtime = ApplicationState(

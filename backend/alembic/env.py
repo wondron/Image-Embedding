@@ -1,4 +1,9 @@
-"""Alembic env — URL from DATABASE_URL / PostgresSettings (no hard-coded secrets).
+"""Alembic env — the database comes from the same config as the application.
+
+Connection: POSTGRES_CONFIG in the effective config (Nacos layered over the local
+YAML, app.core.config.nacos), rendered by PostgresSettings.url(). Programmatic
+callers (tests/test_pg_live.py) can target another database through
+Config.attributes["database_url"].
 
 Schema SSOT is app.models (ORM). Revisions stay hand-reviewed SQL; use
 `alembic check` to confirm the migrated DB matches the models, or
@@ -7,11 +12,12 @@ The categories.path trigger lives only in migrations (not visible to autogenerat
 """
 from __future__ import annotations
 
-import os
+import logging
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import create_engine, pool
+from sqlalchemy.engine import URL, make_url
 
 import app.models  # noqa: F401  registers all 12 tables on Base.metadata
 from app.db.base import Base
@@ -24,23 +30,29 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
-def _database_url() -> str:
-    url = os.getenv("DATABASE_URL", "").strip()
-    if url:
-        return url
-    # Host-side default: localhost (compose service name only works inside docker net)
-    host = os.getenv("POSTGRES_HOST", "localhost")
-    port = os.getenv("POSTGRES_PORT", "5432")
-    user = os.getenv("POSTGRES_USER", "image_emb")
-    password = os.getenv("POSTGRES_PASSWORD", "image_emb")
-    database = os.getenv("POSTGRES_DATABASE", "image_embedding")
-    return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{database}"
+def _database_url() -> URL:
+    explicit = config.attributes.get("database_url")
+    if explicit:
+        return make_url(explicit)
+    from app.core.config.nacos import load_config_once
+    from app.core.config.settings import PostgresSettings, settings
+
+    app_config = load_config_once(settings.nacos, settings.config.yaml_path)
+    url = PostgresSettings.from_config(app_config).url()
+    # NACOS_ENV defaults to prod: say which database is about to be migrated (password masked)
+    nacos = settings.nacos
+    logging.getLogger("alembic.env").info(
+        "target database %s | NACOS_ENV=%s, %s",
+        url,
+        nacos.profile,
+        "Nacos over local YAML" if nacos.enabled else "Nacos disabled, local YAML only",
+    )
+    return url
 
 
 def run_migrations_offline() -> None:
-    url = _database_url()
     context.configure(
-        url=url,
+        url=_database_url(),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -50,13 +62,7 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    configuration = config.get_section(config.config_ini_section) or {}
-    configuration["sqlalchemy.url"] = _database_url()
-    connectable = engine_from_config(
-        configuration,
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    connectable = create_engine(_database_url(), poolclass=pool.NullPool)
     with connectable.connect() as connection:
         context.configure(
             connection=connection,
