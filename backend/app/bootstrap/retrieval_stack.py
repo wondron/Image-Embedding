@@ -18,10 +18,10 @@ from typing import Any, Optional
 
 from app.clients.inference import Embedder
 from app.clients.qdrant import QdrantConnection, QdrantStore
-from app.clients.s3 import build_object_storage
+from app.clients.image_storage import build_image_storage
 from app.core.config.settings import Settings
 from app.repositories.metadata import PgMetadataStore
-from app.repositories.ports import ObjectStoragePort
+from app.repositories.ports import ImageStoragePort
 from app.repositories.vectors import QdrantVectorStore
 from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.delete_image import DeleteImageUseCase, DeletionWorker
@@ -39,7 +39,7 @@ class RetrievalInfra:
 
     metadata: PgMetadataStore
     vectors: QdrantVectorStore
-    storage: ObjectStoragePort
+    storage: ImageStoragePort
     model: ActiveModel
 
     def ping(self) -> dict[str, dict[str, Any]]:
@@ -110,7 +110,7 @@ def build_retrieval_infra(settings: Settings, config: dict[str, Any] | None = No
             )
         )
         vectors.ensure_collection(recreate=False)
-        storage = build_object_storage(settings.s3)
+        storage = build_image_storage(settings.image_storage)
     except BaseException:
         if vectors is not None:
             vectors.close()

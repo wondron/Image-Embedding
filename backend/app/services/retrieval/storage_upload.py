@@ -11,7 +11,7 @@ from typing import Any
 from uuid import UUID
 
 from app.services.retrieval import errors as err
-from app.repositories.ports import ObjectStoragePort
+from app.repositories.ports import ImageStoragePort
 from app.services.retrieval.storage_keys import (
     THUMB_LONG_EDGE,
     guess_ext_from_bytes_header,
@@ -48,7 +48,7 @@ def make_thumb_webp(image_bytes: bytes, *, long_edge: int = THUMB_LONG_EDGE) -> 
 
 
 def put_original_and_thumb(
-    storage: ObjectStoragePort,
+    storage: ImageStoragePort,
     image_id: UUID | str,
     image_bytes: bytes,
     *,

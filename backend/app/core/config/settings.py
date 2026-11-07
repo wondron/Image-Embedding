@@ -194,8 +194,11 @@ class PostgresSettings:
 
 
 @dataclass(frozen=True, slots=True)
-class S3Settings:
-    """Object storage (contract §5). Secrets only via env; mock by default.
+class ImageStorageSettings:
+    """Image storage: originals / thumbnails / staging files (contract §5).
+
+    Any S3-compatible service (AWS S3, MinIO, OSS); env vars keep the S3_* names.
+    Secrets only via env; mock by default.
 
     ASSUMPTION A8: public_base_url is the CDN/bucket HTTPS prefix baked into
     original_url / thumb_url / staged_url. Keys never include scene/category.
@@ -246,7 +249,7 @@ class Settings:
     nacos: NacosSettings = field(default_factory=NacosSettings)
     qdrant: QdrantSettings = field(default_factory=QdrantSettings)
     postgres: PostgresSettings = field(default_factory=PostgresSettings)
-    s3: S3Settings = field(default_factory=S3Settings)
+    image_storage: ImageStorageSettings = field(default_factory=ImageStorageSettings)
     allowed_content_types: frozenset[str] = field(
         default_factory=lambda: frozenset(
             {

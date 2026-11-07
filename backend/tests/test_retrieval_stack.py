@@ -28,7 +28,7 @@ SETTINGS = SimpleNamespace(
         dsn=lambda: "postgresql+psycopg://u:p@h/db", host="h", port=5432, user="u", password="p", database="db"
     ),
     qdrant=SimpleNamespace(url="http://q:6333", host="q", port=6333, collection="", prefer_grpc=True),
-    s3=SimpleNamespace(),
+    image_storage=SimpleNamespace(),
     paths=SimpleNamespace(save_images_dir="save_images"),
 )
 
@@ -67,7 +67,7 @@ class BuildStackTests(unittest.TestCase):
             ("PgMetadataStore", Mock(return_value=self.metadata)),
             ("QdrantStore", Mock(return_value=self.qstore)),
             ("QdrantVectorStore", Mock(return_value=self.vectors)),
-            ("build_object_storage", Mock(return_value=self.storage)),
+            ("build_image_storage", Mock(return_value=self.storage)),
             ("Embedder", self.embedder_cls),
         ):
             p = patch.object(rs, name, value)

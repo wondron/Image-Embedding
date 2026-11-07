@@ -1,7 +1,9 @@
-"""Object storage adapter (contract §5).
+"""Image storage: original images, thumbnails and staging files (contract §5).
 
-Default: MockObjectStorage — builds https URLs from public_base_url + key, no network.
-Optional: S3_USE_BOTO3=1 attempts boto3 (credentials via env names in S3Settings).
+Any S3-compatible service (AWS S3, MinIO, Aliyun OSS) behind ImageStoragePort.
+Default: MockImageStorage — builds https URLs from public_base_url + key, no upload.
+S3_USE_BOTO3=1: S3ImageStorage uploads through boto3 (credentials via env names in
+ImageStorageSettings).
 """
 
 from __future__ import annotations
@@ -12,9 +14,9 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from app.core.config.settings import S3Settings
+from app.core.config.settings import ImageStorageSettings
 from app.services.retrieval import errors as err
-from app.repositories.ports import ObjectStoragePort
+from app.repositories.ports import ImageStoragePort
 from app.services.retrieval.storage_keys import (
     original_key,
     public_url,
@@ -41,10 +43,10 @@ def _key_from_url_or_key(url_or_key: str, public_base_url: str) -> str:
     return raw.lstrip("/")
 
 
-class MockObjectStorage(ObjectStoragePort):
+class MockImageStorage(ImageStoragePort):
     """In-process mock: records puts; optional mirror dir for local bytes."""
 
-    def __init__(self, settings: S3Settings) -> None:
+    def __init__(self, settings: ImageStorageSettings) -> None:
         self.settings = settings
         self.public_base_url = settings.public_base_url
         self.bucket = settings.bucket
@@ -116,10 +118,10 @@ class MockObjectStorage(ObjectStoragePort):
         }
 
 
-class Boto3ObjectStorage(ObjectStoragePort):
+class S3ImageStorage(ImageStoragePort):
     """Optional real S3 via boto3 when S3_USE_BOTO3=1. No secrets in repo."""
 
-    def __init__(self, settings: S3Settings) -> None:
+    def __init__(self, settings: ImageStorageSettings) -> None:
         self.settings = settings
         self.public_base_url = settings.public_base_url
         self.bucket = settings.bucket
@@ -206,13 +208,13 @@ class Boto3ObjectStorage(ObjectStoragePort):
             }
 
 
-def build_object_storage(settings: S3Settings) -> ObjectStoragePort:
+def build_image_storage(settings: ImageStorageSettings) -> ImageStoragePort:
     if settings.use_boto3:
         logger.info("object storage: boto3 driver bucket=%s", settings.bucket)
-        return Boto3ObjectStorage(settings)
+        return S3ImageStorage(settings)
     logger.info(
         "object storage: mock driver base=%s bucket=%s",
         settings.public_base_url,
         settings.bucket,
     )
-    return MockObjectStorage(settings)
+    return MockImageStorage(settings)

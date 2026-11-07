@@ -14,7 +14,7 @@ from typing import Any
 from uuid import UUID
 
 from app.services.retrieval import errors as err
-from app.repositories.ports import MetadataStorePort, ObjectStoragePort, VectorStorePort
+from app.repositories.ports import MetadataStorePort, ImageStoragePort, VectorStorePort
 
 logger = logging.getLogger("retrieval.delete")
 
@@ -41,7 +41,7 @@ class DeleteImageUseCase:
 def process_deletion_queue(
     metadata: MetadataStorePort,
     vectors: VectorStorePort,
-    storage: ObjectStoragePort,
+    storage: ImageStoragePort,
     *,
     limit: int = 50,
 ) -> dict[str, Any]:
@@ -92,7 +92,7 @@ class DeletionWorker:
         self,
         metadata: MetadataStorePort,
         vectors: VectorStorePort,
-        storage: ObjectStoragePort,
+        storage: ImageStoragePort,
     ) -> None:
         self._metadata = metadata
         self._vectors = vectors

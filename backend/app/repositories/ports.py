@@ -1,8 +1,8 @@
 """Retrieval ports: what services/retrieval needs from the outside world.
 
 Implementations: PgMetadataStore (repositories.metadata), QdrantVectorStore
-(repositories.vectors, over clients.qdrant.QdrantStore), Mock/Boto3ObjectStorage
-(clients.s3), Embedder (clients.inference; one instance shared with predict).
+(repositories.vectors, over clients.qdrant.QdrantStore), Mock/S3ImageStorage
+(clients.image_storage), Embedder (clients.inference; one instance shared with predict).
 Wiring: app.bootstrap.retrieval_stack.
 
 PG v0.1: point id == images.id (uuid). Collection/dim/distance come from the
@@ -182,7 +182,7 @@ class FlyBFallbackPort(ABC):
         raise NotImplementedError
 
 
-class ObjectStoragePort(ABC):
+class ImageStoragePort(ABC):
     """S3/OSS object storage (contract §5). Returns full https URLs for DB columns."""
 
     @abstractmethod

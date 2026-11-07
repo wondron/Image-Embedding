@@ -27,7 +27,7 @@ from app.services.retrieval.embedding_validate import validate_embedding
 from app.repositories.ports import (
     EmbeddingPort,
     MetadataStorePort,
-    ObjectStoragePort,
+    ImageStoragePort,
     VectorStorePort,
 )
 from app.services.retrieval.scene_membership import build_qdrant_payload
@@ -81,7 +81,7 @@ class IndexImageUseCase:
         metadata: MetadataStorePort,
         *,
         model: ActiveModel,
-        storage: ObjectStoragePort | None = None,
+        storage: ImageStoragePort | None = None,
         indexed_dir: str = "save_images/indexed",
     ) -> None:
         self._embedding = embedding
@@ -184,12 +184,12 @@ class IndexImageUseCase:
             original_url = urls["original_url"]
             thumb_url = urls["thumb_url"]
         else:
-            # TODO(M5+): require ObjectStoragePort in production; stub https for dry-run
+            # TODO(M5+): require ImageStoragePort in production; stub https for dry-run
             base = "https://cdn.example.local/image-embedding"
             original_url = f"{base}/original/{image_id}.{ext}"
             thumb_url = f"{base}/thumb/{image_id}.webp"
             logger.warning(
-                "index without ObjectStoragePort; stub URLs id=%s (wire storage in stack)",
+                "index without ImageStoragePort; stub URLs id=%s (wire storage in stack)",
                 image_id,
             )
             # Best-effort local mirror for debug
