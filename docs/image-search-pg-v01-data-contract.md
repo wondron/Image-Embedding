@@ -427,7 +427,7 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | **删除** | 软删 status | 删图 API → `image_deletions` 流水线 |
 | **Health** | 聚合 Qdrant+MySQL | 改探 PG + Qdrant(current collection) +（可选）S3；回报 current model/collection |
 
-**结果卡形状**：旧 SSOT §9 统一 wire **仍作废**（见 §0.1）。前后端统一 wire 见 **§6.1（已拍 2026-11-05 · 一刀切）**；实现须按已拍定案改 BE hit/list 与 FE 适配层。
+**结果卡形状**：旧 SSOT §9 统一 wire **仍作废**（见 §0.1）。前后端统一 wire 见 **§6.1（已拍 2026-11-05 · 一刀切；2026-11-08 更正 `description` 允许、`heating_group` 为对象）**；实现须按已拍定案改 BE hit/list 与 FE 适配层。
 
 **错误码**：MVP 已定码能复用的复用（如 `SEARCH_BAD_SCORE_THRESHOLD`）；uuid/sha 冲突、未知 scene code、无 current 模型等 **TBD 补表**。
 
@@ -439,9 +439,9 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 
 ---
 
-## 6.1 前后端 Wire / 结果卡（**已拍 · 2026-11-05 · 一刀切**）
+## 6.1 前后端 Wire / 结果卡（**已拍 · 2026-11-05 · 一刀切**；**2026-11-08 更正**）
 
-> **状态**：**已拍 · 2026-11-05 · 一刀切**（P1–P12 全按建议）。  
+> **状态**：**已拍 · 2026-11-05 · 一刀切**（P1–P12）。**2026-11-08 总裁拍更正**（以 `backend/app/schemas/retrieval.py` 为准）：`description` 允许（更正 P6）；`heating_group` 改为对象 `{id, code, name}`（更正 W2）。  
 > **本刀交付**：补齐 §6「细字段 TBD（FE 对齐刀）」——只定 **HTTP JSON wire**（snake_case），不复活旧 §9，不写业务代码。  
 > **摸底基线（2026-11-05 本机核实）**：  
 > - BE Search hit（`application/retrieval/search_image.py`）仍吐 FlyB 旧壳：`image_url`/`thumbnail_url`、`site_name`、`text_snippets:[]`、嵌套 `details.{page_url,site,text_snippets,images[]}`；加热时另带 `scene_label`/`heating_group`/`food_state`；envelope 用 `result` + `source=self|empty`（空时 `result` 竟为嵌套 `{results,status,message}` 对象）。  
@@ -462,7 +462,7 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | **P3** | Search envelope 数组键名 | **已拍**：权威键 = `items`（始终 array）；**禁**把对象塞进 `result` | 现状 BE 用 `result`；FE 须只读 `items` |
 | **P4** | 空结果形态 | **已拍**：`source=empty` + `items: []`；可选顶层 `message`；**禁**嵌套空壳 | 对齐 A4；FE 可简化 |
 | **P5** | `title` 是否出现在 wire | **已拍**：**禁**（`images` 无 title 列）；展示名用 `category` / `scene_label` | 现状 BE 用 category_name 冒充 title |
-| **P6** | `description` | **已拍**：结果卡 **禁**（仅 string 也不放） | 表侧 description 属 `scenes`/`heating_groups`，非结果卡 |
+| **P6** | `description` | **已拍更正 2026-11-08**：**允许**。类型 `string`，默认 `""`。Index 请求（`IndexJsonRequest.description`）、Index 响应（`IndexedImage.description`）、Search hit（`SearchHit.description`）、List item（`ListImageItem.description`）均带此字段 | 对应 `images.description`（§2.4 / 迁移 `0003`）；**不进** Qdrant payload；改描述不 bump `payload_version` |
 | **P7** | `site` / `site_name` / `page_url` / `snippets` / `text_snippets` / `details.*` | **已拍**：**全禁**（FlyB 壳） | 本轮无外搜 |
 | **P8** | `scene_label` 类型 | **已拍**：`string \| null`（场景展示名）；禁止随意 object | 若需 id+name 对象另开拍板（见 ASSUMPTION W3） |
 | **P9** | `outputs_heating` 放哪 | **已拍**：**仅 envelope** 布尔；hit 上仅当 true 出现 `heating_group`/`food_state` | 避免双源 |
@@ -506,8 +506,9 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | `label_status` | 否 | `string` | `unlabeled`/`auto`/`verified` |
 | `width` | 否 | `integer \| null` | |
 | `height` | 否 | `integer \| null` | |
+| `description` | 否 | `string` | 图片描述；默认 `""`；与 `images.description` 一致；不进 Qdrant payload |
 | `food_state` | 条件 | `"raw"\|"cooked"\|"frozen"\|null` | **仅当**该 scene `outputs_heating=true` 时可出现 |
-| `heating_group` | 条件 | `string \| null` | 加热组**展示名或 code**（见 W2）；仅加热场景 |
+| `heating_group` | 条件 | `{ "id": int, "code": string, "name": string }` | `HeatingGroup` 对象。**仅当**该次检索对应 scene 的 `outputs_heating=true` 且用例已设置时出现（实现 `exclude_unset`：未设置则键不出现）；`outputs_heating=false` 时不出现 |
 
 **禁字段（Search hit）**——出现即视为违约（实现刀须删）：
 
@@ -519,9 +520,17 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | `page_url` | 外链页；本轮无 |
 | `site` / `site_name` | 站点壳；本轮无 |
 | `similiar` | 错误拼写 |
-| `description` | 结果卡不承载；见 **P6** |
 | `title` | 表无列；**P5 已拍禁** |
 | `source`（hit 级） | 渠道只在 envelope；禁止 hit 自报 flyb/self |
+
+**`description` 三接口口径（2026-11-08 已拍更正）**：
+
+- Index 请求 `IndexJsonRequest.description`：`string`，默认 `""`。
+- Index 响应 `IndexedImage.description`：`string`，默认 `""`。
+- Search `SearchHit.description` 与 List `ListImageItem.description`：`string`，默认 `""`。
+- 列存 `images.description`（§2.4）；**不进** Qdrant payload；修改不 bump `payload_version`。
+
+**`heating_group` 对象口径（2026-11-08 已拍更正）**：形状为 `{ "id": <int>, "code": <string>, "name": <string> }`（`HeatingGroup`）。Search `SearchHit` 与 List `ListImageItem` 仅当该次请求所针对 scene 的 `outputs_heating=true` 且用例已赋值时出现；实现用 `exclude_unset`，未设置则 JSON 键不出现。`outputs_heating=false` 时不出现。Search envelope 的 `outputs_heating` 布尔仍仅在 envelope（P9 不变）。
 
 ### 6.1.2 List item 与 Search 对齐 / 差量（`GET /api/images`）
 
@@ -549,7 +558,8 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | `scene_label` | ✓（按检索 scene） | **通常不出现** | List 无「当前投票 scene 标签」语义；若产品要展示另刀 |
 | `label_status` | 可选 | 可选 | 同 |
 | `width` / `height` | 可选 | 可选 | 同 |
-| `food_state` / `heating_group` | 加热 scene 条件出现 | 同（`outputs_heating`） | 同规则 |
+| `description` | ✓ 默认 `""` | ✓ 默认 `""` | 同；Index `IndexedImage` 亦同 |
+| `food_state` / `heating_group` | 加热 scene 条件出现 | 同（该 scene `outputs_heating=true`） | `heating_group` 为对象 `{id,code,name}`，非 string；出现规则见 §6.1.1 |
 | `created_at` / `updated_at` | **禁**（非检索所需） | 可选 `string`（ISO-8601 / timestamptz 序列化） | List 可展示入库时间 |
 | `image_url` / `thumbnail_url` | **禁**（P2 已拍） | **禁**（P2 已拍） | 双边同时删除（一刀切） |
 | `qdrant_point_id` | 禁 | **禁**（P11 已拍） | 与 `id` 重复 |
@@ -626,7 +636,8 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | `category_id` | （若 UI 需要）`categoryId` | 现状类型可补 |
 | `scenes` | （若 UI 需要）`scenes` | |
 | `scene_label` | `sceneLabel` | string |
-| `heating_group` | `heatingGroup` | |
+| `description` | `description` | 默认 `""`；一对一，勿猜其它字段 |
+| `heating_group` | `heatingGroup` | **对象**；子字段 `id` / `code` / `name` 保持，勿把 `name` 抽成顶层 string |
 | `food_state` | `foodState` | |
 | `width` / `height` | `width` / `height` | |
 | — | `pageUrl` / `siteName` / `snippets` | **恒为 null / []**；适配层可删字段（产品刀） |
@@ -639,8 +650,10 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | `page` / `page_size` / `total` | `page` / `pageSize` / `total` | |
 | `thumb_url` | → `LibraryImageItem.imageUrl`（展示） | 与现 `pickImageDisplayUrl` 目标一致，但**最终只认** `thumb_url` |
 | `original_url` | `originalUrl` | |
+| `description` | `description` | 默认 `""`；一对一 |
 | `created_at` | `createdAt` | |
 | `food_state` | `foodState` | |
+| `heating_group` | `heatingGroup` | 对象 `{id,code,name}`；仅加热 scene |
 | `scenes` | `scenes` / `sceneMemberships` | 若未来提供 `scene_memberships` 再扩展；本草案不强制 |
 
 ### 6.1.5 相对现状的删除 / 改名清单（破坏性）
@@ -650,6 +663,8 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | Search hit URL | 只吐 `image_url`/`thumbnail_url` | `original_url`/`thumb_url` | **改名 + 删旧键**（P2 一刀切） |
 | Search hit 壳 | `text_snippets`、`details.*`、`page_url`、`site_name` | 无 | **删除**（P7） |
 | Search hit `title` | 用 category_name 冒充 | 无 title（P5 已拍禁） | **删除**（展示走 category/scene_label） |
+| Search/List/Index `description` | 原 P6 结果卡禁 | 允许 `string`，默认 `""`；三接口都有 | **更正 2026-11-08**（以 `retrieval.py` 为准） |
+| Search/List `heating_group` | W2 一期展示名 string | 对象 `{id, code, name}` | **更正 2026-11-08** |
 | Search envelope 键 | `result`（空时可为对象） | `items` 恒 array（P3/P4 已拍） | **改名 + 形态修复**；禁 `result` |
 | Search `source` | `self`/`empty` | 同；禁 flyb | **保持**；文档冻结 |
 | List URL | 双吐权威+别名 | 仅权威（P2 已拍） | **删除别名** |
@@ -676,7 +691,7 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | # | ASSUMPTION | 说明 |
 |---|---|---|
 | W1 | Wire 编码 snake_case；时间字段 ISO-8601 / timestamptz JSON 字符串 | 与全文「Wire 字段名英文」一致；与已拍不冲突 |
-| W2 | `heating_group` 一期先用**展示名 string**；若需稳定 code 另加 `heating_group_code` 字段刀 | 避免与表 `heating_groups.code`  silently 混用；与 P9 不冲突 |
+| W2 | **已拍更正 2026-11-08**：`heating_group` 为对象 `{id: int, code: string, name: string}`（`HeatingGroup`）；不再使用展示名 string | 以 `backend/app/schemas/retrieval.py` 为准；出现条件见 §6.1.1；与 P9 不冲突 |
 | W3 | `scene_label` 类型 **已由 P8 拍为** `string \| null`；若要 `{id,name,code}` 对象须**另开拍板**，不得默默改类型 | 对象形态仍属 ASSUMPTION / 未拍；string 本身已是已拍 |
 | W4 | `source=empty` 时 **HTTP 仍 200** + `ok=true`（与现 BE 一致）；真正校验错误仍走既有 4xx 码 | 与 P4 不冲突 |
 | W5 | 本轮 Search `source` 枚举**不包含** `flyb`；FE 类型里遗留 `flyb` 仅历史兼容，不得新写 | A4 / M0；与已拍不冲突 |
@@ -736,8 +751,9 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | 2026-11-04 | **M0 总裁已拍**：空库重建（无迁移脚本）；FlyB 本轮 OUT OF SCOPE；`scene_labels` 纳入冻结；ASSUMPTION A2–A4 改写 |
 | 2026-11-05 | **§6.1 Wire/结果卡草案（FE 对齐刀）**：Search/List 字段表、external_candidates 最小 wire、FE snake→camel 映射、破坏性清单与 P1–P12 待拍板；更新 §6/§7 交叉引用；未 commit |
 | 2026-11-05 | **§6.1 P1–P12 冻结**：全按建议已拍；**一刀切**；禁 `image_url`/`thumbnail_url` 别名与 FlyB 壳（site/page_url/snippets/details 等）；envelope 权威 `items`；禁 title/description/qdrant_point_id；`external_candidates` 仅定最小 wire（落地 TBD）；未 commit |
+| 2026-11-08 | **§6.1 更正（总裁拍：按后端实现）**：`description` 由禁改为允许（`string`，默认 `""`；Index 请求/Index 响应/Search/List 均有；不进 Qdrant payload）；`heating_group` 由展示名 string 改为对象 `{id, code, name}`（仅 `outputs_heating=true` 时出现）。以 `backend/app/schemas/retrieval.py` 为准。未改其它债。未 commit |
 | 2026-11-05 | **表结构以 ORM 为准**：`app/models/` 按域拆分（category/image/scene/embedding/external）+ `app/core/enums.py`；迁移 `0002` 补齐约束（images 宽高非空且 >0、unlabeled⇔无类别、sha256 32 字节；scene_rules 每场景类别/菜系唯一、label 必须属于同场景（组合外键）；image_scenes 只有人工行可排除；embedding_models dim/input_size >0；external_candidates 审核时间/入库图一致性）、ON DELETE 行为、默认值、索引与注释；`include_all` 场景不再物化到 `image_scenes`。Wire（§6.1）不变 |
 
 ---
 
-*文档结束 · §6.1 Wire **已拍 2026-11-05 · 一刀切**（P1–P12）；实现刀派后端/前端适配*
+*文档结束 · §6.1 Wire **已拍 2026-11-05 · 一刀切**（P1–P12）；**2026-11-08 更正** `description` 允许、`heating_group` 对象；实现刀派后端/前端适配*
