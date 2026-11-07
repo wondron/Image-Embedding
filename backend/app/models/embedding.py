@@ -7,7 +7,6 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Identity, Index, UniqueConstraint, func, text
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import Distance, ModelStatus
@@ -46,9 +45,8 @@ class EmbeddingModel(CreatedAtMixin, Base):
     dim: Mapped[int] = mapped_column(comment="向量维度，如 1024")
     distance: Mapped[Distance] = mapped_column(str_enum(Distance, "distance"), comment="距离")
     input_size: Mapped[int] = mapped_column(comment="输入尺寸，如 336")
-    # 显式写 JSONB：较老的 SQLAlchemy 2.0.x 解析不了字符串化的 dict[str, Any] 注解
     preprocess: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, server_default=text("'{}'::jsonb"), comment="预处理参数：均值方差、缩放方式等"
+        server_default=text("'{}'::jsonb"), comment="预处理参数：均值方差、缩放方式等"
     )
     weights_uri: Mapped[str] = mapped_column(comment="权重位置，含 LoRA")
     collection: Mapped[str] = mapped_column(unique=True, comment="对应的 Qdrant collection 名")

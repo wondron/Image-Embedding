@@ -22,5 +22,5 @@ requests
 qdrant-client>=1.10,<2.0   # query_points API
 # PostgreSQL metadata (M2); MySQL adapter removed (DDD D2)
 psycopg[binary]>=3.1,<4.0
-SQLAlchemy>=2.0,<3.0
+SQLAlchemy>=2.1.8,<2.2     # 2.1 series (needs Python>=3.11); SQLAlchemy minor bumps can break
 alembic>=1.13,<2.0

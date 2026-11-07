@@ -6,18 +6,7 @@
 
 from __future__ import annotations
 
-import sys
-
-if sys.version_info >= (3, 11):
-    from enum import StrEnum
-else:  # Python 3.10（本地 onnxgpu 环境）；镜像里是 3.11
-    from enum import Enum
-
-    class StrEnum(str, Enum):
-        """3.10 兼容：成员即字符串，str() 返回 value。"""
-
-        def __str__(self) -> str:
-            return str(self.value)
+from enum import StrEnum  # SQLAlchemy 2.1 要求 Python>=3.11，直接用标准库
 
 
 class CategoryDomain(StrEnum):

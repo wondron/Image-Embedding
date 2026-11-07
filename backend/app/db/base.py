@@ -26,6 +26,9 @@ class Base(DeclarativeBase):
     type_annotation_map = {
         str: Text,
         datetime: DateTime(timezone=True),
+        # 模型都开了 from __future__ import annotations，Mapped[dict[str, Any]] 是字符串注解，
+        # 由 SQLAlchemy 解析后匹配这一项；早期 2.0.x（如 2.0.25）解析不了，会报
+        # Could not locate SQLAlchemy Core type。版本要求见 requirements.txt（2.1 系列）
         dict[str, Any]: JSONB,
     }
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import create_engine, text
+
 from app.db.common import REQUIRED_TABLES, logger
 from app.services.retrieval import errors as err
 
@@ -38,12 +40,6 @@ class PgConnectionMixin:
         if self._engine is not None:
             return self._engine
         try:
-            from sqlalchemy import create_engine
-        except ImportError as exc:
-            raise err.index_mysql_failed(
-                "SQLAlchemy is not installed; add sqlalchemy>=2 to requirements.txt"
-            ) from exc
-        try:
             self._engine = create_engine(
                 self.dsn,
                 pool_pre_ping=True,
@@ -62,8 +58,6 @@ class PgConnectionMixin:
 
     def ping(self) -> dict[str, Any]:
         try:
-            from sqlalchemy import text
-
             engine = self._get_engine()
             with engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
@@ -89,8 +83,6 @@ class PgConnectionMixin:
         """
         if self._schema_ready:
             return
-        from sqlalchemy import text
-
         engine = self._get_engine()
         try:
             with engine.connect() as conn:
