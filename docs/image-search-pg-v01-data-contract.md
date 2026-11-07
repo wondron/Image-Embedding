@@ -654,6 +654,8 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | Search `source` | `self`/`empty` | 同；禁 flyb | **保持**；文档冻结 |
 | List URL | 双吐权威+别名 | 仅权威（P2 已拍） | **删除别名** |
 | List `qdrant_point_id` | 有 | 无（P11 已拍禁） | **删除** |
+| 元数据库错误码（2026-11-07） | `INDEX_/SEARCH_/LIST_MYSQL_FAILED` | `INDEX_/SEARCH_/LIST_POSTGRES_FAILED`（HTTP 502 不变） | **改名** |
+| `/api/health` 元数据组件（2026-11-07） | `components.mysql` | `components.postgres` | **改名** |
 | FE `normalizeItem` | 读 `details`/`text_snippets`/`similiar`、多 URL 回落 | 单源映射表 | **删除回落枝**（实现刀） |
 | FE `pickSearchImageUrls` | 仍回落 `thumbnail_url`/`image_url` | 只读 thumb/original | **收紧** |
 | 旧 §9 结果卡 | 已作废 | 不复活 | **保持作废** |

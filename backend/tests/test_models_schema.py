@@ -12,9 +12,15 @@ from sqlalchemy.schema import CreateTable
 import app.models  # noqa: F401
 from app.core import enums
 from app.db.base import Base
-from app.db.common import REQUIRED_TABLES
 
 BACKEND = Path(__file__).resolve().parents[1]
+
+# The 12 tables of contract v0.1; ensure_schema checks whatever app.models registers
+TABLES = {
+    "heating_groups", "categories", "category_names", "images", "image_deletions", "scenes",
+    "scene_labels", "scene_rules", "image_scenes", "embedding_models", "image_embeddings",
+    "external_candidates",
+}
 
 
 class ModelsSchemaTests(unittest.TestCase):
@@ -23,9 +29,8 @@ class ModelsSchemaTests(unittest.TestCase):
         configure_mappers()  # relationship strings resolve
         cls.tables = Base.metadata.tables
 
-    def test_models_register_exactly_the_tables_ensure_schema_checks(self):
-        self.assertEqual(set(self.tables), set(REQUIRED_TABLES))
-        self.assertEqual(len(self.tables), 12)
+    def test_models_register_exactly_the_contract_tables(self):
+        self.assertEqual(set(self.tables), TABLES)
 
     def test_every_constraint_and_index_follows_the_naming_convention(self):
         prefixes = ("pk_", "fk_", "uq_", "ck_", "ix_")

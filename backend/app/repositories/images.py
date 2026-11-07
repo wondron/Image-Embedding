@@ -9,6 +9,7 @@ from app.db.common import (
     _row_to_dict,
     _uuid_in_clause,
 )
+from app.db.errors import index_postgres_failed, list_postgres_failed, search_postgres_failed
 from app.services.retrieval import errors as err
 from app.services.retrieval.enum_fields import coerce_enum, coerce_optional_enum
 from app.services.retrieval.image_ids import uuid_from_sha256
@@ -150,14 +151,14 @@ class PgImagesMixin:
                     {"sha": sha},
                 ).fetchone()
             if existing is None:
-                raise err.index_mysql_failed(
+                raise index_postgres_failed(
                     f"insert_image: conflict on id={uid} but no row with this sha256"
                 )
             return _as_uuid(existing[0])
         except err.RetrievalError:
             raise
         except Exception as exc:
-            raise err.index_mysql_failed(
+            raise index_postgres_failed(
                 f"insert_image: {type(exc).__name__}: {exc}"
             ) from exc
 
@@ -227,7 +228,7 @@ class PgImagesMixin:
                 f"update_image violates a constraint: {exc.orig}"
             ) from exc
         except Exception as exc:
-            raise err.index_mysql_failed(
+            raise index_postgres_failed(
                 f"update_image: {type(exc).__name__}: {exc}"
             ) from exc
 
@@ -280,7 +281,7 @@ class PgImagesMixin:
         except err.RetrievalError:
             raise
         except Exception as exc:
-            raise err.search_mysql_failed(
+            raise search_postgres_failed(
                 f"get_active_by_ids: {type(exc).__name__}: {exc}"
             ) from exc
 
@@ -385,7 +386,7 @@ class PgImagesMixin:
                 codes_by = self._scene_codes_by_image(conn, [str(r["id"]) for r in rows])
             return [_decorate(row, codes_by) for row in rows], int(total or 0)
         except Exception as exc:
-            raise err.list_mysql_failed(
+            raise list_postgres_failed(
                 f"list_images: {type(exc).__name__}: {exc}"
             ) from exc
 
@@ -412,4 +413,4 @@ class PgImagesMixin:
                 ).mappings().fetchone()
             return _row_to_dict(row) if row else None
         except Exception as exc:
-            raise err.search_mysql_failed(f"{type(exc).__name__}: {exc}") from exc
+            raise search_postgres_failed(f"{type(exc).__name__}: {exc}") from exc

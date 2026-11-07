@@ -20,7 +20,6 @@ adapter.persistence.qdrant_store.QdrantStore — no second client.
 from __future__ import annotations
 
 from app.db.common import (  # noqa: F401
-    REQUIRED_TABLES,
     _as_uuid,
     _iso,
     _row_to_dict,

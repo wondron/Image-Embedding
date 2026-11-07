@@ -1,13 +1,37 @@
+"""PostgreSQL connection for the metadata store: engine, ping, schema check.
+
+Depends only on app.core and app.db / app.models, never on app.services.
+"""
+
 from __future__ import annotations
 
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
-from sqlalchemy import create_engine, text
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import URL, make_url
 
+import app.models  # noqa: F401  registers every table on Base.metadata
 from app.core.config.constant import PG_CONNECT_TIMEOUT_SECONDS
-from app.db.common import REQUIRED_TABLES, logger
-from app.services.retrieval import errors as err
+from app.core.errors import RetrievalError
+from app.db.base import Base
+from app.db.common import logger
+from app.db.errors import index_postgres_failed
+
+# Migrations shipped with this code: backend/alembic (/app/alembic in the image)
+ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
+
+
+@lru_cache(maxsize=1)
+def expected_revision() -> str:
+    """Head of the Alembic scripts next to this code; the database must be at exactly this revision."""
+    head = ScriptDirectory(str(ALEMBIC_DIR)).get_current_head()
+    if head is None:
+        raise index_postgres_failed(f"no Alembic revisions under {ALEMBIC_DIR}")
+    return head
 
 
 class PgConnectionMixin:
@@ -38,7 +62,7 @@ class PgConnectionMixin:
             )
             return self._engine
         except Exception as exc:
-            raise err.index_mysql_failed(f"{type(exc).__name__}: {exc}") from exc
+            raise index_postgres_failed(f"{type(exc).__name__}: {exc}") from exc
 
     def close(self) -> None:
         """Dispose the connection pool (idempotent); next call reconnects lazily."""
@@ -68,7 +92,8 @@ class PgConnectionMixin:
             }
 
     def ensure_schema(self) -> None:
-        """Verify Alembic-applied 12 tables + ltree. Does NOT auto-migrate.
+        """Check the database is at this code's Alembic head and has ltree plus every
+        table in app.models. Does NOT auto-migrate.
 
         Run: `cd backend && alembic upgrade head` (same POSTGRES_CONFIG as the app).
         """
@@ -76,38 +101,30 @@ class PgConnectionMixin:
             return
         engine = self._get_engine()
         try:
+            expected = expected_revision()
             with engine.connect() as conn:
-                ext = conn.execute(
-                    text("SELECT 1 FROM pg_extension WHERE extname = 'ltree'")
-                ).fetchone()
-                if not ext:
-                    raise err.index_mysql_failed(
-                        "ltree extension missing; run `alembic upgrade head`"
+                current = MigrationContext.configure(conn).get_current_revision()
+                if current != expected:
+                    raise index_postgres_failed(
+                        f"database {self.database!r} is at migration {current or 'none'}, this code "
+                        f"needs {expected}; run `alembic upgrade head` from backend/"
                     )
-                missing: list[str] = []
-                for table in REQUIRED_TABLES:
-                    row = conn.execute(
-                        text(
-                            "SELECT 1 FROM information_schema.tables "
-                            "WHERE table_schema='public' AND table_name=:t"
-                        ),
-                        {"t": table},
-                    ).fetchone()
-                    if not row:
-                        missing.append(table)
+                ltree = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'ltree'")).fetchone()
+                if not ltree:
+                    raise index_postgres_failed("ltree extension missing; run `alembic upgrade head`")
+                missing = sorted(set(Base.metadata.tables) - set(inspect(conn).get_table_names()))
                 if missing:
-                    raise err.index_mysql_failed(
-                        "PG schema incomplete (missing "
-                        + ", ".join(missing)
-                        + "); run `alembic upgrade head` from backend/"
+                    raise index_postgres_failed(
+                        f"tables missing although migration {current} is recorded: {', '.join(missing)}"
                     )
-            self._schema_ready = True
-            logger.info(
-                "pg metadata schema ready db=%s tables=%d",
-                self.database,
-                len(REQUIRED_TABLES),
-            )
-        except err.RetrievalError:
+        except RetrievalError:
             raise
         except Exception as exc:
-            raise err.index_mysql_failed(f"ensure_schema: {exc}") from exc
+            raise index_postgres_failed(f"ensure_schema: {type(exc).__name__}: {exc}") from exc
+        self._schema_ready = True
+        logger.info(
+            "pg metadata schema ready db=%s revision=%s tables=%d",
+            self.database,
+            expected,
+            len(Base.metadata.tables),
+        )

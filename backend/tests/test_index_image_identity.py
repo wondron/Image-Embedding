@@ -59,7 +59,7 @@ class FakeMetadata:
 
     def upsert_image_embedding(self, *, model_id, image_id, synced_version=None):
         if self.ledger_fails:
-            raise RetrievalError("INDEX_MYSQL_FAILED", "ledger down", http_status=502)
+            raise RetrievalError("INDEX_POSTGRES_FAILED", "ledger down", http_status=502)
         self.ledger[(model_id, str(image_id))] = synced_version
 
     def get_category_id_by_code(self, code):
@@ -164,7 +164,7 @@ class IndexImageIdentityTests(unittest.TestCase):
         self.meta.ledger_fails = True
         with self.assertRaises(RetrievalError) as ctx:
             self.use_case().execute_one(image_bytes=_png())
-        self.assertEqual(ctx.exception.code, "INDEX_MYSQL_FAILED")
+        self.assertEqual(ctx.exception.code, "INDEX_POSTGRES_FAILED")
         self.assertEqual(self.meta.deleted, [])  # point + row stay; ledger re-sync later
         self.assertEqual(len(self.vectors.upserts), 1)
 

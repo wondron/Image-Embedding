@@ -377,13 +377,13 @@ MVP 聚合检查（**不**替代现有 `healthz`/`readyz`；二者可继续给�
     "api": { "ok": true },
     "embedding": { "ok": true, "model_path": "config/model/dino/multitask_cls.onnx", "vector_dim": 1024, "embedding_space_id": "es_a1b2c3d4e5f6" },
     "qdrant": { "ok": true, "collection": "image_embeddings", "points_count": 0, "embedding_space_id": "es_a1b2c3d4e5f6" },
-    "mysql": { "ok": true },
+    "postgres": { "ok": true },
     "flyb": { "ok": true, "optional": true }
   }
 }
 ```
 
-规则：`embedding` / `qdrant` / `mysql` 任一不可用 → 整体 `ok=false` 且 HTTP 503。`flyb` 失败 **不**导致 503（兜底可选；但应在 JSON 里标 `ok=false` 便于排障）。
+规则：`embedding` / `qdrant` / `postgres` 任一不可用 → 整体 `ok=false` 且 HTTP 503。`flyb` 失败 **不**导致 503（兜底可选；但应在 JSON 里标 `ok=false` 便于排障）。
 `embedding` / `qdrant` 均应暴露 `embedding_space_id`；若配置与 meta 不一致，对应组件 `ok=false`，并在 `detail`（或同级字段）给出 `configured` / `stored`；整体 503，错误语义同 `VECTOR_SPACE_MISMATCH`。
 
 现网对照：`GET /api/healthz` 轻量存活可保留；`GET /api/readyz` 当前检查 segmentor/clip，与 MVP embedding/qdrant **不一致** —— 后端架构改 ready 语义或让 `/api/health` 专管 MVP，**需实现时对齐，勿静默删旧探针**。
@@ -464,7 +464,7 @@ MVP 聚合检查（**不**替代现有 `healthz`/`readyz`；二者可继续给�
 
 **空页**：`200` + `items: []` + `total: 0`（或 total>0 但 page 超出时 `items: []` 且 `total` 仍为全集计数）。
 
-**错误**：未知 `scene` → `LIST_UNKNOWN_SCENE`；非法 `page`/`page_size` → `VALIDATION_ERROR`；MySQL 失败 → `LIST_MYSQL_FAILED`（502）。
+**错误**：未知 `scene` → `LIST_UNKNOWN_SCENE`；非法 `page`/`page_size` → `VALIDATION_ERROR`；元数据库（PostgreSQL）失败 → `LIST_POSTGRES_FAILED`（502）。
 
 ---
 
@@ -507,16 +507,16 @@ FlyB 返回形态沿用现 `FlyBSearch.parse_results`（数组或 `upstream_empt
 | `INDEX_DUPLICATE_PATH` | 409 | path 唯一冲突 |
 | `INDEX_PATH_TOO_LONG` | 422 | `path` 规范化后长度 > 768（与 `UNIQUE(path(768))` 语义对齐） |
 | `INDEX_UNKNOWN_SCENE` | 422 | `scene`/`scenes` 含未登记短串 |
-| `INDEX_QDRANT_FAILED` | 502 | 写向量失败（MySQL 应回滚或标失败） |
-| `INDEX_MYSQL_FAILED` | 502 | 写元数据失败 |
+| `INDEX_QDRANT_FAILED` | 502 | 写向量失败（元数据应回滚或标失败） |
+| `INDEX_POSTGRES_FAILED` | 502 | 写元数据失败；也用于元数据库连接 / 启动时表结构检查失败 |
 | `SEARCH_BAD_IMAGE` | 422 | 查询图无效 |
 | `SEARCH_UNKNOWN_SCENE` | 422 | 请求 `scene` 未登记 |
 | `SEARCH_BAD_EMBEDDING` | 422 | 查询向量非法 |
 | `SEARCH_QDRANT_FAILED` | 502 | 检索基础设施失败（**不**降级 FlyB） |
-| `SEARCH_MYSQL_FAILED` | 502 | 元数据 join 失败 |
+| `SEARCH_POSTGRES_FAILED` | 502 | 元数据 join 失败 |
 | `SEARCH_FLYB_FAILED` | 502 | 已判定自建空，但 FlyB 超时/HTTP/解析失败 |
 | `VECTOR_DIM_MISMATCH` | 503 | 配置 dim ≠ collection / 模型输出 |
-| `NOT_READY` | 503 | embedding/qdrant/mysql 未就绪 |
+| `NOT_READY` | 503 | embedding/qdrant/postgres 未就绪 |
 | `INTERNAL_ERROR` | 500 | 未分类 |
 
 健康：`GET /api/health` 用组件级 `ok`，不必再拆业务 CODE。
@@ -571,6 +571,7 @@ FlyB 返回形态沿用现 `FlyBSearch.parse_results`（数组或 `upstream_empt
 | 2026-10-28 | **拒识 §3.2.1（初稿）**：字段语义；缺省曾写 null（已废） |
 | 2026-10-28 | **拒识锁数字**：缺省/**null**=**0.55**；显式 `0`=关；可调 0.30–0.95 step 0.01（后改上限 1）；`SEARCH_BAD_SCORE_THRESHOLD`；附录 B device 占位 |
 | 2026-10-28 | **拒识上限**：总裁裁定合法上限 **0.95→1**（含 1）；合法 `{0}∪[0.30,1]`；其余不变 |
+| 2026-11-07 | **去 MySQL 命名（破坏性）**：元数据库已是 PostgreSQL。错误码 `INDEX_MYSQL_FAILED` / `SEARCH_MYSQL_FAILED` / `LIST_MYSQL_FAILED` → `INDEX_POSTGRES_FAILED` / `SEARCH_POSTGRES_FAILED` / `LIST_POSTGRES_FAILED`；`/api/health` 的 `components.mysql` → `components.postgres`；HTTP 状态码不变 |
 
 ---
 

@@ -221,7 +221,7 @@ class RetrievalHttpTests(unittest.TestCase):
         self.assertEqual(body["components"]["embedding"]["vector_dim"], 1024)
         self.assertEqual(body["components"]["embedding"]["embedding_space_id"], "dino:v1")
         self.assertEqual(body["components"]["qdrant"]["points_count"], 3)
-        self.assertTrue(body["components"]["mysql"]["ok"])
+        self.assertTrue(body["components"]["postgres"]["ok"])
         self.assertTrue(body["components"]["flyb"]["disabled"])
 
     def test_health_without_stack_is_503_with_reason(self):
@@ -230,7 +230,7 @@ class RetrievalHttpTests(unittest.TestCase):
         response = self.client.get("/api/health")
         self.assertEqual(response.status_code, 503)
         comps = response.json()["components"]
-        self.assertEqual(comps["mysql"], {"ok": False, "detail": "OperationalError: refused"})
+        self.assertEqual(comps["postgres"], {"ok": False, "detail": "OperationalError: refused"})
         self.assertFalse(comps["embedding"]["ok"])
 
     def test_legacy_file_route_is_gone(self):

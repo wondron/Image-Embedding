@@ -6,8 +6,8 @@ validation, unexpected exceptions) as one envelope:
 
     {"ok": false, "error": "<CODE>", "detail": "<message>", "trace_id": "<id>"}
 
-Domain modules may subclass (services.retrieval.errors.RetrievalError) and add
-their own codes; the generic codes below are shared by every endpoint.
+Domain errors subclass AppError (RetrievalError below) and add their own codes;
+the generic codes below are shared by every endpoint.
 """
 
 from __future__ import annotations
@@ -27,6 +27,15 @@ class AppError(Exception):
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.code!r}, {self.detail!r}, http_status={self.http_status})"
+
+
+class RetrievalError(AppError):
+    """Retrieval error codes (contract §4.2); rendered like any AppError.
+
+    Defined here, below app.services and app.db, so the persistence layer can raise
+    it (app.db.errors) without importing the service package. The code constructors
+    live in app.services.retrieval.errors, which re-exports this class.
+    """
 
 
 # -- generic codes ---------------------------------------------------------------

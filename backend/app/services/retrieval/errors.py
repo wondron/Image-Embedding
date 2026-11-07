@@ -1,12 +1,12 @@
-"""Retrieval domain errors mapped to contract §4.2 codes."""
+"""Retrieval domain errors mapped to contract §4.2 codes.
+
+Metadata-database failures (INDEX_/SEARCH_/LIST_POSTGRES_FAILED) are raised by the
+persistence layer and constructed in app.db.errors.
+"""
 
 from __future__ import annotations
 
-from app.core.errors import AppError
-
-
-class RetrievalError(AppError):
-    """Retrieval error codes (contract §4.2); rendered like any AppError."""
+from app.core.errors import RetrievalError  # also used by callers as err.RetrievalError
 
 
 # Convenience constructors matching §4.2
@@ -38,10 +38,6 @@ def index_qdrant_failed(detail: str) -> RetrievalError:
     return RetrievalError("INDEX_QDRANT_FAILED", detail, http_status=502)
 
 
-def index_mysql_failed(detail: str) -> RetrievalError:
-    return RetrievalError("INDEX_MYSQL_FAILED", detail, http_status=502)
-
-
 def search_bad_image(detail: str) -> RetrievalError:
     return RetrievalError("SEARCH_BAD_IMAGE", detail, http_status=422)
 
@@ -62,10 +58,6 @@ def search_qdrant_failed(detail: str) -> RetrievalError:
     return RetrievalError("SEARCH_QDRANT_FAILED", detail, http_status=502)
 
 
-def search_mysql_failed(detail: str) -> RetrievalError:
-    return RetrievalError("SEARCH_MYSQL_FAILED", detail, http_status=502)
-
-
 def search_flyb_failed(detail: str) -> RetrievalError:
     return RetrievalError("SEARCH_FLYB_FAILED", detail, http_status=502)
 
@@ -81,10 +73,6 @@ def not_ready(detail: str) -> RetrievalError:
 
 def list_unknown_scene(detail: str) -> RetrievalError:
     return RetrievalError("LIST_UNKNOWN_SCENE", detail, http_status=422)
-
-
-def list_mysql_failed(detail: str) -> RetrievalError:
-    return RetrievalError("LIST_MYSQL_FAILED", detail, http_status=502)
 
 
 def validation_error(detail: str) -> RetrievalError:

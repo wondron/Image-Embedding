@@ -15,7 +15,7 @@ from sqlalchemy.engine import make_url
 
 from app.core.config.settings import ApplicationSettings, ImageStorageSettings, PostgresSettings, config_flag
 from app.core.errors import AppError
-from app.repositories.metadata import PgMetadataStore  # importing app.db.session first hits an import cycle
+from app.repositories.metadata import PgMetadataStore
 
 BACKEND = Path(__file__).resolve().parents[1]
 PG = {"host": "pg.internal", "user": "image_emb", "database": "meta"}

@@ -50,11 +50,21 @@ _TRUE = {"1", "true", "yes", "y", "on"}
 _FALSE = {"0", "false", "no", "n", "off", ""}
 
 
+def _parse_bool(value: Any, what: str) -> bool:
+    """环境变量和配置开关共用一套规则：true/1/yes/on、false/0/no/off/空；其他值报错并指出是哪一项。"""
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in _TRUE:
+        return True
+    if text in _FALSE:
+        return False
+    raise ValueError(f"{what} must be true or false, got {value!r}")
+
+
 def _env_bool(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in _TRUE
+    return default if value is None else _parse_bool(value, name)
 
 
 def _nacos_profile_name() -> str:
@@ -198,16 +208,7 @@ def _number(section: Mapping[str, Any], name: str, key: str, default: _T, cast: 
 
 def _flag(section: Mapping[str, Any], name: str, key: str, default: bool) -> bool:
     value = section.get(key)
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    text = str(value).strip().lower()
-    if text in _TRUE:
-        return True
-    if text in _FALSE:
-        return False
-    raise ValueError(f"{name}.{key} must be true or false, got {value!r}")
+    return default if value is None else _parse_bool(value, f"{name}.{key}")
 
 
 def config_flag(config: Mapping[str, Any], name: str, key: str, default: bool) -> bool:

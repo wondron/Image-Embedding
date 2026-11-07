@@ -10,20 +10,6 @@ from uuid import UUID
 
 logger = logging.getLogger("pg_metadata")
 
-REQUIRED_TABLES = (
-    "heating_groups",
-    "categories",
-    "category_names",
-    "images",
-    "image_deletions",
-    "scenes",
-    "scene_labels",
-    "scene_rules",
-    "image_scenes",
-    "embedding_models",
-    "image_embeddings",
-    "external_candidates",
-)
 
 def _iso(val: Any) -> Any:
     if isinstance(val, datetime):
@@ -49,26 +35,19 @@ def _uuid_in_clause(image_ids: list[str]) -> tuple[str, dict[str, str]]:
         parts.append(f"CAST(:{key} AS uuid)")
     return "(" + ", ".join(parts) + ")", params
 
+def _jsonable(value: Any) -> Any:
+    """datetime -> ISO 8601 (naive means UTC), UUID -> str, bytea (sha256) -> hex; the rest as-is."""
+    if isinstance(value, datetime):
+        return _iso(value)
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).hex()
+    return value
+
 def _row_to_dict(row: Any) -> dict[str, Any]:
+    """A result row as a JSON-friendly dict. Converts by value type, so new columns need no edit here."""
     if row is None:
         return {}
-    if hasattr(row, "_mapping"):
-        out = dict(row._mapping)
-    else:
-        out = dict(row)
-    for key in (
-        "created_at",
-        "updated_at",
-        "deleted_at",
-        "embedded_at",
-        "activated_at",
-        "reviewed_at",
-    ):
-        if key in out:
-            out[key] = _iso(out[key])
-    for key in ("id", "image_id"):
-        if key in out and isinstance(out[key], uuid.UUID):
-            out[key] = str(out[key])
-    if "sha256" in out and isinstance(out["sha256"], (bytes, bytearray)):
-        out["sha256"] = bytes(out["sha256"]).hex()
-    return out
+    mapping = row._mapping if hasattr(row, "_mapping") else row
+    return {key: _jsonable(value) for key, value in dict(mapping).items()}

@@ -126,25 +126,6 @@ class QdrantStore:
         self.distance = dist
         self._client = client
 
-    @classmethod
-    def from_config(
-        cls,
-        config: Mapping[str, Any],
-        *,
-        collection: Optional[str] = None,
-        vector_dim: Optional[int] = None,
-        distance: Optional[str] = None,
-    ) -> "QdrantStore":
-        """From a full app config dict (reads QDRANT_CONFIG); explicit args win."""
-        conf = dict(config.get("QDRANT_CONFIG") or {})
-        dim = vector_dim if vector_dim is not None else conf.get("vector_dim", conf.get("vector_size", 0))
-        return cls(
-            QdrantConnection.from_mapping(conf),
-            collection=collection or conf.get("collection") or "",
-            vector_dim=int(dim),
-            distance=distance or conf.get("distance") or "cosine",
-        )
-
     @property
     def client(self) -> Any:
         if self._client is None:

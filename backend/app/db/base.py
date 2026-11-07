@@ -34,16 +34,20 @@ class Base(DeclarativeBase):
 
 
 class CreatedAtMixin:
-    """创建时间。"""
+    """创建时间，由数据库默认值 now() 填入。"""
 
-    # 插入后立即取回数据库生成的值，异步会话里不会触发懒加载
+    # 只对 ORM 会话生效：插入后立即取回数据库生成的值。目前运行时都是手写 SQL，不经过 ORM 会话
     __mapper_args__ = {"eager_defaults": True}
 
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), comment="创建时间")
 
 
 class UpdatedAtMixin:
-    """更新时间。"""
+    """更新时间。
+
+    onupdate=func.now() 只对 SQLAlchemy 自己生成的 UPDATE（ORM / Core 语句）生效。仓储层是手写
+    SQL，UPDATE 里必须自己写 SET updated_at = now()（images、image_scenes 现在都是这样写的）。
+    """
 
     __mapper_args__ = {"eager_defaults": True}
 

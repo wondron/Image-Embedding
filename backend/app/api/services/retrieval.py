@@ -271,8 +271,8 @@ _FLYB_DISABLED = {"ok": False, "optional": True, "disabled": True, "detail": "ou
 def mvp_health(runtime: ApplicationState) -> JSONResponse:
     """GET /api/health: embedding / qdrant / metadata status of the retrieval stack.
 
-    Wire keys kept for compatibility: "mysql" = PostgreSQL metadata; "flyb" always
-    disabled. Does not replace /api/healthz or /api/readyz.
+    "postgres" is the metadata database; "flyb" is always disabled.
+    Does not replace /api/healthz or /api/readyz.
     """
     ts = datetime.now().astimezone().isoformat(timespec="seconds")
     stack = runtime.retrieval
@@ -287,7 +287,7 @@ def mvp_health(runtime: ApplicationState) -> JSONResponse:
                 "collection": None,  # the real one comes from the current embedding model
                 "embedding_space_id": None,
             },
-            "mysql": {"ok": False, "detail": detail},
+            "postgres": {"ok": False, "detail": detail},
             "flyb": dict(_FLYB_DISABLED),
         }
         return JSONResponse(status_code=503, content={"ok": False, "ts": ts, "components": components})
@@ -322,7 +322,7 @@ def mvp_health(runtime: ApplicationState) -> JSONResponse:
             "current_collection": model.collection,
         },
         "qdrant": qdrant,
-        "mysql": metadata,
+        "postgres": metadata,
         "flyb": dict(_FLYB_DISABLED),
     }
     ok = qdrant["ok"] and metadata["ok"]
