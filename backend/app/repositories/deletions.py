@@ -5,8 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from app.db.common import _as_uuid, _row_to_dict
-from app.db.errors import index_postgres_failed
-from app.services.retrieval import errors as err
+from app.core import errors as err
 
 
 class PgDeletionsMixin:
@@ -76,10 +75,10 @@ class PgDeletionsMixin:
                     {"id": uid},
                 ).mappings().fetchone()
             return _row_to_dict(out)
-        except err.RetrievalError:
+        except err.AppError:
             raise
         except Exception as exc:
-            raise index_postgres_failed(
+            raise err.index_postgres_failed(
                 f"enqueue_image_deletion: {type(exc).__name__}: {exc}"
             ) from exc
 
@@ -103,7 +102,7 @@ class PgDeletionsMixin:
                 ).mappings().fetchall()
             return [_row_to_dict(r) for r in rows]
         except Exception as exc:
-            raise index_postgres_failed(
+            raise err.index_postgres_failed(
                 f"list_pending_deletions: {type(exc).__name__}: {exc}"
             ) from exc
 
@@ -124,6 +123,6 @@ class PgDeletionsMixin:
                     {"id": uid},
                 )
         except Exception as exc:
-            raise index_postgres_failed(
+            raise err.index_postgres_failed(
                 f"complete_deletion: {type(exc).__name__}: {exc}"
             ) from exc

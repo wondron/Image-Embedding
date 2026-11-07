@@ -3,7 +3,12 @@
     {"ok": false, "error": "<CODE>", "detail": "<message>", "trace_id": "<id>"}
 
 plus "errors" (field-level list) for request validation. Endpoints raise
-app.core.errors.AppError (or a subclass); nothing builds error JSON by hand.
+app.core.errors.AppError; nothing builds error JSON by hand.
+
+What the client sees vs. what the log keeps (app.core.errors.client_detail):
+internal codes (database, vector store, models) and unexpected exceptions get a
+fixed public message; their detail and cause chain are logged once, here, with
+the trace id.
 """
 
 from __future__ import annotations
@@ -16,8 +21,9 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.core.errors import AppError, code_for_status
+from app.core.errors import AppError, client_detail, code_for_status, internal_error, is_internal
 from app.core.middleware import TRACE_HEADER, get_trace_id
 from app.schemas.common import ErrorResponse
 
@@ -46,13 +52,62 @@ def _location(entry: Mapping[str, Any]) -> str:
     return ".".join(str(part) for part in entry.get("loc") or () if part != "body")
 
 
+def app_error_response(request: Request, exc: AppError) -> JSONResponse:
+    trace_id = get_trace_id(request)
+    if is_internal(exc):
+        # The client gets the public text: the detail and its cause chain live here only.
+        logger.error("%s %s -> %d %s: %s | trace_id=%s", request.method, request.url.path,
+                     exc.http_status, exc.code, exc.detail, trace_id, exc_info=exc)
+    else:
+        level = logging.WARNING if exc.http_status >= 500 else logging.INFO
+        logger.log(level, "%s %s -> %d %s: %s | trace_id=%s", request.method, request.url.path,
+                   exc.http_status, exc.code, exc.detail, trace_id)
+    return error_response(request, exc.code, client_detail(exc), exc.http_status)
+
+
+def unexpected_error_response(request: Request, exc: BaseException) -> JSONResponse:
+    # Details stay in the log (with the trace id); clients get a generic message.
+    logger.error("unhandled error %s %s | trace_id=%s", request.method, request.url.path,
+                 get_trace_id(request), exc_info=exc)
+    generic = internal_error("unhandled exception")
+    return error_response(request, generic.code, client_detail(generic), generic.http_status)
+
+
+class UnhandledErrorMiddleware:
+    """Unexpected exceptions -> the INTERNAL_ERROR envelope, from inside the CORS middleware.
+
+    Starlette runs the `Exception` handler in ServerErrorMiddleware, which wraps every other
+    middleware, so those 500s would reach browsers without CORS headers (shown as a CORS
+    failure instead of the error body). register_middlewares adds this one innermost.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        started = False
+
+        async def send_tracking(message: Message) -> None:
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_tracking)
+        except Exception as exc:
+            if started:  # part of the response is already out; nothing can replace it
+                raise
+            await unexpected_error_response(Request(scope), exc)(scope, receive, send)
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def handle_app_error(request: Request, exc: AppError) -> JSONResponse:
-        level = logging.WARNING if exc.http_status >= 500 else logging.INFO
-        logger.log(level, "%s %s -> %d %s: %s | trace_id=%s", request.method, request.url.path,
-                   exc.http_status, exc.code, exc.detail, get_trace_id(request))
-        return error_response(request, exc.code, exc.detail, exc.http_status)
+        return app_error_response(request, exc)
 
     @app.exception_handler(StarletteHTTPException)
     async def handle_http_exception(request: Request, exc: StarletteHTTPException) -> JSONResponse:
@@ -70,7 +125,5 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def handle_unexpected(request: Request, exc: Exception) -> JSONResponse:
-        # Details stay in the log (with the trace id); clients get a generic message.
-        logger.exception("unhandled error %s %s | trace_id=%s", request.method, request.url.path,
-                         get_trace_id(request))
-        return error_response(request, "INTERNAL_ERROR", "internal server error", 500)
+        # Last resort for failures outside UnhandledErrorMiddleware (or apps without it).
+        return unexpected_error_response(request, exc)

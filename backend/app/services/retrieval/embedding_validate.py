@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from typing import Sequence
 
-from app.services.retrieval import errors as err
+from app.core import errors as err
 from app.repositories.ports import VECTOR_DIM
 
 

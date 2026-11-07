@@ -94,7 +94,6 @@ async def run_url_predict(
     show_text(source, trace_id=trace_id)
     img_bytes = await read_url_bytes(
         img_url,
-        client=runtime.http_client,
         max_image_bytes=runtime.max_image_bytes,
         timeout_s=runtime.http_timeout,
     )

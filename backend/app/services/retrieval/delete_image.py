@@ -13,7 +13,7 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from app.services.retrieval import errors as err
+from app.core import errors as err
 from app.repositories.ports import MetadataStorePort, ImageStoragePort, VectorStorePort
 
 logger = logging.getLogger("retrieval.delete")

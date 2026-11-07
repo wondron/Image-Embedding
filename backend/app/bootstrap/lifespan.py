@@ -7,8 +7,9 @@ import httpx
 from fastapi import FastAPI
 
 from app.bootstrap.state import ApplicationState
+from app.core import errors
 from app.core.config.nacos import NacosConfigProvider, NacosConfigSnapshot
-from app.core.config.settings import Settings, config_flag, settings
+from app.core.config.settings import ImageDownloadSettings, Settings, config_flag, settings
 from app.core.observability.logging import setup_logger
 
 
@@ -99,6 +100,21 @@ def _loaded_embedder_for(runtime: ApplicationState, config: dict):
     return None
 
 
+def apply_download_policy(config: dict) -> None:
+    """IMAGE_DOWNLOAD_CONFIG.trusted_networks for every remote image fetch; read once at startup."""
+    from app.clients import public_image
+
+    try:
+        trusted = ImageDownloadSettings.from_config(config).trusted_networks
+    except ValueError as exc:
+        logger.error("IMAGE_DOWNLOAD_CONFIG ignored, downloads stay public-only: %s", exc)
+        trusted = ()
+    public_image.set_trusted_networks(trusted)
+    if trusted:
+        logger.warning("image downloads also trust %s (IMAGE_DOWNLOAD_CONFIG.trusted_networks)",
+                       ", ".join(str(network) for network in trusted))
+
+
 def _retrieval_enabled(config: dict) -> bool:
     """TOTAL_CONFIG.retrieval_enabled: false skips PG / Qdrant init (predict-only, e.g. host-side debug)."""
     return config_flag(config, "TOTAL_CONFIG", "retrieval_enabled", True)
@@ -154,18 +170,18 @@ def initialize_retrieval(runtime: ApplicationState, embedder) -> None:
         return
 
     from app.bootstrap.retrieval_stack import build_retrieval_stack
-    from app.services.retrieval.errors import RetrievalError
 
     try:
         runtime.retrieval = build_retrieval_stack(runtime.config, runtime.settings, embedder=embedder)
     except Exception as exc:
-        if isinstance(exc, RetrievalError):
-            runtime.retrieval_error = f"{exc.code}: {exc.detail}"
+        # retrieval_error is shown by the health endpoints: an internal code keeps its detail in this log only
+        if isinstance(exc, errors.AppError):
+            runtime.retrieval_error = f"{exc.code}: {errors.client_detail(exc)}"
             runtime.retrieval_error_code = exc.code
         else:
             runtime.retrieval_error = f"{type(exc).__name__}: {exc}"
         if _is_infra_unreachable(exc):
-            logger.warning("Retrieval stack unavailable (infra) | %s | %s", runtime.retrieval_error, _retrieval_local_debug_hint())
+            logger.warning("Retrieval stack unavailable (infra) | %s: %s | %s", type(exc).__name__, exc, _retrieval_local_debug_hint())
         else:
             logger.exception("Retrieval stack initialization failed: %s", exc)
         return
@@ -233,6 +249,7 @@ async def lifespan(app: FastAPI):
     )
     app.state.runtime = runtime
     logger.info("App starting ENV=%s cfg=%s", runtime.settings.application.env, runtime.config_info,)
+    apply_download_policy(config)
     embedder = initialize_embedder(runtime)  # one ONNX session for predict + retrieval
     initialize_food_service(runtime, embedder)
     initialize_retrieval(runtime, embedder)

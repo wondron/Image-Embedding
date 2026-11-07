@@ -14,7 +14,7 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from app.services.retrieval import errors as err
+from app.core import errors as err
 from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.embedding_validate import validate_embedding
 from app.repositories.ports import (
@@ -128,7 +128,7 @@ class SearchImageUseCase:
 
         try:
             vector = self._embedding.embed_bytes(image_bytes)
-        except err.RetrievalError:
+        except err.AppError:
             raise
         except Exception as exc:
             raise err.search_bad_image(f"embed failed: {exc}") from exc

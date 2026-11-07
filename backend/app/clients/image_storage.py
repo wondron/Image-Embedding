@@ -14,7 +14,7 @@ from typing import Any
 from uuid import UUID
 
 from app.core.config.settings import ImageStorageSettings
-from app.services.retrieval import errors as err
+from app.core import errors as err
 from app.repositories.ports import ImageStoragePort
 from app.services.retrieval.storage_keys import (
     original_key,

@@ -72,6 +72,12 @@ class TraceIdMiddleware:
 
 
 def register_middlewares(app: FastAPI) -> None:
+    """Innermost first: each add_middleware wraps the ones added before it."""
+    # Inside CORS, so 500s from unexpected exceptions still carry the CORS headers.
+    # Imported here: app.core.exceptions imports this module.
+    from app.core.exceptions import UnhandledErrorMiddleware
+
+    app.add_middleware(UnhandledErrorMiddleware)
     origins = list(settings.cors.origins)
     app.add_middleware(
         CORSMiddleware,

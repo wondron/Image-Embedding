@@ -47,8 +47,8 @@ def readyz(request: Request) -> dict[str, Any]:
     except AppError:
         raise
     except Exception as exc:
-        logger.exception("readyz failed: %s", exc)
-        raise errors.not_ready(f"not ready: {exc}") from exc
+        logger.exception("readyz failed: %s", exc)  # the exception text stays in the log
+        raise errors.not_ready("not ready: readiness check failed") from exc
 
 
 @router.get("/version")

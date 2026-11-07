@@ -11,7 +11,7 @@ from app.bootstrap import retrieval_stack as rs
 from app.bootstrap.state import ApplicationState
 from app.core.config.settings import ImageStorageSettings
 from app.services.retrieval.active_model import ActiveModel
-from app.services.retrieval.errors import RetrievalError
+from app.core.errors import AppError
 
 ROW = {
     "id": 7,
@@ -42,14 +42,14 @@ class ActiveModelTests(unittest.TestCase):
         self.assertEqual(m.space_id, "dino:v2")
 
     def test_bad_row_is_not_ready(self):
-        with self.assertRaises(RetrievalError) as ctx:
+        with self.assertRaises(AppError) as ctx:
             ActiveModel.from_row({"id": 1})
         self.assertEqual(ctx.exception.code, "NOT_READY")
 
     def test_encoder_dim_must_match(self):
         m = ActiveModel.from_row(ROW)
         m.check_encoder_dim(1024)
-        with self.assertRaises(RetrievalError) as ctx:
+        with self.assertRaises(AppError) as ctx:
             m.check_encoder_dim(768)
         self.assertEqual(ctx.exception.code, "VECTOR_DIM_MISMATCH")
         self.assertIn("dino:v2", ctx.exception.detail)
@@ -124,22 +124,22 @@ class BuildStackTests(unittest.TestCase):
 
     def test_encoder_for_another_model_fails_startup_and_releases_connections(self):
         self.embedder.probe_dim.return_value = 768
-        with self.assertRaises(RetrievalError) as ctx:
+        with self.assertRaises(AppError) as ctx:
             rs.build_retrieval_stack(CONFIG, SETTINGS)
         self.assertEqual(ctx.exception.code, "VECTOR_DIM_MISMATCH")
         self.vectors.close.assert_called_once()
         self.metadata.close.assert_called_once()
 
     def test_infra_failure_closes_what_was_opened(self):
-        self.vectors.ensure_collection.side_effect = RetrievalError("NOT_READY", "qdrant down", http_status=503)
-        with self.assertRaises(RetrievalError):
+        self.vectors.ensure_collection.side_effect = AppError("NOT_READY", "qdrant down", http_status=503)
+        with self.assertRaises(AppError):
             rs.build_retrieval_infra(CONFIG)
         self.vectors.close.assert_called_once()
         self.metadata.close.assert_called_once()
 
     def test_no_current_model_closes_pg(self):
-        self.metadata.get_current_embedding_model.side_effect = RetrievalError("NOT_READY", "no current", http_status=503)
-        with self.assertRaises(RetrievalError):
+        self.metadata.get_current_embedding_model.side_effect = AppError("NOT_READY", "no current", http_status=503)
+        with self.assertRaises(AppError):
             rs.build_retrieval_infra(CONFIG)
         self.metadata.close.assert_called_once()
         rs.QdrantVectorStore.assert_not_called()

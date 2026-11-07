@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from app.core.enums import Distance
-from app.services.retrieval import errors as err
+from app.core import errors as err
 
 
 @dataclass(frozen=True, slots=True)

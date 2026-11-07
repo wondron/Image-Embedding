@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.services.retrieval import errors as err
+from app.core import errors as err
 
 # API-side bound; the column itself is unbounded text.
 MAX_DESCRIPTION_LENGTH = 1000

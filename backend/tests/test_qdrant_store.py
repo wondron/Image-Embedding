@@ -14,7 +14,7 @@ from app.clients.qdrant import (
 )
 from app.repositories.vectors import PAYLOAD_INDEXES, QdrantVectorStore
 from app.services.retrieval.active_model import ActiveModel
-from app.services.retrieval.errors import RetrievalError
+from app.core.errors import AppError
 from app.services.retrieval.search_image import SearchImageUseCase
 
 DIM = 4
@@ -100,7 +100,7 @@ class QdrantVectorStoreTests(unittest.TestCase):
         self.addCleanup(self.vectors.close)
 
     def test_points_are_keyed_by_image_uuid(self):
-        with self.assertRaises(RetrievalError) as ctx:
+        with self.assertRaises(AppError) as ctx:
             self.vectors.upsert(42, unit(1, 0, 0, 0), {})
         self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
 
@@ -110,7 +110,7 @@ class QdrantVectorStoreTests(unittest.TestCase):
         self.vectors.upsert(b, unit(1, 0.2, 0, 0), {"scenes": ["general"], "category_id": 4})
         self.assertEqual([h["id"] for h in self.vectors.search(unit(1, 0, 0, 0), scene="oven")], [str(a)])
         self.assertEqual([h["id"] for h in self.vectors.search(unit(1, 0, 0, 0), filters={"category_id": 4})], [str(b)])
-        with self.assertRaises(RetrievalError) as ctx:
+        with self.assertRaises(AppError) as ctx:
             self.vectors.search([1.0, 0.0])
         self.assertEqual(ctx.exception.code, "SEARCH_QDRANT_FAILED")
         self.vectors.delete(a)
@@ -118,7 +118,7 @@ class QdrantVectorStoreTests(unittest.TestCase):
 
     def test_shape_mismatch_is_vector_dim_mismatch(self):
         wrong = QdrantVectorStore(QdrantStore(MEMORY, collection="c", vector_dim=8, client=self.store.client))
-        with self.assertRaises(RetrievalError) as ctx:
+        with self.assertRaises(AppError) as ctx:
             wrong.ensure_collection()
         self.assertEqual(ctx.exception.code, "VECTOR_DIM_MISMATCH")
 

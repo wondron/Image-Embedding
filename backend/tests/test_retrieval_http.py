@@ -12,7 +12,7 @@ from app.api.v1 import retrieval as routes
 from app.core.exceptions import register_exception_handlers
 from app.bootstrap.state import ApplicationState
 from app.services.retrieval.active_model import ActiveModel
-from app.services.retrieval.errors import RetrievalError
+from app.core.errors import AppError
 
 MODEL = ActiveModel(id=1, name="dino", version="v1", collection="c1", dim=1024, distance="cosine")
 
@@ -154,14 +154,18 @@ class RetrievalHttpTests(unittest.TestCase):
         self.assertNotIn("index_file", self.calls)
 
     def test_index_file_preserves_use_case_error_codes_and_statuses(self):
-        for code, status in (("INDEX_BAD_IMAGE", 422), ("INDEX_QDRANT_FAILED", 502)):
+        # A client error keeps its detail; an internal code (vector store) shows its public message.
+        for code, status, detail in (
+            ("INDEX_BAD_IMAGE", 422, "index failed"),
+            ("INDEX_QDRANT_FAILED", 502, "vector store write failed"),
+        ):
             with self.subTest(code=code):
-                execute_one = Mock(side_effect=RetrievalError(code, "index failed", http_status=status))
+                execute_one = Mock(side_effect=AppError(code, "index failed", http_status=status))
                 self.stack.index_uc.execute_one = execute_one
                 response = self.client.post("/api/index/file", files={"file": ("single.png", b"image", "image/png")})
                 self.assertEqual(response.status_code, status, response.text)
                 body = response.json()
-                self.assertEqual((body["error"], body["detail"]), (code, "index failed"))
+                self.assertEqual((body["error"], body["detail"]), (code, detail))
                 execute_one.assert_called_once_with(image_bytes=b"image", filename="single.png")
 
     def test_index_file_openapi_declares_only_one_required_binary_file(self):

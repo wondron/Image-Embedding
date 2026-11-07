@@ -1,9 +1,7 @@
-import asyncio
 import unittest
 from unittest.mock import Mock, patch
 from uuid import UUID
 
-import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -15,14 +13,14 @@ class PredictEndpointTests(unittest.TestCase):
     def setUp(self):
         self.requests = []
 
-        def image_response(request):
-            self.requests.append(request)
-            return httpx.Response(200, content=b"query-image")
+        def fetch_image(url, **limits):  # the public-host fetcher behind read_url_bytes
+            self.requests.append(url)
+            return b"query-image", "image/png"
 
-        self.http_client = httpx.AsyncClient(transport=httpx.MockTransport(image_response))
-        self.addCleanup(lambda: asyncio.run(self.http_client.aclose()))
+        fetch_patch = patch("app.clients.image_fetch.public_image.fetch_image", side_effect=fetch_image)
+        fetch_patch.start()
+        self.addCleanup(fetch_patch.stop)
         self.runtime = Mock()
-        self.runtime.http_client = self.http_client
         self.runtime.http_timeout = 10
         self.runtime.max_image_bytes = 1024
         self.service = self.runtime.require_food_service.return_value
@@ -45,7 +43,7 @@ class PredictEndpointTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json(), {"ok": True, "result": [], "trace_id": "query-trace"})
-        self.assertEqual(str(self.requests[0].url), "https://query.example/a.png")
+        self.assertEqual(self.requests, ["https://query.example/a.png"])
         self.service.detect.assert_called_once_with(b"query-image", machine_info="", trace_id="query-trace", save_result=False)
 
     def test_url_body_defaults_and_generated_trace_id_are_preserved(self):
@@ -53,7 +51,7 @@ class PredictEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         trace_id = response.json()["trace_id"]
         self.assertEqual(str(UUID(trace_id)), trace_id)
-        self.assertEqual(str(self.requests[0].url), "https://images.example/a.png")
+        self.assertEqual(self.requests, ["https://images.example/a.png"])
         self.service.detect.assert_called_once_with(b"query-image", machine_info=None, trace_id=trace_id, save_result=False)
 
     def test_url_body_fills_fields_not_provided_in_query(self):

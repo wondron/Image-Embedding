@@ -1,14 +1,16 @@
 import base64
+import ipaddress
 import unittest
 from io import BytesIO
 from types import SimpleNamespace
+from unittest.mock import patch
 
-import httpx
 from fastapi import UploadFile
 from PIL import Image
 from starlette.datastructures import Headers
 
 from app.api.uploads import read_upload as read_file_bytes
+from app.clients import image_fetch, public_image
 from app.clients.image_fetch import clean_url, read_url_bytes
 from app.core.errors import AppError
 from app.utils.image import encode_png_base64
@@ -55,66 +57,78 @@ class ImageInputTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(caught.exception.status_code, status)
             self.assertEqual(caught.exception.detail, detail)
 
-    async def download(self, handler, url="https://images.example/a.png", limit=10):
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            return await read_url_bytes(url, client=client, max_image_bytes=limit, timeout_s=7)
+    async def test_url_download_normalizes_and_uses_the_public_image_fetcher(self):
+        with patch.object(image_fetch.public_image, "fetch_image", return_value=(b"image", "image/png")) as fetch:
+            data = await read_url_bytes(" //images.example/a.png \n", max_image_bytes=10, timeout_s=7)
+        self.assertEqual(data, b"image")
+        fetch.assert_called_once_with("https://images.example/a.png", max_bytes=10, total_timeout=7)
 
-    async def test_url_download_normalizes_and_uses_provided_client(self):
-        def handler(request):
-            self.assertEqual(str(request.url), "https://images.example/a.png")
-            return httpx.Response(200, content=b"image")
-        self.assertEqual(await self.download(handler, " //images.example/a.png \n"), b"image")
+    async def test_private_and_loopback_hosts_are_refused_before_any_connection(self):
+        urls = (
+            "http://127.0.0.1/a.png",
+            "http://10.0.0.8/a.png",
+            "http://192.168.1.10/a.png",
+            "http://[::1]/a.png",
+            "http://169.254.169.254/latest/meta-data",
+        )
+        with patch.object(public_image, "_connection", side_effect=AssertionError("must not connect")):
+            for url in urls:
+                with self.subTest(url=url), self.assertRaises(AppError) as caught:
+                    await read_url_bytes(url, max_image_bytes=10, timeout_s=7)
+                self.assertEqual((caught.exception.code, caught.exception.status_code), ("FORBIDDEN_HOST", 403))
 
-    async def test_declared_oversize_is_rejected_before_stream_read_and_closes_response(self):
-        class UnreadStream(httpx.AsyncByteStream):
-            closed = False
+    async def test_fake_ip_proxy_addresses_need_an_explicit_trust_entry(self):
+        fake_ip = "http://198.18.0.32/a.png"  # where a fake-IP proxy resolves every public name
+        with patch.object(public_image, "_connection", side_effect=AssertionError("must not connect")), \
+                self.assertRaises(AppError) as caught:
+            await read_url_bytes(fake_ip, max_image_bytes=10, timeout_s=7)
+        self.assertEqual(caught.exception.code, "FORBIDDEN_HOST")
 
-            async def __aiter__(self):
-                raise AssertionError("oversize response must not be read")
-                yield b""
-
-            async def aclose(self):
-                self.closed = True
-
-        stream = UnreadStream()
+        public_image.set_trusted_networks([ipaddress.ip_network("198.18.0.0/15")])
+        self.addCleanup(public_image.set_trusted_networks, ())
+        with patch.object(public_image, "_connection", side_effect=OSError("reached the connect step")), \
+                self.assertRaises(AppError) as caught:
+            await read_url_bytes(fake_ip, max_image_bytes=10, timeout_s=7)
+        self.assertEqual(caught.exception.code, "DOWNLOAD_FAILED")  # allowed, then the fake connect fails
+        # ports stay restricted to 80 / 443 even for a trusted network
         with self.assertRaises(AppError) as caught:
-            await self.download(lambda request: httpx.Response(200, headers={"Content-Length": "11"}, stream=stream))
-        self.assertEqual(caught.exception.status_code, 413)
-        self.assertTrue(stream.closed)
+            await read_url_bytes("http://198.18.0.32:6333/a.png", max_image_bytes=10, timeout_s=7)
+        self.assertEqual(caught.exception.code, "INVALID_URL")
 
-    async def test_stream_limit_cannot_be_bypassed_by_missing_or_underreported_content_length(self):
-        class OversizeStream(httpx.AsyncByteStream):
-            closed = False
+    async def test_remote_status_is_never_passed_through(self):
+        class Response:
+            def __init__(self, status):
+                self.status = status
 
-            async def __aiter__(self):
-                yield b"x" * 11
-                raise AssertionError("the stream should stop as soon as the limit is exceeded")
+            def getheader(self, name):
+                return None
 
-            async def aclose(self):
-                self.closed = True
+            def close(self):
+                pass
 
-        for headers in ({}, {"Content-Length": "1"}, {"Content-Length": "invalid"}):
-            stream = OversizeStream()
-            with self.subTest(headers=headers), self.assertRaises(AppError) as caught:
-                await self.download(lambda request: httpx.Response(200, headers=headers, stream=stream))
-            self.assertEqual(caught.exception.status_code, 413)
-            self.assertTrue(stream.closed)
+        class Connection:
+            sock = None
 
-    async def test_url_empty_body_and_upstream_status_are_preserved(self):
-        for upstream, body, expected in ((200, b"", 400), (403, b"denied", 403), (404, b"missing", 404)):
-            with self.subTest(upstream=upstream), self.assertRaises(AppError) as caught:
-                await self.download(lambda request: httpx.Response(upstream, content=body))
-            self.assertEqual(caught.exception.status_code, expected)
+            def __init__(self, status):
+                self.response = Response(status)
 
-    async def test_url_transport_failures_map_to_http_errors(self):
-        for error, status in ((httpx.ReadTimeout, 504), (httpx.ConnectError, 502), (httpx.UnsupportedProtocol, 422)):
-            def handler(request):
-                raise error("controlled transport failure", request=request)
-            with self.subTest(error=error), self.assertRaises(AppError) as caught:
-                await self.download(handler)
-            self.assertEqual(caught.exception.status_code, status)
-            if status == 504:
-                self.assertIn("7s", caught.exception.detail)
+            def request(self, *args, **kwargs):
+                pass
+
+            def getresponse(self):
+                return self.response
+
+            def close(self):
+                pass
+
+        target = SimpleNamespace(path="/a.png")
+        for status in (403, 404, 500):
+            with self.subTest(status=status), patch.object(public_image, "_resolve_target", return_value=target), \
+                    patch.object(public_image, "_connection", return_value=Connection(status)), \
+                    self.assertRaises(AppError) as caught:
+                await read_url_bytes("https://images.example/a.png", max_image_bytes=10, timeout_s=7)
+            self.assertEqual((caught.exception.code, caught.exception.status_code), ("DOWNLOAD_FAILED", 502))
+            self.assertIn(f"upstream HTTP {status}", caught.exception.detail)
 
 
 class ImageFormatTests(unittest.TestCase):

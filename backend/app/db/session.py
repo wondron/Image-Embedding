@@ -15,11 +15,10 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import URL, make_url
 
 import app.models  # noqa: F401  registers every table on Base.metadata
+from app.core import errors
 from app.core.config.constant import PG_CONNECT_TIMEOUT_SECONDS
-from app.core.errors import RetrievalError
 from app.db.base import Base
 from app.db.common import logger
-from app.db.errors import index_postgres_failed
 
 # Migrations shipped with this code: backend/alembic (/app/alembic in the image)
 ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
@@ -30,7 +29,7 @@ def expected_revision() -> str:
     """Head of the Alembic scripts next to this code; the database must be at exactly this revision."""
     head = ScriptDirectory(str(ALEMBIC_DIR)).get_current_head()
     if head is None:
-        raise index_postgres_failed(f"no Alembic revisions under {ALEMBIC_DIR}")
+        raise errors.not_ready(f"no Alembic revisions under {ALEMBIC_DIR}")
     return head
 
 
@@ -62,7 +61,7 @@ class PgConnectionMixin:
             )
             return self._engine
         except Exception as exc:
-            raise index_postgres_failed(f"{type(exc).__name__}: {exc}") from exc
+            raise errors.index_postgres_failed(f"create_engine: {type(exc).__name__}: {exc}") from exc
 
     def close(self) -> None:
         """Dispose the connection pool (idempotent); next call reconnects lazily."""
@@ -95,6 +94,8 @@ class PgConnectionMixin:
         """Check the database is at this code's Alembic head and has ltree plus every
         table in app.models. Does NOT auto-migrate.
 
+        A database that is reachable but not migrated is NOT_READY (the message says what to
+        run); a failure to reach or query it is INDEX_POSTGRES_FAILED.
         Run: `cd backend && alembic upgrade head` (same POSTGRES_CONFIG as the app).
         """
         if self._schema_ready:
@@ -105,22 +106,22 @@ class PgConnectionMixin:
             with engine.connect() as conn:
                 current = MigrationContext.configure(conn).get_current_revision()
                 if current != expected:
-                    raise index_postgres_failed(
+                    raise errors.not_ready(
                         f"database {self.database!r} is at migration {current or 'none'}, this code "
                         f"needs {expected}; run `alembic upgrade head` from backend/"
                     )
                 ltree = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'ltree'")).fetchone()
                 if not ltree:
-                    raise index_postgres_failed("ltree extension missing; run `alembic upgrade head`")
+                    raise errors.not_ready("ltree extension missing; run `alembic upgrade head`")
                 missing = sorted(set(Base.metadata.tables) - set(inspect(conn).get_table_names()))
                 if missing:
-                    raise index_postgres_failed(
+                    raise errors.not_ready(
                         f"tables missing although migration {current} is recorded: {', '.join(missing)}"
                     )
-        except RetrievalError:
+        except errors.AppError:
             raise
         except Exception as exc:
-            raise index_postgres_failed(f"ensure_schema: {type(exc).__name__}: {exc}") from exc
+            raise errors.index_postgres_failed(f"ensure_schema: {type(exc).__name__}: {exc}") from exc
         self._schema_ready = True
         logger.info(
             "pg metadata schema ready db=%s revision=%s tables=%d",

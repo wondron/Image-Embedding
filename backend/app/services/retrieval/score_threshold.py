@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 from typing import Optional, Union
 
-from app.services.retrieval import errors as err
+from app.core import errors as err
 
 DEFAULT_SCORE_THRESHOLD = 0.55
 MIN_SCORE_THRESHOLD = 0.30

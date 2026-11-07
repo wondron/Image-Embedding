@@ -114,10 +114,12 @@ class HealthEndpointTests(unittest.TestCase):
         with patch.object(
             health, "get_application_state", side_effect=RuntimeError("missing state")
         ):
-            with self.assertLogs("svc.health", level="ERROR"):
+            with self.assertLogs("svc.health", level="ERROR") as logs:
                 response = self.client.get("/api/readyz")
 
-        self.assert_not_ready(response, "not ready: missing state")
+        self.assert_not_ready(response, "not ready: readiness check failed")
+        self.assertNotIn("missing state", response.text)  # the exception text stays in the log
+        self.assertIn("missing state", "\n".join(logs.output))
 
     def test_liveness_version_and_config_do_not_require_models(self):
         self.runtime.food_service = None

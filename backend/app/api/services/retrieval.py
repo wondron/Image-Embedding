@@ -3,7 +3,7 @@
 Business flow lives in app.services.retrieval (reached through RetrievalStack).
 Functions return the response body as a dict ({ok, trace_id, ...result}); the
 routes' response_model (app.schemas.retrieval) validates and serializes it.
-Failures are raised (AppError / RetrievalError) and rendered by
+Failures are raised as AppError (codes registered in app.core.errors) and rendered by
 app.core.exceptions. Use cases block (ONNX / PG / Qdrant / S3), so async
 handlers run them in the threadpool instead of on the event loop.
 """
@@ -27,7 +27,7 @@ from app.bootstrap.state import ApplicationState
 from app.clients.image_fetch import read_url_bytes
 from app.core.middleware import bind_trace_id
 from app.schemas.retrieval import IndexJsonRequest, SearchJsonRequest
-from app.services.retrieval import errors as err
+from app.core import errors as err
 
 logger = logging.getLogger("svc.retrieval")
 
@@ -157,12 +157,11 @@ def _raise_if_batch_failed_uniformly(outcome: Dict[str, Any]) -> None:
         return
     failed = outcome["failed"]
     for code, fallback in (
-        ("INDEX_PATH_TOO_LONG", "path too long after normalize"),
         ("INDEX_UNKNOWN_SCENE", "unknown scene"),
         ("VALIDATION_ERROR", "validation error"),
     ):
         if failed and all(f.get("error") == code for f in failed):
-            raise err.RetrievalError(code, failed[0].get("detail") or fallback, http_status=422)
+            raise err.AppError(code, failed[0].get("detail") or fallback)
     if all(f.get("error") in {"INDEX_EMPTY_REQUEST", "INDEX_BAD_IMAGE"} for f in failed):
         raise err.index_empty_request("no decodable image in request")
 
@@ -193,7 +192,6 @@ async def search_from_request(runtime: ApplicationState, request: Request) -> Di
     if image_bytes is None:
         image_bytes = await read_url_bytes(
             params.image_url,
-            client=runtime.http_client,
             max_image_bytes=runtime.max_image_bytes,
             timeout_s=runtime.http_timeout,
         )

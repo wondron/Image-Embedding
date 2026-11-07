@@ -15,6 +15,7 @@ namespace 读配置，没法放进配置本身。
 
 from __future__ import annotations
 
+import ipaddress
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -292,6 +293,31 @@ class ImageStorageSettings:
             secret_access_key=_text(section, "secret_access_key"),
             mock_mirror_dir=_text(section, "mock_mirror_dir"),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ImageDownloadSettings:
+    """Remote image downloads (browser proxy and model-input URLs), from IMAGE_DOWNLOAD_CONFIG.
+
+    Only public hosts are fetched. trusted_networks are treated as public too: keep it empty
+    in production; a machine behind a fake-IP proxy lists 198.18.0.0/15 and 2001:2::/48.
+    """
+
+    trusted_networks: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = ()
+
+    @classmethod
+    def from_config(cls, config: Mapping[str, Any]) -> ImageDownloadSettings:
+        name = "IMAGE_DOWNLOAD_CONFIG"
+        raw = _section(config, name).get("trusted_networks") or []
+        if not isinstance(raw, (list, tuple)):
+            raise ValueError(f"{name}.trusted_networks must be a list of CIDR blocks, got {raw!r}")
+        networks = []
+        for item in raw:
+            try:
+                networks.append(ipaddress.ip_network(str(item).strip(), strict=False))
+            except ValueError:
+                raise ValueError(f"{name}.trusted_networks: invalid network {item!r}") from None
+        return cls(trusted_networks=tuple(networks))
 
 
 @dataclass(frozen=True, slots=True)

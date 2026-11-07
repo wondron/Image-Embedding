@@ -13,7 +13,13 @@ from unittest.mock import patch
 
 from sqlalchemy.engine import make_url
 
-from app.core.config.settings import ApplicationSettings, ImageStorageSettings, PostgresSettings, config_flag
+from app.core.config.settings import (
+    ApplicationSettings,
+    ImageDownloadSettings,
+    ImageStorageSettings,
+    PostgresSettings,
+    config_flag,
+)
 from app.core.errors import AppError
 from app.repositories.metadata import PgMetadataStore
 
@@ -98,6 +104,30 @@ class ImageStorageSettingsTests(unittest.TestCase):
         self.assertIn("IMAGE_STORAGE_CONFIG.access_key_id", ctx.exception.detail)
         storage = S3ImageStorage(ImageStorageSettings(use_boto3=True, access_key_id="ak", secret_access_key="sk"))
         self.assertEqual(storage.bucket, "image-embedding")
+
+
+class ImageDownloadSettingsTests(unittest.TestCase):
+    def test_trusted_networks_default_to_none_and_parse_cidr_blocks(self):
+        self.assertEqual(ImageDownloadSettings.from_config({}).trusted_networks, ())
+        parsed = ImageDownloadSettings.from_config(
+            {"IMAGE_DOWNLOAD_CONFIG": {"trusted_networks": ["198.18.0.0/15", " 2001:2::/48 "]}}
+        )
+        self.assertEqual([str(n) for n in parsed.trusted_networks], ["198.18.0.0/15", "2001:2::/48"])
+        for bad in ("198.18.0.0/15", ["not-a-network"]):
+            with self.subTest(bad=bad), self.assertRaises(ValueError) as ctx:
+                ImageDownloadSettings.from_config({"IMAGE_DOWNLOAD_CONFIG": {"trusted_networks": bad}})
+            self.assertIn("IMAGE_DOWNLOAD_CONFIG.trusted_networks", str(ctx.exception))
+
+    def test_startup_policy_falls_back_to_public_only_on_a_bad_value(self):
+        from app.bootstrap import lifespan
+        from app.clients import public_image
+
+        self.addCleanup(public_image.set_trusted_networks, ())
+        lifespan.apply_download_policy({"IMAGE_DOWNLOAD_CONFIG": {"trusted_networks": ["198.18.0.0/15"]}})
+        self.assertTrue(public_image._is_public("198.18.0.32"))
+        with self.assertLogs("lifespan", level="ERROR"):
+            lifespan.apply_download_policy({"IMAGE_DOWNLOAD_CONFIG": {"trusted_networks": ["bad"]}})
+        self.assertFalse(public_image._is_public("198.18.0.32"))
 
 
 class SwitchAndEnvironmentTests(unittest.TestCase):

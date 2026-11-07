@@ -168,7 +168,7 @@ class PgLiveTests(unittest.TestCase):
         return str(iid)
 
     def test_index_list_and_scene_membership_flow(self):
-        from app.services.retrieval.errors import RetrievalError
+        from app.core.errors import AppError
 
         cat = self.seed_catalog()
         store = self.store()
@@ -197,7 +197,7 @@ class PgLiveTests(unittest.TestCase):
         label = store.map_category_to_scene_label("oven", cat["steak"])
         self.assertEqual(label["code"], "steak")
 
-        with self.assertRaises(RetrievalError):
+        with self.assertRaises(AppError):
             store.set_manual_scene_membership(steak_img, "general", is_member=False)
         out = store.set_manual_scene_membership(steak_img, "oven", is_member=False)
         self.assertEqual(out["scene_codes"], ["general"])
@@ -214,15 +214,15 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual(self.sql("SELECT count(*) FROM images").scalar_one(), 1)
 
     def test_update_image_validates_and_maps_constraint_errors(self):
-        from app.services.retrieval.errors import RetrievalError
+        from app.core.errors import AppError
 
         cat = self.seed_catalog()
         store = self.store()
         iid = self.insert(store, 1)
-        with self.assertRaises(RetrievalError) as ctx:
+        with self.assertRaises(AppError) as ctx:
             store.update_image(iid, {"food_state": "boiled"})
         self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
-        with self.assertRaises(RetrievalError) as ctx:
+        with self.assertRaises(AppError) as ctx:
             store.update_image(iid, {"category_id": cat["steak"]})  # still unlabeled
         self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
         store.update_image(iid, {"category_id": cat["steak"], "label_status": "verified"})

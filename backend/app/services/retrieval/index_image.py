@@ -22,7 +22,7 @@ from app.core.enums import FoodState, LabelStatus, License, SourceType
 from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.enum_fields import coerce_enum, coerce_optional_enum
 from app.services.retrieval.image_ids import uuid_from_sha256
-from app.services.retrieval import errors as err
+from app.core import errors as err
 from app.services.retrieval.embedding_validate import validate_embedding
 from app.repositories.ports import (
     EmbeddingPort,
@@ -169,7 +169,7 @@ class IndexImageUseCase:
         # Embed before any write: a failure here leaves no S3 objects or rows behind.
         try:
             vector = self._embedding.embed_bytes(image_bytes)
-        except err.RetrievalError:
+        except err.AppError:
             raise
         except Exception as exc:
             raise err.index_bad_image(f"embed failed: {exc}") from exc
@@ -246,7 +246,7 @@ class IndexImageUseCase:
                     self._metadata.mark_deleted(image_id)
                 except Exception:
                     logger.exception("rollback mark_deleted failed id=%s", image_id)
-            if isinstance(exc, err.RetrievalError):
+            if isinstance(exc, err.AppError):
                 raise
             raise err.index_qdrant_failed(f"{type(exc).__name__}: {exc}") from exc
 
@@ -307,8 +307,10 @@ class IndexImageUseCase:
                         description=item.get("description"),
                     )
                 )
-            except err.RetrievalError as exc:
-                failed.append({"filename": label, "error": exc.code, "detail": exc.detail})
+            except err.AppError as exc:
+                if err.is_internal(exc):  # the client sees the public text; the cause stays in the log
+                    logger.error("index item failed: %s | %s: %s", label, exc.code, exc.detail, exc_info=exc)
+                failed.append({"filename": label, "error": exc.code, "detail": err.client_detail(exc)})
             except Exception:
                 # Details go to the log; the item reports a generic failure.
                 logger.exception("index item failed: %s", label)

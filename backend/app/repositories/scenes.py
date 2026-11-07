@@ -6,8 +6,7 @@ from uuid import UUID
 
 from app.core.enums import SceneOrigin
 from app.db.common import _as_uuid, _row_to_dict, _uuid_in_clause
-from app.db.errors import index_postgres_failed
-from app.services.retrieval import errors as err
+from app.core import errors as err
 from app.services.retrieval.scene_membership import (
     apply_manual_overrides,
     compute_rule_member_scene_ids,
@@ -268,10 +267,10 @@ class PgScenesMixin:
                 "effective_ids": sorted(effective),
                 "payload_version": payload_version,
             }
-        except err.RetrievalError:
+        except err.AppError:
             raise
         except Exception as exc:
-            raise index_postgres_failed(
+            raise err.index_postgres_failed(
                 f"recompute_image_scenes: {type(exc).__name__}: {exc}"
             ) from exc
 

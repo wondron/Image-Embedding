@@ -1,4 +1,4 @@
-"""app.db: layering, error codes, row conversion and the expected migration (no database needed)."""
+"""app.db: layering, row conversion and the expected migration (no database needed)."""
 
 import subprocess
 import sys
@@ -7,11 +7,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from app.core.errors import RetrievalError
-from app.db import errors as db_errors
 from app.db.common import _row_to_dict
 from app.db.session import expected_revision
-from app.services.retrieval import errors as err
 
 BACKEND = Path(__file__).resolve().parents[1]
 
@@ -20,7 +17,7 @@ class LayeringTests(unittest.TestCase):
     def test_db_layer_imports_nothing_from_services(self):
         # Fresh interpreter: importing app.db.session first used to loop back through app.services
         probe = (
-            "import sys, app.db.session, app.db.errors, app.db.common; "
+            "import sys, app.db.session, app.db.common; "
             "print(sorted(m for m in sys.modules if m.startswith('app.services')))"
         )
         out = subprocess.run(
@@ -28,21 +25,6 @@ class LayeringTests(unittest.TestCase):
         )
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(out.stdout.strip(), "[]")
-
-
-class ErrorCodeTests(unittest.TestCase):
-    def test_postgres_failures_are_retrieval_errors_with_postgres_codes(self):
-        cases = {
-            db_errors.index_postgres_failed: "INDEX_POSTGRES_FAILED",
-            db_errors.search_postgres_failed: "SEARCH_POSTGRES_FAILED",
-            db_errors.list_postgres_failed: "LIST_POSTGRES_FAILED",
-        }
-        for factory, code in cases.items():
-            exc = factory("boom")
-            # services catch err.RetrievalError (e.g. per-item failures in batch indexing)
-            self.assertIsInstance(exc, err.RetrievalError)
-            self.assertEqual((exc.code, exc.http_status, exc.detail), (code, 502, "boom"))
-        self.assertIs(err.RetrievalError, RetrievalError)
 
 
 class RowToDictTests(unittest.TestCase):

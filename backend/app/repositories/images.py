@@ -9,8 +9,7 @@ from app.db.common import (
     _row_to_dict,
     _uuid_in_clause,
 )
-from app.db.errors import index_postgres_failed, list_postgres_failed, search_postgres_failed
-from app.services.retrieval import errors as err
+from app.core import errors as err
 from app.services.retrieval.enum_fields import coerce_enum, coerce_optional_enum
 from app.services.retrieval.image_ids import uuid_from_sha256
 from app.services.retrieval.text_fields import normalize_description
@@ -151,14 +150,14 @@ class PgImagesMixin:
                     {"sha": sha},
                 ).fetchone()
             if existing is None:
-                raise index_postgres_failed(
+                raise err.index_postgres_failed(
                     f"insert_image: conflict on id={uid} but no row with this sha256"
                 )
             return _as_uuid(existing[0])
-        except err.RetrievalError:
+        except err.AppError:
             raise
         except Exception as exc:
-            raise index_postgres_failed(
+            raise err.index_postgres_failed(
                 f"insert_image: {type(exc).__name__}: {exc}"
             ) from exc
 
@@ -219,7 +218,7 @@ class PgImagesMixin:
                 conn.execute(text(sql), params)
             if bump:
                 self.recompute_image_scenes(image_id, bump_version=False)
-        except err.RetrievalError:
+        except err.AppError:
             raise
         except IntegrityError as exc:
             # e.g. only one of label_status / category_id patched and the pair
@@ -228,7 +227,7 @@ class PgImagesMixin:
                 f"update_image violates a constraint: {exc.orig}"
             ) from exc
         except Exception as exc:
-            raise index_postgres_failed(
+            raise err.index_postgres_failed(
                 f"update_image: {type(exc).__name__}: {exc}"
             ) from exc
 
@@ -278,10 +277,10 @@ class PgImagesMixin:
                     continue
                 out[iid] = _decorate(row, codes_by)
             return out
-        except err.RetrievalError:
+        except err.AppError:
             raise
         except Exception as exc:
-            raise search_postgres_failed(
+            raise err.search_postgres_failed(
                 f"get_active_by_ids: {type(exc).__name__}: {exc}"
             ) from exc
 
@@ -386,7 +385,7 @@ class PgImagesMixin:
                 codes_by = self._scene_codes_by_image(conn, [str(r["id"]) for r in rows])
             return [_decorate(row, codes_by) for row in rows], int(total or 0)
         except Exception as exc:
-            raise list_postgres_failed(
+            raise err.list_postgres_failed(
                 f"list_images: {type(exc).__name__}: {exc}"
             ) from exc
 
@@ -413,4 +412,4 @@ class PgImagesMixin:
                 ).mappings().fetchone()
             return _row_to_dict(row) if row else None
         except Exception as exc:
-            raise search_postgres_failed(f"{type(exc).__name__}: {exc}") from exc
+            raise err.search_postgres_failed(f"{type(exc).__name__}: {exc}") from exc

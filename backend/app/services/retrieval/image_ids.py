@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 
-from app.services.retrieval import errors as err
+from app.core import errors as err
 
 
 def uuid_from_sha256(sha256_bytes: bytes) -> uuid.UUID:

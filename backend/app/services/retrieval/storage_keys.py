@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from app.services.retrieval import errors as err
+from app.core import errors as err
 
 THUMB_EXT = "webp"
 THUMB_LONG_EDGE = 512

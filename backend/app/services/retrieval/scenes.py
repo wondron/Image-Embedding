@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Optional, Sequence
 
-from app.services.retrieval import errors as err
+from app.core import errors as err
 
 # Contract §2.6 seed codes
 REGISTERED_SCENES = frozenset(

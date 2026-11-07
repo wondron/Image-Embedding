@@ -5,8 +5,7 @@ from uuid import UUID
 
 from app.core.enums import Distance, ModelStatus
 from app.db.common import _as_uuid, _row_to_dict, logger
-from app.db.errors import index_postgres_failed
-from app.services.retrieval import errors as err
+from app.core import errors as err
 
 
 class PgEmbeddingsMixin:
@@ -76,7 +75,7 @@ class PgEmbeddingsMixin:
                         {"id": str(uid)},
                     ).fetchone()
                     if prow is None:
-                        raise index_postgres_failed(
+                        raise err.index_postgres_failed(
                             f"upsert_image_embedding: image {uid} not found"
                         )
                     version = int(prow[0])
@@ -91,9 +90,9 @@ class PgEmbeddingsMixin:
                     ),
                     {"mid": int(model_id), "iid": str(uid), "ver": int(version)},
                 )
-        except err.RetrievalError:
+        except err.AppError:
             raise
         except Exception as exc:
-            raise index_postgres_failed(
+            raise err.index_postgres_failed(
                 f"upsert_image_embedding: {type(exc).__name__}: {exc}"
             ) from exc

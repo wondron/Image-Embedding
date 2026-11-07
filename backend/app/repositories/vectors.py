@@ -2,7 +2,7 @@
 
 Retrieval rules for the vector index live here: point id == images.id (uuid),
 which payload fields are filterable (and indexed), the scene filter, and the
-RetrievalError codes. Payload content comes from
+Qdrant error codes. Payload content comes from
 services.retrieval.scene_membership.build_qdrant_payload; the score threshold
 is decided in services.retrieval.score_threshold (None here = no threshold).
 """
@@ -14,7 +14,7 @@ from uuid import UUID
 
 from app.clients.qdrant import CollectionMismatchError, QdrantStore
 from app.repositories.ports import VectorStorePort
-from app.services.retrieval import errors as err
+from app.core import errors as err
 
 # Filterable payload fields -> Qdrant index schema (contract §4.2)
 PAYLOAD_INDEXES: dict[str, str] = {

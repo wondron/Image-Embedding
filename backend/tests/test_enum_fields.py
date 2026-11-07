@@ -4,7 +4,7 @@ import unittest
 
 from app.core.enums import FoodState, LabelStatus, SourceType
 from app.services.retrieval.enum_fields import coerce_enum, coerce_optional_enum
-from app.services.retrieval.errors import RetrievalError
+from app.core.errors import AppError
 
 
 class EnumFieldTests(unittest.TestCase):
@@ -18,7 +18,7 @@ class EnumFieldTests(unittest.TestCase):
             coerce_enum(SourceType, "", field="source_type", default=SourceType.USER_UPLOAD),
             SourceType.USER_UPLOAD,
         )
-        with self.assertRaises(RetrievalError) as ctx:
+        with self.assertRaises(AppError) as ctx:
             coerce_enum(LabelStatus, None, field="label_status")
         self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
 
@@ -27,7 +27,7 @@ class EnumFieldTests(unittest.TestCase):
         self.assertIsNone(coerce_optional_enum(FoodState, "  ", field="food_state"))
 
     def test_unknown_value_names_field_and_allowed_values(self):
-        with self.assertRaises(RetrievalError) as ctx:
+        with self.assertRaises(AppError) as ctx:
             coerce_optional_enum(FoodState, "boiled", field="food_state")
         self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
         self.assertIn("food_state", str(ctx.exception))

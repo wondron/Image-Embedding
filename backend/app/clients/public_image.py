@@ -1,5 +1,8 @@
 """Download public raster images without exposing a general-purpose URL proxy.
 
+The one fetcher for remote image URLs: the browser download proxy (/api/images/download)
+and model-input URLs (predict, retrieval search, via app.clients.image_fetch).
+
 SSRF-safe: only public addresses (checked after DNS, pinned for the connection),
 ports 80/443, bounded size/time/redirects, content verified as an image.
 Failures raise AppError: INVALID_URL / FORBIDDEN_HOST / FILE_TOO_LARGE /
@@ -15,6 +18,7 @@ import socket
 import threading
 import time
 import warnings
+from collections.abc import Iterable
 from dataclasses import dataclass
 from io import BytesIO
 from urllib.parse import quote, urljoin, urlsplit
@@ -41,8 +45,22 @@ class _Target:
     addresses: tuple[str, ...]
 
 
+# Networks treated as public besides the global internet, set once at startup from
+# IMAGE_DOWNLOAD_CONFIG.trusted_networks (bootstrap.lifespan). Empty in production; a
+# developer machine behind a fake-IP proxy (every name resolves into 198.18.0.0/15 and
+# 2001:2::/48) lists those ranges. Ports, redirects and limits are checked as usual.
+_trusted_networks: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = ()
+
+
+def set_trusted_networks(networks: Iterable[ipaddress.IPv4Network | ipaddress.IPv6Network]) -> None:
+    global _trusted_networks
+    _trusted_networks = tuple(networks)
+
+
 def _is_public(address: str) -> bool:
     ip = ipaddress.ip_address(address)
+    if any(ip in network for network in _trusted_networks):
+        return True
     if not ip.is_global or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
         return False
     # Embedded IPv4 addresses must not provide a route to private networks either.
@@ -139,8 +157,19 @@ def _verify_image(data: bytes) -> str:
         raise errors.unsupported_media_type("The remote file is not a valid supported image.") from exc
 
 
-def fetch_image(url: str) -> tuple[bytes, str]:
-    deadline = time.monotonic() + TOTAL_TIMEOUT
+def _size_label(limit: int) -> str:
+    return f"{limit / 2**20:g} MB" if limit >= 2**20 else f"{limit} bytes"
+
+
+def fetch_image(url: str, *, max_bytes: int | None = None, total_timeout: float | None = None) -> tuple[bytes, str]:
+    """(content, verified media type) of a public image URL.
+
+    max_bytes / total_timeout default to MAX_IMAGE_BYTES / TOTAL_TIMEOUT (read at call time).
+    Every failure is an AppError; an upstream HTTP error is DOWNLOAD_FAILED (502), never its status.
+    """
+    limit = MAX_IMAGE_BYTES if max_bytes is None else int(max_bytes)
+    too_large = f"Image exceeds the {_size_label(limit)} download limit."
+    deadline = time.monotonic() + (TOTAL_TIMEOUT if total_timeout is None else float(total_timeout))
     try:
         for redirect in range(MAX_REDIRECTS + 1):
             target = _resolve_target(url)
@@ -186,19 +215,19 @@ def fetch_image(url: str) -> tuple[bytes, str]:
                                 raise ValueError("negative size")
                         except ValueError as exc:
                             raise errors.download_failed("The image server returned an invalid content length.") from exc
-                        if size > MAX_IMAGE_BYTES:
-                            raise errors.file_too_large("Image exceeds the 15 MB download limit.")
+                        if size > limit:
+                            raise errors.file_too_large(too_large)
                     data = bytearray()
                     while True:
                         timeout = _remaining(deadline)
                         if connection.sock is not None:
                             connection.sock.settimeout(timeout)
-                        chunk = response.read(min(CHUNK_SIZE, MAX_IMAGE_BYTES + 1 - len(data)))
+                        chunk = response.read(min(CHUNK_SIZE, limit + 1 - len(data)))
                         if not chunk:
                             break
                         data.extend(chunk)
-                        if len(data) > MAX_IMAGE_BYTES:
-                            raise errors.file_too_large("Image exceeds the 15 MB download limit.")
+                        if len(data) > limit:
+                            raise errors.file_too_large(too_large)
                 finally:
                     response.close()
             finally:

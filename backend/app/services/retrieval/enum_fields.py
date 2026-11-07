@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any, TypeVar
 
 from app.core.enums import StrEnum
-from app.services.retrieval import errors as err
+from app.core import errors as err
 
 E = TypeVar("E", bound=StrEnum)
 

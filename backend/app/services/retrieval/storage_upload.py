@@ -10,7 +10,7 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from app.services.retrieval import errors as err
+from app.core import errors as err
 from app.repositories.ports import ImageStoragePort
 from app.services.retrieval.storage_keys import (
     THUMB_LONG_EDGE,
@@ -41,7 +41,7 @@ def make_thumb_webp(image_bytes: bytes, *, long_edge: int = THUMB_LONG_EDGE) -> 
             out = io.BytesIO()
             im.save(out, format="WEBP", quality=80, method=4)
             return out.getvalue()
-    except err.RetrievalError:
+    except err.AppError:
         raise
     except Exception as exc:
         raise err.index_bad_image(f"thumb encode failed: {exc}") from exc
