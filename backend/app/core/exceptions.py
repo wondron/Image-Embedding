@@ -54,14 +54,15 @@ def _location(entry: Mapping[str, Any]) -> str:
 
 def app_error_response(request: Request, exc: AppError) -> JSONResponse:
     trace_id = get_trace_id(request)
+    show = f" | show_text={exc.show_text}" if exc.show_text else ""
     if is_internal(exc):
         # The client gets the public text: the detail and its cause chain live here only.
-        logger.error("%s %s -> %d %s: %s | trace_id=%s", request.method, request.url.path,
-                     exc.http_status, exc.code, exc.detail, trace_id, exc_info=exc)
+        logger.error("%s %s -> %d %s: %s | trace_id=%s%s", request.method, request.url.path,
+                     exc.http_status, exc.code, exc.detail, trace_id, show, exc_info=exc)
     else:
         level = logging.WARNING if exc.http_status >= 500 else logging.INFO
-        logger.log(level, "%s %s -> %d %s: %s | trace_id=%s", request.method, request.url.path,
-                   exc.http_status, exc.code, exc.detail, trace_id)
+        logger.log(level, "%s %s -> %d %s: %s | trace_id=%s%s", request.method, request.url.path,
+                   exc.http_status, exc.code, exc.detail, trace_id, show)
     return error_response(request, exc.code, client_detail(exc), exc.http_status)
 
 

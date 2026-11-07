@@ -76,12 +76,21 @@ _UNREGISTERED_5XX = ERROR_CODES["INTERNAL_ERROR"].public_detail or "internal ser
 class AppError(Exception):
     """A failure with a stable code; http_status defaults to the code's registered status."""
 
-    def __init__(self, code: str, detail: str, *, http_status: int | None = None) -> None:
+    def __init__(
+        self,
+        code: str,
+        detail: str,
+        *,
+        http_status: int | None = None,
+        show_text: str | None = None,
+    ) -> None:
         super().__init__(detail)
         spec = ERROR_CODES.get(code)
         self.code = code
         self.detail = detail
         self.http_status = int(http_status if http_status is not None else (spec.http_status if spec else 500))
+        # log-only extra context; never sent to the client envelope
+        self.show_text = show_text or ""
 
     @property
     def status_code(self) -> int:

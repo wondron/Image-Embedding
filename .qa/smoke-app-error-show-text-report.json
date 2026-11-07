@@ -1,0 +1,65 @@
+{
+    "git_head":  "cb32372",
+    "verdict":  "PASS",
+    "items":  [
+                  {
+                      "detail":  "show_text=\u0027请上传 jpg/png\u0027 stored as-is",
+                      "result":  "PASS",
+                      "name":  "AppError stores show_text",
+                      "id":  "ST1"
+                  },
+                  {
+                      "detail":  "omitted/\u0027\u0027/None -\u003e self.show_text == \u0027\u0027",
+                      "result":  "PASS",
+                      "name":  "None/empty/omitted become empty string",
+                      "id":  "ST2-4"
+                  },
+                  {
+                      "detail":  "POST /api/search -\u003e 422 SEARCH_BAD_IMAGE: unsupported image format | trace_id=... | show_text=请上传 jpg/png",
+                      "result":  "PASS",
+                      "name":  "log includes | show_text= when set",
+                      "id":  "L1"
+                  },
+                  {
+                      "detail":  "no empty show_text= fragment; line matches prior style with method/path/status/code/detail/trace_id",
+                      "result":  "PASS",
+                      "name":  "empty/omitted show_text omitted from log",
+                      "id":  "L2-4"
+                  },
+                  {
+                      "detail":  "keys ok/error/detail/trace_id only; show_text absent; ErrorResponse schema has no show_text field",
+                      "result":  "PASS",
+                      "name":  "client ErrorResponse envelope unchanged",
+                      "id":  "E1-2"
+                  },
+                  {
+                      "detail":  "INTERNAL_ERROR -\u003e ERROR with exc_info; client detail remains public \u0027internal server error\u0027; show_text not in body",
+                      "result":  "PASS",
+                      "name":  "internal error logs error+stack and optional show_text",
+                      "id":  "I1"
+                  },
+                  {
+                      "detail":  "VECTOR_DIM_MISMATCH 503 -\u003e WARNING, no stack, show_text attached when set",
+                      "result":  "PASS",
+                      "name":  "non-internal HTTP \u003e=500 logs warning",
+                      "id":  "W1"
+                  },
+                  {
+                      "detail":  "SEARCH_BAD_IMAGE 422 -\u003e INFO",
+                      "result":  "PASS",
+                      "name":  "ordinary business logs info",
+                      "id":  "L1_level"
+                  }
+              ],
+    "timezone":  "Asia/Shanghai",
+    "notes":  "Smoke 19/19 via D:\\01-code\\Image-Embedding\\.qa\\smoke_app_error_show_text.py using onnxgpu Python. Static: AppError.__init__ show_text or \u0027\u0027; app_error_response show = f\u0027 | show_text={exc.show_text}\u0027 if exc.show_text else \u0027\u0027; both log paths append it; error_response builds ErrorResponse only. HEAD cb32372; uncommitted errors.py + exceptions.py. Did not commit.",
+    "dirty":  [
+                  "backend/app/core/errors.py",
+                  "backend/app/core/exceptions.py"
+              ],
+    "timestamp":  "2026-11-08T00:21:50+08:00",
+    "smoke_script":  "D:\\\\01-code\\\\Image-Embedding\\\\.qa\\\\smoke_app_error_show_text.py",
+    "blockers":  [
+
+                 ]
+}
