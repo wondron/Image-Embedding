@@ -10,11 +10,14 @@ import { Dialog } from './components/Dialog'
 import { BatchSearchPanel, type BatchSearchResult } from './components/BatchSearchPanel'
 import { DownloadDialog } from './components/DownloadDialog'
 import { ImageFilePicker } from './components/ImageFilePicker'
-import { downloadImage, getImageSources, safeHttpUrl, searchImages, searchLocalImages } from './lib/search'
-import type { SearchImage, SearchResponse } from './types'
+import { downloadImage } from './lib/downloads'
 import { DEFAULT_SCENE } from './entities/scene'
-import { SourceBadge, displayCategoryLabel } from './entities/search-result'
+import {
+  SourceBadge, displayCategoryLabel, getImageSources, searchGlobalImages, searchLocalImages,
+  type SearchImage, type SearchResponse,
+} from './entities/search-result'
 import { pingApi } from './shared/api'
+import { safeHttpUrl } from './shared/lib'
 import { SceneSelect } from './features/scene-select'
 import {
   ScoreThresholdControl,
@@ -184,7 +187,7 @@ export default function App() {
       const common = { file: mode === 'file' ? file! : undefined, url: mode === 'url' ? url.trim() : undefined, baseUrl: apiBase, signal: controller.signal }
       const result = searchTarget === 'local'
         ? await searchLocalImages({ ...common, scoreThreshold: rejectOff ? 0 : clampScoreThreshold(scoreThreshold), scene })
-        : await searchImages(common)
+        : await searchGlobalImages(common)
       if (activeRequest.current !== controller) return
       setResponse(result); setSearched(true); setElapsed((performance.now() - started) / 1000)
       if (result.message) setNotice(result.message)

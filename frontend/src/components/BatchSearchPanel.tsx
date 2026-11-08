@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CheckCircle2, ChevronLeft, ChevronRight, Circle, Clock3, Images, LoaderCircle, Play, RotateCcw, Square, Trash2, UploadCloud, X, XCircle } from 'lucide-react'
-import { searchImages } from '../lib/search'
+import { searchGlobalImages, type SearchResponse } from '../entities/search-result'
 import { maxBatchImages, selectBatchFiles } from '../lib/batch-search'
 import { ImageFilePicker } from './ImageFilePicker'
-import type { SearchResponse } from '../types'
 import './BatchSearchPanel.css'
 
 type JobStatus = 'pending' | 'running' | 'success' | 'error' | 'cancelled'
@@ -209,7 +208,7 @@ export function BatchSearchPanel({ baseUrl, active: isActive = true, onResult, o
         const started = performance.now()
         let completed: SearchJob | null = null
         try {
-          const response = await searchImages({ file: target.file, baseUrl: requestBase, signal: controller.signal })
+          const response = await searchGlobalImages({ file: target.file, baseUrl: requestBase, signal: controller.signal })
           if (!currentRun()) break
           if (controller.signal.aborted) throw new Error('搜索超时')
           completed = { ...target, status: 'success', response, elapsed: (performance.now() - started) / 1000, error: undefined }

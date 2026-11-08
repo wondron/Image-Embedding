@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { DEFAULT_SCENE, toApiSceneCode } from '../../entities/scene'
-import type { LibraryImageItem } from '../../entities/image'
-import { listImages } from '../../lib/images-api'
+import { listImages, type LibraryImageItem } from '../../entities/image'
 
 export type UseLibraryListOptions = {
   enabled: boolean
@@ -11,9 +10,15 @@ export type UseLibraryListOptions = {
   q?: string
   category?: string | null
   scene: string
+  /** Bump to refetch the same page (retry). */
   reloadKey?: number
 }
 
+/**
+ * One library page from GET /api/images. Refetches when any option changes and aborts the
+ * superseded request. A page past the end comes back with total > 0 and no items; the caller
+ * clamps the page.
+ */
 export function useLibraryList({
   enabled,
   apiBase = '',
@@ -29,48 +34,26 @@ export function useLibraryList({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
-  const [responseScene, setResponseScene] = useState<string>(DEFAULT_SCENE)
-  const abortRef = useRef<AbortController | null>(null)
-  const apiBaseRef = useRef(apiBase)
-  apiBaseRef.current = apiBase
-
-  const reload = useCallback(() => {
-    // parent bumps reloadKey
-  }, [])
 
   useEffect(() => {
     if (!enabled) return
-    abortRef.current?.abort()
     const controller = new AbortController()
-    abortRef.current = controller
-    const requestBase = apiBaseRef.current
-    const apiScene = toApiSceneCode(scene, DEFAULT_SCENE)
     setLoading(true)
     setError(null)
-    void listImages({
+    listImages({
       page,
       pageSize,
       q: q || undefined,
       category: category || undefined,
-      scene: apiScene,
-      baseUrl: requestBase,
+      scene: toApiSceneCode(scene, DEFAULT_SCENE),
+      baseUrl: apiBase,
       signal: controller.signal,
     }).then(result => {
       if (controller.signal.aborted) return
-      const maxPage = Math.max(1, Math.ceil(result.total / pageSize) || 1)
-      if (result.total > 0 && result.items.length === 0 && page > maxPage) {
-        setLoading(false)
-        return { needPage: maxPage as number }
-      }
       setItems(result.items)
       setTotal(result.total)
-      setResponseScene(toApiSceneCode(result.scene, DEFAULT_SCENE))
       setConnected(true)
       setLoading(false)
-      return null
-    }).then(adjust => {
-      // page clamp handled by caller via onNeedPage if we expose it — keep simple here
-      void adjust
     }).catch(cause => {
       if (controller.signal.aborted || (cause instanceof Error && cause.name === 'AbortError')) return
       setItems([])
@@ -81,14 +64,5 @@ export function useLibraryList({
     return () => controller.abort()
   }, [enabled, page, pageSize, q, category, scene, apiBase, reloadKey])
 
-  return {
-    items,
-    total,
-    loading,
-    error,
-    connected,
-    responseScene,
-    reload,
-    setError,
-  }
+  return { items, total, loading, error, connected }
 }

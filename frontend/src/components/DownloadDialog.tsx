@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Archive, CheckCircle2, Download, ExternalLink, FolderOpen, LoaderCircle, RotateCcw, Square, TriangleAlert } from 'lucide-react'
-import type { SearchImage } from '../types'
+import type { SearchImage } from '../entities/search-result'
+import { safeHttpUrl } from '../shared/lib'
 import { Dialog } from './Dialog'
-import { safeHttpUrl } from '../lib/search'
 import { canChooseDownloadDirectory, chooseDownloadDirectory, downloadImages,
   type DownloadDirectory, type DownloadProgress, type DownloadReport } from '../lib/downloads'
 import './DownloadDialog.css'

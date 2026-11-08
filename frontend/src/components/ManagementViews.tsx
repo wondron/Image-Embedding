@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Circle, Clock3, CloudUpload, FolderOpen, ImagePlus, Images, Info, Layers3, Leaf, ListChecks, LoaderCircle, Pencil, Plus, RotateCcw, Search, Square, Tags, Trash2, X, XCircle } from 'lucide-react'
 import { Dialog } from './Dialog'
-import { indexImage } from '../lib/index-api'
-import type { LibraryImageItem } from '../entities/image'
+import { indexImage, type LibraryImageItem } from '../entities/image'
 import { DEFAULT_SCENE, sceneDisplayLabel, toApiSceneCode } from '../entities/scene'
 import { EmptyState, Metric } from '../shared/ui'
 import { EMPTY_COPY } from '../shared/config'
@@ -391,15 +390,15 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
                   className="mg-upload-preview"
                   disabled={!item.imageUrl}
                   onClick={() => setLibraryPreview(item)}
-                  aria-label={item.imageUrl ? `预览 ${item.title ?? item.id}` : '暂无预览'}
+                  aria-label={item.imageUrl ? `预览 ${item.id}` : '暂无预览'}
                 >
                   {item.imageUrl
-                    ? <img src={item.imageUrl} alt={item.title ?? ''} loading="lazy" />
+                    ? <img src={item.imageUrl} alt="" loading="lazy" />
                     : <span className="mg-library-placeholder" aria-hidden="true"><Images size={28} strokeWidth={1.4} /></span>}
                   <span>{item.imageUrl ? '查看图片' : '暂无预览'}</span>
                 </button>
                 <div>
-                  <strong title={item.title ?? item.id}>{item.title ?? '未命名图片'}</strong>
+                  <strong title={item.id}>未命名图片</strong>
                   <small>
                     {item.category ? <span className="mg-category-chip">{item.category}</span> : <span>—</span>}
                     {item.scenes.map(code => <span className="mg-library-scene" key={code}>{sceneDisplayLabel(code)}</span>)}
@@ -422,10 +421,10 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
                   {item.imageUrl
                     ? <img src={item.imageUrl} alt="" className="mg-library-thumb" loading="lazy" />
                     : <span className="mg-library-thumb mg-library-placeholder" aria-hidden="true"><Images size={16} /></span>}
-                  <strong title={item.title ?? item.id}>{item.title ?? '未命名图片'}</strong>
+                  <strong title={item.id}>未命名图片</strong>
                 </button>
                 <span>{item.category ? <span className="mg-category-chip">{item.category}</span> : '—'}</span>
-                <span className="mg-attributes">{item.tags.length ? item.tags.join('、') : '—'}</span>
+                <span className="mg-attributes">—</span>
                 <span>{formatLibraryTime(item.createdAt)}</span>
               </div>
             ))}
@@ -507,9 +506,9 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     {preview && <Dialog title="图片预览" onClose={() => setPreview(null)} wide><img className="mg-dialog-image" src={preview.preview} alt={preview.file.name} /><p className="mg-preview-name">{preview.file.name}</p>{preview.remoteId && <p className="mg-preview-name monospace">入库 id：{preview.remoteId}</p>}{preview.error && <p className="mg-form-error" role="alert">{preview.error}</p>}</Dialog>}
     {libraryPreview && <Dialog title="图片标注" onClose={() => setLibraryPreview(null)} wide>
       {(libraryPreview.originalUrl || libraryPreview.imageUrl)
-        ? <img className="mg-dialog-image" src={libraryPreview.originalUrl ?? libraryPreview.imageUrl!} alt={libraryPreview.title ?? ''} />
+        ? <img className="mg-dialog-image" src={libraryPreview.originalUrl ?? libraryPreview.imageUrl!} alt="" />
         : <div className="mg-empty"><p>暂无预览地址</p></div>}
-      <p className="mg-preview-name">{libraryPreview.title ?? libraryPreview.id}</p>
+      <p className="mg-preview-name">{libraryPreview.id}</p>
       <ImageLabelPanel item={libraryPreview} apiReady={false} />
     </Dialog>}
     {editor && <Dialog title={ingredients.some(item => item.id === editor.id) ? '编辑食材草稿' : '新建食材草稿'} onClose={() => setEditor(null)}>

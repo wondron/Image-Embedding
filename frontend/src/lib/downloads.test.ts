@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { strFromU8, unzipSync } from 'fflate'
-import { canChooseDownloadDirectory, chooseDownloadDirectory, downloadImages, type DownloadDirectory, type DownloadProgress } from './downloads'
-import type { SearchImage } from '../types'
+import { canChooseDownloadDirectory, chooseDownloadDirectory, downloadImage, downloadImages, type DownloadDirectory, type DownloadProgress } from './downloads'
+import { fromPredictResponse, type SearchImage } from '../entities/search-result'
 
 const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 function candidate(id = '1', values: Partial<SearchImage> = {}): SearchImage {
   return { id, title: '同名/:食材', imageUrl: `https://images.example/${id}.jpg`, thumbnailUrl: null,
-    similarity: .87, category: null, pageUrl: 'https://source.example/item', siteName: null,
-    snippets: [], width: null, height: null, raw: {}, ...values }
+    alternateUrls: [], similarity: .87, categoryId: null, category: null, scenes: [], sceneLabel: null,
+    labelStatus: null, description: '', foodState: null, heatingGroup: null, width: null, height: null,
+    pageUrl: 'https://source.example/item', siteName: null, snippets: [], ...values }
 }
 function imageResponse() { return new Response(png, { headers: { 'Content-Type': 'image/png' } }) }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
@@ -46,7 +47,7 @@ describe('downloadImages', () => {
     vi.stubGlobal('fetch', fetcher)
     const result = await downloadImages({ items: [candidate('1', {
       thumbnailUrl: 'https://thumb.example/large.png',
-      raw: { thumbnail_url: { large: 'https://thumb.example/large.png', medium: 'https://thumb.example/medium.png', small: 'https://thumb.example/small.png' } },
+      alternateUrls: ['https://thumb.example/large.png', 'https://thumb.example/medium.png', 'https://thumb.example/small.png'],
     })], mode: 'zip', signal: new AbortController().signal, saveArchive: vi.fn() })
     expect(result.saved).toBe(1)
     expect(result.records[0]).toMatchObject({ originalUrl: 'https://images.example/1.jpg', source: 'https://thumb.example/medium.png' })
@@ -247,5 +248,139 @@ describe('directory saving', () => {
     expect(canChooseDownloadDirectory()).toBe(true)
     await expect(chooseDownloadDirectory()).resolves.toBe(parent)
     expect(picker).toHaveBeenCalledWith({ mode: 'readwrite' })
+  })
+})
+
+describe('downloadImage', () => {
+  /** A card as the 现网 predict adapter builds it from one FlyB document. */
+  const predictItem = (doc: Record<string, unknown>) => fromPredictResponse({ result: [doc] }).items[0]
+  function stubAnchor() {
+    const anchor = { href: '', download: '', click: vi.fn(), remove: vi.fn() }
+    vi.stubGlobal('document', { createElement: vi.fn().mockReturnValue(anchor), body: { appendChild: vi.fn() } })
+    vi.stubGlobal('window', { setTimeout: vi.fn() })
+    return anchor
+  }
+
+  it('tries original then large then medium and stops before requesting small after a successful download', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(new Response('image-data', { headers: { 'Content-Type': 'image/png' } }))
+    vi.stubGlobal('fetch', fetcher)
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:medium')
+    const anchor = stubAnchor()
+    await downloadImage(predictItem({
+      image_url: 'https://img.example/original.png', thumbnail_url: {
+        large: 'https://img.example/large.png', medium: 'https://img.example/medium.png', small: 'https://img.example/small.png',
+      },
+    }))
+    expect(fetcher.mock.calls.map(call => call[0])).toEqual([
+      'https://img.example/original.png', 'https://img.example/large.png', 'https://img.example/medium.png',
+    ])
+    expect(anchor.click).toHaveBeenCalledOnce()
+  })
+
+  it('uses the configured server proxy after CORS failure and retains the original source for filename fallback', async () => {
+    const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError('CORS'))
+      .mockResolvedValueOnce(new Response(new Uint8Array([1, 2, 3])))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:proxy-image')
+    const anchor = stubAnchor()
+    await downloadImage(predictItem({
+      title: 'food', image_url: 'https://example.com/original.webp', thumbnail_url: 'https://example.com/large.png',
+    }), 'http://localhost:8320/')
+    expect(fetchMock.mock.calls.map(call => call[0])).toEqual([
+      'https://example.com/original.webp',
+      'http://localhost:8320/api/images/download?url=https%3A%2F%2Fexample.com%2Foriginal.webp',
+    ])
+    expect(anchor.download).toBe('food.webp')
+    expect(anchor.click).toHaveBeenCalledOnce()
+  })
+
+  it('tries a distinct thumbnail after both original downloads fail, including same-origin proxy configuration', async () => {
+    const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError('CORS'))
+      .mockResolvedValueOnce(new Response(null, { status: 422 }))
+      .mockResolvedValueOnce(new Response('image-data', { headers: { 'Content-Type': 'image/png' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:proxy-image')
+    const anchor = stubAnchor()
+    await downloadImage(predictItem({
+      title: 'food', image_url: 'https://example.com/original.jpg', thumbnail_url: 'https://example.com/large.png',
+    }), '')
+    expect(fetchMock.mock.calls.map(call => call[0])).toEqual([
+      'https://example.com/original.jpg',
+      '/api/images/download?url=https%3A%2F%2Fexample.com%2Foriginal.jpg',
+      'https://example.com/large.png',
+    ])
+    expect(anchor.download).toBe('food.png')
+  })
+
+  it('saves the actual image blob with a safe filename and releases the temporary URL', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('image-bytes', { headers: { 'Content-Type': 'image/png' } })))
+    const createObjectUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test-image')
+    const revokeObjectUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    const anchor = { href: '', download: '', click: vi.fn(), remove: vi.fn() }
+    const appendChild = vi.fn()
+    vi.stubGlobal('document', { createElement: vi.fn().mockReturnValue(anchor), body: { appendChild } })
+    const schedule = vi.fn()
+    vi.stubGlobal('window', { setTimeout: schedule })
+    await downloadImage(predictItem({ title: '食材/西红柿', image_url: 'https://example.com/a.jpg' }))
+    expect(createObjectUrl).toHaveBeenCalledWith(expect.any(Blob))
+    expect(anchor.href).toBe('blob:test-image')
+    expect(anchor.download).toBe('食材_西红柿.png')
+    expect(appendChild).toHaveBeenCalledWith(anchor)
+    expect(anchor.click).toHaveBeenCalledOnce()
+    expect(anchor.remove).toHaveBeenCalledOnce()
+    expect(revokeObjectUrl).not.toHaveBeenCalled()
+    schedule.mock.calls[0][0]()
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:test-image')
+  })
+
+  it('reports blocked cross-origin downloads without claiming success or opening a tab', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('CORS'))
+    const open = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('open', open)
+    await expect(downloadImage(predictItem({ image_url: 'https://example.com/a.png' }))).rejects.toThrow('打开原图')
+    expect(fetchMock).toHaveBeenCalledWith('https://example.com/a.png', {
+      mode: 'cors', credentials: 'omit', signal: expect.any(AbortSignal),
+    })
+    expect(open).not.toHaveBeenCalled()
+  })
+
+  it('does not save an HTML error page returned by an image source', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>denied</html>', { headers: { 'Content-Type': 'text/html' } })))
+    await expect(downloadImage(predictItem({ image_url: 'https://example.com/a.png' }))).rejects.toThrow('图片下载失败')
+  })
+
+  it('downloads a self-built hit from original_url, then thumb_url', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(null, { status: 403 }))
+      .mockResolvedValueOnce(new Response(new Uint8Array([1, 2, 3])))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:thumb')
+    const anchor = stubAnchor()
+    await downloadImage(candidate('hit-1', {
+      title: '番茄', imageUrl: 'https://s3.example/original/hit-1.jpg', thumbnailUrl: 'https://s3.example/thumb/hit-1.webp',
+    }))
+    expect(fetchMock.mock.calls.map(call => call[0])).toEqual([
+      'https://s3.example/original/hit-1.jpg', 'https://s3.example/thumb/hit-1.webp',
+    ])
+    expect(anchor.download).toBe('番茄.webp')
+  })
+
+  it.each(['http', 'network', 'invalid-blob'])('retries a distinct thumbnail after an original %s failure and names the saved source', async failure => {
+    const fetchMock = vi.fn()
+    if (failure === 'http') fetchMock.mockResolvedValueOnce(new Response(null, { status: 403 }))
+    else if (failure === 'network') fetchMock.mockRejectedValueOnce(new TypeError('CORS'))
+    else fetchMock.mockResolvedValueOnce(new Response('<html>denied</html>', { headers: { 'Content-Type': 'text/html' } }))
+    fetchMock.mockResolvedValueOnce(new Response(new Uint8Array([1, 2, 3])))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:thumbnail')
+    const anchor = stubAnchor()
+    await downloadImage(predictItem({
+      title: '食材', image_url: 'https://example.com/original.jpg', thumbnail_url: 'https://example.com/large.webp',
+    }))
+    expect(fetchMock.mock.calls.map(call => call[0])).toEqual(['https://example.com/original.jpg', 'https://example.com/large.webp'])
+    expect(anchor.download).toBe('食材.webp')
+    expect(anchor.click).toHaveBeenCalledOnce()
   })
 })

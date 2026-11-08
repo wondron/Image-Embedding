@@ -1,6 +1,62 @@
 import { strToU8, zip, type Zippable } from 'fflate'
-import type { SearchImage } from '../types'
-import { getImageSources, safeHttpUrl } from './search'
+import { getImageSources, type SearchImage } from '../entities/search-result'
+import { safeHttpUrl } from '../shared/lib'
+
+function downloadName(item: SearchImage, type: string, source: string): string {
+  const suffixes: Record<string, string> = {
+    'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp',
+    'image/gif': 'gif', 'image/avif': 'avif', 'image/bmp': 'bmp', 'image/svg+xml': 'svg',
+  }
+  const pathExtension = new URL(source).pathname.match(/\.(jpe?g|png|webp|gif|avif|bmp|svg)$/i)?.[1]
+  const extension = suffixes[type.toLowerCase()] ?? pathExtension ?? 'img'
+  const filename = item.title.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/[. ]+$/, '').slice(0, 90) || item.id
+  return `${filename}.${extension}`
+}
+
+/** A successful resolution means the browser was asked to save a downloaded blob. */
+export async function downloadImage(item: SearchImage, apiBase?: string): Promise<void> {
+  const sources = getImageSources(item)
+  if (!sources.length) throw new Error('这张图片没有有效的下载地址。')
+  let downloaded: { blob: Blob; source: string } | null = null
+  const attempts = sources.flatMap(source => [
+    { source, requestUrl: source },
+    ...(apiBase !== undefined ? [{ source,
+      requestUrl: `${apiBase.replace(/\/+$/, '')}/api/images/download?url=${encodeURIComponent(source)}`,
+    }] : []),
+  ])
+  for (const { source, requestUrl } of attempts) {
+    try {
+      const response = await fetch(requestUrl, {
+        mode: 'cors', credentials: 'omit', signal: AbortSignal.timeout(30_000),
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const blob = await response.blob()
+      if (!blob.size || (blob.type && !blob.type.startsWith('image/') && blob.type !== 'application/octet-stream')) {
+        throw new Error('源站未返回有效图片')
+      }
+      downloaded = { blob, source }
+      break
+    } catch {
+      // Try the configured download service, then the next thumbnail size.
+    }
+  }
+  if (!downloaded) {
+    throw new Error('图片下载失败，源站可能限制跨域访问。可点击“打开原图”，在新页面中手动保存。')
+  }
+  const { blob, source } = downloaded
+  const objectUrl = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = objectUrl
+  anchor.download = downloadName(item, blob.type, source)
+  document.body.appendChild(anchor)
+  try {
+    anchor.click()
+  } finally {
+    anchor.remove()
+    // Allow the browser to start the save before revoking the temporary URL.
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
+  }
+}
 
 export const MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024
 

@@ -1,118 +1,223 @@
+import {
+  asId,
+  asInteger,
+  asPositiveNumber,
+  asText,
+  asTextList,
+  untrusted,
+  untrustedList,
+  type Untrusted,
+} from '../../shared/lib/parse'
 import { safeHttpUrl } from '../../shared/lib/safeHttpUrl'
-import { DEFAULT_SCENE, normalizeSceneCode } from '../scene'
+import type {
+  HeatingGroupWire,
+  IndexFailureWire,
+  IndexResponseWire,
+  IndexedImageWire,
+  ListImageItemWire,
+  ListImagesResponseWire,
+} from '../../shared/api'
+import { DEFAULT_SCENE, normalizeSceneCode, toApiSceneCode } from '../scene'
 
-type ObjectValue = Record<string, unknown>
+// -- value types (shared by library, index and search) -----------------------------------
 
-function object(value: unknown): ObjectValue {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as ObjectValue
-    : {}
+export type FoodState = 'raw' | 'cooked' | 'frozen'
+export type LabelStatus = 'unlabeled' | 'auto' | 'verified'
+
+/** 加热组, kept as the wire object (§6.1.4: never flatten `name` into a string). */
+export interface HeatingGroup {
+  id: number
+  code: string
+  name: string
 }
-
-function text(value: unknown): string | null {
-  if (typeof value === 'string' && value.trim()) return value.trim()
-  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
-  return null
-}
-
-function positiveNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
-}
-
-function stringList(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value.map(text).filter((entry): entry is string => entry !== null)
-}
-
-export type FoodState = 'raw' | 'cooked' | 'frozen' | null
 
 export interface SceneMembership {
   code: string
-  /** rule | manual — when API absent, omit */
-  origin?: 'rule' | 'manual' | string
+  /** rule | manual — unset until the API reports it. */
+  origin?: 'rule' | 'manual'
 }
 
+/** `food_state` → FoodState; anything else → null. */
+export function parseFoodState(value: unknown): FoodState | null {
+  const state = asText(value)?.toLowerCase()
+  return state === 'raw' || state === 'cooked' || state === 'frozen' ? state : null
+}
+
+/** `label_status` → LabelStatus; anything else → null. */
+export function parseLabelStatus(value: unknown): LabelStatus | null {
+  const status = asText(value)?.toLowerCase()
+  return status === 'unlabeled' || status === 'auto' || status === 'verified' ? status : null
+}
+
+/** `heating_group` → HeatingGroup; null when absent, null, or missing id / code / name. */
+export function parseHeatingGroup(value: unknown): HeatingGroup | null {
+  const group = untrusted<HeatingGroupWire>(value)
+  if (!group) return null
+  const id = asInteger(group.id)
+  const code = asText(group.code)
+  const name = asText(group.name)
+  return id !== null && code && name ? { id, code, name } : null
+}
+
+/** `description` is a string; default "" (P6). Kept as sent. */
+export function parseDescription(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
+/** `scenes` → normalized scene codes, without duplicates. */
+export function parseSceneCodes(value: unknown): string[] {
+  return [...new Set(asTextList(value).map(code => normalizeSceneCode(code)))]
+}
+
+// -- GET /api/images (§6.1.2) -----------------------------------------------------------
+
+/** One library image (ListImageItem; field map §6.1.4). */
 export interface LibraryImageItem {
   id: string
-  /** Display thumb from wire `thumb_url` only (https). */
+  /** Display thumbnail ← `thumb_url` (https only). */
   imageUrl: string | null
-  /** Wire `original_url` only. */
+  /** Full image ← `original_url` (https only). */
   originalUrl: string | null
-  /** Always null — wire has no title (P5). UI may show category / id. */
-  title: string | null
+  categoryId: number | null
+  /** Category display name ← `category`. */
   category: string | null
-  /** Always [] — tags have no PG column. */
-  tags: string[]
   scenes: string[]
-  /** Rich membership when API provides origin; else derived from scenes[]. */
+  /** One entry per scene code; `origin` stays unset until the API reports it. */
   sceneMemberships: SceneMembership[]
-  foodState: FoodState
-  heatingGroup: string | null
-  createdAt: string | null
+  labelStatus: LabelStatus | null
+  description: string
+  /** Sent only for scenes with outputs_heating; null otherwise. */
+  foodState: FoodState | null
+  /** Sent only for scenes with outputs_heating; null otherwise or when the category has none. */
+  heatingGroup: HeatingGroup | null
   width: number | null
   height: number | null
-  raw: Record<string, unknown>
+  createdAt: string | null
+  updatedAt: string | null
 }
 
-/**
- * Display URL: wire `thumb_url` only (List map §6.1.4).
- * FORBIDDEN: image_url / thumbnail_url / path / url aliases (P2).
- */
-export function pickImageDisplayUrl(raw: ObjectValue): string | null {
-  return safeHttpUrl(raw.thumb_url)
+export interface ListImagesResponse {
+  traceId: string | null
+  scene: string
+  page: number
+  pageSize: number
+  total: number
+  items: LibraryImageItem[]
 }
 
-/** Wire `original_url` only. */
-export function pickOriginalUrl(raw: ObjectValue): string | null {
-  return safeHttpUrl(raw.original_url)
-}
-
-function parseFoodState(value: unknown): FoodState {
-  const v = text(value)?.toLowerCase()
-  if (v === 'raw' || v === 'cooked' || v === 'frozen') return v
-  return null
-}
-
-function parseMemberships(raw: ObjectValue): SceneMembership[] {
-  const detailed = raw.scene_memberships
-  if (Array.isArray(detailed)) {
-    return detailed
-      .map(entry => {
-        const row = object(entry)
-        const code = text(row.code) ?? text(row.scene) ?? text(row.scene_code)
-        if (!code) return null
-        const origin = text(row.origin) ?? undefined
-        return { code: normalizeSceneCode(code, code as never) || code, ...(origin ? { origin } : {}) }
-      })
-      .filter((m): m is SceneMembership => m !== null)
-  }
-  return stringList(raw.scenes).map(code => ({ code: normalizeSceneCode(code, code as never) || code }))
-}
-
-export function normalizeLibraryItem(raw: ObjectValue): LibraryImageItem | null {
-  // id only — never qdrant_point_id (P11)
-  const id = text(raw.id) ?? (typeof raw.id === 'number' && Number.isFinite(raw.id) ? String(raw.id) : null)
-  if (!id) return null
-  const memberships = parseMemberships(raw)
-  const scenes = memberships.length
-    ? memberships.map(m => m.code)
-    : stringList(raw.scenes).map(c => normalizeSceneCode(c, c as never) || c)
+/** One `items[]` entry → LibraryImageItem; null when it has no id. */
+export function toLibraryImage(value: unknown): LibraryImageItem | null {
+  const item = untrusted<ListImageItemWire>(value)
+  const id = asId(item?.id)
+  if (!item || !id) return null
+  const scenes = parseSceneCodes(item.scenes)
   return {
     id,
-    imageUrl: pickImageDisplayUrl(raw),
-    originalUrl: pickOriginalUrl(raw),
-    title: null,
-    category: text(raw.category),
-    tags: [],
+    imageUrl: safeHttpUrl(item.thumb_url),
+    originalUrl: safeHttpUrl(item.original_url),
+    categoryId: asInteger(item.category_id),
+    category: asText(item.category),
     scenes,
-    sceneMemberships: memberships,
-    foodState: parseFoodState(raw.food_state),
-    heatingGroup: text(raw.heating_group),
-    createdAt: text(raw.created_at),
-    width: positiveNumber(raw.width),
-    height: positiveNumber(raw.height),
-    raw,
+    sceneMemberships: scenes.map(code => ({ code })),
+    labelStatus: parseLabelStatus(item.label_status),
+    description: parseDescription(item.description),
+    foodState: parseFoodState(item.food_state),
+    heatingGroup: parseHeatingGroup(item.heating_group),
+    width: asPositiveNumber(item.width),
+    height: asPositiveNumber(item.height),
+    createdAt: asText(item.created_at),
+    updatedAt: asText(item.updated_at),
   }
 }
 
-export { DEFAULT_SCENE }
+function intAtLeast(value: unknown, min: number, fallback: number): number {
+  const number = asInteger(value)
+  return number !== null && number >= min ? number : fallback
+}
+
+/** GET /api/images body → ListImagesResponse. `items` must be an array. */
+export function toListImagesResponse(payload: unknown): ListImagesResponse {
+  const body = untrusted<ListImagesResponseWire>(payload)
+  if (!body || !Array.isArray(body.items)) {
+    throw new Error('图库接口返回的数据格式不正确，请检查后端响应。')
+  }
+  return {
+    traceId: asText(body.trace_id),
+    scene: toApiSceneCode(body.scene, DEFAULT_SCENE),
+    page: intAtLeast(body.page, 1, 1),
+    pageSize: intAtLeast(body.page_size, 1, 24),
+    total: intAtLeast(body.total, 0, 0),
+    items: body.items.map(toLibraryImage).filter((item): item is LibraryImageItem => item !== null),
+  }
+}
+
+// -- POST /api/index (§3.1) -------------------------------------------------------------
+
+/** One stored image (IndexedImage); URL names follow LibraryImageItem. */
+export interface IndexedImage {
+  id: string
+  filename: string | null
+  /** Thumbnail ← `thumb_url`. */
+  imageUrl: string | null
+  /** Full image ← `original_url`. */
+  originalUrl: string | null
+  categoryId: number | null
+  scenes: string[]
+  labelStatus: LabelStatus | null
+  foodState: FoodState | null
+  description: string
+  width: number | null
+  height: number | null
+  payloadVersion: number | null
+  createdAt: string | null
+}
+
+/** One file the batch could not store (IndexFailure). */
+export interface IndexFailure {
+  filename: string | null
+  /** Error code, e.g. INDEX_BAD_IMAGE. */
+  error: string | null
+  detail: string | null
+}
+
+export interface IndexResponse {
+  traceId: string | null
+  indexed: IndexedImage[]
+  failed: IndexFailure[]
+}
+
+function toIndexedImage(image: Untrusted<IndexedImageWire>): IndexedImage | null {
+  const id = asId(image.id)
+  if (!id) return null
+  return {
+    id,
+    filename: asText(image.filename),
+    imageUrl: safeHttpUrl(image.thumb_url),
+    originalUrl: safeHttpUrl(image.original_url),
+    categoryId: asInteger(image.category_id),
+    scenes: parseSceneCodes(image.scenes),
+    labelStatus: parseLabelStatus(image.label_status),
+    foodState: parseFoodState(image.food_state),
+    description: parseDescription(image.description),
+    width: asPositiveNumber(image.width),
+    height: asPositiveNumber(image.height),
+    payloadVersion: asInteger(image.payload_version),
+    createdAt: asText(image.created_at),
+  }
+}
+
+/** POST /api/index body → IndexResponse. Missing lists read as empty. */
+export function toIndexResponse(payload: unknown): IndexResponse {
+  const body = untrusted<IndexResponseWire>(payload)
+  return {
+    traceId: asText(body?.trace_id),
+    indexed: untrustedList<IndexedImageWire>(body?.indexed)
+      .map(toIndexedImage)
+      .filter((image): image is IndexedImage => image !== null),
+    failed: untrustedList<IndexFailureWire>(body?.failed).map(failure => ({
+      filename: asText(failure.filename),
+      error: asText(failure.error),
+      detail: asText(failure.detail),
+    })),
+  }
+}

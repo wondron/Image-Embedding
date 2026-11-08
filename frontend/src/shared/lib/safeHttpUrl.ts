@@ -1,11 +1,8 @@
+import { asText } from './parse'
+
 /** Only remote HTTP(S) sources may become clickable links or image sources. Never path → src. */
-
-function text(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
 export function safeHttpUrl(value: unknown): string | null {
-  const candidate = text(value)
+  const candidate = asText(value)
   if (!candidate) return null
   try {
     const url = new URL(candidate.startsWith('//') ? `https:${candidate}` : candidate)
@@ -14,4 +11,9 @@ export function safeHttpUrl(value: unknown): string | null {
   } catch {
     return null
   }
+}
+
+/** Safe HTTP(S) URLs of `values`, in order, without duplicates. */
+export function uniqueHttpUrls(values: readonly unknown[]): string[] {
+  return [...new Set(values.map(safeHttpUrl).filter((url): url is string => url !== null))]
 }
