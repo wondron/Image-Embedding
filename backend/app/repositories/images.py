@@ -6,7 +6,6 @@ from uuid import UUID
 from app.core.enums import (
     DEFAULT_LICENSE,
     DEFAULT_SOURCE_TYPE,
-    FOOD_STATE,
     LICENSE,
     SOURCE_TYPE,
     LabelStatus,
@@ -19,7 +18,9 @@ from app.db.common import (
     _uuid_in_clause,
 )
 from app.core import errors as err
-from app.services.retrieval.enum_fields import coerce_enum, coerce_optional_enum
+from app.repositories.foods import FOOD_JOIN, FOOD_SELECT, write_image_food
+from app.services.retrieval.enum_fields import coerce_enum
+from app.services.retrieval.food_fields import FOOD_FIELDS, coerce_food_field
 from app.services.retrieval.image_ids import uuid_from_sha256
 from app.services.retrieval.text_fields import normalize_description
 
@@ -38,10 +39,11 @@ _HEATING_GROUP_JOIN = (
     "  ORDER BY nlevel(anc.path) DESC LIMIT 1"
     ") hg ON true "
 )
+# + the food annotation (image_foods, needs FOOD_JOIN)
 _HYDRATE_SELECT = (
     "SELECT i.*, cn.name AS category_name, "
     "hg.id AS heating_group_id, hg.code AS heating_group_code, "
-    "hg.name AS heating_group_name "
+    f"hg.name AS heating_group_name, {FOOD_SELECT} "
 )
 
 # Required enum columns -> system enum class (also has a CHECK) or editable enum name (only this check)
@@ -90,10 +92,10 @@ class PgImagesMixin:
     """images table CRUD / list / hydrate helpers."""
 
     def insert_image(self, row: dict[str, Any]) -> UUID | str:
-        """Insert images row (uuid PK = sha256[:16]).
+        """Insert images row (uuid PK = sha256[:16]) and, when given, its image_foods row.
 
         Identical bytes are stored once: on conflict the existing id is returned
-        and the first upload's columns are kept (app.models.image.Image).
+        and the first upload's columns (food annotation included) are kept.
         """
         self.ensure_schema()
         from sqlalchemy import text
@@ -119,7 +121,7 @@ class PgImagesMixin:
         label_status = coerce_enum(
             LabelStatus, row.get("label_status"), field="label_status", default=LabelStatus.UNLABELED
         )
-        food_state = coerce_optional_enum(FOOD_STATE, row.get("food_state"), field="food_state")
+        food = {key: coerce_food_field(key, row.get(key)) for key in FOOD_FIELDS}
         category_id = row.get("category_id")
         _check_label_matches_category(label_status, category_id)
         description = normalize_description(row.get("description"))
@@ -131,10 +133,10 @@ class PgImagesMixin:
                     text(
                         "INSERT INTO images ("
                         "id, sha256, original_url, thumb_url, width, height, "
-                        "source_type, license, category_id, food_state, label_status, description"
+                        "source_type, license, category_id, label_status, description"
                         ") VALUES ("
                         "CAST(:id AS uuid), :sha, :ou, :tu, :w, :h, "
-                        ":st, :lic, :cid, :fs, :ls, :desc"
+                        ":st, :lic, :cid, :ls, :desc"
                         ") ON CONFLICT DO NOTHING RETURNING id"
                     ),
                     {
@@ -147,12 +149,13 @@ class PgImagesMixin:
                         "st": source_type,
                         "lic": license_v,
                         "cid": category_id,
-                        "fs": food_state,
                         "ls": label_status.value,
                         "desc": description,
                     },
                 ).fetchone()
                 if inserted is not None:
+                    if any(value is not None for value in food.values()):  # optional: no row when unknown
+                        write_image_food(conn, uid, food)
                     return _as_uuid(inserted[0])
                 existing = conn.execute(
                     text("SELECT id FROM images WHERE sha256 = :sha LIMIT 1"),
@@ -171,7 +174,11 @@ class PgImagesMixin:
             ) from exc
 
     def update_image(self, image_id: UUID | str, fields: dict[str, Any]) -> None:
-        """Patch allowed image columns; bump payload_version on membership-relevant fields."""
+        """Patch allowed image columns and food fields (image_foods, created on first use).
+
+        Bumps payload_version on Qdrant-payload fields; food fields touch only their own
+        columns and the image's updated_at.
+        """
         self.ensure_schema()
         from sqlalchemy import text
         from sqlalchemy.exc import IntegrityError
@@ -182,33 +189,36 @@ class PgImagesMixin:
             "width",
             "height",
             "category_id",
-            "food_state",
             "label_status",
             "source_type",
             "license",
             "description",
+            *FOOD_FIELDS,
         }
-        # description is not in the Qdrant payload, so it does not bump payload_version
+        # The Qdrant payload holds only these; description and the other food fields are not
+        # in it, so they do not bump payload_version
         bump_keys = {"category_id", "food_state", "label_status"}
         sets: list[str] = []
         params: dict[str, Any] = {"id": str(_as_uuid(image_id))}
+        food: dict[str, Any] = {}  # -> image_foods
         bump = False
         for key, val in (fields or {}).items():
             if key not in allowed:
                 continue
+            if key in bump_keys:
+                bump = True
+            if key in FOOD_FIELDS:
+                food[key] = coerce_food_field(key, val)
+                continue
             if key in _ENUM_COLUMNS:
                 val = str(coerce_enum(_ENUM_COLUMNS[key], val, field=key))
-            elif key == "food_state":
-                val = coerce_optional_enum(FOOD_STATE, val, field=key)
             elif key in ("width", "height"):
                 val = _positive_int(val, key)
             elif key == "description":
                 val = normalize_description(val)
             sets.append(f"{key} = :{key}")
             params[key] = val
-            if key in bump_keys:
-                bump = True
-        if not sets:
+        if not sets and not food:
             return
         if "label_status" in params and "category_id" in params:
             _check_label_matches_category(LabelStatus(params["label_status"]), params["category_id"])
@@ -223,7 +233,9 @@ class PgImagesMixin:
         engine = self._get_engine()
         try:
             with engine.begin() as conn:
-                conn.execute(text(sql), params)
+                matched = conn.execute(text(sql), params).rowcount
+                if matched and food:  # same transaction; a missing image gets no food row
+                    write_image_food(conn, params["id"], food)
             if bump:
                 self.recompute_image_scenes(image_id, bump_version=False)
         except err.AppError:
@@ -272,6 +284,7 @@ class PgImagesMixin:
                         "LEFT JOIN categories c ON c.id = i.category_id "
                         + _CATEGORY_NAME_JOIN
                         + _HEATING_GROUP_JOIN
+                        + FOOD_JOIN
                         + f"WHERE i.id IN {id_sql}"
                     ),
                     {**id_params, "primary_kind": NameKind.PRIMARY.value},
@@ -384,6 +397,7 @@ class PgImagesMixin:
                         _HYDRATE_SELECT
                         + base_from
                         + _HEATING_GROUP_JOIN
+                        + FOOD_JOIN
                         + f"WHERE {where_sql} "
                         "ORDER BY i.created_at DESC "
                         "LIMIT :lim OFFSET :off"
@@ -415,7 +429,7 @@ class PgImagesMixin:
         try:
             with engine.connect() as conn:
                 row = conn.execute(
-                    text("SELECT * FROM images WHERE id = CAST(:id AS uuid)"),
+                    text(f"SELECT i.*, {FOOD_SELECT} FROM images i {FOOD_JOIN}WHERE i.id = CAST(:id AS uuid)"),
                     {"id": uid},
                 ).mappings().fetchone()
             return _row_to_dict(row) if row else None

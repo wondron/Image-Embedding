@@ -1,8 +1,8 @@
 """List-images use case (PG v0.1 + §6.1 Wire).
 
 Library pagination via image_scenes membership for the active scene code.
-Default scene = general. Attach heating_group/food_state only when
-scene.outputs_heating (P9).
+Default scene = general. Attach heating_group and the food attributes
+(food_fields.FOOD_FIELDS) only when scene.outputs_heating (P9).
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from uuid import UUID
 
 from app.core import errors as err
 from app.repositories.ports import MetadataStorePort
+from app.services.retrieval.food_fields import FOOD_FIELDS
 from app.services.retrieval.scenes import normalize_list_scene
 
 logger = logging.getLogger("retrieval.list")
@@ -47,7 +48,7 @@ def _item_from_row(
     }
     if scene_meta and scene_meta.get("outputs_heating"):
         item["heating_group"] = row.get("heating_group")
-        item["food_state"] = row.get("food_state")
+        item.update({key: row.get(key) for key in FOOD_FIELDS})
     return item
 
 

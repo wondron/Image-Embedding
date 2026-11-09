@@ -15,11 +15,18 @@ from app.db.base import Base
 
 BACKEND = Path(__file__).resolve().parents[1]
 
-# The 12 tables of contract v0.1; ensure_schema checks whatever app.models registers
+# The 12 tables of contract v0.1 + image_foods (0006); ensure_schema checks whatever app.models registers
 TABLES = {
     "heating_groups", "categories", "category_names", "images", "image_deletions", "scenes",
     "scene_labels", "scene_rules", "image_scenes", "embedding_models", "image_embeddings",
-    "external_candidates",
+    "external_candidates", "image_foods",
+}
+# editable enum (app.core.enums.EDITABLE_ENUMS) -> the column that stores it
+EDITABLE_COLUMNS = {
+    "source_type": ("images", "source_type"),
+    "license": ("images", "license"),
+    "food_state": ("image_foods", "food_state"),
+    "food_processing": ("image_foods", "food_processing"),
 }
 
 
@@ -63,15 +70,15 @@ class ModelsSchemaTests(unittest.TestCase):
 
     def test_editable_enum_columns_are_varchar_without_a_check_list(self):
         # values live in config/param/enums.yaml and grow at runtime (migration 0004)
-        images = self.tables["images"]
-        for column in enums.EDITABLE_ENUMS:
-            col_type = images.c[column].type
+        self.assertEqual(set(EDITABLE_COLUMNS), set(enums.EDITABLE_ENUMS))
+        for table, column in EDITABLE_COLUMNS.values():
+            col_type = self.tables[table].c[column].type
             self.assertNotIsInstance(col_type, Enum, column)  # Enum subclasses String
             self.assertIsInstance(col_type, String, column)
             self.assertEqual(col_type.length, enums.ENUM_VALUE_MAX_LEN)
-        ddl = str(CreateTable(images).compile(dialect=postgresql.dialect()))
-        for column in enums.EDITABLE_ENUMS:
-            self.assertNotIn(f"ck_images_{column}", ddl)
+            ddl = str(CreateTable(self.tables[table]).compile(dialect=postgresql.dialect()))
+            self.assertNotIn(f"ck_{table}_{column}", ddl)
+        ddl = str(CreateTable(self.tables["images"]).compile(dialect=postgresql.dialect()))
         self.assertIn("ck_images_label_status", ddl)
 
     def test_images_invariants_are_declared(self):
@@ -83,6 +90,22 @@ class ModelsSchemaTests(unittest.TestCase):
         self.assertIn("(label_status = 'unlabeled') = (category_id IS NULL)", checks.values())
         self.assertIn("width > 0 AND height > 0", checks.values())
         self.assertFalse(self.tables["images"].c.width.nullable)
+        # the food annotation lives in image_foods since 0006
+        self.assertFalse({"food_state", "food_processing", "food_count"} & set(self.tables["images"].c.keys()))
+
+    def test_image_foods_is_an_optional_one_row_child_of_images(self):
+        from app.services.retrieval.food_fields import FOOD_FIELDS
+
+        foods = self.tables["image_foods"]
+        self.assertEqual([c.name for c in foods.primary_key.columns], ["image_id"])  # at most one row per image
+        (fk,) = foods.c.image_id.foreign_keys
+        self.assertEqual((fk.column.table.name, fk.ondelete), ("images", "CASCADE"))
+        for column in FOOD_FIELDS:  # 非必填
+            self.assertTrue(foods.c[column].nullable, column)
+        checks = {str(c.sqltext) for c in foods.constraints if isinstance(c, CheckConstraint)}
+        self.assertEqual(checks, {
+            "food_count > 0", "total_mass_g > 0", "water_mass_g >= 0", "main_ingredient_mass_g > 0",
+        })
 
     def test_compiled_ddl_names_constraints_like_migration_0002(self):
         ddl = str(CreateTable(self.tables["scene_rules"]).compile(dialect=postgresql.dialect()))
@@ -99,7 +122,9 @@ class MigrationChainTests(unittest.TestCase):
         cfg = Config(str(BACKEND / "alembic.ini"))
         cfg.set_main_option("script_location", str(BACKEND / "alembic"))
         script = ScriptDirectory.from_config(cfg)
-        self.assertEqual(script.get_heads(), ["20261109_0004"])
+        self.assertEqual(script.get_heads(), ["20261109_0006"])
+        self.assertEqual(script.get_revision("20261109_0006").down_revision, "20261109_0005")
+        self.assertEqual(script.get_revision("20261109_0005").down_revision, "20261109_0004")
         self.assertEqual(script.get_revision("20261109_0004").down_revision, "20261106_0003")
         self.assertEqual(script.get_revision("20261106_0003").down_revision, "20261105_0002")
         self.assertEqual(script.get_revision("20261105_0002").down_revision, "20261104_0001")

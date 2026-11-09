@@ -21,13 +21,13 @@ from uuid import UUID
 from app.core.enums import (
     DEFAULT_LICENSE,
     DEFAULT_SOURCE_TYPE,
-    FOOD_STATE,
     LICENSE,
     SOURCE_TYPE,
     LabelStatus,
 )
 from app.services.retrieval.active_model import ActiveModel
-from app.services.retrieval.enum_fields import coerce_enum, coerce_optional_enum
+from app.services.retrieval.enum_fields import coerce_enum
+from app.services.retrieval.food_fields import FOOD_FIELDS, coerce_food_field
 from app.services.retrieval.image_ids import uuid_from_sha256
 from app.core import errors as err
 from app.services.retrieval.embedding_validate import validate_embedding
@@ -110,6 +110,11 @@ class IndexImageUseCase:
         scene: str | None = None,
         scenes: Sequence[Any] | None = None,
         food_state: str | None = None,
+        food_processing: str | None = None,
+        food_count: int | str | None = None,
+        total_mass_g: int | str | None = None,
+        water_mass_g: int | str | None = None,
+        main_ingredient_mass_g: int | str | None = None,
         label_status: str | None = None,
         source_type: str | None = None,
         license: str | None = None,
@@ -144,7 +149,19 @@ class IndexImageUseCase:
 
         src = coerce_enum(SOURCE_TYPE, source_type, field="source_type", default=DEFAULT_SOURCE_TYPE)
         lic = coerce_enum(LICENSE, license, field="license", default=DEFAULT_LICENSE)
-        food = coerce_optional_enum(FOOD_STATE, food_state, field="food_state")
+        # optional food annotation, stored in image_foods (app.services.retrieval.food_fields)
+        food_fields = {
+            key: coerce_food_field(key, value)
+            for key, value in (
+                ("food_state", food_state),
+                ("food_processing", food_processing),
+                ("food_count", food_count),
+                ("total_mass_g", total_mass_g),
+                ("water_mass_g", water_mass_g),
+                ("main_ingredient_mass_g", main_ingredient_mass_g),
+            )
+        }
+        food = food_fields["food_state"]  # the only one in the Qdrant payload
         desc = normalize_description(description)
 
         # Resolve category_id: prefer explicit; optional code lookup on metadata
@@ -218,9 +235,9 @@ class IndexImageUseCase:
             "source_type": src,
             "license": lic,
             "category_id": resolved_category_id,
-            "food_state": food,
             "label_status": label,
             "description": desc,
+            **food_fields,
         }
         inserted_id = self._metadata.insert_image(row)
         image_id = inserted_id if isinstance(inserted_id, UUID) else UUID(str(inserted_id))
@@ -273,9 +290,8 @@ class IndexImageUseCase:
             if created.get("category_id") is not None
             else resolved_category_id,
             "scenes": created.get("scenes") or scene_codes,
-            "food_state": created.get("food_state")
-            if "food_state" in created
-            else (str(food) if food else None),
+            # the stored row wins: on re-upload the first upload's values are kept
+            **{key: created[key] if key in created else value for key, value in food_fields.items()},
             "label_status": str(created.get("label_status") or label),
             "width": created.get("width") or width,
             "height": created.get("height") or height,
@@ -305,7 +321,7 @@ class IndexImageUseCase:
                         tags=item.get("tags"),
                         scene=item.get("scene"),
                         scenes=item.get("scenes"),
-                        food_state=item.get("food_state"),
+                        **{key: item.get(key) for key in FOOD_FIELDS},
                         label_status=item.get("label_status"),
                         source_type=item.get("source_type"),
                         license=item.get("license"),

@@ -38,6 +38,16 @@ food_state:
   - {value: cooked, label: 熟}
   - {value: frozen, label: 冷冻}
 
+food_processing:
+  label: 加工状态
+  description: 可为空
+  editable: true
+  values:
+  - {value: sliced, label: 切片}
+  - {value: chunked, label: 切块}
+  - {value: whole, label: 整个}
+  - {value: shredded, label: 切丝}
+
 category_domain:
   label: 类别域
   description: 类别树的四个根节点

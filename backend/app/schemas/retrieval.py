@@ -21,6 +21,16 @@ class IndexJsonRequest(BaseModel):
     tags: list[Any] | None = None
     scene: str | None = None
     scenes: list[Any] | None = None
+    # optional food annotation (stored in image_foods); the use case checks it
+    # (app.services.retrieval.food_fields). Strict ints: JSON true must not count as 1
+    food_state: str | None = Field(default=None, description="食物状态，取值见 GET /api/enums/food_state")
+    food_processing: str | None = Field(
+        default=None, description="加工状态，取值见 GET /api/enums/food_processing"
+    )
+    food_count: int | None = Field(default=None, gt=0, strict=True, description="食物个数")
+    total_mass_g: int | None = Field(default=None, gt=0, strict=True, description="总质量（克）")
+    water_mass_g: int | None = Field(default=None, ge=0, strict=True, description="含水质量（克），可以为 0")
+    main_ingredient_mass_g: int | None = Field(default=None, gt=0, strict=True, description="主食材质量（克）")
 
 
 class SearchJsonRequest(BaseModel):
@@ -55,6 +65,11 @@ class IndexedImage(BaseModel):
     scenes: list[str] = Field(default_factory=list)
     label_status: str
     food_state: str | None = None
+    food_processing: str | None = None
+    food_count: int | None = None
+    total_mass_g: int | None = None
+    water_mass_g: int | None = None
+    main_ingredient_mass_g: int | None = None
     description: str = ""
     width: int
     height: int
@@ -90,7 +105,13 @@ class SearchHit(BaseModel):
     description: str = ""
     width: int | None = None
     height: int | None = None
+    # food annotation: only when the scene outputs_heating (§6.1 P9), like heating_group
     food_state: str | None = None
+    food_processing: str | None = None
+    food_count: int | None = None
+    total_mass_g: int | None = None
+    water_mass_g: int | None = None
+    main_ingredient_mass_g: int | None = None
     heating_group: HeatingGroup | None = None
 
 
@@ -117,7 +138,13 @@ class ListImageItem(BaseModel):
     description: str = ""
     width: int | None = None
     height: int | None = None
+    # food annotation: only when the scene outputs_heating (§6.1 P9), like heating_group
     food_state: str | None = None
+    food_processing: str | None = None
+    food_count: int | None = None
+    total_mass_g: int | None = None
+    water_mass_g: int | None = None
+    main_ingredient_mass_g: int | None = None
     heating_group: HeatingGroup | None = None
     created_at: str | None = None
     updated_at: str | None = None

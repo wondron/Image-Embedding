@@ -281,8 +281,72 @@ class PgLiveTests(unittest.TestCase):
         # 0004's downgrade restores the old CHECK lists, so it refuses while such rows exist
         with self.assertRaisesRegex(IntegrityError, "ck_images_(source_type|food_state)"):
             _alembic("downgrade", "20261106_0003")
-        self.sql("UPDATE images SET food_state = 'frozen', source_type = 'user_upload'")
+        self.sql("UPDATE images SET source_type = 'user_upload'")
+        self.sql("UPDATE image_foods SET food_state = 'frozen'")  # 0006's downgrade copies it back to images
         _alembic("downgrade", "20261106_0003")
+        _alembic("upgrade", "head")
+
+    def test_food_annotation_lives_in_its_own_optional_table(self):
+        from sqlalchemy.exc import IntegrityError
+
+        from app.core.errors import AppError
+        from app.services.retrieval.food_fields import FOOD_FIELDS
+
+        store = self.store()
+        bare = self.insert(store, 1)  # 非必填: nothing annotated -> no image_foods row
+        self.assertEqual(self.sql("SELECT count(*) FROM image_foods").scalar_one(), 0)
+        self.assertEqual({k: store.get_image_by_uuid(bare)[k] for k in FOOD_FIELDS}, dict.fromkeys(FOOD_FIELDS))
+
+        food = {"food_state": "raw", "food_processing": "sliced", "food_count": 4,
+                "total_mass_g": 350, "water_mass_g": 0, "main_ingredient_mass_g": 300}
+        iid = self.insert(store, 2, **food)
+        row = store.get_image_by_uuid(iid)
+        self.assertEqual({k: row[k] for k in FOOD_FIELDS}, food)
+        before = row["payload_version"]
+
+        # a patch changes only the given columns; these are not in the Qdrant payload: no bump
+        store.update_image(iid, {"total_mass_g": "1200", "food_count": None})
+        row = store.get_image_by_uuid(iid)
+        self.assertEqual((row["total_mass_g"], row["food_count"], row["water_mass_g"], row["payload_version"]),
+                         (1200, None, 0, before))
+        store.update_image(iid, {"food_state": "cooked"})  # food_state is in the payload
+        self.assertEqual(store.get_image_by_uuid(iid)["payload_version"], before + 1)
+        store.update_image(bare, {"water_mass_g": 80})  # first annotation of an image creates its row
+        self.assertEqual(store.get_image_by_uuid(bare)["water_mass_g"], 80)
+
+        items, _ = store.list_images(scene="general")  # list / search hydrate through the same join
+        self.assertEqual({i["id"]: i["total_mass_g"] for i in items}, {bare: None, iid: 1200})
+        self.assertEqual(store.get_active_by_ids([iid])[iid]["main_ingredient_mass_g"], 300)
+
+        with self.assertRaises(AppError) as ctx:
+            store.update_image(iid, {"main_ingredient_mass_g": 0})
+        self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
+        # the database holds the same rule for writers that skip the repository
+        with self.assertRaisesRegex(IntegrityError, "ck_image_foods_total_mass_positive"):
+            self.sql("UPDATE image_foods SET total_mass_g = 0")
+        store.enqueue_image_deletion(iid)  # deleting the image deletes its annotation
+        self.assertEqual(self.sql("SELECT count(*) FROM image_foods").scalar_one(), 1)
+
+    def test_0006_moves_the_food_columns_into_image_foods_and_back(self):
+        _alembic("downgrade", "20261109_0005")
+        ids = [uuid.UUID(bytes=_sha(i)[:16]) for i in (1, 2)]
+        self.sql(
+            "INSERT INTO images (id, sha256, original_url, thumb_url, width, height, source_type, license, "
+            "label_status, food_state, food_processing, food_weight_g, food_count) VALUES "
+            "(:a, :sa, 'https://x/o1', 'https://x/t1', 4, 3, 'user_upload', 'unknown', 'unlabeled', "
+            " 'raw', 'sliced', 350, 4), "
+            "(:b, :sb, 'https://x/o2', 'https://x/t2', 4, 3, 'user_upload', 'unknown', 'unlabeled', "
+            " NULL, NULL, NULL, NULL)",
+            {"a": ids[0], "sa": _sha(1), "b": ids[1], "sb": _sha(2)},
+        )
+        _alembic("upgrade", "head")
+        rows = self.sql(
+            "SELECT image_id, food_state, food_processing, food_count, total_mass_g, water_mass_g FROM image_foods"
+        ).fetchall()
+        self.assertEqual([tuple(r) for r in rows], [(ids[0], "raw", "sliced", 4, 350, None)])  # weight -> total mass
+
+        _alembic("downgrade", "20261109_0005")
+        self.assertEqual(dict(self.sql("SELECT id, food_weight_g FROM images").fetchall()), {ids[0]: 350, ids[1]: None})
         _alembic("upgrade", "head")
 
     def test_description_round_trip_without_payload_bump(self):

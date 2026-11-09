@@ -19,7 +19,7 @@ from alembic import context
 from sqlalchemy import create_engine, pool
 from sqlalchemy.engine import URL, make_url
 
-import app.models  # noqa: F401  registers all 12 tables on Base.metadata
+import app.models  # noqa: F401  registers all 13 tables on Base.metadata
 from app.db.base import Base
 
 config = context.config

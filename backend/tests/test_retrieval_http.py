@@ -12,6 +12,7 @@ from app.api.v1 import retrieval as routes
 from app.core.exceptions import register_exception_handlers
 from app.bootstrap.state import ApplicationState
 from app.services.retrieval.active_model import ActiveModel
+from app.services.retrieval.food_fields import FOOD_FIELDS
 from app.core.errors import AppError
 
 MODEL = ActiveModel(id=1, name="dino", version="v1", collection="c1", dim=1024, distance="cosine")
@@ -253,6 +254,38 @@ class RetrievalHttpTests(unittest.TestCase):
         self.assertEqual(self.calls["index"]["items"][0]["description"], "清蒸鱼")
         self.client.post("/api/index", json={"path": "/data/a.png"})
         self.assertEqual(self.calls["index"]["items"][0]["description"], "")
+
+    def test_index_food_attributes_from_form_and_json_reach_the_use_case(self):
+        def food_of_last_item():
+            item = self.calls["index"]["items"][0]
+            return {key: item[key] for key in FOOD_FIELDS}
+
+        # every food field the use case knows is forwarded (form values stay strings)
+        form = {
+            "food_state": "raw", "food_processing": "sliced", "food_count": "4",
+            "total_mass_g": "350", "water_mass_g": "50", "main_ingredient_mass_g": "300",
+        }
+        self.assertEqual(set(form), set(FOOD_FIELDS))
+        self.client.post("/api/index", files=[("file", ("a.png", b"aaa", "image/png"))], data=form)
+        self.assertEqual(food_of_last_item(), form)
+
+        body = {
+            "food_state": "cooked", "food_processing": "whole", "food_count": 1,
+            "total_mass_g": 500, "water_mass_g": 0, "main_ingredient_mass_g": 450,
+        }
+        self.client.post("/api/index", json={"path": "/data/a.png", **body})
+        self.assertEqual(food_of_last_item(), body)
+        self.client.post("/api/index", json={"path": "/data/a.png"})  # all optional
+        self.assertEqual(food_of_last_item(), dict.fromkeys(FOOD_FIELDS))
+
+    def test_index_json_rejects_out_of_range_fractional_or_boolean_amounts(self):
+        for bad in ({"total_mass_g": 0}, {"water_mass_g": -1}, {"food_count": True},
+                    {"main_ingredient_mass_g": 1.5}, {"food_count": -2}):
+            with self.subTest(body=bad):
+                response = self.client.post("/api/index", json={"path": "/data/a.png", **bad})
+                self.assertEqual(response.status_code, 422)
+                self.assertEqual(response.json()["error"], "VALIDATION_ERROR")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -67,7 +67,7 @@
 
 > 类型与设计原文一致；下列补齐 **NULL / PK / FK / UNIQUE / 推荐索引** 与实现约束。Wire 字段名英文。时间一律 **`timestamptz`**。
 >
-> **2026-11-05 起表结构权威 = `backend/app/models/`（ORM）**，迁移 `0001` + `0002` 把库变成该结构（`alembic check` 可核对）。枚举列存 `varchar(32)`，取值见 `backend/config/param/enums.yaml`（系统枚举另有 CHECK，以 `backend/app/core/enums.py` 为准；`images.source_type`/`license`/`food_state` 为可编辑枚举，可经 `POST /api/enums/{name}/values` 追加，库里无 CHECK，见迁移 `0004`）；约束/索引命名 `pk_/fk_/uq_/ck_/ix_`。本节表格与 ORM 冲突时以 ORM 为准。
+> **2026-11-05 起表结构权威 = `backend/app/models/`（ORM）**，迁移 `0001` + `0002` 把库变成该结构（`alembic check` 可核对）。枚举列存 `varchar(32)`，取值见 `backend/config/param/enums.yaml`（系统枚举另有 CHECK，以 `backend/app/core/enums.py` 为准；`images.source_type`/`license` 与 `image_foods.food_state`/`food_processing` 为可编辑枚举，可经 `POST /api/enums/{name}/values` 追加，库里无 CHECK，见迁移 `0004`/`0006`）；约束/索引命名 `pk_/fk_/uq_/ck_/ix_`。本节表格与 ORM 冲突时以 ORM 为准。
 
 ### 2.1 `heating_groups`
 
@@ -135,7 +135,6 @@
 | `source_type` | `text` | NO | 可编辑枚举，应用层按 `enums.yaml` 校验（无 CHECK，迁移 `0004`） | 初始 `crawled` / `device` / `open_dataset` / `user_upload` / `external` |
 | `license` | `text` | NO | 可编辑枚举，同上 | 初始 `commercial` / `research_only` / `unknown` |
 | `category_id` | `integer` | YES | FK → `categories.id` ON DELETE RESTRICT | 可标到任意层级；未标注为空 |
-| `food_state` | `text` | YES | 可编辑枚举，同上；可为 NULL | 初始 `raw`/`cooked`/`frozen`（生/熟/冷冻） |
 | `label_status` | `text` | NO | CHECK ∈ `unlabeled`/`auto`/`verified` | **未标注 ⇔ 没有类别**（库约束 `ck_images_label_matches_category`：`(label_status = 'unlabeled') = (category_id IS NULL)`）；默认 `unlabeled` |
 | `description` | `text` | NO | 默认 `''` | 图片描述（迁移 `0003`）；API 侧上限 1000 字符；不进 Qdrant payload，修改不 bump `payload_version`；同图重复上传保留首次的描述 |
 | `payload_version` | `bigint` | NO | 默认 `1` | 类别/状态/所属场景变化时递增；与 Qdrant payload 同步 |
@@ -153,6 +152,23 @@ id = uuid_from_bytes(sha256(original_bytes)[0:16])  # RFC 4122 变体/版本位�
 ```
 
 **ASSUMPTION A7**：同一字节图重复入库 → 同一 `id`/`sha256` 行；**来源只记第一次**（与设计确认记录一致）。冲突策略：`ON CONFLICT (sha256) DO NOTHING` 或返回已有 id（API 另刀）。
+
+#### 食物标注 `image_foods`（2026-11-09 新增 · 迁移 `0006`；第 13 张表）
+
+食物标注和 `image_embeddings` 一样单独成表：**每张图最多一行**（PK = `image_id`，FK → `images.id` ON DELETE CASCADE），**整行与每个字段都非必填**，没有标注的图没有这一行（读时按 NULL）。原 `images.food_state` 迁入本表；同图重复上传保留首次的标注。
+
+| 字段 | 类型 | Null | 约束 | 说明 |
+|---|---|---|---|---|
+| `image_id` | `uuid` | NO | PK；FK → `images.id` ON DELETE CASCADE | |
+| `food_state` | `varchar(32)` | YES | 可编辑枚举（无 CHECK） | 食物状态，初始 `raw`/`cooked`/`frozen`（生/熟/冷冻）；**唯一进 Qdrant payload 的字段**，修改 bump `images.payload_version` |
+| `food_processing` | `varchar(32)` | YES | 可编辑枚举（无 CHECK） | 加工状态，初始 `sliced`/`chunked`/`whole`/`shredded`（切片/切块/整个/切丝） |
+| `food_count` | `integer` | YES | CHECK `> 0` | 食物个数 |
+| `total_mass_g` | `integer` | YES | CHECK `> 0` | 总质量（克） |
+| `water_mass_g` | `integer` | YES | CHECK `>= 0` | 含水质量（克），可以为 0 |
+| `main_ingredient_mass_g` | `integer` | YES | CHECK `> 0` | 主食材质量（克） |
+| `updated_at` | `timestamptz` | NO | 默认 `now()` | |
+
+除 `food_state` 外不进 Qdrant payload，修改不 bump `payload_version`。规则见 `backend/app/services/retrieval/food_fields.py`。
 
 ---
 
@@ -372,7 +388,7 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 |---|---|---|
 | `category_id` | integer（可 null） | `images.category_id` |
 | `scenes` | string[] | 有效场景 **code** 列表（非 id） |
-| `food_state` | keyword / string（可 null） | `images.food_state` |
+| `food_state` | keyword / string（可 null） | `image_foods.food_state`（2026-11-09 起；无标注行时为 null） |
 | `label_status` | keyword | `images.label_status` |
 
 **Payload 索引**：
@@ -508,7 +524,10 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | `width` | 否 | `integer \| null` | |
 | `height` | 否 | `integer \| null` | |
 | `description` | 否 | `string` | 图片描述；默认 `""`；与 `images.description` 一致；不进 Qdrant payload |
-| `food_state` | 条件 | `"raw"\|"cooked"\|"frozen"\|null` | **仅当**该 scene `outputs_heating=true` 时可出现 |
+| `food_state` | 条件 | `string \| null` | 食物状态，取值见 `GET /api/enums/food_state`（初始 `raw`/`cooked`/`frozen`）。**仅当**该 scene `outputs_heating=true` 时可出现 |
+| `food_processing` | 条件 | `string \| null` | 加工状态，取值见 `GET /api/enums/food_processing`；出现条件同 `food_state`（2026-11-09 新增） |
+| `food_count` | 条件 | `integer \| null` | 食物个数；出现条件同 `food_state`（2026-11-09 新增） |
+| `total_mass_g` / `water_mass_g` / `main_ingredient_mass_g` | 条件 | `integer \| null` | 总质量 / 含水质量 / 主食材质量（克）；出现条件同 `food_state`（2026-11-09 新增）。六个食物字段存于 `image_foods`（§2.4） |
 | `heating_group` | 条件 | `{ "id": int, "code": string, "name": string }` | `HeatingGroup` 对象。**仅当**该次检索对应 scene 的 `outputs_heating=true` 且用例已设置时出现（实现 `exclude_unset`：未设置则键不出现）；`outputs_heating=false` 时不出现 |
 
 **禁字段（Search hit）**——出现即视为违约（实现刀须删）：
@@ -560,7 +579,7 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | `label_status` | 可选 | 可选 | 同 |
 | `width` / `height` | 可选 | 可选 | 同 |
 | `description` | ✓ 默认 `""` | ✓ 默认 `""` | 同；Index `IndexedImage` 亦同 |
-| `food_state` / `heating_group` | 加热 scene 条件出现 | 同（该 scene `outputs_heating=true`） | `heating_group` 为对象 `{id,code,name}`，非 string；出现规则见 §6.1.1 |
+| `food_state` / `food_processing` / `food_count` / `total_mass_g` / `water_mass_g` / `main_ingredient_mass_g` / `heating_group` | 加热 scene 条件出现 | 同（该 scene `outputs_heating=true`） | `heating_group` 为对象 `{id,code,name}`，非 string；出现规则见 §6.1.1；Index `IndexedImage` 总是带六个食物字段 |
 | `created_at` / `updated_at` | **禁**（非检索所需） | 可选 `string`（ISO-8601 / timestamptz 序列化） | List 可展示入库时间 |
 | `image_url` / `thumbnail_url` | **禁**（P2 已拍） | **禁**（P2 已拍） | 双边同时删除（一刀切） |
 | `qdrant_point_id` | 禁 | **禁**（P11 已拍） | 与 `id` 重复 |
@@ -640,6 +659,7 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | `description` | `description` | 默认 `""`；一对一，勿猜其它字段 |
 | `heating_group` | `heatingGroup` | **对象**；子字段 `id` / `code` / `name` 保持，勿把 `name` 抽成顶层 string |
 | `food_state` | `foodState` | |
+| `food_processing` / `food_count` / `total_mass_g` / `water_mass_g` / `main_ingredient_mass_g` | `foodProcessing` / `foodCount` / `totalMassG` / `waterMassG` / `mainIngredientMassG` | 2026-11-09 新增；FE 适配 TBD |
 | `width` / `height` | `width` / `height` | |
 | — | `pageUrl` / `siteName` / `snippets` | **恒为 null / []**；适配层可删字段（产品刀） |
 
@@ -654,6 +674,7 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | `description` | `description` | 默认 `""`；一对一 |
 | `created_at` | `createdAt` | |
 | `food_state` | `foodState` | |
+| `food_processing` / `food_count` / `total_mass_g` / `water_mass_g` / `main_ingredient_mass_g` | `foodProcessing` / `foodCount` / `totalMassG` / `waterMassG` / `mainIngredientMassG` | 仅加热 scene；2026-11-09 新增，FE 适配 TBD |
 | `heating_group` | `heatingGroup` | 对象 `{id,code,name}`；仅加热 scene |
 | `scenes` | `scenes` / `sceneMemberships` | 若未来提供 `scene_memberships` 再扩展；本草案不强制 |
 
@@ -755,6 +776,8 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | 2026-11-08 | **§6.1 更正（总裁拍：按后端实现）**：`description` 由禁改为允许（`string`，默认 `""`；Index 请求/Index 响应/Search/List 均有；不进 Qdrant payload）；`heating_group` 由展示名 string 改为对象 `{id, code, name}`（仅 `outputs_heating=true` 时出现）。以 `backend/app/schemas/retrieval.py` 为准。未改其它债。未 commit |
 | 2026-11-05 | **表结构以 ORM 为准**：`app/models/` 按域拆分（category/image/scene/embedding/external）+ `app/core/enums.py`；迁移 `0002` 补齐约束（images 宽高非空且 >0、unlabeled⇔无类别、sha256 32 字节；scene_rules 每场景类别/菜系唯一、label 必须属于同场景（组合外键）；image_scenes 只有人工行可排除；embedding_models dim/input_size >0；external_candidates 审核时间/入库图一致性）、ON DELETE 行为、默认值、索引与注释；`include_all` 场景不再物化到 `image_scenes`。Wire（§6.1）不变 |
 | 2026-11-09 | **枚举改为配置文件**：取值、中文名统一放 `backend/config/param/enums.yaml`（`app/core/config/enum_store.py` 读写，文件改了自动重读）。`source_type`/`license`/`food_state` 为可编辑枚举，新增接口 `/api/enums`（§6）可追加取值；迁移 `0004` 去掉这三列的 CHECK，取值改由应用层校验。系统枚举（`label_status` 等）取值仍以 `app/core/enums.py` 为准、保留 CHECK。Wire（§6.1）不变：`food_state` 仍是 string，可能出现初始三值以外的取值 |
+| 2026-11-09 | **食物属性扩充**：`images` 在 `food_state`（生/熟/冷冻）之外新增 `food_processing`（加工状态，可编辑枚举，初始 切片/切块/整个/切丝）、`food_weight_g`（重量，克，CHECK > 0）、`food_count`（个数，CHECK > 0），均可为空（迁移 `0005`）。`POST /api/index`（JSON 与 multipart）可传这四个字段（此前 `food_state` 不能经接口写入）；`IndexedImage` 总带，Search hit / List item 与 `food_state` 同规则只在 `outputs_heating=true` 时出现（§6.1 P9 不变，纯新增字段）。新三项不进 Qdrant payload，修改不 bump `payload_version`。规则见 `backend/app/services/retrieval/food_fields.py` |
+| 2026-11-09 | **食物标注改为单独一张表**（取代上一条的 `images` 列方案）：新表 `image_foods`（§2.4，与 `image_embeddings` 同样做法，每图最多一行，ON DELETE CASCADE），六个字段均非必填：`food_state`、`food_processing`、`food_count`、`total_mass_g`（总质量）、`water_mass_g`（含水质量，可为 0）、`main_ingredient_mass_g`（主食材质量）；质量单位克，整数。迁移 `0006` 把 `images` 上的 `food_*` 列连数据搬过去（`food_weight_g` → `total_mass_g`）后删列。Wire：六个字段平铺在 Index 请求/响应、Search hit、List item（后两者仍仅 `outputs_heating=true`）；`food_weight_g` 由三个质量字段取代。Qdrant payload 不变（`food_state` 改从 `image_foods` 取） |
 
 ---
 

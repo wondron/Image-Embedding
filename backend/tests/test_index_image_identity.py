@@ -11,6 +11,7 @@ from PIL import Image as PILImage
 from app.repositories.ports import VECTOR_DIM
 from app.services.retrieval.active_model import ActiveModel
 from app.core.errors import AppError
+from app.services.retrieval.food_fields import FOOD_FIELDS
 from app.services.retrieval.index_image import IndexImageUseCase
 
 MODEL = ActiveModel(id=3, name="dino", version="v1", collection="c_dino_v1", dim=VECTOR_DIM, distance="cosine")
@@ -75,7 +76,7 @@ class FakeMetadata:
                 "width": row["width"],
                 "height": row["height"],
                 "category_id": row["category_id"],
-                "food_state": str(row["food_state"]) if row["food_state"] else None,
+                **{key: row.get(key) for key in FOOD_FIELDS},  # image_foods, LEFT JOINed on read
                 "label_status": str(row["label_status"]),
                 "source_type": str(row["source_type"]),
                 "license": str(row["license"]),
@@ -194,6 +195,40 @@ class IndexImageIdentityTests(unittest.TestCase):
             self.use_case().execute_one(image_bytes=_png(), description="x" * 1001)
         self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
         self.assertEqual((self.meta.rows, self.vectors.upserts), ({}, []))
+
+    def test_food_annotation_is_validated_stored_and_returned(self):
+        out = self.use_case().execute_one(
+            image_bytes=_png((7, 7, 7)), food_state="raw", food_processing="sliced", food_count=4,
+            total_mass_g="350", water_mass_g=0, main_ingredient_mass_g=300,
+        )
+        expected = {
+            "food_state": "raw", "food_processing": "sliced", "food_count": 4,
+            "total_mass_g": 350, "water_mass_g": 0, "main_ingredient_mass_g": 300,
+        }
+        self.assertEqual({key: out[key] for key in FOOD_FIELDS}, expected)
+        stored = self.meta.rows[uuid.UUID(out["id"])]
+        self.assertEqual({key: stored[key] for key in FOOD_FIELDS}, expected)
+        _, payload = self.vectors.upserts[-1]  # only food_state goes to Qdrant
+        self.assertEqual(set(payload), {"category_id", "scenes", "food_state", "label_status"})
+
+    def test_no_food_annotation_is_fine(self):
+        out = self.use_case().execute_one(image_bytes=_png((6, 6, 6)))
+        self.assertEqual({key: out[key] for key in FOOD_FIELDS}, dict.fromkeys(FOOD_FIELDS))
+
+    def test_bad_food_field_is_rejected_before_any_write(self):
+        for kwargs in ({"total_mass_g": 0}, {"water_mass_g": -1}, {"food_count": "two"},
+                       {"main_ingredient_mass_g": 1.5}, {"food_processing": "minced"}):
+            with self.subTest(**kwargs):
+                with self.assertRaises(AppError) as ctx:
+                    self.use_case().execute_one(image_bytes=_png(), **kwargs)
+                self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
+        self.assertEqual((self.meta.rows, self.vectors.upserts), ({}, []))
+
+    def test_reupload_keeps_the_first_food_annotation(self):
+        data = _png()
+        self.use_case().execute_one(image_bytes=data, total_mass_g=100)
+        out = self.use_case().execute_one(image_bytes=data, total_mass_g=999, food_count=2)
+        self.assertEqual((out["total_mass_g"], out["food_count"]), (100, None))
 
     def test_unknown_category_code_is_stored_unlabeled(self):
         out = self.use_case().execute_one(image_bytes=_png(), category="no.such.code", label_status="auto")

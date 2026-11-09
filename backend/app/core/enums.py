@@ -99,7 +99,8 @@ SYSTEM_ENUMS: dict[str, type[StrEnum]] = {
 
 SOURCE_TYPE = "source_type"  # images.source_type：图片来源大类
 LICENSE = "license"  # images.license：许可标签，确认不能用的数据按标签整批剔除
-FOOD_STATE = "food_state"  # images.food_state：食物状态，可为空
+FOOD_STATE = "food_state"  # image_foods.food_state：食物状态（生 / 熟 / 冷冻），可为空
+FOOD_PROCESSING = "food_processing"  # image_foods.food_processing：加工状态（切片 / 切块 / 整个……），可为空
 
 DEFAULT_SOURCE_TYPE = "user_upload"  # 请求没给来源时
 DEFAULT_LICENSE = "unknown"  # 请求没给许可时
@@ -109,4 +110,5 @@ EDITABLE_ENUMS: dict[str, frozenset[str]] = {
     SOURCE_TYPE: frozenset({DEFAULT_SOURCE_TYPE}),
     LICENSE: frozenset({DEFAULT_LICENSE}),
     FOOD_STATE: frozenset(),
+    FOOD_PROCESSING: frozenset(),
 }

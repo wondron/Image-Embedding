@@ -29,9 +29,11 @@ Global 搜索阶段直接保留上游 `image_url`，不下载或验证候选图�
 - 生效配置：本地 `backend/config/param/config.yaml` 打底，所选 Nacos 环境的 dataId 逐键覆盖。密码、连接参数、模型等都在这里。
 
 枚举取值（数据库、接口、Qdrant payload 共用）单独放在 `backend/config/param/enums.yaml`，不走 Nacos，规则见文件头。
-`source_type` / `license` / `food_state` 可以直接改文件（不用重启），也可以调 `POST /api/enums/{name}/values` 追加；
-`GET /api/enums` 返回全部取值和中文名。容器里的文件随镜像走：要保留接口追加的取值，需要把这个文件挂载出来。
-升级到这一版要先执行 `alembic upgrade head`（迁移 `0004` 去掉这三列的 CHECK）。
+`source_type` / `license` / `food_state` / `food_processing`（加工状态）可以直接改文件（不用重启），也可以调
+`POST /api/enums/{name}/values` 追加；`GET /api/enums` 返回全部取值和中文名。容器里的文件随镜像走：要保留接口追加的取值，
+需要把这个文件挂载出来。升级到这一版要先执行 `alembic upgrade head`（迁移 `0004` 去掉可编辑枚举列的 CHECK；
+`0005`、`0006` 把食物标注放进单独的表 `image_foods`：`food_state`、`food_processing`、`food_count`、总质量、
+含水质量、主食材质量，都是非必填）。
 
 连接相关的配置段（API、workers、Alembic 共用）：
 

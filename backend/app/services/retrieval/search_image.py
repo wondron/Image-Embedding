@@ -17,6 +17,7 @@ from uuid import UUID
 from app.core import errors as err
 from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.embedding_validate import validate_embedding
+from app.services.retrieval.food_fields import FOOD_FIELDS
 from app.repositories.ports import (
     EmbeddingPort,
     MetadataStorePort,
@@ -89,7 +90,7 @@ def _hit_from_row(
     if scene_label is not None:
         hit["scene_label"] = _scene_label_name(scene_label)
     if _outputs_heating(scene_meta):
-        hit["food_state"] = row.get("food_state")
+        hit.update({key: row.get(key) for key in FOOD_FIELDS})
         hit["heating_group"] = row.get("heating_group")
     return hit
 

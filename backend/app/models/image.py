@@ -16,6 +16,7 @@ from app.db.types import editable_enum, str_enum
 if TYPE_CHECKING:
     from app.models.category import Category
     from app.models.embedding import ImageEmbedding
+    from app.models.food import ImageFood
     from app.models.scene import ImageScene
 
 
@@ -45,7 +46,7 @@ class Image(TimestampMixin, Base):
     thumb_url: Mapped[str] = mapped_column(comment="缩略图的完整 https 地址（长边 512，WebP）")
     width: Mapped[int] = mapped_column(comment="原图宽（像素）")
     height: Mapped[int] = mapped_column(comment="原图高（像素）")
-    # source_type / license / food_state 是可编辑枚举：取值在 config/param/enums.yaml，库里没有 CHECK
+    # source_type / license 是可编辑枚举：取值在 config/param/enums.yaml，库里没有 CHECK
     source_type: Mapped[str] = mapped_column(
         editable_enum(), index=True, comment="来源大类，取值见 config/param/enums.yaml"
     )
@@ -56,9 +57,6 @@ class Image(TimestampMixin, Base):
         ForeignKey("categories.id", ondelete="RESTRICT"),
         index=True,
         comment="类别，可以标到任意层级；未标注时为空",
-    )
-    food_state: Mapped[str | None] = mapped_column(
-        editable_enum(), comment="食物状态，可为空，取值见 config/param/enums.yaml"
     )
     label_status: Mapped[LabelStatus] = mapped_column(
         str_enum(LabelStatus, "label_status"),
@@ -81,6 +79,10 @@ class Image(TimestampMixin, Base):
         back_populates="image", cascade="all, delete-orphan", passive_deletes=True
     )
     embeddings: Mapped[list[ImageEmbedding]] = relationship(
+        back_populates="image", cascade="all, delete-orphan", passive_deletes=True
+    )
+    # 食物标注单独一张表（image_foods），最多一行，非必填
+    food: Mapped[ImageFood | None] = relationship(
         back_populates="image", cascade="all, delete-orphan", passive_deletes=True
     )
 

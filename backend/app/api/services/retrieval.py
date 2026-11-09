@@ -32,6 +32,16 @@ from app.core import errors as err
 logger = logging.getLogger("svc.retrieval")
 
 MAX_INDEX_FILES = 100
+# Optional food annotation an index request may carry; the use case validates it. Same names
+# as app.services.retrieval.food_fields.FOOD_FIELDS (not imported: use cases load with the stack)
+FOOD_KEYS = (
+    "food_state",
+    "food_processing",
+    "food_count",
+    "total_mass_g",
+    "water_mass_g",
+    "main_ingredient_mass_g",
+)
 M = TypeVar("M", bound=BaseModel)
 
 
@@ -101,7 +111,8 @@ async def index_from_upload(
 
 
 async def index_from_request(runtime: ApplicationState, request: Request) -> Dict[str, Any]:
-    """multipart file/files (<= 100) or JSON {path, description, category, tags, scene, scenes}."""
+    """multipart file/files (<= 100) or JSON {path, description, category, tags, scene, scenes,
+    and the optional food fields FOOD_KEYS}."""
     trace_id = bind_trace_id(request)
     if _is_json(request):
         raw = await _json_body(request, IndexJsonRequest)
@@ -113,6 +124,7 @@ async def index_from_request(runtime: ApplicationState, request: Request) -> Dic
             "scene": raw.scene,
             "scenes": raw.scenes,
             "description": raw.description,
+            **{key: getattr(raw, key) for key in FOOD_KEYS},
         }]
     else:
         items = await _index_items_from_form(request, runtime.max_image_bytes)
@@ -133,6 +145,7 @@ async def _index_items_from_form(request: Request, max_bytes: int) -> List[Dict[
         "scene": str(scene).strip() if scene not in (None, "") else None,
         "scenes": _json_array(form.get("scenes"), "scenes"),
         "description": form.get("description"),  # normalized (and validated) by the use case
+        **{key: form.get(key) for key in FOOD_KEYS},  # strings; validated by the use case
     }
     uploads = []
     for value in [form.get("file"), *form.getlist("files"), *form.getlist("file")]:

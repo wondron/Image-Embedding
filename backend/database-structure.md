@@ -1,8 +1,8 @@
 # 图搜图 PostgreSQL 数据结构
 
-本文描述当前元数据库中实际保存的数据结构，以 `backend/app/models/` 中的 ORM 为准（共 12 张表）。向量本身不在 PostgreSQL 里，而在 Qdrant；库里只记录「哪张图、哪个模型版本已经写入过」。
+本文描述当前元数据库中实际保存的数据结构，以 `backend/app/models/` 中的 ORM 为准（共 13 张表）。向量本身不在 PostgreSQL 里，而在 Qdrant；库里只记录「哪张图、哪个模型版本已经写入过」。
 
-数据库枚举列存的是字符串取值（`VARCHAR(32)`），取值和中文名都列在 `backend/config/param/enums.yaml`。系统枚举另有 `CHECK` 约束，取值以 `backend/app/core/enums.py` 为准；`images.source_type` / `license` / `food_state` 是可编辑枚举，可以通过接口 `POST /api/enums/{name}/values` 追加取值，库里不建 `CHECK`（迁移 `0004`），写入前由后端按文件校验。
+数据库枚举列存的是字符串取值（`VARCHAR(32)`），取值和中文名都列在 `backend/config/param/enums.yaml`。系统枚举另有 `CHECK` 约束，取值以 `backend/app/core/enums.py` 为准；`images.source_type` / `license` 和 `image_foods.food_state` / `food_processing` 是可编辑枚举，可以通过接口 `POST /api/enums/{name}/values` 追加取值，库里不建 `CHECK`（迁移 `0004`），写入前由后端按文件校验。
 
 ---
 
@@ -11,6 +11,7 @@
 | 分组 | 表 | 作用 |
 | --- | --- | --- |
 | 图片 | `images` | 一张原图一行 |
+| 图片 | `image_foods` | 图片的食物标注（非必填，每张图最多一行） |
 | 图片 | `image_deletions` | 删图后的清理队列 |
 | 类别 | `categories` | 类别树节点 |
 | 类别 | `category_names` | 类别多语言名称与别名 |
@@ -38,6 +39,7 @@ erDiagram
     scene_labels ||--o{ scene_rules : label_id
     images ||--o{ image_scenes : image_id
     images ||--o{ image_embeddings : image_id
+    images ||--o| image_foods : image_id
     images ||--o{ external_candidates : image_id
     embedding_models ||--o{ image_embeddings : model_id
 ```
@@ -63,14 +65,32 @@ erDiagram
 | `source_type` | 可编辑枚举，有索引 | 来源大类，见下方枚举 |
 | `license` | 可编辑枚举，有索引 | 许可标签 |
 | `category_id` | 外键 → `categories.id`，`ON DELETE RESTRICT`，可空 | 可标到类别树任意层级；未标注时为空 |
-| `food_state` | 可编辑枚举，可空 | 食物状态，见下方枚举 |
 | `label_status` | 枚举，有索引，默认 `unlabeled` | 标注状态。约束：`unlabeled` 当且仅当 `category_id` 为空 |
 | `description` | 文本，默认空字符串 | 图片描述。只存在库里，**不进 Qdrant payload**；修改它不会让 `payload_version` 加 1 |
 | `payload_version` | `bigint`，默认 1 | 类别、食物状态或所属场景变化时加 1，用来判断 Qdrant 里的 payload 要不要重推 |
 | `created_at` | 时间戳 | 创建时间；图库列表按它倒序分页 |
+| `updated_at` | 时间戳 | 更新时间（改食物标注时也会更新） |
+
+食物标注（状态、加工状态、个数、质量）不在这张表里，见下面的 `image_foods`。
+
+### 1.2 `image_foods`
+
+图片里食物的标注，和 `image_embeddings` 一样单独成表（迁移 `0006`）。每张图最多一行（主键就是 `image_id`），图片删除时一起删。整行和每个字段都是**非必填**：没有标注的图没有这一行，读的时候六个字段都按空处理。接口读写时把这六个字段和图片放在一起（`POST /api/index` 可传；检索、列表只在 `outputs_heating` 的场景返回）。
+
+| 字段 | 类型要点 | 说明 |
+| --- | --- | --- |
+| `image_id` | 主键；外键 → `images.id`，`ON DELETE CASCADE` | 图片 |
+| `food_state` | 可编辑枚举，可空 | 食物状态（生 / 熟 / 冷冻），见下方枚举。**唯一进 Qdrant payload 的字段**，修改会让 `images.payload_version` 加 1 |
+| `food_processing` | 可编辑枚举，可空 | 加工状态（切片 / 切块 / 整个 / 切丝……），见下方枚举 |
+| `food_count` | 整数，可空；有值时须大于 0 | 食物个数 |
+| `total_mass_g` | 整数（克），可空；有值时须大于 0 | 总质量 |
+| `water_mass_g` | 整数（克），可空；有值时须大于等于 0 | 含水质量，可以为 0 |
+| `main_ingredient_mass_g` | 整数（克），可空；有值时须大于 0 | 主食材质量 |
 | `updated_at` | 时间戳 | 更新时间 |
 
-### 1.2 `image_deletions`
+除 `food_state` 外的五个字段只存在库里，修改不会让 `payload_version` 加 1。
+
+### 1.3 `image_deletions`
 
 清理队列：图片删除后，清理任务据此删掉各 collection 里的点和对象存储文件，处理完再删这条记录。图片行此时已经不在了，所以这里不设外键。
 
@@ -278,7 +298,8 @@ erDiagram
 | --- | --- | --- | --- |
 | `source_type` | `images.source_type` | 可编辑，无 CHECK | `crawled` 爬取（含 TikTok、Instagram）；`device` 设备采集；`open_dataset` 开源数据集；`user_upload` 用户上传（默认）；`external` 外部图搜审核通过 |
 | `license` | `images.license` | 可编辑，无 CHECK | `commercial` 可商用；`research_only` 仅研究；`unknown` 未知（默认） |
-| `food_state` | `images.food_state` | 可编辑，无 CHECK | `raw` 生；`cooked` 熟；`frozen` 冷冻 |
+| `food_state` | `image_foods.food_state` | 可编辑，无 CHECK | `raw` 生；`cooked` 熟；`frozen` 冷冻 |
+| `food_processing` | `image_foods.food_processing` | 可编辑，无 CHECK | `sliced` 切片；`chunked` 切块；`whole` 整个；`shredded` 切丝 |
 | `name_kind` | `category_names.kind` | 系统，CHECK | `primary` 主名；`alias` 别名 |
 | `label_status` | `images.label_status` | 系统，CHECK | `unlabeled` 未标注（一定没有类别）；`auto` 自动标注；`verified` 已核验 |
 | `scene_origin` | `image_scenes.origin` | 系统，CHECK | `rule` 按规则分配；`manual` 人工调整（优先于规则） |
@@ -295,6 +316,6 @@ erDiagram
 - PostgreSQL 保存元数据、类别树、场景归属和向量写入记录。
 - Qdrant 保存向量和检索用 payload。
 - 图片的 `id` 同时是 Qdrant 点 ID。
-- `images.description` 不写入 Qdrant payload。
+- `images.description` 和 `image_foods` 里除 `food_state` 以外的字段不写入 Qdrant payload；`food_state` 写入，取自 `image_foods`。
 - `images.payload_version` 与 `image_embeddings.synced_version` 对照：不一致则需要重推 payload。
 - `embedding_models.collection` 指出该模型版本对应的 Qdrant collection；同一时间只有一个 `current` 模型对外提供检索。

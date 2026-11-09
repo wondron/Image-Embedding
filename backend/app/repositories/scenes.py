@@ -130,7 +130,7 @@ class PgScenesMixin:
             with engine.begin() as conn:
                 img = conn.execute(
                     text(
-                        "SELECT id, category_id, food_state, label_status, "
+                        "SELECT id, category_id, label_status, "
                         "payload_version FROM images "
                         "WHERE id = CAST(:id AS uuid) FOR UPDATE"
                     ),
