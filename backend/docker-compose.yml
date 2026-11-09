@@ -1,10 +1,10 @@
 x-common-healthcheck: &hc
   healthcheck:
     test: ["CMD", "curl", "-sf", "http://127.0.0.1:8320/api/healthz"]
-    interval: 3600s
+    interval: 30s
     timeout: 5s
-    start_period: 10s
-    retries: 3
+    start_period: 180s
+    retries: 5
 
 x-common-logging: &logs
   logging:
@@ -29,16 +29,23 @@ services:
     environment:
       # Set NACOS_ENV=test to use test; unset or empty defaults to prod.
       NACOS_ENV: ${NACOS_ENV:-test}
-      # PG / Qdrant / 对象存储的连接参数都在 Nacos 里（读不到时用镜像里的 config/param/config.yaml），
-      # 不再通过环境变量传。要连本文件里的 postgres / qdrant，把配置里的 host 写成服务名。
+      # Local compose stack talks to sibling postgres/qdrant via the entrypoint
+      # (it rewrites hosts from the mounted Windows config.yaml). Keep Nacos
+      # off unless you explicitly want it to overlay connection settings.
+      NACOS_ENABLED: ${NACOS_ENABLED:-false}
     volumes:
       - ./save_images:/app/save_imagesoutput
       - ./output:/app/output
+      - ./config/param/config.yaml:/opt/host-config.yaml:ro
+      - ./docker-entrypoint-compose.sh:/opt/entrypoint-compose.sh:ro
     ports:
       - "8320:8320"
     depends_on:
-      - qdrant
-      - postgres
+      qdrant:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "/opt/entrypoint-compose.sh"]
     <<: [*hc, *logs, *gpu]
     restart: unless-stopped
 
