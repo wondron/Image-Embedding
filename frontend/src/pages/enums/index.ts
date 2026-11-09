@@ -1,0 +1,1 @@
+export { EnumConfigPage } from './EnumConfigPage'

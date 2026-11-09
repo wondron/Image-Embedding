@@ -30,6 +30,45 @@ export interface ErrorResponseWire {
   errors?: Array<Record<string, unknown>>
 }
 
+// -- /api/enums (schemas/enums.py) ------------------------------------------------------
+
+/** Success bodies do not include trace_id; read X-Trace-Id from the response header. */
+
+export interface EnumValueWire {
+  value: string
+  label: string
+  description?: string
+}
+
+export interface EnumItemWire {
+  name: string
+  label: string
+  description?: string
+  editable: boolean
+  values: EnumValueWire[]
+}
+
+/** GET /api/enums */
+export interface EnumListResponseWire {
+  ok: true
+  enums: EnumItemWire[]
+  /** Present when the file is broken and the body is the last good cache. */
+  file_error?: string | null
+}
+
+/** GET /api/enums/{name} and POST /api/enums/{name}/values (201). No file_error field. */
+export interface EnumResponseWire {
+  ok: true
+  enum: EnumItemWire
+}
+
+/** POST /api/enums/{name}/values — only these three fields. */
+export interface AddEnumValueRequestWire {
+  value: string
+  label: string
+  description: string
+}
+
 // -- POST /api/search (§6.1.1) ----------------------------------------------------------
 
 /** schemas/retrieval.py SearchJsonRequest (JSON body; multipart sends the same names). */

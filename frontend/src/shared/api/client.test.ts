@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, apiRoot, readableApiError, requestJson } from '.'
+import { ApiError, apiRoot, readableApiError, requestJson, requestJsonResult } from '.'
 
 const labels = { service: '图库服务', endpoint: '图库接口', action: '图库列表' }
 
@@ -56,6 +56,26 @@ describe('requestJson', () => {
     const abort = new DOMException('Aborted', 'AbortError')
     fetchMock.mockRejectedValueOnce(abort)
     await expect(requestJson('/api/images', { labels })).rejects.toBe(abort)
+  })
+
+  it('reads X-Trace-Id when the success body has no trace_id, and prefers the body on errors', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, enums: [] }), {
+        status: 200,
+        headers: { 'X-Trace-Id': 'trace-header' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ok: false, error: 'ENUM_FILE_INVALID', detail: 'broken', trace_id: 'trace-body',
+      }), {
+        status: 503,
+        headers: { 'X-Trace-Id': 'trace-header' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(requestJsonResult('/api/enums', { labels })).resolves.toMatchObject({
+      status: 200, traceId: 'trace-header', body: { ok: true, enums: [] },
+    })
+    const error = await requestJsonResult('/api/enums', { labels }).catch(cause => cause)
+    expect(error).toMatchObject({ code: 'ENUM_FILE_INVALID', traceId: 'trace-body', detail: 'broken', status: 503 })
   })
 
   it('strips trailing slashes from the API origin', () => {

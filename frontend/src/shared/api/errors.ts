@@ -7,19 +7,27 @@ export class ApiError extends Error {
   readonly status: number | null
   /** Wire `error` code (e.g. SEARCH_BAD_IMAGE); null when the body had none. */
   readonly code: string | null
-  /** Wire `trace_id`, to quote when reporting the failure. */
+  /** Body `trace_id` when present, otherwise the `X-Trace-Id` header. */
   readonly traceId: string | null
+  /** Body `detail` string, when the envelope had one. */
+  readonly detail: string | null
+  /** Body `errors` list (VALIDATION_ERROR); null when absent. */
+  readonly errors: readonly Record<string, unknown>[] | null
 
-  constructor(message: string, { status = null, code = null, traceId = null }: {
+  constructor(message: string, { status = null, code = null, traceId = null, detail = null, errors = null }: {
     status?: number | null
     code?: string | null
     traceId?: string | null
+    detail?: string | null
+    errors?: readonly Record<string, unknown>[] | null
   } = {}) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
     this.traceId = traceId
+    this.detail = detail
+    this.errors = errors
   }
 }
 
@@ -54,12 +62,27 @@ export function readableApiError(payload: unknown, status: number, action = '搜
   return `${action}失败（HTTP ${status}），请检查后端服务后重试。`
 }
 
+function asErrorList(value: unknown): readonly Record<string, unknown>[] | null {
+  if (!Array.isArray(value)) return null
+  const rows = value.filter((entry): entry is Record<string, unknown> => (
+    entry !== null && typeof entry === 'object' && !Array.isArray(entry)
+  ))
+  return rows.length ? rows : null
+}
+
 /** ApiError for a non-2xx response; `payload` is the parsed body, or null when it was not JSON. */
-export function apiErrorFromResponse(payload: unknown, status: number, action: string): ApiError {
+export function apiErrorFromResponse(
+  payload: unknown,
+  status: number,
+  action: string,
+  headerTraceId: string | null = null,
+): ApiError {
   const body = untrusted<ErrorResponseWire>(payload)
   return new ApiError(readableApiError(payload, status, action), {
     status,
     code: asText(body?.error),
-    traceId: asText(body?.trace_id),
+    traceId: asText(body?.trace_id) ?? headerTraceId,
+    detail: asText(body?.detail),
+    errors: asErrorList(body?.errors),
   })
 }

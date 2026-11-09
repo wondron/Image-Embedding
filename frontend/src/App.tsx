@@ -2,10 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUpRight, Check, CheckCircle2,
   CircleHelp, Database, FolderOpen, ImageIcon, Images, LayoutGrid, List, Link2, PanelLeftClose, PanelLeftOpen,
-  ListFilter, LoaderCircle, Menu, ScanLine, Search, Settings2, SlidersHorizontal,
+  ListFilter, ListTree, LoaderCircle, Menu, ScanLine, Search, Settings2, SlidersHorizontal,
   Tags, Upload, UploadCloud, Workflow, X, XCircle,
 } from 'lucide-react'
 import { ManagementViews, type ManagementView } from './components/ManagementViews'
+import { EnumConfigPage } from './pages/enums'
 import { Dialog } from './components/Dialog'
 import { BatchSearchPanel, type BatchSearchResult } from './components/BatchSearchPanel'
 import { DownloadDialog } from './components/DownloadDialog'
@@ -33,6 +34,7 @@ const navigation = [
   { key: 'import' as const, name: '上传与导入', icon: UploadCloud, description: '整理图片，准备入库' },
   { key: 'tasks' as const, name: '入库任务', icon: Workflow, description: '任务进度与失败记录' },
   { key: 'ingredients' as const, name: '食材管理', icon: Tags, description: '名称、类别与属性' },
+  { key: 'enums' as const, name: '枚举配置', icon: ListTree, description: '查看取值并追加' },
 ]
 const pageSize = 12
 const maxBytes = 15 * 1024 * 1024
@@ -85,8 +87,15 @@ function ResultTable({ items, onDetail, onDownload, downloading, selected, onTog
   </table></div>
 }
 
+function initialView(): View {
+  try {
+    if (new URLSearchParams(window.location.search).get('view') === 'enums') return 'enums'
+  } catch { /* keep the default view */ }
+  return 'search'
+}
+
 export default function App() {
-  const [view, setView] = useState<View>('search')
+  const [view, setView] = useState<View>(initialView)
   const [mobileNav, setMobileNav] = useState(false)
   const [navCollapsed, setNavCollapsed] = useState(false)
   const [mode, setMode] = useState<'file' | 'url'>('file')
@@ -206,7 +215,19 @@ export default function App() {
     catch (cause) { setError(cause instanceof Error ? cause.message : '下载失败，请打开原图另存为。'); setDownloadFailure(item) }
     finally { setDownloading(null) }
   }
-  function navigate(next: View) { setView(next); setMobileNav(false) }
+  function navigate(next: View) {
+    setView(next)
+    setMobileNav(false)
+    try {
+      const url = new URL(window.location.href)
+      if (next === 'enums') url.searchParams.set('view', 'enums')
+      else {
+        url.searchParams.delete('view')
+        url.searchParams.delete('enum')
+      }
+      window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
+    } catch { /* the in-app view still changes when the URL cannot be updated */ }
+  }
   function saveSettings() {
     const next = apiDraft.trim().replace(/\/+$/, '')
     if (next && !safeHttpUrl(next)) { return }
@@ -246,7 +267,7 @@ export default function App() {
         {navigation.map(({ key, icon: Icon, name }, index) => <div key={key}>
           {index === 1 && <span className="nav-group-label nav-group-second">数据管理</span>}
           <button className={`nav-item ${view === key ? 'active' : ''}`} onClick={() => navigate(key)} aria-label={name} title={name} aria-current={view === key ? 'page' : undefined}>
-            <span className="nav-icon"><Icon size={16} strokeWidth={1.6} /></span><span className="nav-label">{name}</span>{key !== 'search' && <small>待接入</small>}
+            <span className="nav-icon"><Icon size={16} strokeWidth={1.6} /></span><span className="nav-label">{name}</span>{key !== 'search' && key !== 'enums' && <small>待接入</small>}
           </button>
         </div>)}
       </nav>
@@ -258,7 +279,8 @@ export default function App() {
 
     <div className="main-shell"><header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" aria-label="展开导航" onClick={() => setMobileNav(true)}><Menu size={20} /></button><div className="topbar-title"><h1>{pageInfo.name}</h1><span>食材图像管理 / {pageInfo.description}</span></div></div><div className="topbar-actions"><button className="icon-button" title="使用说明" aria-label="使用说明" onClick={() => setHelpOpen(true)}><CircleHelp size={17} /></button><button className="icon-button" title="连接设置" aria-label="连接设置" disabled={batchRunning} onClick={() => { setApiDraft(apiBase); setSettingsOpen(true) }}><Settings2 size={17} /></button></div></header>
     <main className={view === 'search' ? 'search-page' : 'management-page'}>
-      {view !== 'search' && <ManagementViews view={view} onNavigate={navigate} apiBase={apiBase} />}
+      {view !== 'search' && view !== 'enums' && <ManagementViews view={view} onNavigate={navigate} apiBase={apiBase} />}
+      {view === 'enums' && <EnumConfigPage apiBase={apiBase} />}
       <div className="search-view" hidden={view !== 'search'}>
         {(error || notice) && <div className={`message-banner ${error ? 'message-error' : 'message-success'}`} role={error ? 'alert' : 'status'}>{error ? <XCircle size={18} /> : <CheckCircle2 size={18} />}<span>{error || notice}</span>{downloadFailure && safeHttpUrl(downloadFailure.imageUrl ?? downloadFailure.thumbnailUrl ?? '') && <a href={downloadFailure.imageUrl ?? downloadFailure.thumbnailUrl!} target="_blank" rel="noreferrer">打开原图 <ArrowUpRight size={14} /></a>}<button className="icon-button" aria-label="关闭提示" onClick={() => { setError(''); setNotice(''); setDownloadFailure(null) }}><X size={16} /></button></div>}
         <div className="search-workspace">
