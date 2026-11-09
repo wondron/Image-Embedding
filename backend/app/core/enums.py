@@ -1,12 +1,30 @@
-"""枚举：数据库、接口和 Qdrant payload 共用同一套取值。
+"""枚举：数据库、接口和 Qdrant payload 共用同一套取值，全部列在 config/param/enums.yaml。
 
-数据库里存的是 value（VARCHAR + CHECK，见 app.db.types.str_enum）；
-改取值时同步改迁移里的 CHECK 约束。
+文件由 app.core.config.enum_store 读写（中文名、说明也在文件里），这里只定义代码这边的约定。
+枚举分两类：
+
+- 系统枚举（下面的 StrEnum，登记在 SYSTEM_ENUMS）：代码按取值分支，数据库有 CHECK 约束
+  （app.db.types.str_enum）。取值以代码为准，文件里必须一样（读文件时校验），文件里只能改
+  label / description；改取值要同时改代码和迁移。
+- 可编辑枚举（登记在 EDITABLE_ENUMS）：取值以文件为准，可以手工改文件，也可以调接口
+  POST /api/enums/{name}/values 追加。数据库只存 VARCHAR(32)、不建 CHECK，写入前由
+  app.services.retrieval.enum_fields 按文件校验。代码只直接用到少数几个取值（如默认值），
+  它们必须一直留在文件里。
 """
 
 from __future__ import annotations
 
 from enum import StrEnum  # SQLAlchemy 2.1 要求 Python>=3.11，直接用标准库
+
+# 取值规则（文件和接口共用）。库里的枚举列都是 VARCHAR(32)
+ENUM_VALUE_MAX_LEN = 32
+ENUM_VALUE_PATTERN = r"^[a-z][a-z0-9_]*$"
+ENUM_LABEL_MAX_LEN = 64
+ENUM_DESCRIPTION_MAX_LEN = 256
+ENUM_MAX_VALUES = 100  # 每个枚举最多多少个取值，防止接口被刷
+
+
+# -- 系统枚举 ----------------------------------------------------------------------
 
 
 class CategoryDomain(StrEnum):
@@ -23,32 +41,6 @@ class NameKind(StrEnum):
 
     PRIMARY = "primary"  # 主名，每个类别每种语言只能有一个
     ALIAS = "alias"  # 别名
-
-
-class SourceType(StrEnum):
-    """图片来源大类。"""
-
-    CRAWLED = "crawled"  # 爬取（含 TikTok、Instagram）
-    DEVICE = "device"  # 设备采集
-    OPEN_DATASET = "open_dataset"  # 开源数据集
-    USER_UPLOAD = "user_upload"  # 用户上传
-    EXTERNAL = "external"  # 外部图搜审核通过
-
-
-class License(StrEnum):
-    """许可标签；确认不能用的数据按标签整批剔除。"""
-
-    COMMERCIAL = "commercial"  # 可商用
-    RESEARCH_ONLY = "research_only"  # 仅研究
-    UNKNOWN = "unknown"  # 未知
-
-
-class FoodState(StrEnum):
-    """食物状态。"""
-
-    RAW = "raw"  # 生
-    COOKED = "cooked"  # 熟
-    FROZEN = "frozen"  # 冷冻
 
 
 class LabelStatus(StrEnum):
@@ -89,3 +81,32 @@ class ReviewStatus(StrEnum):
     PENDING = "pending"
     ACCEPTED = "accepted"
     REJECTED = "rejected"
+
+
+# 枚举名（文件里的键、接口路径里的 {name}）-> 类
+SYSTEM_ENUMS: dict[str, type[StrEnum]] = {
+    "category_domain": CategoryDomain,
+    "name_kind": NameKind,
+    "label_status": LabelStatus,
+    "scene_origin": SceneOrigin,
+    "distance": Distance,
+    "model_status": ModelStatus,
+    "review_status": ReviewStatus,
+}
+
+
+# -- 可编辑枚举 --------------------------------------------------------------------
+
+SOURCE_TYPE = "source_type"  # images.source_type：图片来源大类
+LICENSE = "license"  # images.license：许可标签，确认不能用的数据按标签整批剔除
+FOOD_STATE = "food_state"  # images.food_state：食物状态，可为空
+
+DEFAULT_SOURCE_TYPE = "user_upload"  # 请求没给来源时
+DEFAULT_LICENSE = "unknown"  # 请求没给许可时
+
+# 枚举名 -> 代码直接用到的取值（文件里不能删）
+EDITABLE_ENUMS: dict[str, frozenset[str]] = {
+    SOURCE_TYPE: frozenset({DEFAULT_SOURCE_TYPE}),
+    LICENSE: frozenset({DEFAULT_LICENSE}),
+    FOOD_STATE: frozenset(),
+}

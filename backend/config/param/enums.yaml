@@ -1,0 +1,100 @@
+# 枚举取值：数据库、接口和 Qdrant payload 共用这里的 value。后端读写见 app/core/config/enum_store.py；
+# 接口 GET /api/enums 查询全部，POST /api/enums/{name}/values 追加取值。
+#
+# editable: true   可编辑枚举，取值以本文件为准：可以直接改文件（不用重启，下次用到时自动重新读取），
+#                  也可以调接口追加。
+# editable: false  接口不能追加。系统枚举（代码按取值分支、库里有 CHECK 约束）只能是 false，
+#                  取值必须和 app/core/enums.py 一致，这里只能改 label / description。
+#
+# value 只用小写字母、数字和下划线，字母开头，最长 32 个字符。库里存的就是 value，用过的取值不要删、不要改名。
+# 接口追加时会按固定格式重写整个文件，只保留这段文件头；补充说明写进 description，不要写成注释。
+
+source_type:
+  label: 图片来源
+  description: 图片来源大类；请求没给时记为 user_upload
+  editable: true
+  values:
+  - {value: crawled, label: 爬取, description: 含 TikTok、Instagram}
+  - {value: device, label: 设备采集}
+  - {value: open_dataset, label: 开源数据集}
+  - {value: user_upload, label: 用户上传}
+  - {value: external, label: 外部图搜, description: 外部图搜结果审核通过后入库}
+
+license:
+  label: 许可
+  description: 确认不能用的数据按许可整批剔除；请求没给时记为 unknown
+  editable: true
+  values:
+  - {value: commercial, label: 可商用}
+  - {value: research_only, label: 仅研究}
+  - {value: unknown, label: 未知}
+
+food_state:
+  label: 食物状态
+  description: 可为空
+  editable: true
+  values:
+  - {value: raw, label: 生}
+  - {value: cooked, label: 熟}
+  - {value: frozen, label: 冷冻}
+
+category_domain:
+  label: 类别域
+  description: 类别树的四个根节点
+  editable: false
+  values:
+  - {value: ingredient, label: 食材}
+  - {value: dish, label: 菜品}
+  - {value: dessert, label: 甜点烘焙}
+  - {value: beverage, label: 饮品}
+
+name_kind:
+  label: 名称种类
+  description: 类别名称的种类
+  editable: false
+  values:
+  - {value: primary, label: 主名, description: 每个类别每种语言只能有一个}
+  - {value: alias, label: 别名}
+
+label_status:
+  label: 标注状态
+  editable: false
+  values:
+  - {value: unlabeled, label: 未标注, description: 一定没有类别}
+  - {value: auto, label: 自动标注}
+  - {value: verified, label: 已核验}
+
+scene_origin:
+  label: 场景来源
+  description: 图片进入场景的方式
+  editable: false
+  values:
+  - {value: rule, label: 按规则分配}
+  - {value: manual, label: 人工调整, description: 优先于规则}
+
+distance:
+  label: 向量距离
+  editable: false
+  values:
+  - {value: cosine, label: 余弦}
+  - {value: dot, label: 点积}
+  - {value: euclid, label: 欧氏距离}
+
+model_status:
+  label: 模型状态
+  description: 模型版本状态
+  editable: false
+  values:
+  - {value: building, label: 写入中, description: 正在写入向量}
+  - {value: ready, label: 已就绪, description: 已补齐，可以切换}
+  - {value: current, label: 当前使用, description: 同一时间只有一个}
+  - {value: retired, label: 已下线}
+
+review_status:
+  label: 审核状态
+  description: 外部候选的审核状态
+  editable: false
+  values:
+  - {value: pending, label: 待审核}
+  - {value: accepted, label: 已通过}
+  - {value: rejected, label: 已拒绝}

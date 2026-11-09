@@ -9,9 +9,9 @@ from typing import TYPE_CHECKING
 from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Index, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.enums import FoodState, LabelStatus, License, SourceType
+from app.core.enums import LabelStatus
 from app.db.base import Base, TimestampMixin
-from app.db.types import str_enum
+from app.db.types import editable_enum, str_enum
 
 if TYPE_CHECKING:
     from app.models.category import Category
@@ -45,17 +45,20 @@ class Image(TimestampMixin, Base):
     thumb_url: Mapped[str] = mapped_column(comment="缩略图的完整 https 地址（长边 512，WebP）")
     width: Mapped[int] = mapped_column(comment="原图宽（像素）")
     height: Mapped[int] = mapped_column(comment="原图高（像素）")
-    source_type: Mapped[SourceType] = mapped_column(
-        str_enum(SourceType, "source_type"), index=True, comment="来源大类"
+    # source_type / license / food_state 是可编辑枚举：取值在 config/param/enums.yaml，库里没有 CHECK
+    source_type: Mapped[str] = mapped_column(
+        editable_enum(), index=True, comment="来源大类，取值见 config/param/enums.yaml"
     )
-    license: Mapped[License] = mapped_column(str_enum(License, "license"), index=True, comment="许可")
+    license: Mapped[str] = mapped_column(
+        editable_enum(), index=True, comment="许可，取值见 config/param/enums.yaml"
+    )
     category_id: Mapped[int | None] = mapped_column(
         ForeignKey("categories.id", ondelete="RESTRICT"),
         index=True,
         comment="类别，可以标到任意层级；未标注时为空",
     )
-    food_state: Mapped[FoodState | None] = mapped_column(
-        str_enum(FoodState, "food_state"), comment="食物状态：生 / 熟 / 冷冻"
+    food_state: Mapped[str | None] = mapped_column(
+        editable_enum(), comment="食物状态，可为空，取值见 config/param/enums.yaml"
     )
     label_status: Mapped[LabelStatus] = mapped_column(
         str_enum(LabelStatus, "label_status"),

@@ -2,7 +2,7 @@
 
 import unittest
 
-from app.core.enums import FoodState, LabelStatus
+from app.core.enums import LabelStatus
 from app.services.retrieval.scene_membership import (
     apply_manual_overrides,
     build_qdrant_payload,
@@ -56,7 +56,7 @@ class SceneMembershipTests(unittest.TestCase):
         payload = build_qdrant_payload(
             category_id=7,
             scene_codes=["general", "oven"],
-            food_state=FoodState.COOKED,
+            food_state="cooked",  # editable enum: a plain str from config/param/enums.yaml
             label_status=LabelStatus.AUTO,
         )
         self.assertEqual(

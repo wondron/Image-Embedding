@@ -67,7 +67,7 @@
 
 > 类型与设计原文一致；下列补齐 **NULL / PK / FK / UNIQUE / 推荐索引** 与实现约束。Wire 字段名英文。时间一律 **`timestamptz`**。
 >
-> **2026-11-05 起表结构权威 = `backend/app/models/`（ORM）**，迁移 `0001` + `0002` 把库变成该结构（`alembic check` 可核对）。枚举列存 `varchar(32)` + CHECK，取值见 `backend/app/core/enums.py`；约束/索引命名 `pk_/fk_/uq_/ck_/ix_`。本节表格与 ORM 冲突时以 ORM 为准。
+> **2026-11-05 起表结构权威 = `backend/app/models/`（ORM）**，迁移 `0001` + `0002` 把库变成该结构（`alembic check` 可核对）。枚举列存 `varchar(32)`，取值见 `backend/config/param/enums.yaml`（系统枚举另有 CHECK，以 `backend/app/core/enums.py` 为准；`images.source_type`/`license`/`food_state` 为可编辑枚举，可经 `POST /api/enums/{name}/values` 追加，库里无 CHECK，见迁移 `0004`）；约束/索引命名 `pk_/fk_/uq_/ck_/ix_`。本节表格与 ORM 冲突时以 ORM 为准。
 
 ### 2.1 `heating_groups`
 
@@ -132,10 +132,10 @@
 | `thumb_url` | `text` | NO | — | 完整 https；长边 512 WebP |
 | `width` | `integer` | NO | CHECK `> 0` | 原图像素宽 |
 | `height` | `integer` | NO | CHECK `> 0` | 原图像素高 |
-| `source_type` | `text` | NO | CHECK ∈ 见下 | `crawled` / `device` / `open_dataset` / `user_upload` / `external` |
-| `license` | `text` | NO | CHECK ∈ 见下 | `commercial` / `research_only` / `unknown` |
+| `source_type` | `text` | NO | 可编辑枚举，应用层按 `enums.yaml` 校验（无 CHECK，迁移 `0004`） | 初始 `crawled` / `device` / `open_dataset` / `user_upload` / `external` |
+| `license` | `text` | NO | 可编辑枚举，同上 | 初始 `commercial` / `research_only` / `unknown` |
 | `category_id` | `integer` | YES | FK → `categories.id` ON DELETE RESTRICT | 可标到任意层级；未标注为空 |
-| `food_state` | `text` | YES | CHECK ∈ `raw`/`cooked`/`frozen` 或 NULL | 生/熟/冷冻 |
+| `food_state` | `text` | YES | 可编辑枚举，同上；可为 NULL | 初始 `raw`/`cooked`/`frozen`（生/熟/冷冻） |
 | `label_status` | `text` | NO | CHECK ∈ `unlabeled`/`auto`/`verified` | **未标注 ⇔ 没有类别**（库约束 `ck_images_label_matches_category`：`(label_status = 'unlabeled') = (category_id IS NULL)`）；默认 `unlabeled` |
 | `description` | `text` | NO | 默认 `''` | 图片描述（迁移 `0003`）；API 侧上限 1000 字符；不进 Qdrant payload，修改不 bump `payload_version`；同图重复上传保留首次的描述 |
 | `payload_version` | `bigint` | NO | 默认 `1` | 类别/状态/所属场景变化时递增；与 Qdrant payload 同步 |
@@ -426,6 +426,7 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | **模型** | 配置 + meta 表 | `embedding_models` 状态机；切 `current`；重建进度 **TBD** |
 | **删除** | 软删 status | 删图 API → `image_deletions` 流水线 |
 | **Health** | 聚合 Qdrant+MySQL | 改探 PG + Qdrant(current collection) +（可选）S3；回报 current model/collection |
+| **枚举** `/api/enums`（**已落地 2026-11-09**） | 写死在代码 | `GET /api/enums`、`GET /api/enums/{name}` 返回取值 + 中文名 + `editable`；`POST /api/enums/{name}/values` `{value, label, description?}` 给可编辑枚举追加取值（201，返回整个枚举），写回 `backend/config/param/enums.yaml`。错误码 `ENUM_NOT_FOUND` 404、`ENUM_NOT_EDITABLE` 403（系统枚举）、`ENUM_VALUE_EXISTS` 409、`ENUM_FILE_INVALID` 503、`VALIDATION_ERROR` 422。字段见 `backend/app/schemas/enums.py` |
 
 **结果卡形状**：旧 SSOT §9 统一 wire **仍作废**（见 §0.1）。前后端统一 wire 见 **§6.1（已拍 2026-11-05 · 一刀切；2026-11-08 更正 `description` 允许、`heating_group` 为对象）**；实现须按已拍定案改 BE hit/list 与 FE 适配层。
 
@@ -753,6 +754,7 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | 2026-11-05 | **§6.1 P1–P12 冻结**：全按建议已拍；**一刀切**；禁 `image_url`/`thumbnail_url` 别名与 FlyB 壳（site/page_url/snippets/details 等）；envelope 权威 `items`；禁 title/description/qdrant_point_id；`external_candidates` 仅定最小 wire（落地 TBD）；未 commit |
 | 2026-11-08 | **§6.1 更正（总裁拍：按后端实现）**：`description` 由禁改为允许（`string`，默认 `""`；Index 请求/Index 响应/Search/List 均有；不进 Qdrant payload）；`heating_group` 由展示名 string 改为对象 `{id, code, name}`（仅 `outputs_heating=true` 时出现）。以 `backend/app/schemas/retrieval.py` 为准。未改其它债。未 commit |
 | 2026-11-05 | **表结构以 ORM 为准**：`app/models/` 按域拆分（category/image/scene/embedding/external）+ `app/core/enums.py`；迁移 `0002` 补齐约束（images 宽高非空且 >0、unlabeled⇔无类别、sha256 32 字节；scene_rules 每场景类别/菜系唯一、label 必须属于同场景（组合外键）；image_scenes 只有人工行可排除；embedding_models dim/input_size >0；external_candidates 审核时间/入库图一致性）、ON DELETE 行为、默认值、索引与注释；`include_all` 场景不再物化到 `image_scenes`。Wire（§6.1）不变 |
+| 2026-11-09 | **枚举改为配置文件**：取值、中文名统一放 `backend/config/param/enums.yaml`（`app/core/config/enum_store.py` 读写，文件改了自动重读）。`source_type`/`license`/`food_state` 为可编辑枚举，新增接口 `/api/enums`（§6）可追加取值；迁移 `0004` 去掉这三列的 CHECK，取值改由应用层校验。系统枚举（`label_status` 等）取值仍以 `app/core/enums.py` 为准、保留 CHECK。Wire（§6.1）不变：`food_state` 仍是 string，可能出现初始三值以外的取值 |
 
 ---
 

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import Enum
+from sqlalchemy import Enum, String
 from sqlalchemy.types import UserDefinedType
 
-from app.core.enums import StrEnum
+from app.core.enums import ENUM_VALUE_MAX_LEN, StrEnum
 
 
 class LtreeType(UserDefinedType[str]):
@@ -20,13 +20,22 @@ class LtreeType(UserDefinedType[str]):
 
 
 def str_enum(enum_cls: type[StrEnum], name: str) -> Enum:
-    """枚举存成 VARCHAR + CHECK 约束，不用 PostgreSQL 原生枚举，以后加取值只需改约束。"""
+    """系统枚举：存成 VARCHAR + CHECK 约束（不用 PostgreSQL 原生枚举），取值来自代码里的类，改取值要写迁移。"""
     return Enum(
         enum_cls,
         name=name,
         native_enum=False,
         create_constraint=True,
-        length=32,
+        length=ENUM_VALUE_MAX_LEN,
         validate_strings=True,
         values_callable=lambda members: [m.value for m in members],
     )
+
+
+def editable_enum() -> String:
+    """可编辑枚举：只存 VARCHAR，不建 CHECK。
+
+    取值在 config/param/enums.yaml，运行中可以追加，所以库里不列取值；写入前由
+    app.services.retrieval.enum_fields 按文件校验。
+    """
+    return String(ENUM_VALUE_MAX_LEN)

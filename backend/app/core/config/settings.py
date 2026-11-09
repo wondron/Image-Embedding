@@ -24,6 +24,7 @@ from typing import Any, Callable, TypeVar
 from sqlalchemy.engine import URL
 
 from app.core.config.constant import (
+    DEFAULT_ENUMS_PATH,
     DEFAULT_PORT,
     DEFAULT_TIME_OUT,
     DEFAULT_YAML_PATH,
@@ -87,6 +88,7 @@ class ApplicationSettings:
 @dataclass(frozen=True, slots=True)
 class ConfigSettings:
     yaml_path: str = DEFAULT_YAML_PATH
+    enums_path: str = DEFAULT_ENUMS_PATH
 
 
 @dataclass(frozen=True, slots=True)

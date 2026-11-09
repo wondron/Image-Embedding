@@ -8,6 +8,7 @@ from fastapi import FastAPI
 
 from app.bootstrap.state import ApplicationState
 from app.core import errors
+from app.core.config.enum_store import get_enum_store
 from app.core.config.nacos import NacosConfigProvider, NacosConfigSnapshot
 from app.core.config.settings import ImageDownloadSettings, Settings, config_flag, settings
 from app.core.observability.logging import setup_logger
@@ -113,6 +114,19 @@ def apply_download_policy(config: dict) -> None:
     if trusted:
         logger.warning("image downloads also trust %s (IMAGE_DOWNLOAD_CONFIG.trusted_networks)",
                        ", ".join(str(network) for network in trusted))
+
+
+def load_enum_file() -> None:
+    """Read config/param/enums.yaml now so a broken file shows up in the startup log.
+
+    Not fatal: predict does not use it. Until the file is fixed, index requests that pass an
+    editable enum value and /api/enums answer ENUM_FILE_INVALID; the store re-reads the file
+    as soon as it changes.
+    """
+    try:
+        get_enum_store().catalog()
+    except errors.AppError:
+        pass  # the store already logged why
 
 
 def _retrieval_enabled(config: dict) -> bool:
@@ -250,6 +264,7 @@ async def lifespan(app: FastAPI):
     app.state.runtime = runtime
     logger.info("App starting ENV=%s cfg=%s", runtime.settings.application.env, runtime.config_info,)
     apply_download_policy(config)
+    load_enum_file()
     embedder = initialize_embedder(runtime)  # one ONNX session for predict + retrieval
     initialize_food_service(runtime, embedder)
     initialize_retrieval(runtime, embedder)

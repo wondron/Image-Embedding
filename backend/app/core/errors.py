@@ -68,6 +68,12 @@ ERROR_CODES: dict[str, ErrorSpec] = {
     # -- retrieval: gallery list
     "LIST_UNKNOWN_SCENE": ErrorSpec(422),
     "LIST_POSTGRES_FAILED": ErrorSpec(502, "metadata list query failed"),
+    # -- enums (config/param/enums.yaml, app.core.config.enum_store)
+    "ENUM_NOT_FOUND": ErrorSpec(404),
+    "ENUM_NOT_EDITABLE": ErrorSpec(403),
+    "ENUM_VALUE_EXISTS": ErrorSpec(409),
+    "ENUM_FILE_INVALID": ErrorSpec(503),
+    "ENUM_FILE_WRITE_FAILED": ErrorSpec(500, "enum file write failed"),
 }
 
 _UNREGISTERED_5XX = ERROR_CODES["INTERNAL_ERROR"].public_detail or "internal server error"
@@ -238,6 +244,30 @@ def list_unknown_scene(detail: str) -> AppError:
 
 def list_postgres_failed(detail: str) -> AppError:
     return AppError("LIST_POSTGRES_FAILED", detail)
+
+
+# -- enums -----------------------------------------------------------------------
+
+def enum_not_found(detail: str) -> AppError:
+    return AppError("ENUM_NOT_FOUND", detail)
+
+
+def enum_not_editable(detail: str) -> AppError:
+    """A system enum, or an editable one locked with editable: false."""
+    return AppError("ENUM_NOT_EDITABLE", detail)
+
+
+def enum_value_exists(detail: str) -> AppError:
+    return AppError("ENUM_VALUE_EXISTS", detail)
+
+
+def enum_file_invalid(detail: str) -> AppError:
+    """The enums file cannot be read or breaks a rule; the detail says where, for whoever fixes it."""
+    return AppError("ENUM_FILE_INVALID", detail)
+
+
+def enum_file_write_failed(detail: str) -> AppError:
+    return AppError("ENUM_FILE_WRITE_FAILED", detail)
 
 
 # Codes for HTTPExceptions raised by the framework itself (404 route, 405 method, ...)

@@ -4,7 +4,7 @@ import re
 import unittest
 from pathlib import Path
 
-from sqlalchemy import CheckConstraint, Enum
+from sqlalchemy import CheckConstraint, Enum, String
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import configure_mappers
 from sqlalchemy.schema import CreateTable
@@ -45,11 +45,8 @@ class ModelsSchemaTests(unittest.TestCase):
             # PG truncates identifiers past 63 bytes; keep names exact
             self.assertTrue(all(len(n) <= 63 for n in names), names)
 
-    def test_enum_columns_store_enum_values_with_check_constraints(self):
+    def test_system_enum_columns_store_enum_values_with_check_constraints(self):
         expected = {
-            ("images", "source_type"): enums.SourceType,
-            ("images", "license"): enums.License,
-            ("images", "food_state"): enums.FoodState,
             ("images", "label_status"): enums.LabelStatus,
             ("category_names", "kind"): enums.NameKind,
             ("image_scenes", "origin"): enums.SceneOrigin,
@@ -62,6 +59,20 @@ class ModelsSchemaTests(unittest.TestCase):
             self.assertIsInstance(col_type, Enum, f"{table}.{column}")
             self.assertFalse(col_type.native_enum)
             self.assertEqual(list(col_type.enums), [m.value for m in enum_cls])
+            self.assertEqual(col_type.length, enums.ENUM_VALUE_MAX_LEN)
+
+    def test_editable_enum_columns_are_varchar_without_a_check_list(self):
+        # values live in config/param/enums.yaml and grow at runtime (migration 0004)
+        images = self.tables["images"]
+        for column in enums.EDITABLE_ENUMS:
+            col_type = images.c[column].type
+            self.assertNotIsInstance(col_type, Enum, column)  # Enum subclasses String
+            self.assertIsInstance(col_type, String, column)
+            self.assertEqual(col_type.length, enums.ENUM_VALUE_MAX_LEN)
+        ddl = str(CreateTable(images).compile(dialect=postgresql.dialect()))
+        for column in enums.EDITABLE_ENUMS:
+            self.assertNotIn(f"ck_images_{column}", ddl)
+        self.assertIn("ck_images_label_status", ddl)
 
     def test_images_invariants_are_declared(self):
         checks = {
@@ -88,7 +99,8 @@ class MigrationChainTests(unittest.TestCase):
         cfg = Config(str(BACKEND / "alembic.ini"))
         cfg.set_main_option("script_location", str(BACKEND / "alembic"))
         script = ScriptDirectory.from_config(cfg)
-        self.assertEqual(script.get_heads(), ["20261106_0003"])
+        self.assertEqual(script.get_heads(), ["20261109_0004"])
+        self.assertEqual(script.get_revision("20261109_0004").down_revision, "20261106_0003")
         self.assertEqual(script.get_revision("20261106_0003").down_revision, "20261105_0002")
         self.assertEqual(script.get_revision("20261105_0002").down_revision, "20261104_0001")
 

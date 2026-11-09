@@ -9,6 +9,10 @@ frontend/node_modules/
 backend/logs/
 frontend/dist/
 logs/
-backend/config
+# backend/config 不进 git（模型、字体、config.yaml 等），只留枚举取值文件 enums.yaml（没有密钥，取值要有版本记录）
+backend/config/*
+!backend/config/param/
+backend/config/param/*
+!backend/config/param/enums.yaml
 # 后端不读 .env：参数只来自 constant.py 和 Nacos / config.yaml；防止把密钥再提交进来
 backend/.env

@@ -3,7 +3,16 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from app.core.enums import FoodState, LabelStatus, License, NameKind, SourceType
+from app.core.enums import (
+    DEFAULT_LICENSE,
+    DEFAULT_SOURCE_TYPE,
+    FOOD_STATE,
+    LICENSE,
+    SOURCE_TYPE,
+    LabelStatus,
+    NameKind,
+    StrEnum,
+)
 from app.db.common import (
     _as_uuid,
     _row_to_dict,
@@ -35,10 +44,10 @@ _HYDRATE_SELECT = (
     "hg.name AS heating_group_name "
 )
 
-# Enum columns -> enum class (validated before they reach the CHECK constraints)
-_ENUM_COLUMNS = {
-    "source_type": SourceType,
-    "license": License,
+# Required enum columns -> system enum class (also has a CHECK) or editable enum name (only this check)
+_ENUM_COLUMNS: dict[str, type[StrEnum] | str] = {
+    "source_type": SOURCE_TYPE,
+    "license": LICENSE,
     "label_status": LabelStatus,
 }
 
@@ -104,13 +113,13 @@ class PgImagesMixin:
         width = _positive_int(row.get("width"), "width")
         height = _positive_int(row.get("height"), "height")
         source_type = coerce_enum(
-            SourceType, row.get("source_type"), field="source_type", default=SourceType.USER_UPLOAD
+            SOURCE_TYPE, row.get("source_type"), field="source_type", default=DEFAULT_SOURCE_TYPE
         )
-        license_v = coerce_enum(License, row.get("license"), field="license", default=License.UNKNOWN)
+        license_v = coerce_enum(LICENSE, row.get("license"), field="license", default=DEFAULT_LICENSE)
         label_status = coerce_enum(
             LabelStatus, row.get("label_status"), field="label_status", default=LabelStatus.UNLABELED
         )
-        food_state = coerce_optional_enum(FoodState, row.get("food_state"), field="food_state")
+        food_state = coerce_optional_enum(FOOD_STATE, row.get("food_state"), field="food_state")
         category_id = row.get("category_id")
         _check_label_matches_category(label_status, category_id)
         description = normalize_description(row.get("description"))
@@ -135,10 +144,10 @@ class PgImagesMixin:
                         "tu": thumb_url,
                         "w": width,
                         "h": height,
-                        "st": source_type.value,
-                        "lic": license_v.value,
+                        "st": source_type,
+                        "lic": license_v,
                         "cid": category_id,
-                        "fs": food_state.value if food_state else None,
+                        "fs": food_state,
                         "ls": label_status.value,
                         "desc": description,
                     },
@@ -188,10 +197,9 @@ class PgImagesMixin:
             if key not in allowed:
                 continue
             if key in _ENUM_COLUMNS:
-                val = coerce_enum(_ENUM_COLUMNS[key], val, field=key).value
+                val = str(coerce_enum(_ENUM_COLUMNS[key], val, field=key))
             elif key == "food_state":
-                fs = coerce_optional_enum(FoodState, val, field=key)
-                val = fs.value if fs else None
+                val = coerce_optional_enum(FOOD_STATE, val, field=key)
             elif key in ("width", "height"):
                 val = _positive_int(val, key)
             elif key == "description":

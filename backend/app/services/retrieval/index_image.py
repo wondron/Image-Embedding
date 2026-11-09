@@ -18,7 +18,14 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 from uuid import UUID
 
-from app.core.enums import FoodState, LabelStatus, License, SourceType
+from app.core.enums import (
+    DEFAULT_LICENSE,
+    DEFAULT_SOURCE_TYPE,
+    FOOD_STATE,
+    LICENSE,
+    SOURCE_TYPE,
+    LabelStatus,
+)
 from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.enum_fields import coerce_enum, coerce_optional_enum
 from app.services.retrieval.image_ids import uuid_from_sha256
@@ -135,11 +142,9 @@ class IndexImageUseCase:
         image_id: UUID = uuid_from_sha256(sha)
         ext = guess_ext_from_bytes_header(image_bytes)
 
-        src = coerce_enum(
-            SourceType, source_type, field="source_type", default=SourceType.USER_UPLOAD
-        )
-        lic = coerce_enum(License, license, field="license", default=License.UNKNOWN)
-        food = coerce_optional_enum(FoodState, food_state, field="food_state")
+        src = coerce_enum(SOURCE_TYPE, source_type, field="source_type", default=DEFAULT_SOURCE_TYPE)
+        lic = coerce_enum(LICENSE, license, field="license", default=DEFAULT_LICENSE)
+        food = coerce_optional_enum(FOOD_STATE, food_state, field="food_state")
         desc = normalize_description(description)
 
         # Resolve category_id: prefer explicit; optional code lookup on metadata

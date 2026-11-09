@@ -251,6 +251,40 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual(status, "building")
 
 
+    def test_a_value_added_to_the_enum_file_is_stored_and_blocks_downgrade(self):
+        import shutil
+        import tempfile
+
+        from sqlalchemy.exc import IntegrityError
+
+        from app.core.config.enum_store import EnumStore, set_enum_store
+        from app.core.errors import AppError
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        enums_path = Path(tmp.name) / "enums.yaml"
+        shutil.copyfile(BACKEND / "config" / "param" / "enums.yaml", enums_path)
+        enum_file = EnumStore(enums_path)
+        self.addCleanup(set_enum_store, set_enum_store(enum_file))
+
+        store = self.store()
+        with self.assertRaises(AppError) as ctx:
+            self.insert(store, 1, food_state="thawed", source_type="partner_api")
+        self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
+
+        enum_file.add_value("food_state", "thawed", "解冻")
+        enum_file.add_value("source_type", "partner_api", "合作方接口")
+        iid = self.insert(store, 1, food_state="thawed", source_type="partner_api")
+        row = store.get_image_by_uuid(iid)
+        self.assertEqual((row["food_state"], row["source_type"]), ("thawed", "partner_api"))
+
+        # 0004's downgrade restores the old CHECK lists, so it refuses while such rows exist
+        with self.assertRaisesRegex(IntegrityError, "ck_images_(source_type|food_state)"):
+            _alembic("downgrade", "20261106_0003")
+        self.sql("UPDATE images SET food_state = 'frozen', source_type = 'user_upload'")
+        _alembic("downgrade", "20261106_0003")
+        _alembic("upgrade", "head")
+
     def test_description_round_trip_without_payload_bump(self):
         store = self.store()
         default_id = self.insert(store, 1)

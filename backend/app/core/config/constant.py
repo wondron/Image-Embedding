@@ -12,6 +12,7 @@ SERVICE_NAME = "image-embedding"
 VERSION = "1.0.0"
 DEFAULT_PORT = 8320
 DEFAULT_YAML_PATH = "config/param/config.yaml"
+DEFAULT_ENUMS_PATH = "config/param/enums.yaml"  # 枚举取值（app.core.config.enum_store），不走 Nacos
 LOGGER_NAME = 'roki_ai_image_embedding'
 DEFAULT_TIME_OUT = 15.0
 

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Mapping, Sequence
 
-from app.core.enums import FoodState, LabelStatus
+from app.core.enums import LabelStatus
 
 
 def include_all_scene_ids(scenes: Sequence[Mapping[str, Any]]) -> set[int]:
@@ -141,7 +141,7 @@ def build_qdrant_payload(
     *,
     category_id: int | None,
     scene_codes: Sequence[str],
-    food_state: FoodState | str | None,
+    food_state: str | None,
     label_status: LabelStatus | str | None,
 ) -> dict[str, Any]:
     """Contract §4.2 filter payload (plain JSON strings, same values as PG)."""
