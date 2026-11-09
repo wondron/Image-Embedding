@@ -241,7 +241,8 @@ export function EnumConfigPanel({ apiBase = '' }: { apiBase?: string }) {
 
   useEffect(() => {
     mounted.current = true
-    const controller = lifetime.current
+    const controller = new AbortController()
+    lifetime.current = controller
     return () => {
       mounted.current = false
       controller.abort()
