@@ -387,5 +387,202 @@ class PgLiveTests(unittest.TestCase):
         store.update_image(iid, {"tags": []})
         self.assertEqual(store.get_image_by_uuid(iid)["tags"], [])
 
+    # ---- category tree admin (app.repositories.categories) ---------------
+
+    @staticmethod
+    def zh(name):
+        return {"lang": "zh", "name": name, "kind": "primary"}
+
+    def assert_category_error(self, code, fn, *args):
+        from app.core.errors import AppError
+
+        with self.assertRaises(AppError) as ctx:
+            fn(*args)
+        self.assertEqual(ctx.exception.code, code, ctx.exception.detail)
+        return ctx.exception.detail
+
+    def seed_tree(self, store):
+        """ingredient (sorted first), dish > dish.pizza > dish.pizza.slice"""
+        dish = store.create_category({"code": "dish", "names": [self.zh("菜品")]})
+        ingredient = store.create_category({"code": "ingredient", "names": [self.zh("食材")], "sort_order": -1})
+        pizza = store.create_category({
+            "code": "dish.pizza",
+            "parent_id": dish["id"],
+            "names": [
+                {"lang": "en", "name": "Pizza", "kind": "primary"},
+                {"lang": "zh", "name": "比萨", "kind": "alias"},
+                self.zh("披萨"),
+            ],
+            "cuisines": ["italian", "american", "italian"],
+        })
+        piece = store.create_category(
+            {"code": "dish.pizza.slice", "parent_id": pizza["id"], "names": [self.zh("披萨切片")]}
+        )
+        return dish, ingredient, pizza, piece
+
+    def test_category_create_builds_paths_names_and_a_display_order(self):
+        store = self.store()
+        self.assertEqual(store.list_categories(), [])
+        dish, ingredient, pizza, piece = self.seed_tree(store)
+
+        self.assertEqual((dish["parent_id"], dish["path"], dish["name"]), (None, str(dish["id"]), "菜品"))
+        self.assertEqual((pizza["parent_id"], pizza["path"]), (dish["id"], f"{dish['id']}.{pizza['id']}"))
+        self.assertEqual(piece["path"], f"{dish['id']}.{pizza['id']}.{piece['id']}")
+        # names: the display language first, in a language the primary first
+        self.assertEqual(pizza["names"], [
+            self.zh("披萨"),
+            {"lang": "zh", "name": "比萨", "kind": "alias"},
+            {"lang": "en", "name": "Pizza", "kind": "primary"},
+        ])
+        self.assertEqual((pizza["name"], pizza["cuisines"]), ("披萨", ["italian", "american"]))
+        self.assertEqual(
+            (pizza["sort_order"], pizza["is_active"], pizza["heating_group"], pizza["image_count"], pizza["scene_rule_count"]),
+            (0, True, None, 0, 0),
+        )
+        from datetime import datetime
+
+        self.assertIsNotNone(datetime.fromisoformat(pizza["created_at"]).tzinfo)  # ISO 8601 with an offset
+
+        # parents before children; siblings by sort_order, then id
+        listed = store.list_categories()
+        self.assertEqual([n["code"] for n in listed], ["ingredient", "dish", "dish.pizza", "dish.pizza.slice"])
+        self.assertEqual(listed[2], pizza)  # a write answers with the same node the list shows
+        self.assertEqual(store.get_category_id_by_code("dish.pizza"), pizza["id"])  # indexing resolves it
+
+    def test_category_patch_renames_relabels_and_replaces_names(self):
+        store = self.store()
+        dish, _, pizza, _ = self.seed_tree(store)
+        hg = self.sql("INSERT INTO heating_groups (code, name) VALUES ('grill', '烤') RETURNING id").scalar_one()
+        self.assertEqual(store.list_heating_groups(), [{"id": hg, "code": "grill", "name": "烤"}])
+        self.sql("UPDATE categories SET updated_at = now() - interval '1 day' WHERE id = :id", {"id": pizza["id"]})
+        stale = store.list_categories()[2]["updated_at"]
+
+        patched = store.update_category(pizza["id"], {
+            "code": "dish.pizza_pie", "names": [self.zh("意式披萨")], "cuisines": [],
+            "heating_group_id": hg, "sort_order": 7, "is_active": False,
+        })
+        self.assertEqual(
+            (patched["code"], patched["name"], patched["names"], patched["cuisines"]),
+            ("dish.pizza_pie", "意式披萨", [self.zh("意式披萨")], []),
+        )
+        self.assertEqual(patched["heating_group"], {"id": hg, "code": "grill", "name": "烤"})
+        self.assertEqual((patched["sort_order"], patched["is_active"], patched["path"]), (7, False, pizza["path"]))
+        self.assertGreater(patched["updated_at"], stale)  # raw SQL has to set it itself
+        self.assertEqual(
+            self.sql("SELECT count(*) FROM category_names WHERE category_id = :c", {"c": pizza["id"]}).scalar_one(), 1
+        )
+
+        # only the given fields change; null clears the heating group
+        cleared = store.update_category(pizza["id"], {"heating_group_id": None})
+        self.assertIsNone(cleared["heating_group"])
+        self.assertEqual((cleared["code"], cleared["sort_order"], cleared["names"]), ("dish.pizza_pie", 7, [self.zh("意式披萨")]))
+        # a names-only patch still touches updated_at
+        self.sql("UPDATE categories SET updated_at = now() - interval '1 day' WHERE id = :id", {"id": dish["id"]})
+        before = store.list_categories()[1]["updated_at"]
+        self.assertGreater(store.update_category(dish["id"], {"names": [self.zh("菜肴")]})["updated_at"], before)
+
+    def test_category_move_takes_the_subtree_and_respects_the_tree_rules(self):
+        store = self.store()
+        dish, ingredient, pizza, piece = self.seed_tree(store)
+
+        moved = store.update_category(pizza["id"], {"parent_id": ingredient["id"]})
+        self.assertEqual((moved["parent_id"], moved["path"]), (ingredient["id"], f"{ingredient['id']}.{pizza['id']}"))
+        by_code = {n["code"]: n for n in store.list_categories()}
+        self.assertEqual(by_code["dish.pizza.slice"]["path"], f"{ingredient['id']}.{pizza['id']}.{piece['id']}")
+        self.assertEqual(by_code["dish.pizza.slice"]["parent_id"], pizza["id"])
+
+        update = store.update_category
+        self.assertIn("descendants", self.assert_category_error("VALIDATION_ERROR", update, pizza["id"], {"parent_id": piece["id"]}))
+        self.assertIn("descendants", self.assert_category_error("VALIDATION_ERROR", update, pizza["id"], {"parent_id": pizza["id"]}))
+        self.assertIn("does not exist", self.assert_category_error("VALIDATION_ERROR", update, pizza["id"], {"parent_id": 987654}))
+        # only a domain may be a root: by creating, by moving up, by renaming a root
+        create = store.create_category
+        self.assertIn("needs a parent", self.assert_category_error("VALIDATION_ERROR", create, {"code": "snack", "names": [self.zh("零食")]}))
+        self.assertIn("needs a parent", self.assert_category_error("VALIDATION_ERROR", update, pizza["id"], {"parent_id": None}))
+        self.assert_category_error("VALIDATION_ERROR", update, dish["id"], {"code": "dishes"})
+        # ... and a domain under another node can go back up
+        dessert = create({"code": "dessert", "parent_id": dish["id"], "names": [self.zh("甜点烘焙")]})
+        self.assertEqual(update(dessert["id"], {"parent_id": None})["path"], str(dessert["id"]))
+        # nothing above was half-applied
+        self.assertEqual(
+            {n["code"]: n["parent_id"] for n in store.list_categories()},
+            {"ingredient": None, "dish": None, "dessert": None, "dish.pizza": ingredient["id"], "dish.pizza.slice": pizza["id"]},
+        )
+
+    def test_category_codes_are_unique_and_references_must_exist(self):
+        store = self.store()
+        dish, _, pizza, _ = self.seed_tree(store)
+        duplicate = {"code": "dish.pizza", "parent_id": dish["id"], "names": [self.zh("重复")]}
+        self.assertIn("'dish.pizza'", self.assert_category_error("CATEGORY_CODE_EXISTS", store.create_category, duplicate))
+        self.assert_category_error("CATEGORY_CODE_EXISTS", store.update_category, pizza["id"], {"code": "dish"})
+        self.assertEqual(store.update_category(pizza["id"], {"code": "dish.pizza"})["code"], "dish.pizza")  # its own code is fine
+
+        self.assert_category_error("VALIDATION_ERROR", store.create_category, dict(duplicate, code="dish.x", parent_id=987654))
+        self.assert_category_error("VALIDATION_ERROR", store.create_category, dict(duplicate, code="dish.x", heating_group_id=987654))
+        self.assert_category_error("VALIDATION_ERROR", store.update_category, pizza["id"], {"heating_group_id": 987654})
+        self.assert_category_error("CATEGORY_NOT_FOUND", store.update_category, 987654, {"sort_order": 1})
+        self.assert_category_error("CATEGORY_NOT_FOUND", store.delete_category, 987654)
+        self.assertEqual(self.sql("SELECT count(*) FROM categories").scalar_one(), 4)
+
+    def test_category_inserted_by_sql_keeps_its_root_code_until_it_is_renamed(self):
+        store = self.store()
+        legacy = self.sql("INSERT INTO categories (code) VALUES ('legacy') RETURNING id").scalar_one()
+        node = store.list_categories()[0]
+        self.assertEqual((node["code"], node["name"], node["names"]), ("legacy", None, []))
+        self.assertEqual(store.update_category(legacy, {"sort_order": 9, "names": [self.zh("旧根")]})["name"], "旧根")
+        self.assert_category_error("VALIDATION_ERROR", store.update_category, legacy, {"code": "legacy2"})
+        self.assertEqual(store.update_category(legacy, {"code": "beverage"})["code"], "beverage")
+
+    def test_category_delete_refuses_a_node_in_use_and_removes_a_free_one(self):
+        store = self.store()
+        dish, ingredient, pizza, piece = self.seed_tree(store)
+        delete = store.delete_category
+
+        self.assertIn("child categories: 1", self.assert_category_error("CATEGORY_IN_USE", delete, pizza["id"]))
+        image = self.insert(store, 1, category_id=piece["id"], label_status="auto")
+        oven = self.sql("SELECT id FROM scenes WHERE code = 'oven'").scalar_one()
+        self.sql("INSERT INTO scene_rules (scene_id, category_id) VALUES (:s, :c)", {"s": oven, "c": piece["id"]})
+        counts = {n["code"]: (n["image_count"], n["scene_rule_count"]) for n in store.list_categories()}
+        self.assertEqual(counts, {"ingredient": (0, 0), "dish": (0, 0), "dish.pizza": (0, 0), "dish.pizza.slice": (1, 1)})
+        detail = self.assert_category_error("CATEGORY_IN_USE", delete, piece["id"])
+        self.assertIn("images: 1", detail)
+        self.assertIn("scene rules: 1", detail)
+        self.assertEqual(self.sql("SELECT count(*) FROM scene_rules").scalar_one(), 1)  # the rule did not cascade away
+
+        self.sql("DELETE FROM scene_rules")
+        self.sql("DELETE FROM images WHERE id = :id", {"id": image})
+        self.assertEqual(delete(piece["id"]), {"id": piece["id"], "code": "dish.pizza.slice"})
+        self.assertEqual(
+            self.sql("SELECT count(*) FROM category_names WHERE category_id = :c", {"c": piece["id"]}).scalar_one(), 0
+        )
+        self.assertEqual(delete(pizza["id"])["code"], "dish.pizza")  # no children left
+        self.assertEqual([n["code"] for n in store.list_categories()], ["ingredient", "dish"])
+
+    def test_category_writes_wait_for_the_tree_lock(self):
+        import threading
+
+        from sqlalchemy import text
+
+        from app.repositories.categories import _TREE_LOCK_KEY
+
+        store = self.store()
+        done = threading.Event()
+
+        def create():
+            store.create_category({"code": "dish", "names": [self.zh("菜品")]})
+            done.set()
+
+        with self.engine.connect() as holder:
+            tx = holder.begin()
+            holder.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _TREE_LOCK_KEY})
+            worker = threading.Thread(target=create, daemon=True)
+            worker.start()
+            self.assertFalse(done.wait(0.6), "the write did not wait for the tree lock")
+            tx.commit()
+            self.assertTrue(done.wait(10), "the write never finished after the lock was released")
+            worker.join(10)
+        self.assertEqual([n["code"] for n in store.list_categories()], ["dish"])
+
+
 if __name__ == "__main__":
     unittest.main()

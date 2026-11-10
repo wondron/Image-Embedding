@@ -1,0 +1,1 @@
+export { CategoryConfigPage } from './CategoryConfigPage'

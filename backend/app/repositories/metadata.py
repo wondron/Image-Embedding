@@ -4,7 +4,7 @@ M2: replace MySQL with 12-table PG schema.
 Schema ownership: Alembic (`alembic upgrade head`); this adapter pings /
 verifies tables and supplies CRUD + model/embedding helpers for stack wiring.
 
-Split (DDD D2): connection / images / embeddings / deletions / scenes mixins
+Split (DDD D2): connection / images / embeddings / deletions / scenes / categories mixins
 under adapter.persistence; this module composes them as PgMetadataStore.
 
 ASSUMPTION A7 / id policy: images.id = uuid_from_bytes(sha256(original)[0:16]);
@@ -27,6 +27,7 @@ from app.db.common import (  # noqa: F401
     logger,
 )
 from app.db.session import PgConnectionMixin
+from app.repositories.categories import PgCategoriesMixin
 from app.repositories.deletions import PgDeletionsMixin
 from app.repositories.embeddings import PgEmbeddingsMixin
 from app.repositories.images import PgImagesMixin
@@ -40,6 +41,7 @@ class PgMetadataStore(
     PgEmbeddingsMixin,
     PgDeletionsMixin,
     PgScenesMixin,
+    PgCategoriesMixin,
     MetadataStorePort,
 ):
     """Real PostgreSQL via SQLAlchemy 2 + psycopg3; schema via Alembic.

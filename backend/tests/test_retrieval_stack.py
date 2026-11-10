@@ -88,6 +88,7 @@ class BuildStackTests(unittest.TestCase):
         self.assertIs(stack.index_uc._model, stack.model)
         self.assertIs(stack.search_uc._model, stack.model)
         self.assertIs(stack.index_uc._vectors, self.vectors)  # no hidden decorator
+        self.assertIs(stack.categories_uc._metadata, self.metadata)  # the category admin shares the store
         self.embedder.probe_dim.assert_called_once()
 
     def test_connections_come_from_the_effective_config(self):

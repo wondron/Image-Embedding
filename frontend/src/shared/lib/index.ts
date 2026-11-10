@@ -15,3 +15,4 @@ export {
 } from './parse'
 export { SCORE_DEFAULT, SCORE_MIN, SCORE_MAX, SCORE_STEP, clampScoreThreshold, formatScore } from './score'
 export { formatLibraryTime } from './format'
+export { requestSignal } from './requestSignal'

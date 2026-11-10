@@ -19,7 +19,7 @@ export interface ApiLabels {
 export interface RequestJsonOptions {
   /** API origin; defaults to VITE_API_BASE_URL. */
   baseUrl?: string
-  method?: 'GET' | 'POST'
+  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'
   query?: URLSearchParams
   /** JSON body, sent with Content-Type: application/json. */
   json?: unknown

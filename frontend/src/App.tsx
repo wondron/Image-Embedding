@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUpRight, Check, CheckCircle2,
-  CircleHelp, Database, FolderOpen, ImageIcon, Images, LayoutGrid, List, Link2, PanelLeftClose, PanelLeftOpen,
+  CircleHelp, Database, FolderOpen, FolderTree, ImageIcon, Images, LayoutGrid, List, Link2, PanelLeftClose, PanelLeftOpen,
   ListFilter, ListTree, LoaderCircle, Menu, ScanLine, Search, Settings2, SlidersHorizontal,
   Tags, Upload, UploadCloud, Workflow, X, XCircle,
 } from 'lucide-react'
 import { ManagementViews, type ManagementView } from './components/ManagementViews'
 import { EnumConfigPage } from './pages/enums'
+import { CategoryConfigPage } from './pages/categories'
 import { Dialog } from './components/Dialog'
 import { BatchSearchPanel, type BatchSearchResult } from './components/BatchSearchPanel'
 import { DownloadDialog } from './components/DownloadDialog'
@@ -35,8 +36,11 @@ const navigation = [
   { key: 'import' as const, name: '上传与导入', icon: UploadCloud, description: '整理图片，准备入库' },
   { key: 'tasks' as const, name: '入库任务', icon: Workflow, description: '任务进度与失败记录' },
   { key: 'ingredients' as const, name: '食材管理', icon: Tags, description: '名称、类别与属性' },
+  { key: 'categories' as const, name: '类别配置', icon: FolderTree, description: '维护类别树' },
   { key: 'enums' as const, name: '枚举配置', icon: ListTree, description: '查看取值并追加' },
 ]
+/** Views that are wired to the API and can be opened by URL (?view=<key>) → the parameter that selects an item in them. */
+const linkedViews: Readonly<Record<string, string>> = { enums: 'enum', categories: 'category' }
 const pageSize = 12
 const maxBytes = 15 * 1024 * 1024
 
@@ -90,7 +94,8 @@ function ResultTable({ items, onDetail, onDownload, downloading, selected, onTog
 
 function initialView(): View {
   try {
-    if (new URLSearchParams(window.location.search).get('view') === 'enums') return 'enums'
+    const requested = new URLSearchParams(window.location.search).get('view')
+    if (requested === 'enums' || requested === 'categories') return requested // the keys of linkedViews
   } catch { /* keep the default view */ }
   return 'search'
 }
@@ -221,11 +226,10 @@ export default function App() {
     setMobileNav(false)
     try {
       const url = new URL(window.location.href)
-      if (next === 'enums') url.searchParams.set('view', 'enums')
-      else {
-        url.searchParams.delete('view')
-        url.searchParams.delete('enum')
-      }
+      if (linkedViews[next]) url.searchParams.set('view', next)
+      else url.searchParams.delete('view')
+      // Each linked view owns one parameter (?enum=, ?category=); drop the ones of the other views.
+      for (const [key, param] of Object.entries(linkedViews)) if (key !== next) url.searchParams.delete(param)
       window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
     } catch { /* the in-app view still changes when the URL cannot be updated */ }
   }
@@ -269,7 +273,7 @@ export default function App() {
         {navigation.map(({ key, icon: Icon, name }, index) => <div key={key}>
           {index === 1 && <span className="nav-group-label nav-group-second">数据管理</span>}
           <button className={`nav-item ${view === key ? 'active' : ''}`} onClick={() => navigate(key)} aria-label={name} title={name} aria-current={view === key ? 'page' : undefined}>
-            <span className="nav-icon"><Icon size={16} strokeWidth={1.6} /></span><span className="nav-label">{name}</span>{key !== 'search' && key !== 'enums' && <small>待接入</small>}
+            <span className="nav-icon"><Icon size={16} strokeWidth={1.6} /></span><span className="nav-label">{name}</span>{key !== 'search' && !linkedViews[key] && <small>待接入</small>}
           </button>
         </div>)}
       </nav>
@@ -281,8 +285,9 @@ export default function App() {
 
     <div className="main-shell"><header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" aria-label="展开导航" onClick={() => setMobileNav(true)}><Menu size={20} /></button><div className="topbar-title"><h1>{pageInfo.name}</h1><span>食材图像管理 / {pageInfo.description}</span></div></div><div className="topbar-actions"><button className="icon-button" title="使用说明" aria-label="使用说明" onClick={() => setHelpOpen(true)}><CircleHelp size={17} /></button><button className="icon-button" title="连接设置" aria-label="连接设置" disabled={batchRunning} onClick={() => { setApiDraft(apiBase); setSettingsOpen(true) }}><Settings2 size={17} /></button></div></header>
     <main className={view === 'search' ? 'search-page' : 'management-page'}>
-      {view !== 'search' && view !== 'enums' && <ManagementViews view={view} onNavigate={navigate} apiBase={apiBase} />}
+      {view !== 'search' && view !== 'enums' && view !== 'categories' && <ManagementViews view={view} onNavigate={navigate} apiBase={apiBase} />}
       {view === 'enums' && <EnumConfigPage apiBase={apiBase} />}
+      {view === 'categories' && <CategoryConfigPage apiBase={apiBase} />}
       <div className="search-view" hidden={view !== 'search'}>
         {(error || notice) && <div className={`message-banner ${error ? 'message-error' : 'message-success'}`} role={error ? 'alert' : 'status'}>{error ? <XCircle size={18} /> : <CheckCircle2 size={18} />}<span>{error || notice}</span>{downloadFailure && safeHttpUrl(downloadFailure.imageUrl ?? downloadFailure.thumbnailUrl ?? '') && <a href={downloadFailure.imageUrl ?? downloadFailure.thumbnailUrl!} target="_blank" rel="noreferrer">打开原图 <ArrowUpRight size={14} /></a>}<button className="icon-button" aria-label="关闭提示" onClick={() => { setError(''); setNotice(''); setDownloadFailure(null) }}><X size={16} /></button></div>}
         <div className="search-workspace">

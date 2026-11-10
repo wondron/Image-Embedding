@@ -32,6 +32,7 @@ from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.delete_image import DeleteImageUseCase, DeletionWorker
 from app.services.retrieval.index_image import IndexImageUseCase
 from app.services.retrieval.list_images import ListImagesUseCase
+from app.services.retrieval.manage_categories import ManageCategoriesUseCase
 from app.services.retrieval.recompute_scenes import RecomputeScenesUseCase
 from app.services.retrieval.search_image import SearchImageUseCase
 
@@ -75,6 +76,7 @@ class RetrievalStack:
     delete_uc: DeleteImageUseCase
     deletion_worker: DeletionWorker
     recompute_scenes_uc: RecomputeScenesUseCase
+    categories_uc: ManageCategoriesUseCase
 
     @property
     def model(self) -> ActiveModel:
@@ -169,4 +171,5 @@ def build_retrieval_stack(
         delete_uc=DeleteImageUseCase(metadata),
         deletion_worker=DeletionWorker(metadata, vectors, storage),
         recompute_scenes_uc=RecomputeScenesUseCase(metadata),
+        categories_uc=ManageCategoriesUseCase(metadata),
     )

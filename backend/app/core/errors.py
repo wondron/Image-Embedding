@@ -74,6 +74,11 @@ ERROR_CODES: dict[str, ErrorSpec] = {
     "ENUM_VALUE_EXISTS": ErrorSpec(409),
     "ENUM_FILE_INVALID": ErrorSpec(503),
     "ENUM_FILE_WRITE_FAILED": ErrorSpec(500, "enum file write failed"),
+    # -- categories (the category tree, app.repositories.categories)
+    "CATEGORY_NOT_FOUND": ErrorSpec(404),
+    "CATEGORY_CODE_EXISTS": ErrorSpec(409),
+    "CATEGORY_IN_USE": ErrorSpec(409),
+    "CATEGORY_POSTGRES_FAILED": ErrorSpec(502, "category database error"),
 }
 
 _UNREGISTERED_5XX = ERROR_CODES["INTERNAL_ERROR"].public_detail or "internal server error"
@@ -268,6 +273,25 @@ def enum_file_invalid(detail: str) -> AppError:
 
 def enum_file_write_failed(detail: str) -> AppError:
     return AppError("ENUM_FILE_WRITE_FAILED", detail)
+
+
+# -- categories ------------------------------------------------------------------
+
+def category_not_found(detail: str) -> AppError:
+    return AppError("CATEGORY_NOT_FOUND", detail)
+
+
+def category_code_exists(detail: str) -> AppError:
+    return AppError("CATEGORY_CODE_EXISTS", detail)
+
+
+def category_in_use(detail: str) -> AppError:
+    """Delete refused: the category still has children, images or scene rules."""
+    return AppError("CATEGORY_IN_USE", detail)
+
+
+def category_postgres_failed(detail: str) -> AppError:
+    return AppError("CATEGORY_POSTGRES_FAILED", detail)
 
 
 # Codes for HTTPExceptions raised by the framework itself (404 route, 405 method, ...)

@@ -128,6 +128,31 @@ class MetadataStorePort(ABC):
     ) -> dict[str, Any] | None:
         raise NotImplementedError
 
+    # -- category tree (admin) ----------------------------------------------
+
+    @abstractmethod
+    def list_categories(self) -> list[dict[str, Any]]:
+        """Every node, parents before children, siblings in display order."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_heating_groups(self) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def create_category(self, fields: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def update_category(self, category_id: int, fields: dict[str, Any]) -> dict[str, Any]:
+        """Patch the given fields; parent_id moves the node with its subtree."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete_category(self, category_id: int) -> dict[str, Any]:
+        """Delete a node nothing uses; CATEGORY_IN_USE otherwise."""
+        raise NotImplementedError
+
     # -- embedding models / ledger -----------------------------------------
 
     @abstractmethod

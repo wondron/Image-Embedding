@@ -12,7 +12,7 @@ import { ImageLabelPanel } from '../features/image-label'
 import { ImportSceneIntent } from '../features/index-upload'
 import './ManagementViews.css'
 
-export type ManagementView = 'library' | 'import' | 'tasks' | 'ingredients' | 'enums'
+export type ManagementView = 'library' | 'import' | 'tasks' | 'ingredients' | 'categories' | 'enums'
 type Props = { view: ManagementView; onNavigate: (view: ManagementView) => void; apiBase?: string }
 type IndexJobStatus = 'pending' | 'running' | 'success' | 'error' | 'cancelled'
 type IndexJob = {

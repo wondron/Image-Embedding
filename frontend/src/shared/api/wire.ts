@@ -74,6 +74,85 @@ export interface AddEnumValueRequestWire {
   description: string
 }
 
+// -- /api/categories (schemas/categories.py) --------------------------------------------
+
+/** Success bodies do not include trace_id; read X-Trace-Id from the response header. */
+
+/** System enum (app.core.enums.NameKind). */
+export type CategoryNameKindWire = 'primary' | 'alias'
+
+/** One row of category_names. */
+export interface CategoryNameWire {
+  /** Lowercase language code: zh, en, … */
+  lang: string
+  name: string
+  kind: CategoryNameKindWire
+}
+
+/** schemas/categories.py CategoryItem. */
+export interface CategoryItemWire {
+  id: number
+  code: string
+  /** null for a root. */
+  parent_id: number | null
+  /** Id chain from the root, e.g. 2.15.137; maintained by the database. */
+  path: string
+  /** The zh primary name (the `category` of search hits); null when the node has none. */
+  name: string | null
+  names: CategoryNameWire[]
+  /** The node's own cuisines; empty means it uses its nearest ancestor's. */
+  cuisines: string[]
+  /** The node's own heating group; null means it uses its nearest ancestor's. */
+  heating_group: HeatingGroupWire | null
+  sort_order: number
+  is_active: boolean
+  /** Images labeled with exactly this category. */
+  image_count: number
+  /** Scene rules that point at this category. */
+  scene_rule_count: number
+  created_at: string | null
+  updated_at: string | null
+}
+
+/** GET /api/categories: the whole tree, parents before children, siblings in display order. */
+export interface CategoryListResponseWire {
+  ok: true
+  categories: CategoryItemWire[]
+  heating_groups: HeatingGroupWire[]
+  /** The codes a root may use (the four domains). */
+  root_codes: string[]
+}
+
+/** POST /api/categories (201) and PATCH /api/categories/{id}. */
+export interface CategoryResponseWire {
+  ok: true
+  category: CategoryItemWire
+}
+
+/** DELETE /api/categories/{id}. */
+export interface CategoryDeleteResponseWire {
+  ok: true
+  deleted: { id: number; code: string }
+}
+
+/** POST /api/categories. */
+export interface CategoryCreateRequestWire {
+  code: string
+  parent_id: number | null
+  /** Must include the zh primary name. */
+  names: CategoryNameWire[]
+  cuisines: string[]
+  heating_group_id: number | null
+  sort_order: number
+  is_active: boolean
+}
+
+/**
+ * PATCH /api/categories/{id}: only the fields to change. parent_id null moves the node to the
+ * root, heating_group_id null clears it; names replaces every name.
+ */
+export type CategoryUpdateRequestWire = Partial<CategoryCreateRequestWire>
+
 // -- POST /api/search (§6.1.1) ----------------------------------------------------------
 
 /** schemas/retrieval.py SearchJsonRequest (JSON body; multipart sends the same names). */
