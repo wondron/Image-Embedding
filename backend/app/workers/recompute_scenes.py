@@ -2,6 +2,8 @@
 
 Needs only PG, but builds RetrievalInfra like the other workers so the schema
 and current model are checked the same way; no ONNX model is loaded.
+payload_version is bumped only when the image's scenes changed; the vector payload is not
+written here (app.workers.sync_scenes recomputes every image and writes the payloads).
 
 Invoke from backend/:
 

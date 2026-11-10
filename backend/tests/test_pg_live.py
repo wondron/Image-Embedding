@@ -194,8 +194,9 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual(list(hydrated), [steak_img])
         self.assertEqual(len(store.get_active_by_ids([steak_img, plain_img], scene="general")), 2)
 
-        label = store.map_category_to_scene_label("oven", cat["steak"])
-        self.assertEqual(label["code"], "steak")
+        oven = store.get_scene_by_code("oven")["id"]
+        labels = store.map_categories_to_scene_labels(oven, [cat["steak"], cat["dish"]])
+        self.assertEqual({cid: label["code"] for cid, label in labels.items()}, {cat["steak"]: "steak", cat["dish"]: "steak"})
 
         with self.assertRaises(AppError):
             store.set_manual_scene_membership(steak_img, "general", is_member=False)
@@ -558,29 +559,299 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual(delete(pizza["id"])["code"], "dish.pizza")  # no children left
         self.assertEqual([n["code"] for n in store.list_categories()], ["ingredient", "dish"])
 
-    def test_category_writes_wait_for_the_tree_lock(self):
+    # ---- scene configuration (app.repositories.scene_config / scenes) -----
+
+    def assert_app_error(self, code, fn, *args, **kwargs):
+        from app.core.errors import AppError
+
+        with self.assertRaises(AppError) as ctx:
+            fn(*args, **kwargs)
+        self.assertEqual(ctx.exception.code, code, ctx.exception.detail)
+        return ctx.exception.detail
+
+    def test_scene_requests_follow_the_scenes_table(self):
+        from app.core import errors as err
+        from app.services.retrieval.list_images import ListImagesUseCase
+        from app.services.retrieval.scenes import lookup_scene, requested_scene_code, resolve_index_scenes
+
+        store = self.store()
+        image = self.insert(store, 1)
+        list_uc = ListImagesUseCase(store)
+        self.assertEqual(list_uc.execute()["scene"], "general")  # the default
+        self.assertEqual(list_uc.execute(scene="normal")["scene"], "general")  # MVP code still maps
+        detail = self.assert_app_error("LIST_UNKNOWN_SCENE", list_uc.execute, scene="steam_oven")
+        self.assertIn("general, oven, range_hood, us_diet, cn_diet, jp_diet", detail)  # tells the client what exists
+
+        # A scene created through the configuration is usable at once, everywhere
+        store.create_scene({"code": "steam_oven", "name": "蒸烤箱", "include_all": True})
+        self.assertEqual((list_uc.execute(scene="steam_oven")["total"]), 1)
+        self.assertEqual(resolve_index_scenes(store, scenes=["steam_oven", "general"]), ["steam_oven", "general"])
+        self.assertEqual(
+            lookup_scene(store, requested_scene_code(" steam_oven "), unknown=err.search_unknown_scene,
+                         failed=err.search_postgres_failed)["code"],
+            "steam_oven",
+        )
+        # ... and refused once disabled
+        steam = store.get_scene_by_code("steam_oven")["id"]
+        store.update_scene(steam, {"is_active": False})
+        self.assertIn("is inactive", self.assert_app_error("LIST_UNKNOWN_SCENE", list_uc.execute, scene="steam_oven"))
+        self.assert_app_error("INDEX_UNKNOWN_SCENE", resolve_index_scenes, store, scene="steam_oven")
+        self.assertEqual(store.get_effective_scene_codes(image), ["general"])
+
+    def test_an_inactive_scene_has_no_members_anywhere(self):
+        cat = self.seed_catalog()
+        store = self.store()
+        steak = self.insert(store, 1, category_id=cat["steak"], label_status="auto")
+        oven = store.get_scene_by_code("oven")["id"]
+        self.assertEqual(store.get_effective_scene_codes(steak), ["general", "oven"])
+
+        store.update_scene(oven, {"is_active": False})
+        self.assertEqual(store.get_effective_scene_codes(steak), ["general"])
+        self.assertEqual(store.list_images(scene="oven"), ([], 0))
+        self.assertEqual(store.get_active_by_ids([steak], scene="oven"), {})
+        self.assertEqual(store.get_payload_rows([steak])[0]["scenes"], ["general"])  # what sync would push
+        oven_row = next(s for s in store.list_scene_configs() if s["code"] == "oven")
+        self.assertEqual(oven_row["member_count"], 0)
+
+        store.update_scene(oven, {"is_active": True})  # rows were kept: members are back at once
+        self.assertEqual(store.get_effective_scene_codes(steak), ["general", "oven"])
+
+    def test_scene_configuration_crud_and_its_guards(self):
+        cat = self.seed_catalog()
+        store = self.store()
+        general = store.get_scene_by_code("general")["id"]
+        self.assertIn("cannot be deleted", self.assert_app_error("SCENE_PROTECTED", store.delete_scene, general))
+        self.assert_app_error("SCENE_PROTECTED", store.update_scene, general, {"is_active": False})
+        self.assert_app_error("SCENE_PROTECTED", store.update_scene, general, {"include_all": False})
+        self.assertEqual(store.update_scene(general, {"name": "通用", "description": "  "})["description"], None)
+
+        created = store.create_scene({"code": "steam_oven", "name": "蒸烤箱", "outputs_heating": True})
+        self.assertEqual(
+            {k: created[k] for k in ("code", "name", "include_all", "outputs_heating", "is_active", "member_count", "labels", "rules")},
+            {"code": "steam_oven", "name": "蒸烤箱", "include_all": False, "outputs_heating": True, "is_active": True,
+             "member_count": 0, "labels": [], "rules": []},
+        )
+        sid = created["id"]
+        self.assert_app_error("SCENE_CODE_EXISTS", store.create_scene, {"code": "steam_oven", "name": "重复"})
+        self.assert_app_error("VALIDATION_ERROR", store.create_scene, {"code": "device", "name": "旧编码"})
+        self.assert_app_error("VALIDATION_ERROR", store.update_scene, sid, {"code": "steam"})
+
+        # labels: unique per scene, deletable only when no rule uses them
+        scene = store.create_scene_label(sid, {"code": "steak", "name": "牛排", "sort_order": 2})
+        scene = store.create_scene_label(sid, {"code": "meat", "name": "肉类", "sort_order": 1})
+        self.assertEqual([l["code"] for l in scene["labels"]], ["meat", "steak"])  # sort_order
+        steak_label = next(l["id"] for l in scene["labels"] if l["code"] == "steak")
+        meat_label = next(l["id"] for l in scene["labels"] if l["code"] == "meat")
+        self.assert_app_error("SCENE_CODE_EXISTS", store.create_scene_label, sid, {"code": "steak", "name": "又一个"})
+        self.assert_app_error("SCENE_CODE_EXISTS", store.update_scene_label, sid, meat_label, {"code": "steak"})
+        oven_label = self.sql("SELECT id FROM scene_labels WHERE code = 'steak' AND scene_id <> :s", {"s": sid}).scalar_one()
+        self.assert_app_error("SCENE_NOT_FOUND", store.update_scene_label, sid, oven_label, {"name": "别的场景的"})
+
+        # rules: one per category / cuisine; labels only of this scene, only on category rules
+        scene = store.create_scene_rule(sid, {"category_id": cat["steak"], "label_id": steak_label})
+        scene = store.create_scene_rule(sid, {"cuisine": "american"})
+        self.assertEqual(
+            [(r["category"]["code"] if r["category"] else None, r["cuisine"], r["label"]["code"] if r["label"] else None) for r in scene["rules"]],
+            [("dish.steak", None, "steak"), (None, "american", None)],
+        )
+        self.assertEqual(scene["rules"][0]["category"]["name"], "牛排")
+        self.assert_app_error("SCENE_RULE_EXISTS", store.create_scene_rule, sid, {"category_id": cat["steak"]})
+        self.assert_app_error("SCENE_RULE_EXISTS", store.create_scene_rule, sid, {"cuisine": "american"})
+        self.assert_app_error("VALIDATION_ERROR", store.create_scene_rule, sid, {"category_id": cat["dish"], "label_id": oven_label})
+        self.assert_app_error("VALIDATION_ERROR", store.create_scene_rule, sid, {"category_id": 987654})
+        self.assert_app_error("VALIDATION_ERROR", store.create_scene_rule, sid, {"cuisine": "chinese", "label_id": meat_label})
+        cuisine_rule = scene["rules"][1]["id"]
+        self.assert_app_error("VALIDATION_ERROR", store.update_scene_rule, sid, cuisine_rule, {"label_id": meat_label})
+        self.assert_app_error("SCENE_IN_USE", store.delete_scene_label, sid, steak_label)
+
+        category_rule = scene["rules"][0]["id"]
+        scene = store.update_scene_rule(sid, category_rule, {"label_id": meat_label})
+        self.assertEqual(scene["rules"][0]["label"]["code"], "meat")
+        self.assertEqual({l["code"]: l["rule_count"] for l in scene["labels"]}, {"meat": 1, "steak": 0})
+        scene = store.delete_scene_label(sid, steak_label)
+        self.assertEqual([l["code"] for l in scene["labels"]], ["meat"])
+        scene = store.delete_scene_rule(sid, cuisine_rule)
+        self.assertEqual(len(scene["rules"]), 1)
+        self.assert_app_error("SCENE_NOT_FOUND", store.delete_scene_rule, sid, cuisine_rule)
+
+        # the category admin sees the rule as a use
+        self.assertEqual(next(n for n in store.list_categories() if n["code"] == "dish.steak")["scene_rule_count"], 1)
+
+        # deleting a scene takes its labels, rules and memberships
+        image = self.insert(store, 1, category_id=cat["steak"], label_status="auto")
+        store.recompute_scene_memberships(limit=10)
+        self.assertEqual(store.get_effective_scene_codes(image), ["general", "oven", "steam_oven"])
+        self.assertEqual(store.delete_scene(sid), {"id": sid, "code": "steam_oven"})
+        for table in ("scene_labels", "scene_rules", "image_scenes"):
+            self.assertEqual(self.sql(f"SELECT count(*) FROM {table} WHERE scene_id = :s", {"s": sid}).scalar_one(), 0, table)
+        self.assertEqual(store.get_effective_scene_codes(image), ["general", "oven"])
+        self.assert_app_error("SCENE_NOT_FOUND", store.update_scene, sid, {"name": "x"})
+
+    def test_batch_recompute_follows_the_rules_and_bumps_only_what_changed(self):
+        cat = self.seed_catalog()  # oven: rule on dish (cuisines {american}) with label steak
+        store = self.store()
+        steak = self.insert(store, 1, category_id=cat["steak"], label_status="auto")
+        plain = self.insert(store, 2)
+        us_diet = store.get_scene_by_code("us_diet")["id"]
+        oven = store.get_scene_by_code("oven")["id"]
+
+        def versions():
+            return dict(self.sql("SELECT id::text, payload_version FROM images").fetchall())
+
+        # A new rule does nothing to stored images until they are recomputed
+        store.create_scene_rule(us_diet, {"cuisine": "american"})
+        self.assertEqual(store.get_effective_scene_codes(steak), ["general", "oven"])
+
+        # Paging in id order; the cursor ends with None
+        ordered = sorted([steak, plain])
+        first = store.recompute_scene_memberships(limit=1)
+        self.assertEqual((first["image_ids"], first["last_id"]), ([ordered[0]], ordered[0]))
+        second = store.recompute_scene_memberships(after=first["last_id"], limit=1)
+        self.assertEqual(second["image_ids"], [ordered[1]])
+        self.assertEqual(store.recompute_scene_memberships(after=second["last_id"], limit=1),
+                         {"image_ids": [], "changed_ids": [], "last_id": None})
+        self.assertEqual(sorted(first["changed_ids"] + second["changed_ids"]), [steak])
+        self.assertEqual(store.get_effective_scene_codes(steak), ["general", "oven", "us_diet"])  # cuisine inherited from dish
+        self.assertEqual(versions(), {steak: 2, plain: 1})
+
+        # Nothing changed: a second pass bumps nobody
+        self.assertEqual(store.recompute_scene_memberships(limit=10)["changed_ids"], [])
+        self.assertEqual(versions(), {steak: 2, plain: 1})
+
+        # Removing a rule removes its members; a manual override survives recomputes
+        store.set_manual_scene_membership(plain, "oven", is_member=True)
+        oven_rule = self.sql("SELECT id FROM scene_rules WHERE scene_id = :s", {"s": oven}).scalar_one()
+        store.delete_scene_rule(oven, oven_rule)
+        store.recompute_scene_memberships(limit=10)
+        self.assertEqual(store.get_effective_scene_codes(steak), ["general", "us_diet"])
+        self.assertEqual(store.get_effective_scene_codes(plain), ["general", "oven"])
+        rows = self.sql("SELECT origin, count(*) FROM image_scenes GROUP BY origin ORDER BY origin").fetchall()
+        self.assertEqual([tuple(r) for r in rows], [("manual", 1), ("rule", 1)])
+
+        # Moving a category changes its subtree's memberships the same way
+        store.create_scene_rule(oven, {"category_id": cat["dish"]})
+        ingredient = store.create_category({"code": "ingredient", "names": [self.zh("食材")]})
+        store.update_category(cat["steak"], {"parent_id": ingredient["id"]})  # no longer under dish
+        store.recompute_scene_memberships(limit=10)
+        self.assertEqual(store.get_effective_scene_codes(steak), ["general"])  # nor american any more
+
+    def test_scene_labels_come_from_the_deepest_rule_with_an_active_label(self):
+        cat = self.seed_catalog()  # oven: dish -> label steak
+        store = self.store()
+        oven = store.get_scene_by_code("oven")["id"]
+        scene = store.create_scene_label(oven, {"code": "beef", "name": "牛肉"})
+        beef = next(l["id"] for l in scene["labels"] if l["code"] == "beef")
+        store.create_scene_rule(oven, {"category_id": cat["steak"], "label_id": beef})
+
+        def mapped(*ids):
+            return {cid: label["code"] for cid, label in store.map_categories_to_scene_labels(oven, list(ids)).items()}
+
+        self.assertEqual(mapped(cat["steak"], cat["dish"]), {cat["steak"]: "beef", cat["dish"]: "steak"})
+        store.update_scene_label(oven, beef, {"is_active": False})  # falls back to the broader rule
+        self.assertEqual(mapped(cat["steak"]), {cat["steak"]: "steak"})
+        steak_label = self.sql("SELECT id FROM scene_labels WHERE code = 'steak'").scalar_one()
+        store.update_scene_label(oven, steak_label, {"is_active": False})
+        self.assertEqual(mapped(cat["steak"], cat["dish"]), {})
+        self.assertEqual(mapped(), {})
+
+    def test_sync_rewrites_payloads_and_the_ledger(self):
+        import uuid as uuid_mod
+
+        from app.clients.qdrant import QdrantConnection, QdrantStore
+        from app.repositories.vectors import QdrantVectorStore
+        from app.services.retrieval.active_model import ActiveModel
+        from app.services.retrieval.sync_scenes import SyncSceneMembershipsUseCase
+
+        cat = self.seed_catalog()
+        store = self.store()
+        model_id = self.sql(
+            "INSERT INTO embedding_models (name, version, dim, distance, input_size, weights_uri, collection, status) "
+            "VALUES ('m', '1', 4, 'cosine', 336, 's3://w', 'c_sync', 'current') RETURNING id"
+        ).scalar_one()
+        steak = self.insert(store, 1, category_id=cat["steak"], label_status="auto", food_state="cooked")
+        plain = self.insert(store, 2)
+        orphan = self.insert(store, 3)  # in PG, never embedded into this collection
+
+        vectors = QdrantVectorStore(QdrantStore(QdrantConnection(url=":memory:"), collection="c_sync", vector_dim=4))
+        vectors.ensure_collection()
+        self.addCleanup(vectors.close)
+        for image, unit in ((steak, [1, 0, 0, 0]), (plain, [0, 1, 0, 0])):
+            vectors.upsert(image, unit, {"scenes": ["general"], "category_id": None, "food_state": None, "label_status": "x"})
+        store.upsert_image_embedding(model_id=model_id, image_id=steak, synced_version=1)  # plain: ledger write "failed"
+        self.sql("UPDATE image_embeddings SET embedded_at = now() - interval '1 day'")
+
+        model = ActiveModel(id=model_id, name="m", version="1", collection="c_sync", dim=4, distance="cosine")
+        uc = SyncSceneMembershipsUseCase(store, vectors, model=model)
+        totals = uc.run_all(limit=2)
+        self.assertEqual(
+            {k: totals[k] for k in ("processed", "payload_pushed", "payload_missing", "batches")},
+            {"processed": 3, "payload_pushed": 2, "payload_missing": [orphan], "batches": 2},
+        )
+        points = {p["id"]: p["payload"] for p in vectors.search([1, 0, 0, 0], top_k=10)}
+        self.assertEqual(points[steak], {"category_id": cat["steak"], "scenes": ["general", "oven"], "food_state": "cooked", "label_status": "auto"})
+        self.assertEqual(points[plain]["scenes"], ["general"])
+        self.assertEqual(len(vectors.search([1, 0, 0, 0], top_k=10, scene="oven")), 1)  # the filter sees the new payload
+        ledger = {r[0]: (r[1], r[2]) for r in self.sql(
+            "SELECT image_id::text, synced_version, embedded_at < now() - interval '1 hour' FROM image_embeddings"
+        ).fetchall()}
+        self.assertEqual(ledger, {steak: (1, True), plain: (1, False)})  # plain's row is new; steak's embedded_at kept
+
+        # A rule change reaches the vector filter through the next sync
+        oven = store.get_scene_by_code("oven")["id"]
+        rule = self.sql("SELECT id FROM scene_rules WHERE scene_id = :s", {"s": oven}).scalar_one()
+        store.delete_scene_rule(oven, rule)
+        first = uc.run_batch(limit=10)
+        self.assertEqual((first["membership_changed"], first["done"], first["next_after"]), (1, True, None))
+        self.assertEqual(vectors.search([1, 0, 0, 0], top_k=10, scene="oven"), [])
+        self.assertEqual(self.sql("SELECT synced_version FROM image_embeddings WHERE image_id = :i", {"i": uuid_mod.UUID(steak)}).scalar_one(), 2)
+
+    def run_while_locked(self, action, *, shared):
+        """Start action in a thread while this test holds the catalog lock; True if it waited."""
         import threading
 
         from sqlalchemy import text
 
-        from app.repositories.categories import _TREE_LOCK_KEY
+        from app.repositories.catalog_lock import CATALOG_LOCK_KEY
 
-        store = self.store()
         done = threading.Event()
+        failure = []
 
-        def create():
-            store.create_category({"code": "dish", "names": [self.zh("菜品")]})
+        def run():
+            try:
+                action()
+            except Exception as exc:  # surfaced by the assertion below
+                failure.append(exc)
             done.set()
 
+        lock = "pg_advisory_xact_lock_shared" if shared else "pg_advisory_xact_lock"
         with self.engine.connect() as holder:
             tx = holder.begin()
-            holder.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _TREE_LOCK_KEY})
-            worker = threading.Thread(target=create, daemon=True)
+            holder.execute(text(f"SELECT {lock}(:key)"), {"key": CATALOG_LOCK_KEY})
+            worker = threading.Thread(target=run, daemon=True)
             worker.start()
-            self.assertFalse(done.wait(0.6), "the write did not wait for the tree lock")
+            waited = not done.wait(0.6)
             tx.commit()
-            self.assertTrue(done.wait(10), "the write never finished after the lock was released")
+            self.assertTrue(done.wait(10), "the action never finished after the lock was released")
             worker.join(10)
+        self.assertEqual(failure, [])
+        return waited
+
+    def test_catalog_writes_and_recomputes_wait_for_the_catalog_lock(self):
+        store = self.store()
+        image = self.insert(store, 1)
+        writes = {
+            "category write": lambda: store.create_category({"code": "dish", "names": [self.zh("菜品")]}),
+            "scene write": lambda: store.create_scene({"code": "steam_oven", "name": "蒸烤箱"}),
+            "membership recompute": lambda: store.recompute_image_scenes(image, bump_version=False),
+            "batch recompute": lambda: store.recompute_scene_memberships(limit=10),
+        }
+        for name, action in writes.items():
+            with self.subTest(name):
+                self.assertTrue(self.run_while_locked(action, shared=False), f"{name} did not wait for an admin write")
+        # Recomputes only read the catalog: they share the lock with other readers
+        self.assertFalse(self.run_while_locked(lambda: store.recompute_image_scenes(image, bump_version=False), shared=True))
+        # ... while an admin write waits for them
+        self.assertTrue(self.run_while_locked(lambda: store.create_scene({"code": "air_fryer", "name": "空气炸锅"}), shared=True))
         self.assertEqual([n["code"] for n in store.list_categories()], ["dish"])
 
 

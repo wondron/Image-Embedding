@@ -15,7 +15,9 @@ class ListTagFilterTests(unittest.TestCase):
             calls.update(kw)
             return [{"id": "i1", "tags": ["红薯叶"]}, {"id": "i2", "tags": None}], 2
 
-        meta = SimpleNamespace(list_images=list_images, get_scene_by_code=lambda code: {"code": code})
+        meta = SimpleNamespace(
+            list_images=list_images, get_scene_by_code=lambda code: {"id": 1, "code": code, "is_active": True}
+        )
         return ListImagesUseCase(meta).execute(**kwargs), calls
 
     def test_tag_is_stripped_and_blank_means_no_filter(self):

@@ -79,6 +79,13 @@ ERROR_CODES: dict[str, ErrorSpec] = {
     "CATEGORY_CODE_EXISTS": ErrorSpec(409),
     "CATEGORY_IN_USE": ErrorSpec(409),
     "CATEGORY_POSTGRES_FAILED": ErrorSpec(502, "category database error"),
+    # -- scenes (the scene configuration, app.repositories.scene_config)
+    "SCENE_NOT_FOUND": ErrorSpec(404),
+    "SCENE_CODE_EXISTS": ErrorSpec(409),
+    "SCENE_RULE_EXISTS": ErrorSpec(409),
+    "SCENE_IN_USE": ErrorSpec(409),
+    "SCENE_PROTECTED": ErrorSpec(403),
+    "SCENE_POSTGRES_FAILED": ErrorSpec(502, "scene database error"),
 }
 
 _UNREGISTERED_5XX = ERROR_CODES["INTERNAL_ERROR"].public_detail or "internal server error"
@@ -292,6 +299,36 @@ def category_in_use(detail: str) -> AppError:
 
 def category_postgres_failed(detail: str) -> AppError:
     return AppError("CATEGORY_POSTGRES_FAILED", detail)
+
+
+# -- scenes ----------------------------------------------------------------------
+
+def scene_not_found(detail: str) -> AppError:
+    """A scene, or a label / rule of a scene, that does not exist."""
+    return AppError("SCENE_NOT_FOUND", detail)
+
+
+def scene_code_exists(detail: str) -> AppError:
+    """A scene code, or a label code within a scene, already taken."""
+    return AppError("SCENE_CODE_EXISTS", detail)
+
+
+def scene_rule_exists(detail: str) -> AppError:
+    return AppError("SCENE_RULE_EXISTS", detail)
+
+
+def scene_in_use(detail: str) -> AppError:
+    """Delete refused: a label still referenced by rules."""
+    return AppError("SCENE_IN_USE", detail)
+
+
+def scene_protected(detail: str) -> AppError:
+    """A change the default scene does not allow."""
+    return AppError("SCENE_PROTECTED", detail)
+
+
+def scene_postgres_failed(detail: str) -> AppError:
+    return AppError("SCENE_POSTGRES_FAILED", detail)
 
 
 # Codes for HTTPExceptions raised by the framework itself (404 route, 405 method, ...)

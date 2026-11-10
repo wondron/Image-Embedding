@@ -120,8 +120,8 @@ class IndexImageUseCase:
         license: str | None = None,
         description: str | None = None,
     ) -> dict[str, Any]:
-        # Validate optional client scene hints (membership still recomputed from rules)
-        _ = resolve_index_scenes(scene=scene, scenes=scenes)
+        # Check optional client scene hints against the scenes table (membership still recomputed from rules)
+        resolve_index_scenes(self._metadata, scene=scene, scenes=scenes)
 
         if image_bytes is None and not source_path:
             raise err.index_empty_request()

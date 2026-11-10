@@ -1,22 +1,19 @@
 """List-images use case (PG v0.1 + §6.1 Wire).
 
-Library pagination via image_scenes membership for the active scene code.
-Default scene = general. Attach heating_group and the food attributes
+Library pagination via image_scenes membership for the requested scene (scenes table;
+default general). Attach heating_group and the food attributes
 (food_fields.FOOD_FIELDS) only when scene.outputs_heating (P9).
 """
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 from uuid import UUID
 
 from app.core import errors as err
 from app.repositories.ports import MetadataStorePort
 from app.services.retrieval.food_fields import FOOD_FIELDS
-from app.services.retrieval.scenes import normalize_list_scene
-
-logger = logging.getLogger("retrieval.list")
+from app.services.retrieval.scenes import lookup_scene, requested_scene_code
 
 
 def _as_id(value: Any) -> str:
@@ -67,7 +64,13 @@ class ListImagesUseCase:
         category: str | None = None,
         tag: str | None = None,
     ) -> dict[str, Any]:
-        active_scene = normalize_list_scene(scene)
+        scene_meta = lookup_scene(
+            self._metadata,
+            requested_scene_code(scene),
+            unknown=err.list_unknown_scene,
+            failed=err.list_postgres_failed,
+        )
+        active_scene = str(scene_meta["code"])
 
         try:
             page_i = int(page)
@@ -106,13 +109,6 @@ class ListImagesUseCase:
             category=cat_norm,
             tag=tag_norm,
         )
-
-        scene_meta = None
-        try:
-            scene_meta = self._metadata.get_scene_by_code(active_scene)
-        except Exception:
-            logger.exception("get_scene_by_code failed scene=%s", active_scene)
-
         items = [_item_from_row(row, scene_meta=scene_meta) for row in rows]
         return {
             "scene": active_scene,

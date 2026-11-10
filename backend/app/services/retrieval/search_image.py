@@ -1,6 +1,7 @@
 """Search-image use case (PG v0.1 §4.3 / A4 / A5 / A6 + §6.1 Wire).
 
-Self-built only: embed → Qdrant top-k filtered by scene code → hydrate from PG.
+Self-built only: resolve the scene (scenes table) → embed → Qdrant top-k filtered by scene
+code → hydrate from PG → map categories to the scene's labels (one query for all hits).
 Empty self-built → source=empty. FlyB OUT OF SCOPE (never called).
 score_threshold: omit→0.55; 0 disables; else {0}∪[0.30,1].
 
@@ -23,7 +24,7 @@ from app.repositories.ports import (
     MetadataStorePort,
     VectorStorePort,
 )
-from app.services.retrieval.scenes import normalize_search_scene
+from app.services.retrieval.scenes import lookup_scene, requested_scene_code
 from app.services.retrieval.score_threshold import (
     qdrant_score_threshold,
     resolve_score_threshold,
@@ -124,7 +125,14 @@ class SearchImageUseCase:
         if not (1 <= int(top_k) <= 50):
             raise err.validation_error("top_k must be in 1..50")
 
-        active_scene = normalize_search_scene(scene)
+        # The scene first: an unknown or inactive one is refused before any embedding work.
+        scene_meta = lookup_scene(
+            self._metadata,
+            requested_scene_code(scene),
+            unknown=err.search_unknown_scene,
+            failed=err.search_postgres_failed,
+        )
+        active_scene = str(scene_meta["code"])
         effective_t = resolve_score_threshold(score_threshold)
         native_thr = qdrant_score_threshold(effective_t)
 
@@ -161,37 +169,23 @@ class SearchImageUseCase:
         rows = (
             self._metadata.get_active_by_ids(ids, scene=active_scene) if ids else {}
         )
-
-        scene_meta = None
-        try:
-            scene_meta = self._metadata.get_scene_by_code(active_scene)
-        except Exception:
-            logger.exception("get_scene_by_code failed scene=%s", active_scene)
-
         heating = _outputs_heating(scene_meta)
+        labels = self._scene_labels(scene_meta, rows.values())
 
         items: list[dict[str, Any]] = []
         for pid in ids:
             row = rows.get(pid) or rows.get(pid.lower())
             if not row:
                 continue
-            scene_label = None
-            mapped = False
-            if row.get("category_id") is not None:
-                try:
-                    scene_label = self._metadata.map_category_to_scene_label(
-                        active_scene, int(row["category_id"])
-                    )
-                    mapped = True
-                except Exception:
-                    logger.exception("scene label map failed id=%s", pid)
+            category_id = row.get("category_id")
+            mapped = labels is not None and category_id is not None
             hit = _hit_from_row(
                 row,
                 score_by_id.get(pid),
                 scene_meta=scene_meta,
-                scene_label=scene_label if mapped else None,
+                scene_label=labels.get(int(category_id)) if mapped else None,
             )
-            # When mapping ran and returned None → emit scene_label: null (optional but typed).
+            # When mapping ran and found no label → emit scene_label: null (optional but typed).
             if mapped and "scene_label" not in hit:
                 hit["scene_label"] = None
             items.append(hit)
@@ -215,3 +209,20 @@ class SearchImageUseCase:
             "items": [],
             "message": f"no local matches for scene={active_scene}",
         }
+
+    def _scene_labels(
+        self, scene_meta: dict[str, Any], rows: Any
+    ) -> dict[int, dict[str, Any]] | None:
+        """{category_id: scene label} for the hits' categories, in one query.
+
+        None when the lookup failed: the hits then carry no scene_label at all (logged), which is
+        what a client sees for a scene without labels too, rather than failing the search.
+        """
+        category_ids = sorted({int(row["category_id"]) for row in rows if row.get("category_id") is not None})
+        if not category_ids:
+            return {}
+        try:
+            return self._metadata.map_categories_to_scene_labels(int(scene_meta["id"]), category_ids)
+        except Exception:
+            logger.exception("scene label mapping failed scene=%s", scene_meta.get("code"))
+            return None

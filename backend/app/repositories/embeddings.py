@@ -96,3 +96,61 @@ class PgEmbeddingsMixin:
             raise err.index_postgres_failed(
                 f"upsert_image_embedding: {type(exc).__name__}: {exc}"
             ) from exc
+
+    def get_payload_rows(self, image_ids: list[str]) -> list[dict[str, Any]]:
+        """What the Qdrant payload of these images is built from (contract §4.2), in id order:
+        {id, payload_version, category_id, label_status, food_state, scenes}. Missing ids are left out."""
+        self.ensure_schema()
+        from sqlalchemy import text
+
+        ids = [_as_uuid(i) for i in image_ids]
+        if not ids:
+            return []
+        engine = self._get_engine()
+        try:
+            with engine.connect() as conn:
+                rows = conn.execute(
+                    text(
+                        "SELECT i.id::text AS id, i.payload_version, i.category_id, i.label_status, f.food_state "
+                        "FROM images i LEFT JOIN image_foods f ON f.image_id = i.id "
+                        "WHERE i.id = ANY(:ids) ORDER BY i.id"
+                    ),
+                    {"ids": ids},
+                ).mappings().fetchall()
+                codes = self._scene_codes_by_image(conn, [r["id"] for r in rows])
+            return [{**dict(r), "scenes": codes.get(r["id"], [])} for r in rows]
+        except err.AppError:
+            raise
+        except Exception as exc:
+            raise err.index_postgres_failed(f"get_payload_rows: {type(exc).__name__}: {exc}") from exc
+
+    def mark_payloads_pushed(self, *, model_id: int, versions: dict[str, int]) -> None:
+        """Ledger: these payload versions are now in model_id's collection.
+
+        embedded_at stays as it was for images already in the ledger (only the payload moved);
+        an image missing from it (its ledger write failed at index time) gets a row now.
+        """
+        if not versions:
+            return
+        self.ensure_schema()
+        from sqlalchemy import text
+
+        items = sorted(versions.items())
+        engine = self._get_engine()
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO image_embeddings (model_id, image_id, synced_version, embedded_at) "
+                        "SELECT :mid, d.image_id, d.version, now() "
+                        "FROM unnest(CAST(:ids AS uuid[]), CAST(:versions AS bigint[])) AS d(image_id, version) "
+                        "ON CONFLICT (model_id, image_id) DO UPDATE SET synced_version = EXCLUDED.synced_version"
+                    ),
+                    {
+                        "mid": int(model_id),
+                        "ids": [_as_uuid(image_id) for image_id, _ in items],
+                        "versions": [int(version) for _, version in items],
+                    },
+                )
+        except Exception as exc:
+            raise err.index_postgres_failed(f"mark_payloads_pushed: {type(exc).__name__}: {exc}") from exc

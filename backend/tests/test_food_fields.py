@@ -79,7 +79,7 @@ class HeatingOutputTests(unittest.TestCase):
     def list_item(self, outputs_heating):
         meta = SimpleNamespace(
             list_images=lambda **kw: ([dict(ROW)], 1),
-            get_scene_by_code=lambda code: {"code": code, "outputs_heating": outputs_heating},
+            get_scene_by_code=lambda code: {"id": 2, "code": code, "outputs_heating": outputs_heating, "is_active": True},
         )
         return ListImagesUseCase(meta).execute(scene="oven")["items"][0]
 

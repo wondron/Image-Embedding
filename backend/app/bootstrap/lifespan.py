@@ -160,8 +160,34 @@ def _retrieval_local_debug_hint() -> str:
     )
 
 
+def initialize_catalog(runtime: ApplicationState) -> None:
+    """Build the category / scene admin on PostgreSQL alone; on failure keep serving the rest.
+
+    Independent of TOTAL_CONFIG.retrieval_enabled and of the encoder: configuring categories and
+    scenes needs neither.
+    """
+    runtime.catalog = None
+    runtime.catalog_error = None
+    from app.bootstrap.catalog import build_catalog
+
+    try:
+        runtime.catalog = build_catalog(runtime.config)
+    except Exception as exc:
+        if isinstance(exc, errors.AppError):
+            runtime.catalog_error = f"{exc.code}: {errors.client_detail(exc)}"
+        else:
+            runtime.catalog_error = f"{type(exc).__name__}: {exc}"
+        if _is_infra_unreachable(exc):
+            logger.warning("Catalog unavailable (infra) | %s: %s | %s", type(exc).__name__, exc, _retrieval_local_debug_hint())
+        else:
+            logger.exception("Catalog initialization failed: %s", exc)
+
+
 def initialize_retrieval(runtime: ApplicationState, embedder) -> None:
-    """Build the retrieval stack on the shared encoder; on failure keep serving predict."""
+    """Build the retrieval stack on the shared encoder; on failure keep serving predict.
+
+    It borrows the catalog's PostgreSQL store when the catalog is up (one pool per process).
+    """
     runtime.retrieval = None
     runtime.retrieval_error = None
     runtime.retrieval_error_code = None
@@ -185,8 +211,14 @@ def initialize_retrieval(runtime: ApplicationState, embedder) -> None:
 
     from app.bootstrap.retrieval_stack import build_retrieval_stack
 
+    catalog = runtime.catalog
     try:
-        runtime.retrieval = build_retrieval_stack(runtime.config, runtime.settings, embedder=embedder)
+        runtime.retrieval = build_retrieval_stack(
+            runtime.config,
+            runtime.settings,
+            embedder=embedder,
+            metadata=catalog.store if catalog is not None else None,
+        )
     except Exception as exc:
         # retrieval_error is shown by the health endpoints: an internal code keeps its detail in this log only
         if isinstance(exc, errors.AppError):
@@ -267,6 +299,7 @@ async def lifespan(app: FastAPI):
     load_enum_file()
     embedder = initialize_embedder(runtime)  # one ONNX session for predict + retrieval
     initialize_food_service(runtime, embedder)
+    initialize_catalog(runtime)  # PostgreSQL only; retrieval below borrows its store
     initialize_retrieval(runtime, embedder)
     config_provider.start_polling(lambda snapshot: apply_nacos_config_update(runtime, config_provider, snapshot))
     try:

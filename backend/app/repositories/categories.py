@@ -3,11 +3,15 @@
 Reads return the whole tree: it is small (hundreds to a few thousand nodes) and the page needs
 every node to draw it and to offer move targets, so there is no paging.
 
-Each write is one transaction and first takes a transaction-level advisory lock, so two writes
-through this store cannot interleave their checks (A moves under B while B moves under A; a
-child is added while its parent is deleted). The database stays the last guard for writers
-that bypass this store: unique code, RESTRICT on children and images, and the path trigger
-(migration 0001), which rebuilds the paths of the subtree whenever parent_id changes.
+Each write is one transaction and first takes the catalog lock (app.repositories.catalog_lock),
+so two writes cannot interleave their checks (A moves under B while B moves under A; a child is
+added while its parent is deleted; a scene rule is created for a category being deleted). The
+database stays the last guard for writers that bypass this store: unique code, RESTRICT on
+children and images, and the path trigger (migration 0001), which rebuilds the paths of the
+subtree whenever parent_id changes.
+
+Moving a category or changing its cuisines changes which scenes its images belong to; that
+reaches stored images when the memberships are recomputed (POST /api/scenes/sync).
 
 Deleting refuses a category that is still used. scene_rules would go silently (ON DELETE
 CASCADE) and leave image_scenes stale, so a rule counts as a use too.
@@ -24,15 +28,13 @@ from app.core import errors as err
 from app.core.category_rules import CATEGORY_DISPLAY_LANG
 from app.core.enums import NameKind
 from app.db.common import _row_to_dict
+from app.repositories.catalog_lock import lock_catalog_for_write
 from app.services.retrieval.category_fields import (
     check_root_code,
     display_name,
     normalize_category_fields,
     normalize_category_id,
 )
-
-# pg_advisory_xact_lock key shared by every category tree write ("CATE")
-_TREE_LOCK_KEY = 0x43415445
 
 # One node as the API returns it. names: the display language first, then by language; in a
 # language the primary name first. Binds :display_lang and :primary_kind.
@@ -75,10 +77,6 @@ def _read_node(conn: Any, category_id: int) -> dict[str, Any]:
         text(_NODE_SELECT + "WHERE c.id = :id"), {**_NODE_PARAMS, "id": category_id}
     ).mappings().one()
     return _node(row)
-
-
-def _lock_tree(conn: Any) -> None:
-    conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _TREE_LOCK_KEY})
 
 
 def _check_code_free(conn: Any, code: str) -> None:
@@ -153,7 +151,7 @@ class PgCategoriesMixin:
         engine = self._get_engine()
         try:
             with engine.begin() as conn:
-                _lock_tree(conn)
+                lock_catalog_for_write(conn)
                 parent_id = new["parent_id"]
                 if parent_id is None:
                     check_root_code(new["code"])
@@ -193,7 +191,7 @@ class PgCategoriesMixin:
         engine = self._get_engine()
         try:
             with engine.begin() as conn:
-                _lock_tree(conn)
+                lock_catalog_for_write(conn)
                 current = conn.execute(
                     text(
                         "SELECT code, parent_id, path::text AS path FROM categories "
@@ -255,7 +253,7 @@ class PgCategoriesMixin:
         engine = self._get_engine()
         try:
             with engine.begin() as conn:
-                _lock_tree(conn)
+                lock_catalog_for_write(conn)
                 row = conn.execute(
                     text(
                         "SELECT c.code, "

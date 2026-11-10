@@ -11,8 +11,11 @@ STRATEGY (M5 choice — write-time materialize):
   4. Persist: replace origin=rule rows for the image; leave manual rows intact.
   5. Effective codes (include_all ∪ rule/manual) → Qdrant payload.scenes; bump
      images.payload_version when membership/category/food_state/label_status changes.
+  Inactive scenes take no part: they have no members until enabled again.
 
-Recompute entrypoint: MetadataStore / PgMetadataStore.recompute_image_scenes(image_id).
+Recompute entrypoints (app.repositories.scenes): recompute_image_scenes for one image,
+recompute_scene_memberships for a batch after the catalog changed. Mapping categories to
+scene labels is one SQL query there (the deepest covering rule with an active label).
 """
 
 from __future__ import annotations
@@ -117,24 +120,6 @@ def apply_manual_overrides(
         else:
             effective.discard(sid)
     return effective
-
-
-def most_specific_label_id(
-    matching_rules: Sequence[Mapping[str, Any]],
-    rule_cat_paths: Mapping[int, str],
-) -> int | None:
-    """Among rules with label_id, pick deepest category path (contract §2.8)."""
-    best: tuple[int, int] | None = None  # (depth, label_id)
-    for rule in matching_rules:
-        lid = rule.get("label_id")
-        if lid is None:
-            continue
-        rcat = rule.get("category_id")
-        path = rule_cat_paths.get(int(rcat)) if rcat is not None else ""
-        depth = str(path or "").count(".") + (1 if path else 0)
-        if best is None or depth > best[0]:
-            best = (depth, int(lid))
-    return best[1] if best else None
 
 
 def build_qdrant_payload(

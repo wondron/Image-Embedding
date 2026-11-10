@@ -314,15 +314,13 @@ class PgImagesMixin:
     def _scene_member_ids(
         self, conn, scene: str, id_sql: str, id_params: dict[str, str]
     ) -> set[str]:
-        """Which of the given ids are members of scene code (empty if unknown)."""
+        """Which of the given ids are members of scene code (empty if unknown or inactive)."""
         from sqlalchemy import text
 
         meta = self._scene_membership_row(conn, scene)
-        if meta is None:
+        if meta is None or not meta["is_active"]:
             return set()
         if meta["include_all"]:
-            if not meta["is_active"]:
-                return set()
             rows = conn.execute(
                 text(f"SELECT id::text FROM images WHERE id IN {id_sql}"), id_params
             ).fetchall()
@@ -361,7 +359,7 @@ class PgImagesMixin:
         try:
             with engine.connect() as conn:
                 meta = self._scene_membership_row(conn, scene)
-                if meta is None or (meta["include_all"] and not meta["is_active"]):
+                if meta is None or not meta["is_active"]:  # an inactive scene has no members
                     return [], 0
 
                 params: dict[str, Any] = {

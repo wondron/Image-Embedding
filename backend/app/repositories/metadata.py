@@ -4,8 +4,9 @@ M2: replace MySQL with 12-table PG schema.
 Schema ownership: Alembic (`alembic upgrade head`); this adapter pings /
 verifies tables and supplies CRUD + model/embedding helpers for stack wiring.
 
-Split (DDD D2): connection / images / embeddings / deletions / scenes / categories mixins
-under adapter.persistence; this module composes them as PgMetadataStore.
+Split (DDD D2): connection / images / embeddings / deletions / scenes (membership) /
+categories / scene_config mixins in app.repositories; this module composes them as
+PgMetadataStore.
 
 ASSUMPTION A7 / id policy: images.id = uuid_from_bytes(sha256(original)[0:16]);
 retain content-hash bytes; do NOT rewrite RFC 4122 version/variant nibbles.
@@ -31,8 +32,9 @@ from app.repositories.categories import PgCategoriesMixin
 from app.repositories.deletions import PgDeletionsMixin
 from app.repositories.embeddings import PgEmbeddingsMixin
 from app.repositories.images import PgImagesMixin
+from app.repositories.ports import CatalogStorePort, MetadataStorePort
+from app.repositories.scene_config import PgSceneConfigMixin
 from app.repositories.scenes import PgScenesMixin
-from app.repositories.ports import MetadataStorePort
 
 
 class PgMetadataStore(
@@ -42,11 +44,14 @@ class PgMetadataStore(
     PgDeletionsMixin,
     PgScenesMixin,
     PgCategoriesMixin,
+    PgSceneConfigMixin,
     MetadataStorePort,
+    CatalogStorePort,
 ):
     """Real PostgreSQL via SQLAlchemy 2 + psycopg3; schema via Alembic.
 
-    Public methods unchanged from the pre-D2 monolith; SQL lives in mixins.
+    One store, two ports: MetadataStorePort for the retrieval use cases, CatalogStorePort for
+    the category / scene admin. SQL lives in the mixins.
     """
 
     pass

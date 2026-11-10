@@ -294,6 +294,34 @@ class QdrantStore:
             for p in response.points
         ]
 
+    def existing_ids(self, point_ids: Sequence[PointId]) -> set[Union[int, str]]:
+        """The given ids that are points of the collection (canonical form, as _point_id gives)."""
+        if not point_ids:
+            return set()
+        records = self.client.retrieve(
+            collection_name=self.collection,
+            ids=[_point_id(p) for p in point_ids],
+            with_payload=False,
+            with_vectors=False,
+        )
+        return {_point_id(record.id) for record in records}
+
+    def set_payloads(self, payloads: Mapping[PointId, Mapping[str, Any]]) -> int:
+        """Set payload fields per point in one request (other fields and vectors stay).
+
+        Every id must already be a point: Qdrant refuses the whole request otherwise, so callers
+        filter with existing_ids first.
+        """
+        from qdrant_client.http import models as rest
+
+        operations = [
+            rest.SetPayloadOperation(set_payload=rest.SetPayload(payload=dict(payload), points=[_point_id(pid)]))
+            for pid, payload in payloads.items()
+        ]
+        if operations:
+            self.client.batch_update_points(collection_name=self.collection, update_operations=operations, wait=True)
+        return len(operations)
+
     def delete(self, point_id: PointId) -> None:
         self.delete_batch([point_id])
 

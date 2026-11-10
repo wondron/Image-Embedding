@@ -47,7 +47,7 @@ class EmbedderSharingTests(unittest.TestCase):
             self.created.append(embedder)
             return embedder
 
-        def build_stack(config, app_settings, *, embedder=None, indexed_dir=None):
+        def build_stack(config, app_settings, *, embedder=None, indexed_dir=None, metadata=None):
             return SimpleNamespace(embedding=embedder, model=MODEL, close=Mock())
 
         embedder_patch = patch.object(lifespan, "create_embedder", side_effect=create)

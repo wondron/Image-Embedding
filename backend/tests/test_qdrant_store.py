@@ -134,10 +134,10 @@ class FakeMetadata:
         return {i: self.rows[i] for i in ids if i in self.rows}
 
     def get_scene_by_code(self, code):
-        return {"code": code, "outputs_heating": False}
+        return {"id": 1, "code": code, "outputs_heating": False, "is_active": True}
 
-    def map_category_to_scene_label(self, scene, category_id):
-        return None
+    def map_categories_to_scene_labels(self, scene_id, category_ids):
+        return {}
 
 
 class ScoreThresholdEndToEndTests(unittest.TestCase):

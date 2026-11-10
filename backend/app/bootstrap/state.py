@@ -17,6 +17,7 @@ from app.core.config.settings import Settings
 if TYPE_CHECKING:
     from app.core.config.nacos import NacosConfigProvider
     from app.services.predict.food_service import FoodService
+    from app.bootstrap.catalog import CatalogServices
     from app.bootstrap.retrieval_stack import RetrievalStack
 
 
@@ -36,6 +37,9 @@ class ApplicationState:
     retrieval: Optional["RetrievalStack"] = None
     retrieval_error: str | None = None
     retrieval_error_code: str | None = None
+    # Category / scene admin: PostgreSQL only; the retrieval stack borrows its store
+    catalog: Optional["CatalogServices"] = None
+    catalog_error: str | None = None
     stopping: bool = False
     config_provider: NacosConfigProvider | None = None
     configuration_lock: threading.RLock = field(
@@ -74,6 +78,13 @@ class ApplicationState:
                 detail = self.retrieval_error or "retrieval stack is not initialized"
                 raise RuntimeError(detail)
             return self.retrieval
+
+    def require_catalog(self) -> "CatalogServices":
+        with self.configuration_lock:
+            if self.catalog is None:
+                detail = self.catalog_error or "catalog is not initialized"
+                raise RuntimeError(detail)
+            return self.catalog
 
     def replace_configuration(
         self,
@@ -117,6 +128,7 @@ class ApplicationState:
             self.config_provider.close()
         service = self.food_service
         retrieval, self.retrieval = self.retrieval, None
+        catalog, self.catalog = self.catalog, None
         try:
             service_close = getattr(service, "close", None)
             if callable(service_close):
@@ -127,9 +139,13 @@ class ApplicationState:
             self.food_service = None
             try:
                 if retrieval is not None:
-                    retrieval.close()
+                    retrieval.close()  # before the catalog: it borrows the catalog's store
             finally:
-                await self.http_client.aclose()
+                try:
+                    if catalog is not None:
+                        catalog.close()
+                finally:
+                    await self.http_client.aclose()
 
 
 def get_application_state(request: Request) -> ApplicationState:

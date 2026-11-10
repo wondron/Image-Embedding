@@ -12,13 +12,17 @@ from app.services.retrieval.delete_image import (
 from app.services.retrieval.index_image import IndexImageUseCase
 from app.services.retrieval.list_images import ListImagesUseCase
 from app.services.retrieval.manage_categories import ManageCategoriesUseCase
+from app.services.retrieval.manage_scenes import ManageScenesUseCase
 from app.services.retrieval.recompute_scenes import RecomputeScenesUseCase
 from app.services.retrieval.search_image import SearchImageUseCase
+from app.services.retrieval.sync_scenes import SyncSceneMembershipsUseCase
 
 __all__ = [
     "IndexImageUseCase",
     "ListImagesUseCase",
     "ManageCategoriesUseCase",
+    "ManageScenesUseCase",
+    "SyncSceneMembershipsUseCase",
     "SearchImageUseCase",
     "DeleteImageUseCase",
     "DeletionWorker",

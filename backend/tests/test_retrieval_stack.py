@@ -88,8 +88,31 @@ class BuildStackTests(unittest.TestCase):
         self.assertIs(stack.index_uc._model, stack.model)
         self.assertIs(stack.search_uc._model, stack.model)
         self.assertIs(stack.index_uc._vectors, self.vectors)  # no hidden decorator
-        self.assertIs(stack.categories_uc._metadata, self.metadata)  # the category admin shares the store
+        self.assertIs(stack.scene_sync_uc._vectors, self.vectors)
+        self.assertIs(stack.scene_sync_uc._model, stack.model)  # payloads go to the current collection
         self.embedder.probe_dim.assert_called_once()
+
+    def test_a_borrowed_store_is_used_but_neither_opened_nor_closed(self):
+        borrowed = MagicMock()
+        borrowed.get_current_embedding_model.return_value = dict(ROW)
+        stack = rs.build_retrieval_stack(CONFIG, SETTINGS, metadata=borrowed)
+        rs.PgMetadataStore.assert_not_called()  # no second pool
+        self.assertIs(stack.list_uc._metadata, borrowed)
+        stack.close()
+        self.vectors.close.assert_called_once()
+        borrowed.close.assert_not_called()  # the catalog owns it
+        # ... also when building fails half way
+        self.vectors.ensure_collection.side_effect = AppError("NOT_READY", "qdrant down", http_status=503)
+        with self.assertRaises(AppError):
+            rs.build_retrieval_infra(CONFIG, metadata=borrowed)
+        borrowed.close.assert_not_called()
+
+    def test_a_borrowed_store_needs_no_postgres_config(self):
+        borrowed = MagicMock()
+        borrowed.get_current_embedding_model.return_value = dict(ROW)
+        infra = rs.build_retrieval_infra({"QDRANT_CONFIG": CONFIG["QDRANT_CONFIG"]}, metadata=borrowed)
+        self.assertIs(infra.metadata, borrowed)
+        self.assertFalse(infra.owns_metadata)
 
     def test_connections_come_from_the_effective_config(self):
         rs.build_retrieval_infra(CONFIG)

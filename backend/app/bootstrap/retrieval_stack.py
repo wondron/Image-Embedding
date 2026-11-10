@@ -6,6 +6,10 @@
                             (API process; the encoder is the process-wide Embedder
                             passed in by bootstrap.lifespan, shared with predict)
 
+The API process passes the catalog's PostgreSQL store (metadata=...; app.bootstrap.catalog)
+so there is one pool; the infra then borrows it and does not close it. Workers let the infra
+open and own its store.
+
 Business rules live in app.services.retrieval; adapters in app.repositories /
 app.clients. Both builders release what they opened if a later step fails.
 
@@ -32,21 +36,22 @@ from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.delete_image import DeleteImageUseCase, DeletionWorker
 from app.services.retrieval.index_image import IndexImageUseCase
 from app.services.retrieval.list_images import ListImagesUseCase
-from app.services.retrieval.manage_categories import ManageCategoriesUseCase
 from app.services.retrieval.recompute_scenes import RecomputeScenesUseCase
 from app.services.retrieval.search_image import SearchImageUseCase
+from app.services.retrieval.sync_scenes import SyncSceneMembershipsUseCase
 
 logger = logging.getLogger("retrieval")
 
 
 @dataclass
 class RetrievalInfra:
-    """Connections + the active model. Owns their lifecycle."""
+    """Connections + the active model. Owns their lifecycle, except a borrowed metadata store."""
 
     metadata: PgMetadataStore
     vectors: QdrantVectorStore
     storage: ImageStoragePort
     model: ActiveModel
+    owns_metadata: bool = True
 
     def ping(self) -> dict[str, dict[str, Any]]:
         """Dependency status; never raises."""
@@ -57,7 +62,10 @@ class RetrievalInfra:
         }
 
     def close(self) -> None:
-        for name, closer in (("qdrant", self.vectors.close), ("postgres", self.metadata.close)):
+        closers = [("qdrant", self.vectors.close)]
+        if self.owns_metadata:
+            closers.append(("postgres", self.metadata.close))
+        for name, closer in closers:
             try:
                 closer()
             except Exception:
@@ -76,7 +84,7 @@ class RetrievalStack:
     delete_uc: DeleteImageUseCase
     deletion_worker: DeletionWorker
     recompute_scenes_uc: RecomputeScenesUseCase
-    categories_uc: ManageCategoriesUseCase
+    scene_sync_uc: SyncSceneMembershipsUseCase
 
     @property
     def model(self) -> ActiveModel:
@@ -94,14 +102,23 @@ def _qdrant_connection(config: Mapping[str, Any]) -> QdrantConnection:
     return QdrantConnection.from_mapping(section)
 
 
-def build_retrieval_infra(config: Mapping[str, Any]) -> RetrievalInfra:
-    """PG schema check -> current embedding model -> its Qdrant collection -> object storage."""
+def build_retrieval_infra(
+    config: Mapping[str, Any],
+    *,
+    metadata: PgMetadataStore | None = None,
+) -> RetrievalInfra:
+    """PG schema check -> current embedding model -> its Qdrant collection -> object storage.
+
+    metadata: a store to borrow (the catalog's); None opens one from POSTGRES_CONFIG.
+    """
     # Parse every section before opening anything: a config error fails fast with nothing to release.
-    pg = PostgresSettings.from_config(config)
+    pg = PostgresSettings.from_config(config) if metadata is None else None
     connection = _qdrant_connection(config)
     storage_settings = ImageStorageSettings.from_config(config)
 
-    metadata = PgMetadataStore(url=pg.url(), connect_timeout=pg.connect_timeout)
+    owns_metadata = metadata is None
+    if metadata is None:
+        metadata = PgMetadataStore(url=pg.url(), connect_timeout=pg.connect_timeout)
     vectors: QdrantVectorStore | None = None
     try:
         metadata.ensure_schema()
@@ -119,7 +136,8 @@ def build_retrieval_infra(config: Mapping[str, Any]) -> RetrievalInfra:
     except BaseException:
         if vectors is not None:
             vectors.close()
-        metadata.close()
+        if owns_metadata:
+            metadata.close()
         raise
 
     logger.info(
@@ -133,7 +151,9 @@ def build_retrieval_infra(config: Mapping[str, Any]) -> RetrievalInfra:
         model.dim,
         model.distance,
     )
-    return RetrievalInfra(metadata=metadata, vectors=vectors, storage=storage, model=model)
+    return RetrievalInfra(
+        metadata=metadata, vectors=vectors, storage=storage, model=model, owns_metadata=owns_metadata
+    )
 
 
 def build_retrieval_stack(
@@ -142,13 +162,15 @@ def build_retrieval_stack(
     *,
     embedder: Optional[Embedder] = None,
     indexed_dir: Optional[str] = None,
+    metadata: PgMetadataStore | None = None,
 ) -> RetrievalStack:
     """Infra + encoder + use cases.
 
     embedder: the process-wide encoder (shared with predict). Only standalone
     callers omit it, in which case one is built from config.
+    metadata: the catalog's store to borrow (see build_retrieval_infra).
     """
-    infra = build_retrieval_infra(config)
+    infra = build_retrieval_infra(config, metadata=metadata)
     try:
         embedding = embedder if embedder is not None else Embedder(config)
         # Encoder and collection must belong to the same model version.
@@ -171,5 +193,5 @@ def build_retrieval_stack(
         delete_uc=DeleteImageUseCase(metadata),
         deletion_worker=DeletionWorker(metadata, vectors, storage),
         recompute_scenes_uc=RecomputeScenesUseCase(metadata),
-        categories_uc=ManageCategoriesUseCase(metadata),
+        scene_sync_uc=SyncSceneMembershipsUseCase(metadata, vectors, model=model),
     )

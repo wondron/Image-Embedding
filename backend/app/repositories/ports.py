@@ -1,9 +1,10 @@
 """Retrieval ports: what services/retrieval needs from the outside world.
 
-Implementations: PgMetadataStore (repositories.metadata), QdrantVectorStore
+Implementations: PgMetadataStore (repositories.metadata; both MetadataStorePort for the
+retrieval use cases and CatalogStorePort for the category / scene admin), QdrantVectorStore
 (repositories.vectors, over clients.qdrant.QdrantStore), Mock/S3ImageStorage
 (clients.image_storage), Embedder (clients.inference; one instance shared with predict).
-Wiring: app.bootstrap.retrieval_stack.
+Wiring: app.bootstrap.catalog (admin, PostgreSQL only) and app.bootstrap.retrieval_stack.
 
 PG v0.1: point id == images.id (uuid). Collection/dim/distance come from the
 embedding_models row with status='current' (services.retrieval.active_model).
@@ -53,6 +54,12 @@ class VectorStorePort(ABC):
 
     @abstractmethod
     def delete(self, point_id: UUID | str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def set_payloads(self, payloads: dict[str, dict[str, Any]]) -> list[str]:
+        """Write each point's payload fields (vectors untouched); returns the ids that are not in
+        the collection, which are skipped."""
         raise NotImplementedError
 
     @abstractmethod
@@ -113,6 +120,11 @@ class MetadataStorePort(ABC):
 
     @abstractmethod
     def get_scene_by_code(self, code: str) -> dict[str, Any] | None:
+        """The scenes row (any state) or None."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_scene_codes(self, *, active_only: bool = True) -> list[str]:
         raise NotImplementedError
 
     @abstractmethod
@@ -123,12 +135,81 @@ class MetadataStorePort(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def map_category_to_scene_label(
-        self, scene_code: str, category_id: int
-    ) -> dict[str, Any] | None:
+    def recompute_scene_memberships(
+        self, *, after: UUID | str | None = None, limit: int = 200
+    ) -> dict[str, Any]:
+        """Recompute the next batch of images in id order: {image_ids, changed_ids, last_id}."""
         raise NotImplementedError
 
-    # -- category tree (admin) ----------------------------------------------
+    @abstractmethod
+    def map_categories_to_scene_labels(
+        self, scene_id: int, category_ids: list[int]
+    ) -> dict[int, dict[str, Any]]:
+        """{category_id: {id, code, name}} for the categories that map to an active label."""
+        raise NotImplementedError
+
+    # -- embedding models / ledger -----------------------------------------
+
+    @abstractmethod
+    def get_current_embedding_model(self) -> dict[str, Any]:
+        """The single embedding_models row with status='current' (NOT_READY if none)."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_image_embedding(
+        self,
+        *,
+        model_id: int,
+        image_id: UUID | str,
+        synced_version: int | None = None,
+    ) -> None:
+        """Record that image_id's payload at synced_version is in model_id's collection."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_payload_rows(self, image_ids: list[str]) -> list[dict[str, Any]]:
+        """What the Qdrant payload of these images is built from: {id, payload_version,
+        category_id, label_status, food_state, scenes} per existing image."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def mark_payloads_pushed(self, *, model_id: int, versions: dict[str, int]) -> None:
+        """Ledger: {image_id: payload_version} is now in model_id's collection."""
+        raise NotImplementedError
+
+    # -- deletion queue -----------------------------------------------------
+
+    @abstractmethod
+    def enqueue_image_deletion(self, image_id: UUID | str) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_pending_deletions(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def complete_deletion(self, image_id: UUID | str) -> None:
+        raise NotImplementedError
+
+    # -- lifecycle ------------------------------------------------------------
+
+    @abstractmethod
+    def ping(self) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def close(self) -> None:
+        """Release the connection pool (idempotent)."""
+
+
+class CatalogStorePort(ABC):
+    """The category tree and the scene configuration, as the admin pages edit them.
+
+    PostgreSQL only: the admin use cases (services.retrieval.manage_categories / manage_scenes)
+    work while the encoder, Qdrant or object storage are down. Each write is one transaction
+    under the catalog lock (repositories.catalog_lock). Implemented by PgMetadataStore.
+    """
+
+    # -- category tree ------------------------------------------------------
 
     @abstractmethod
     def list_categories(self) -> list[dict[str, Any]]:
@@ -153,36 +234,47 @@ class MetadataStorePort(ABC):
         """Delete a node nothing uses; CATEGORY_IN_USE otherwise."""
         raise NotImplementedError
 
-    # -- embedding models / ledger -----------------------------------------
+    # -- scenes (each write returns the whole scene: fields, labels, rules) ---
 
     @abstractmethod
-    def get_current_embedding_model(self) -> dict[str, Any]:
-        """The single embedding_models row with status='current' (NOT_READY if none)."""
+    def list_scene_configs(self) -> list[dict[str, Any]]:
         raise NotImplementedError
 
     @abstractmethod
-    def upsert_image_embedding(
-        self,
-        *,
-        model_id: int,
-        image_id: UUID | str,
-        synced_version: int | None = None,
-    ) -> None:
-        """Record that image_id's payload at synced_version is in model_id's collection."""
-        raise NotImplementedError
-
-    # -- deletion queue -----------------------------------------------------
-
-    @abstractmethod
-    def enqueue_image_deletion(self, image_id: UUID | str) -> dict[str, Any]:
+    def create_scene(self, fields: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
 
     @abstractmethod
-    def list_pending_deletions(self, *, limit: int = 50) -> list[dict[str, Any]]:
+    def update_scene(self, scene_id: int, fields: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
 
     @abstractmethod
-    def complete_deletion(self, image_id: UUID | str) -> None:
+    def delete_scene(self, scene_id: int) -> dict[str, Any]:
+        """Delete a scene with its labels, rules and memberships; returns {id, code}."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def create_scene_label(self, scene_id: int, fields: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def update_scene_label(self, scene_id: int, label_id: int, fields: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete_scene_label(self, scene_id: int, label_id: int) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def create_scene_rule(self, scene_id: int, fields: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def update_scene_rule(self, scene_id: int, rule_id: int, fields: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete_scene_rule(self, scene_id: int, rule_id: int) -> dict[str, Any]:
         raise NotImplementedError
 
     # -- lifecycle ------------------------------------------------------------

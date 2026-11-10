@@ -78,9 +78,11 @@ class FakeStore:
 class CategoryEndpointTests(unittest.TestCase):
     def setUp(self):
         self.store = FakeStore()
+        # The catalog only: categories need PostgreSQL, not the retrieval stack
         self.runtime = ApplicationState(
             config={}, config_info={}, http_client=Mock(), settings=SimpleNamespace(),
-            retrieval=SimpleNamespace(categories_uc=ManageCategoriesUseCase(self.store)),
+            catalog=SimpleNamespace(categories_uc=ManageCategoriesUseCase(self.store)),
+            retrieval_error="embedding model unavailable",
         )
         app = FastAPI()
         register_exception_handlers(app)
@@ -230,9 +232,13 @@ class CategoryEndpointTests(unittest.TestCase):
         self.assertEqual(error["detail"], "category database error")
         self.assertIn("hunter2", logs.output[0])  # the log keeps the cause
 
-    def test_without_the_retrieval_stack_every_route_is_503(self):
-        self.runtime.retrieval = None
-        self.runtime.retrieval_error = "postgres unreachable"
+    def test_the_routes_work_without_the_retrieval_stack(self):
+        self.assertIsNone(self.runtime.retrieval)  # setUp has no encoder / Qdrant at all
+        self.assertEqual(self.client.get("/api/categories").status_code, 200)
+
+    def test_without_the_catalog_every_route_is_503(self):
+        self.runtime.catalog = None
+        self.runtime.catalog_error = "postgres unreachable"
         for response in (
             self.client.get("/api/categories"),
             self.client.post("/api/categories", json={"code": "dish", "names": [ZH]}),
