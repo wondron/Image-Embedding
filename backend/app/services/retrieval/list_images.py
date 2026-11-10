@@ -41,6 +41,7 @@ def _item_from_row(
         "scenes": row.get("scenes"),
         "label_status": row.get("label_status"),
         "description": row.get("description") or "",
+        "tags": list(row.get("tags") or []),
         "width": row.get("width"),
         "height": row.get("height"),
         "created_at": row.get("created_at"),
@@ -64,6 +65,7 @@ class ListImagesUseCase:
         page_size: int = 24,
         q: str | None = None,
         category: str | None = None,
+        tag: str | None = None,
     ) -> dict[str, Any]:
         active_scene = normalize_list_scene(scene)
 
@@ -90,12 +92,19 @@ class ListImagesUseCase:
             if c:
                 cat_norm = c
 
+        tag_norm: str | None = None  # stored tags are stripped, so strip the filter too
+        if tag is not None:
+            t = str(tag).strip()
+            if t:
+                tag_norm = t
+
         rows, total = self._metadata.list_images(
             scene=active_scene,
             page=page_i,
             page_size=page_size_i,
             q=q_norm,
             category=cat_norm,
+            tag=tag_norm,
         )
 
         scene_meta = None

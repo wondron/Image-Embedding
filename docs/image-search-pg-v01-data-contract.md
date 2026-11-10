@@ -137,6 +137,7 @@
 | `category_id` | `integer` | YES | FK → `categories.id` ON DELETE RESTRICT | 可标到任意层级；未标注为空 |
 | `label_status` | `text` | NO | CHECK ∈ `unlabeled`/`auto`/`verified` | **未标注 ⇔ 没有类别**（库约束 `ck_images_label_matches_category`：`(label_status = 'unlabeled') = (category_id IS NULL)`）；默认 `unlabeled` |
 | `description` | `text` | NO | 默认 `''` | 图片描述（迁移 `0003`）；API 侧上限 1000 字符；不进 Qdrant payload，修改不 bump `payload_version`；同图重复上传保留首次的描述 |
+| `tags` | `text[]` | NO | 默认 `'{}'`；GIN 索引 `ix_images_tags_gin` | 图片标签，如 `{红薯叶,带皮}`（迁移 `0007`）；写入时去首尾空白、丢空串、去重，API 侧最多 32 个、每个最长 64 字符；不进 Qdrant payload，修改不 bump `payload_version`；同图重复上传保留首次的标签 |
 | `payload_version` | `bigint` | NO | 默认 `1` | 类别/状态/所属场景变化时递增；与 Qdrant payload 同步 |
 | `created_at` | `timestamptz` | NO | 默认 `now()` | |
 | `updated_at` | `timestamptz` | NO | 默认 `now()` | |
@@ -524,6 +525,7 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | `width` | 否 | `integer \| null` | |
 | `height` | 否 | `integer \| null` | |
 | `description` | 否 | `string` | 图片描述；默认 `""`；与 `images.description` 一致；不进 Qdrant payload |
+| `tags` | 否 | `string[]` | 图片标签；默认 `[]`；与 `images.tags` 一致；不进 Qdrant payload（2026-11-09 新增） |
 | `food_state` | 条件 | `string \| null` | 食物状态，取值见 `GET /api/enums/food_state`（初始 `raw`/`cooked`/`frozen`）。**仅当**该 scene `outputs_heating=true` 时可出现 |
 | `food_processing` | 条件 | `string \| null` | 加工状态，取值见 `GET /api/enums/food_processing`；出现条件同 `food_state`（2026-11-09 新增） |
 | `food_count` | 条件 | `integer \| null` | 食物个数；出现条件同 `food_state`（2026-11-09 新增） |
@@ -549,6 +551,14 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 - Index 响应 `IndexedImage.description`：`string`，默认 `""`。
 - Search `SearchHit.description` 与 List `ListImageItem.description`：`string`，默认 `""`。
 - 列存 `images.description`（§2.4）；**不进** Qdrant payload；修改不 bump `payload_version`。
+
+**`tags` 口径（2026-11-09 新增）**：
+
+- Index 请求：JSON `IndexJsonRequest.tags` 为 `string[]`；multipart 的 `tags` 是 JSON 字符串数组文本，如 `["红薯叶"]`。不传即 `[]`。不是字符串数组 → 422 `VALIDATION_ERROR`。
+- Index 响应 `IndexedImage.tags`、Search `SearchHit.tags`、List `ListImageItem.tags`：`string[]`，默认 `[]`，总是出现。
+- List 查询：`q` 的子串匹配范围加上标签（任一标签含 `q` 即命中）；新增 `tag`，精确匹配 `tags` 中的一个元素（区分大小写，走 GIN 索引），trim 后为空视为未传。
+- Search 不按标签过滤（标签不在 Qdrant payload 里）。
+- 列存 `images.tags`（§2.4）；**不进** Qdrant payload；修改不 bump `payload_version`。
 
 **`heating_group` 对象口径（2026-11-08 已拍更正）**：形状为 `{ "id": <int>, "code": <string>, "name": <string> }`（`HeatingGroup`）。Search `SearchHit` 与 List `ListImageItem` 仅当该次请求所针对 scene 的 `outputs_heating=true` 且用例已赋值时出现；实现用 `exclude_unset`，未设置则 JSON 键不出现。`outputs_heating=false` 时不出现。Search envelope 的 `outputs_heating` 布尔仍仅在 envelope（P9 不变）。
 
@@ -579,11 +589,12 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | `label_status` | 可选 | 可选 | 同 |
 | `width` / `height` | 可选 | 可选 | 同 |
 | `description` | ✓ 默认 `""` | ✓ 默认 `""` | 同；Index `IndexedImage` 亦同 |
+| `tags` | ✓ 默认 `[]` | ✓ 默认 `[]` | 同；Index `IndexedImage` 亦同；List 可按 `tag` 精确筛选、`q` 子串命中标签 |
 | `food_state` / `food_processing` / `food_count` / `total_mass_g` / `water_mass_g` / `main_ingredient_mass_g` / `heating_group` | 加热 scene 条件出现 | 同（该 scene `outputs_heating=true`） | `heating_group` 为对象 `{id,code,name}`，非 string；出现规则见 §6.1.1；Index `IndexedImage` 总是带六个食物字段 |
 | `created_at` / `updated_at` | **禁**（非检索所需） | 可选 `string`（ISO-8601 / timestamptz 序列化） | List 可展示入库时间 |
 | `image_url` / `thumbnail_url` | **禁**（P2 已拍） | **禁**（P2 已拍） | 双边同时删除（一刀切） |
 | `qdrant_point_id` | 禁 | **禁**（P11 已拍） | 与 `id` 重复 |
-| `title` / `tags` | 见 P5；tags 表无列 | 同 | 附录 M：title/tags 无对等列 |
+| `title` | 见 P5；表无列 | 同 | 附录 M：title 无对等列（`tags` 见上，迁移 `0007` 起有列） |
 
 ### 6.1.3 `external_candidates` 最小 wire（**形状已拍 · 实现 TBD · P12**）
 
@@ -742,7 +753,8 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | `images.id` BIGINT | 新 `uuid` = hash(文件字节) | **不能**数值对翻 |
 | `images.path` | S3 `original/{id}.ext` + 完整 https | 无本地 path 列 |
 | `images.url` | `original_url` / `thumb_url` | |
-| `images.title` / `tags` | **无对等列** | 产品是否另表 **TBD** |
+| `images.title` | **无对等列** | 产品是否另表 **TBD** |
+| `images.tags` JSON | `images.tags text[]`（迁移 `0007`） | 2026-11-09 起有列；空数组表示未标注 |
 | `images.category` 字符串 | `categories` + `category_id` | |
 | `images.scenes` JSON | `image_scenes` + 规则；`normal`→`general`，`device`→`oven` | |
 | `images.status=deleted` | `image_deletions` 流水线 | |
@@ -778,6 +790,7 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | 2026-11-09 | **枚举改为配置文件**：取值、中文名统一放 `backend/config/param/enums.yaml`（`app/core/config/enum_store.py` 读写，文件改了自动重读）。`source_type`/`license`/`food_state` 为可编辑枚举，新增接口 `/api/enums`（§6）可追加取值；迁移 `0004` 去掉这三列的 CHECK，取值改由应用层校验。系统枚举（`label_status` 等）取值仍以 `app/core/enums.py` 为准、保留 CHECK。Wire（§6.1）不变：`food_state` 仍是 string，可能出现初始三值以外的取值 |
 | 2026-11-09 | **食物属性扩充**：`images` 在 `food_state`（生/熟/冷冻）之外新增 `food_processing`（加工状态，可编辑枚举，初始 切片/切块/整个/切丝）、`food_weight_g`（重量，克，CHECK > 0）、`food_count`（个数，CHECK > 0），均可为空（迁移 `0005`）。`POST /api/index`（JSON 与 multipart）可传这四个字段（此前 `food_state` 不能经接口写入）；`IndexedImage` 总带，Search hit / List item 与 `food_state` 同规则只在 `outputs_heating=true` 时出现（§6.1 P9 不变，纯新增字段）。新三项不进 Qdrant payload，修改不 bump `payload_version`。规则见 `backend/app/services/retrieval/food_fields.py` |
 | 2026-11-09 | **食物标注改为单独一张表**（取代上一条的 `images` 列方案）：新表 `image_foods`（§2.4，与 `image_embeddings` 同样做法，每图最多一行，ON DELETE CASCADE），六个字段均非必填：`food_state`、`food_processing`、`food_count`、`total_mass_g`（总质量）、`water_mass_g`（含水质量，可为 0）、`main_ingredient_mass_g`（主食材质量）；质量单位克，整数。迁移 `0006` 把 `images` 上的 `food_*` 列连数据搬过去（`food_weight_g` → `total_mass_g`）后删列。Wire：六个字段平铺在 Index 请求/响应、Search hit、List item（后两者仍仅 `outputs_heating=true`）；`food_weight_g` 由三个质量字段取代。Qdrant payload 不变（`food_state` 改从 `image_foods` 取） |
+| 2026-11-09 | **图片标签入库**：此前 `POST /api/index` 收 `tags` 但直接丢弃。新增 `images.tags text[] NOT NULL DEFAULT '{}'` + GIN 索引 `ix_images_tags_gin`（迁移 `0007`）；Index 写入（规范化规则见 §2.4），Index 响应 / Search hit / List item 都带 `tags`（默认 `[]`）；List 的 `q` 也匹配标签子串，新增 `tag` 精确筛选。不进 Qdrant payload，Search 不按标签过滤。规则见 `backend/app/services/retrieval/text_fields.py` |
 
 ---
 

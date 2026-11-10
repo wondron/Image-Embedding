@@ -18,7 +18,9 @@ class IndexJsonRequest(BaseModel):
     path: str = Field(..., description="Local path reachable by the API process")
     description: str = Field(default="", description="图片描述，默认空字符串")
     category: str | None = None
-    tags: list[Any] | None = None
+    tags: list[str] | None = Field(
+        default=None, description="图片标签，如 [\"红薯叶\"]；不传为空数组。去首尾空白、去重，最多 32 个，每个最长 64 字符"
+    )
     scene: str | None = None
     scenes: list[Any] | None = None
     # optional food annotation (stored in image_foods); the use case checks it
@@ -71,6 +73,7 @@ class IndexedImage(BaseModel):
     water_mass_g: int | None = None
     main_ingredient_mass_g: int | None = None
     description: str = ""
+    tags: list[str] = Field(default_factory=list)
     width: int
     height: int
     payload_version: int | None = None
@@ -103,6 +106,7 @@ class SearchHit(BaseModel):
     scene_label: str | None = None
     label_status: str | None = None
     description: str = ""
+    tags: list[str] = Field(default_factory=list)
     width: int | None = None
     height: int | None = None
     # food annotation: only when the scene outputs_heating (§6.1 P9), like heating_group
@@ -136,6 +140,7 @@ class ListImageItem(BaseModel):
     scenes: list[str] | None = None
     label_status: str | None = None
     description: str = ""
+    tags: list[str] = Field(default_factory=list)
     width: int | None = None
     height: int | None = None
     # food annotation: only when the scene outputs_heating (§6.1 P9), like heating_group

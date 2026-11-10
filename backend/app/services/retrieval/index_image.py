@@ -41,7 +41,7 @@ from app.services.retrieval.scene_membership import build_qdrant_payload
 from app.services.retrieval.scenes import resolve_index_scenes
 from app.services.retrieval.storage_keys import guess_ext_from_bytes_header
 from app.services.retrieval.storage_upload import put_original_and_thumb
-from app.services.retrieval.text_fields import normalize_description
+from app.services.retrieval.text_fields import normalize_description, normalize_tags
 
 logger = logging.getLogger("retrieval.index")
 
@@ -120,7 +120,6 @@ class IndexImageUseCase:
         license: str | None = None,
         description: str | None = None,
     ) -> dict[str, Any]:
-        del tags
         # Validate optional client scene hints (membership still recomputed from rules)
         _ = resolve_index_scenes(scene=scene, scenes=scenes)
 
@@ -163,6 +162,7 @@ class IndexImageUseCase:
         }
         food = food_fields["food_state"]  # the only one in the Qdrant payload
         desc = normalize_description(description)
+        tag_list = normalize_tags(tags)  # PG only, like description: not in the Qdrant payload
 
         # Resolve category_id: prefer explicit; optional code lookup on metadata
         resolved_category_id = category_id
@@ -237,6 +237,7 @@ class IndexImageUseCase:
             "category_id": resolved_category_id,
             "label_status": label,
             "description": desc,
+            "tags": tag_list,
             **food_fields,
         }
         inserted_id = self._metadata.insert_image(row)
@@ -296,6 +297,7 @@ class IndexImageUseCase:
             "width": created.get("width") or width,
             "height": created.get("height") or height,
             "description": created.get("description", desc),
+            "tags": created.get("tags", tag_list),
             "payload_version": payload_version,
             "created_at": created.get("created_at"),
         }

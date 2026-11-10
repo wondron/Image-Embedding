@@ -255,6 +255,44 @@ class RetrievalHttpTests(unittest.TestCase):
         self.client.post("/api/index", json={"path": "/data/a.png"})
         self.assertEqual(self.calls["index"]["items"][0]["description"], "")
 
+    def test_index_tags_from_form_and_json_reach_the_use_case(self):
+        upload = [("file", ("a.png", b"aaa", "image/png"))]
+        self.client.post("/api/index", files=upload, data={"tags": '["红薯叶", "带皮"]'})
+        self.assertEqual(self.calls["index"]["items"][0]["tags"], ["红薯叶", "带皮"])
+        response = self.client.post("/api/index", files=upload)
+        self.assertIsNone(self.calls["index"]["items"][0]["tags"])  # use case stores []
+        self.assertEqual(response.json()["indexed"][0]["tags"], [])
+
+        self.client.post("/api/index", json={"path": "/data/a.png", "tags": ["清蒸"]})
+        self.assertEqual(self.calls["index"]["items"][0]["tags"], ["清蒸"])
+
+    def test_index_rejects_tags_that_are_not_a_string_array(self):
+        upload = [("file", ("a.png", b"aaa", "image/png"))]
+        for form in ({"tags": "红薯叶"}, {"tags": '{"a": 1}'}):  # multipart: must be a JSON array
+            with self.subTest(form=form):
+                response = self.client.post("/api/index", files=upload, data=form)
+                self.assertEqual((response.status_code, response.json()["error"]), (422, "VALIDATION_ERROR"))
+        for tags in ("红薯叶", [1], [["nested"]]):
+            with self.subTest(tags=tags):
+                response = self.client.post("/api/index", json={"path": "/data/a.png", "tags": tags})
+                self.assertEqual((response.status_code, response.json()["error"]), (422, "VALIDATION_ERROR"))
+
+    def test_list_forwards_the_tag_filter_and_returns_tags(self):
+        def list_execute(**kwargs):
+            self.calls["list"] = kwargs
+            return {
+                "scene": "general", "page": 1, "page_size": 24, "total": 1,
+                "items": [{"id": "abc", "tags": ["红薯叶"]}],
+            }
+
+        self.stack.list_uc = SimpleNamespace(execute=list_execute)
+        response = self.client.get("/api/images", params={"tag": "红薯叶", "q": "薯"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual((self.calls["list"]["tag"], self.calls["list"]["q"]), ("红薯叶", "薯"))
+        self.assertEqual(response.json()["items"][0]["tags"], ["红薯叶"])
+        self.client.get("/api/images")
+        self.assertIsNone(self.calls["list"]["tag"])
+
     def test_index_food_attributes_from_form_and_json_reach_the_use_case(self):
         def food_of_last_item():
             item = self.calls["index"]["items"][0]

@@ -83,6 +83,7 @@ def _hit_from_row(
         "scenes": row.get("scenes"),
         "label_status": row.get("label_status"),
         "description": row.get("description") or "",
+        "tags": list(row.get("tags") or []),
         "width": row.get("width"),
         "height": row.get("height"),
     }

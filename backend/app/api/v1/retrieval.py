@@ -25,7 +25,8 @@ router = APIRouter(prefix="/api", tags=["retrieval"])
     summary="Index image(s)",
     description=(
         "通过 multipart/form-data 上传单张 file 或多张 files，"
-        "或使用 JSON 提交 {path,category,tags,scene,scenes}。参见 SSOT §3.1。"
+        "或使用 JSON 提交 {path,category,tags,scene,scenes}；"
+        "multipart 的 tags 是 JSON 字符串数组，如 [\"红薯叶\"]。参见 SSOT §3.1。"
     ),
 )
 async def index_image(request: Request) -> Any:
@@ -79,8 +80,8 @@ def mvp_health(request: Request) -> JSONResponse:
     summary="List library images",
     description=(
         "按场景分页查询图库图片，默认场景为 general。"
-        "可通过 q 按分类名称、图片 URL 或 ID 进行子串匹配，"
-        "通过 category 按分类代码、名称或 ID 筛选。参见 SSOT §3.5。"
+        "可通过 q 按分类名称、标签、图片 URL 或 ID 进行子串匹配，"
+        "通过 category 按分类代码、名称或 ID 筛选，通过 tag 按单个标签精确筛选。参见 SSOT §3.5。"
     ),
 )
 def list_library_images(
@@ -88,8 +89,9 @@ def list_library_images(
     scene: Optional[str] = Query(None, description="场景代码，默认为 general；未知场景返回 LIST_UNKNOWN_SCENE"),
     page: int = Query(1, description="页码，从 1 开始"),
     page_size: int = Query(24, description="每页数量，默认 24，范围 1～100"),
-    q: Optional[str] = Query(None, description="可选搜索关键词，按分类名称、图片 URL 或 ID 进行子串匹配"),
+    q: Optional[str] = Query(None, description="可选搜索关键词，按分类名称、标签、图片 URL 或 ID 进行子串匹配"),
     category: Optional[str] = Query(None, description="可选分类筛选，支持分类代码、名称或 ID"),
+    tag: Optional[str] = Query(None, description="可选标签筛选：tags 里有这个标签（精确匹配，区分大小写）"),
     trace_id: Optional[str] = Query(None),
 ) -> Any:
     return retrieval_service.run_list_images(
@@ -100,5 +102,6 @@ def list_library_images(
         page_size=page_size,
         q=q,
         category=category,
+        tag=tag,
         trace_id=trace_id,
     )

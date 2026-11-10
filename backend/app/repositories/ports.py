@@ -97,6 +97,7 @@ class MetadataStorePort(ABC):
         page_size: int = 24,
         q: str | None = None,
         category: str | None = None,
+        tag: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         raise NotImplementedError
 

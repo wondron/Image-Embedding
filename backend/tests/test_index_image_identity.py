@@ -81,6 +81,7 @@ class FakeMetadata:
                 "source_type": str(row["source_type"]),
                 "license": str(row["license"]),
                 "description": row.get("description", ""),
+                "tags": row.get("tags", []),
                 "payload_version": 1,
             }
         return iid
@@ -194,6 +195,30 @@ class IndexImageIdentityTests(unittest.TestCase):
         with self.assertRaises(AppError) as ctx:
             self.use_case().execute_one(image_bytes=_png(), description="x" * 1001)
         self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
+        self.assertEqual((self.meta.rows, self.vectors.upserts), ({}, []))
+
+    def test_tags_default_to_empty_and_are_stored_normalized(self):
+        self.assertEqual(self.use_case().execute_one(image_bytes=_png((5, 5, 5)))["tags"], [])
+        out = self.use_case().execute_one(
+            image_bytes=_png((4, 4, 4)), tags=[" 红薯叶 ", "带皮", "", "红薯叶", "  "]
+        )
+        self.assertEqual(out["tags"], ["红薯叶", "带皮"])  # stripped, blanks dropped, first duplicate kept
+        self.assertEqual(self.meta.rows[uuid.UUID(out["id"])]["tags"], ["红薯叶", "带皮"])
+        _, payload = self.vectors.upserts[-1]  # tags stay in PG, like description
+        self.assertNotIn("tags", payload)
+
+    def test_reupload_keeps_the_first_tags(self):
+        data = _png()
+        self.use_case().execute_one(image_bytes=data, tags=["first"])
+        out = self.use_case().execute_one(image_bytes=data, tags=["second"])
+        self.assertEqual(out["tags"], ["first"])
+
+    def test_bad_tags_are_rejected_before_any_write(self):
+        for bad in ("红薯叶", ["ok", 3], [None], ["x" * 65], [f"t{i}" for i in range(33)]):
+            with self.subTest(tags=bad):
+                with self.assertRaises(AppError) as ctx:
+                    self.use_case().execute_one(image_bytes=_png(), tags=bad)
+                self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
         self.assertEqual((self.meta.rows, self.vectors.upserts), ({}, []))
 
     def test_food_annotation_is_validated_stored_and_returned(self):

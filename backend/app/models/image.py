@@ -6,7 +6,8 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Index, func, text
+from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Index, Text, func, text
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import LabelStatus
@@ -35,6 +36,8 @@ class Image(TimestampMixin, Base):
         ),
         # 图库列表按创建时间倒序分页（btree 可反向扫描，不必建 DESC）
         Index("ix_images_created_at", "created_at"),
+        # 图库列表按标签精确筛选：tags @> ARRAY[...]
+        Index("ix_images_tags_gin", "tags", postgresql_using="gin"),
         {"comment": "图片"},
     )
 
@@ -67,6 +70,11 @@ class Image(TimestampMixin, Base):
     description: Mapped[str] = mapped_column(
         server_default=text("''"),
         comment="图片描述，默认空字符串；不进 Qdrant payload，修改不影响 payload_version",
+    )
+    tags: Mapped[list[str]] = mapped_column(
+        ARRAY(Text),
+        server_default=text("'{}'"),
+        comment="图片标签，如 {红薯叶,带皮}；未标注时为空数组；不进 Qdrant payload，修改不影响 payload_version",
     )
     payload_version: Mapped[int] = mapped_column(
         BigInteger,

@@ -362,5 +362,30 @@ class PgLiveTests(unittest.TestCase):
         items, _ = store.list_images(scene="general")
         self.assertEqual({i["id"]: i["description"] for i in items}, {default_id: "", iid: "改过的描述"})
 
+    def test_tags_round_trip_filter_and_q_without_payload_bump(self):
+        store = self.store()
+        untagged = self.insert(store, 1)
+        self.assertEqual(store.get_image_by_uuid(untagged)["tags"], [])
+        iid = self.insert(store, 2, tags=[" 红薯叶 ", "带皮", "红薯叶"])
+        self.assertEqual(store.get_image_by_uuid(iid)["tags"], ["红薯叶", "带皮"])
+
+        def ids(**kw):
+            return sorted(i["id"] for i in store.list_images(scene="general", **kw)[0])
+
+        self.assertEqual(ids(tag="红薯叶"), [iid])
+        self.assertEqual(ids(tag="红薯"), [])  # tag is an exact match
+        self.assertEqual(ids(q="薯"), [iid])  # q matches any tag as a substring
+        self.assertEqual(store.list_images(scene="general", tag="带皮")[1], 1)  # total honours the filter
+
+        before = store.get_image_by_uuid(iid)["payload_version"]
+        store.update_image(iid, {"tags": ["清蒸", " "]})
+        row = store.get_image_by_uuid(iid)
+        self.assertEqual((row["tags"], row["payload_version"]), (["清蒸"], before))
+        self.assertEqual((ids(tag="红薯叶"), ids(tag="清蒸")), ([], [iid]))
+        self.assertEqual(store.get_active_by_ids([iid], scene="general")[iid]["tags"], ["清蒸"])  # search hydrate
+
+        store.update_image(iid, {"tags": []})
+        self.assertEqual(store.get_image_by_uuid(iid)["tags"], [])
+
 if __name__ == "__main__":
     unittest.main()

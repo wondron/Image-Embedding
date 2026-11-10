@@ -22,7 +22,7 @@ from app.repositories.foods import FOOD_JOIN, FOOD_SELECT, write_image_food
 from app.services.retrieval.enum_fields import coerce_enum
 from app.services.retrieval.food_fields import FOOD_FIELDS, coerce_food_field
 from app.services.retrieval.image_ids import uuid_from_sha256
-from app.services.retrieval.text_fields import normalize_description
+from app.services.retrieval.text_fields import normalize_description, normalize_tags
 
 # Category display name (zh primary) + nearest ancestor's heating group.
 # Expects aliases i (images) and c (categories); binds :primary_kind.
@@ -125,6 +125,7 @@ class PgImagesMixin:
         category_id = row.get("category_id")
         _check_label_matches_category(label_status, category_id)
         description = normalize_description(row.get("description"))
+        tags = normalize_tags(row.get("tags"))
 
         engine = self._get_engine()
         try:
@@ -133,10 +134,10 @@ class PgImagesMixin:
                     text(
                         "INSERT INTO images ("
                         "id, sha256, original_url, thumb_url, width, height, "
-                        "source_type, license, category_id, label_status, description"
+                        "source_type, license, category_id, label_status, description, tags"
                         ") VALUES ("
                         "CAST(:id AS uuid), :sha, :ou, :tu, :w, :h, "
-                        ":st, :lic, :cid, :ls, :desc"
+                        ":st, :lic, :cid, :ls, :desc, CAST(:tags AS text[])"
                         ") ON CONFLICT DO NOTHING RETURNING id"
                     ),
                     {
@@ -151,6 +152,7 @@ class PgImagesMixin:
                         "cid": category_id,
                         "ls": label_status.value,
                         "desc": description,
+                        "tags": tags,
                     },
                 ).fetchone()
                 if inserted is not None:
@@ -193,10 +195,11 @@ class PgImagesMixin:
             "source_type",
             "license",
             "description",
+            "tags",
             *FOOD_FIELDS,
         }
-        # The Qdrant payload holds only these; description and the other food fields are not
-        # in it, so they do not bump payload_version
+        # The Qdrant payload holds only these; description, tags and the other food fields are
+        # not in it, so they do not bump payload_version
         bump_keys = {"category_id", "food_state", "label_status"}
         sets: list[str] = []
         params: dict[str, Any] = {"id": str(_as_uuid(image_id))}
@@ -216,7 +219,10 @@ class PgImagesMixin:
                 val = _positive_int(val, key)
             elif key == "description":
                 val = normalize_description(val)
-            sets.append(f"{key} = :{key}")
+            elif key == "tags":
+                val = normalize_tags(val)
+            placeholder = f"CAST(:{key} AS text[])" if key == "tags" else f":{key}"
+            sets.append(f"{key} = {placeholder}")
             params[key] = val
         if not sets and not food:
             return
@@ -338,8 +344,13 @@ class PgImagesMixin:
         page_size: int = 24,
         q: str | None = None,
         category: str | None = None,
+        tag: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
-        """Paginate images that are effective members of scene code."""
+        """Paginate images that are effective members of scene code.
+
+        q: substring of the category name, any tag, the original URL or the id.
+        tag: exact match on one element of images.tags.
+        """
         self.ensure_schema()
         from sqlalchemy import text
 
@@ -375,10 +386,15 @@ class PgImagesMixin:
                     )
                     params["cat"] = category
                     params["cat_like"] = f"%{category}%"
+                if tag:
+                    # served by ix_images_tags_gin (@>, not = ANY, so the index applies)
+                    where.append("i.tags @> ARRAY[CAST(:tag AS text)]")
+                    params["tag"] = tag
                 if q:
                     where.append(
                         "(cn.name ILIKE :q OR i.original_url ILIKE :q OR "
-                        "CAST(i.id AS text) ILIKE :q)"
+                        "CAST(i.id AS text) ILIKE :q OR "
+                        "EXISTS (SELECT 1 FROM unnest(i.tags) AS t(tag) WHERE t.tag ILIKE :q))"
                     )
                     params["q"] = f"%{q}%"
                 where_sql = " AND ".join(where)

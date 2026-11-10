@@ -122,7 +122,8 @@ class MigrationChainTests(unittest.TestCase):
         cfg = Config(str(BACKEND / "alembic.ini"))
         cfg.set_main_option("script_location", str(BACKEND / "alembic"))
         script = ScriptDirectory.from_config(cfg)
-        self.assertEqual(script.get_heads(), ["20261109_0006"])
+        self.assertEqual(script.get_heads(), ["20261109_0007"])
+        self.assertEqual(script.get_revision("20261109_0007").down_revision, "20261109_0006")
         self.assertEqual(script.get_revision("20261109_0006").down_revision, "20261109_0005")
         self.assertEqual(script.get_revision("20261109_0005").down_revision, "20261109_0004")
         self.assertEqual(script.get_revision("20261109_0004").down_revision, "20261106_0003")
@@ -159,6 +160,16 @@ class MigrationChainTests(unittest.TestCase):
         column = Base.metadata.tables["images"].c.description
         self.assertFalse(column.nullable)
         self.assertEqual(str(column.server_default.arg), "''")
+
+    def test_images_tags_is_a_text_array_defaulting_to_empty_with_a_gin_index(self):
+        images = Base.metadata.tables["images"]
+        column = images.c.tags
+        self.assertIsInstance(column.type, postgresql.ARRAY)
+        self.assertFalse(column.nullable)
+        self.assertEqual(str(column.server_default.arg), "'{}'")
+        (index,) = [ix for ix in images.indexes if ix.name == "ix_images_tags_gin"]
+        self.assertEqual([c.name for c in index.columns], ["tags"])
+        self.assertEqual(index.dialect_options["postgresql"]["using"], "gin")
 
 
 if __name__ == "__main__":
