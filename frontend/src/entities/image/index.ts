@@ -8,6 +8,7 @@ export {
   type IndexedImage,
   type IndexFailure,
   type IndexResponse,
+  FOOD_STATE_ENUM,
   parseFoodState,
   parseLabelStatus,
   parseHeatingGroup,

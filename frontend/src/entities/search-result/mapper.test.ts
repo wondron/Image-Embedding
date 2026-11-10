@@ -66,12 +66,18 @@ describe('toSearchResponse (§6.1.1 / §6.1.4)', () => {
     expect(general.items[0]).toMatchObject({ heatingGroup: null, foodState: null, sceneLabel: null, title: '番茄', outputsHeating: false })
   })
 
-  it('rejects malformed heating groups and food states instead of guessing', () => {
+  it('rejects malformed heating groups and label statuses instead of guessing', () => {
     for (const heating_group of ['蔬菜烘烤', { id: 3, code: 'veg_roast' }, { id: '3', code: 'veg_roast', name: '蔬菜烘烤' }, { id: 3.5, code: 'x', name: 'y' }, []]) {
       expect(toSearchResponse(envelope([{ ...ovenHit, heating_group }])).items[0].heatingGroup).toBeNull()
     }
-    expect(toSearchResponse(envelope([{ ...ovenHit, food_state: 'boiled' }])).items[0].foodState).toBeNull()
     expect(toSearchResponse(envelope([{ ...ovenHit, label_status: 'maybe' }])).items[0].labelStatus).toBeNull()
+  })
+
+  it('keeps any food_state text: an editable enum gains values at runtime (GET /api/enums/food_state)', () => {
+    const foodState = (food_state: unknown) => toSearchResponse(envelope([{ ...ovenHit, food_state }])).items[0].foodState
+    expect(foodState('thawed')).toBe('thawed')
+    expect(foodState(' thawed ')).toBe('thawed')
+    for (const value of [null, '', '   ', 42, {}, []]) expect(foodState(value)).toBeNull()
   })
 
   it('defaults description to "" and keeps it as sent', () => {

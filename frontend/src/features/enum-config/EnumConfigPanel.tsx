@@ -9,6 +9,7 @@ import {
   listEnums,
   resolveUncertainProbe,
   toEnumFailure,
+  useEnumCatalog,
   validateAppendDraft,
   type AppendDraft,
   type EnumFailureView,
@@ -118,6 +119,8 @@ function failureAlert(failure: EnumFailureView): FileAlert {
 }
 
 export function EnumConfigPanel({ apiBase = '' }: { apiBase?: string }) {
+  // Labels shown on the other pages (EnumCatalogProvider): reloaded once a value is written.
+  const { refresh: refreshCatalog } = useEnumCatalog()
   const [items, setItems] = useState<EnumItem[]>([])
   const [loading, setLoading] = useState(false)
   const [loadedOnce, setLoadedOnce] = useState(false)
@@ -349,6 +352,7 @@ export function EnumConfigPanel({ apiBase = '' }: { apiBase?: string }) {
       value,
     })
     if (decision.action === 'allow_retry') unblockUnconfirmed(name, value)
+    if (decision.action === 'exists') refreshCatalog()
     setNotice(probeMessage(decision), 'status')
   }
 
@@ -465,6 +469,7 @@ export function EnumConfigPanel({ apiBase = '' }: { apiBase?: string }) {
         return
       }
       markWrite(target)
+      refreshCatalog()
       if (created.outcome === 'created') setItems(previous => replaceItem(previous, created.item))
       blockValue(target, validated.body.value, 'written')
       const refreshGen = ++detailGen.current

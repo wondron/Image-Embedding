@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../../shared/api'
 import { addEnumValue, getEnum, listEnums } from './api'
+import { EMPTY_ENUM_CATALOG, enumOptions, enumValueLabel, enumValueText, toEnumCatalog } from './catalog'
 import { toEnumFailure } from './errors'
 import { toEnumDetail, toEnumList } from './model'
 import { decidePrePost, resolveUncertainProbe, validateAppendDraft } from './policy'
@@ -46,6 +47,39 @@ describe('enum parsers', () => {
       traceId: 'trace-d',
     })
     expect(detail && 'fileError' in detail).toBe(false)
+  })
+})
+
+describe('enum catalog (labels for stored values)', () => {
+  const catalog = toEnumCatalog([{
+    ...item,
+    values: [
+      { value: 'raw', label: '生', description: '' },
+      { value: 'thawed', label: '解冻', description: '' },
+      { value: 'unnamed', label: '  ', description: '' },
+    ],
+  }])
+
+  it('shows the server label, else the value as stored, and 「—」 when there is no value', () => {
+    expect(enumValueText(catalog, 'food_state', 'thawed')).toBe('解冻')
+    expect(enumValueText(catalog, 'food_state', 'half_baked')).toBe('half_baked')
+    expect(enumValueText(catalog, 'food_state', 'unnamed')).toBe('unnamed')
+    expect(enumValueText(catalog, 'license', 'raw')).toBe('raw')
+    expect(enumValueText(EMPTY_ENUM_CATALOG, 'food_state', 'raw')).toBe('raw')
+    for (const value of [null, undefined, '']) expect(enumValueText(catalog, 'food_state', value)).toBe('—')
+    expect(enumValueLabel(catalog, 'food_state', 'raw')).toBe('生')
+    expect(enumValueLabel(catalog, 'food_state', 'half_baked')).toBeNull()
+  })
+
+  it('lists options in file order and keeps a current value the catalog does not list', () => {
+    expect(enumOptions(catalog, 'food_state')).toEqual([
+      { value: 'raw', label: '生' },
+      { value: 'thawed', label: '解冻' },
+      { value: 'unnamed', label: 'unnamed' },
+    ])
+    expect(enumOptions(catalog, 'food_state', 'raw')).toHaveLength(3)
+    expect(enumOptions(catalog, 'food_state', 'half_baked').at(-1)).toEqual({ value: 'half_baked', label: 'half_baked' })
+    expect(enumOptions(EMPTY_ENUM_CATALOG, 'food_state', null)).toEqual([])
   })
 })
 

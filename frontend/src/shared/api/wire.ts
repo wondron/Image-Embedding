@@ -9,7 +9,12 @@
 
 // -- shared parts ------------------------------------------------------------------------
 
-export type FoodStateWire = 'raw' | 'cooked' | 'frozen'
+/**
+ * Editable enum (config/param/enums.yaml): GET /api/enums/food_state lists the values and labels.
+ * It starts with raw / cooked / frozen and can gain values at runtime (POST /api/enums/food_state/values).
+ */
+export type FoodStateWire = string
+/** System enum (app.core.enums.LabelStatus): the values are fixed in code. */
 export type LabelStatusWire = 'unlabeled' | 'auto' | 'verified'
 
 /** schemas/retrieval.py HeatingGroup. */

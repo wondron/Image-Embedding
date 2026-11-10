@@ -1,5 +1,6 @@
-import { foodStateLabel, sceneDisplayLabel, SCENE_SEEDS } from '../../entities/scene'
-import type { LibraryImageItem } from '../../entities/image'
+import { enumOptions, enumValueText, useEnumCatalog } from '../../entities/enum'
+import { FOOD_STATE_ENUM, type FoodState, type LibraryImageItem } from '../../entities/image'
+import { sceneDisplayLabel, SCENE_SEEDS } from '../../entities/scene'
 
 export type ImageLabelPanelProps = {
   item: LibraryImageItem
@@ -7,12 +8,13 @@ export type ImageLabelPanelProps = {
   apiReady?: boolean
   onManualAdd?: (sceneCode: string) => void
   onManualRemove?: (sceneCode: string) => void
-  onFoodStateChange?: (state: 'raw' | 'cooked' | 'frozen' | null) => void
+  onFoodStateChange?: (state: FoodState | null) => void
 }
 
 /**
  * Annotation panel: scene membership (rule/manual) + food_state (R13 / R14).
  * Write ops stay disabled with 待接入 until contract API lands.
+ * Food state labels and options come from GET /api/enums/food_state.
  */
 export function ImageLabelPanel({
   item,
@@ -21,6 +23,7 @@ export function ImageLabelPanel({
   onManualRemove,
   onFoodStateChange,
 }: ImageLabelPanelProps) {
+  const { catalog } = useEnumCatalog()
   const memberCodes = new Set(item.scenes)
   const membershipByCode = Object.fromEntries(
     item.sceneMemberships.map(m => [m.code, m]),
@@ -47,17 +50,17 @@ export function ImageLabelPanel({
                 value={item.foodState ?? ''}
                 onChange={event => {
                   const v = event.target.value
-                  onFoodStateChange?.(v === '' ? null : v as 'raw' | 'cooked' | 'frozen')
+                  onFoodStateChange?.(v === '' ? null : v)
                 }}
               >
                 <option value="">未设</option>
-                <option value="raw">生</option>
-                <option value="cooked">熟</option>
-                <option value="frozen">冷冻</option>
+                {enumOptions(catalog, FOOD_STATE_ENUM, item.foodState).map(option => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
               </select>
             ) : (
               <>
-                {foodStateLabel(item.foodState)}
+                {enumValueText(catalog, FOOD_STATE_ENUM, item.foodState)}
                 <small> · 编辑待接入</small>
               </>
             )}

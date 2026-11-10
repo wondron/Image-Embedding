@@ -30,8 +30,9 @@ Global 搜索阶段直接保留上游 `image_url`，不下载或验证候选图�
 
 枚举取值（数据库、接口、Qdrant payload 共用）单独放在 `backend/config/param/enums.yaml`，不走 Nacos，规则见文件头。
 `source_type` / `license` / `food_state` / `food_processing`（加工状态）可以直接改文件（不用重启），也可以调
-`POST /api/enums/{name}/values` 追加；`GET /api/enums` 返回全部取值和中文名。容器里的文件随镜像走：要保留接口追加的取值，
-需要把这个文件挂载出来。升级到这一版要先执行 `alembic upgrade head`（迁移 `0004` 去掉可编辑枚举列的 CHECK；
+`POST /api/enums/{name}/values` 追加；`GET /api/enums` 返回全部取值和中文名。这个文件随镜像进容器，不挂载：接口追加的取值
+只保存在容器里，重建容器（重新构建镜像、`down` 后再 `up`）就会丢。重建前先把它取出来提交到 git，例如
+`docker cp roki-imageembedding:/app/config/param/enums.yaml backend/config/param/enums.yaml`。升级到这一版要先执行 `alembic upgrade head`（迁移 `0004` 去掉可编辑枚举列的 CHECK；
 `0005`、`0006` 把食物标注放进单独的表 `image_foods`：`food_state`、`food_processing`、`food_count`、总质量、
 含水质量、主食材质量，都是非必填）。
 

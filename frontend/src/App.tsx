@@ -12,6 +12,7 @@ import { BatchSearchPanel, type BatchSearchResult } from './components/BatchSear
 import { DownloadDialog } from './components/DownloadDialog'
 import { ImageFilePicker } from './components/ImageFilePicker'
 import { downloadImage } from './lib/downloads'
+import { EnumCatalogProvider } from './entities/enum'
 import { DEFAULT_SCENE } from './entities/scene'
 import {
   SourceBadge, displayCategoryLabel, getImageSources, searchGlobalImages, searchLocalImages,
@@ -259,7 +260,8 @@ export default function App() {
     })
   }
 
-  return <div className={`app-shell ${navCollapsed ? 'nav-collapsed' : ''}`}>
+  // Enum labels (GET /api/enums) for every page; loaded once the backend answers ping.
+  return <EnumCatalogProvider apiBase={apiBase} enabled={connection === 'online'}><div className={`app-shell ${navCollapsed ? 'nav-collapsed' : ''}`}>
     {mobileNav && <button className="sidebar-scrim" aria-label="关闭导航" onClick={() => setMobileNav(false)} />}
     <aside className={`sidebar ${mobileNav ? 'sidebar-open' : ''}`}>
       <div className="sidebar-heading"><span>导航</span><button className="icon-button collapse-navigation" aria-label={navCollapsed ? '展开侧栏' : '收起侧栏'} title={navCollapsed ? '展开侧栏' : '收起侧栏'} aria-expanded={!navCollapsed} onClick={() => setNavCollapsed(value => !value)}>{navCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}</button></div>
@@ -403,5 +405,5 @@ export default function App() {
     {downloadItems && <DownloadDialog items={downloadItems} apiBase={apiBase} onClose={() => setDownloadItems(null)} />}
     {settingsOpen && <Dialog title="搜索服务连接" onClose={() => setSettingsOpen(false)}><div className="settings-content"><p>连接现有的图像搜索服务。留空时使用当前站点的接口。</p><label htmlFor="api-base">服务地址</label><input className="input" id="api-base" type="url" placeholder="默认使用站点 /api" value={apiDraft} onChange={event => setApiDraft(event.target.value)} /><small>例如 http://127.0.0.1:8320，不包含 /api 路径。跨域连接需服务端允许访问。</small>{apiDraft.trim() && !safeHttpUrl(apiDraft.trim()) && <p className="inline-error">请输入 HTTP 或 HTTPS 地址。</p>}<div className="connection-info"><span className={`status-dot ${connection}`} />{connection === 'online' ? '接口可连接' : connection === 'checking' ? '正在检查连接…' : '当前未连接，请检查服务地址与后端运行状态'}<button className="text-button" onClick={() => void checkConnection()}>重新检查</button></div><div className="dialog-actions"><button className="btn btn-secondary" onClick={() => setSettingsOpen(false)}>取消</button><button className="btn btn-primary" disabled={Boolean(apiDraft.trim() && !safeHttpUrl(apiDraft.trim()))} onClick={saveSettings}><Check size={16} />保存连接</button></div></div></Dialog>}
     {helpOpen && <Dialog title="开始使用食图" onClose={() => setHelpOpen(false)}><div className="help-content"><div><Search size={21} /><section><h3>以图搜图</h3><p>上传图片或输入可公开访问的图片直链，在自建库中检索。默认场景为「通用」（general）；可切换场景与拒识阈值后点「开始搜索」。空库时请先去「上传与导入」入库（PG + S3），不以 FlyB 外搜兜底为完成标准。</p></section></div><div><ArrowDownToLine size={21} /><section><h3>查看与下载</h3><p>点击结果打开详情，勾选图片后可「批量下载」。一体机场景下结果会展示加热组与食物状态（缺字段显示「—」）。</p></section></div><div><FolderOpen size={21} /><section><h3>图库与入库</h3><p>图库按场景筛选（默认 general），缩略图使用 S3 https 地址。入库可指定场景意向；最终成员以规则 + 手动覆盖为准。</p></section></div><div className="help-note">相似度仅在服务返回分数时展示；类别优先展示 scene_label，否则回落通用类别。</div></div></Dialog>}
-  </div>
+  </div></EnumCatalogProvider>
 }

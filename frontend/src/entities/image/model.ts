@@ -21,8 +21,15 @@ import { DEFAULT_SCENE, normalizeSceneCode, toApiSceneCode } from '../scene'
 
 // -- value types (shared by library, index and search) -----------------------------------
 
-export type FoodState = 'raw' | 'cooked' | 'frozen'
+/**
+ * A `food_state` value as stored. Editable enum: it is not limited to the initial raw / cooked / frozen;
+ * the values and their labels come from GET /api/enums/food_state (see FOOD_STATE_ENUM).
+ */
+export type FoodState = string
 export type LabelStatus = 'unlabeled' | 'auto' | 'verified'
+
+/** Name of the food_state enum in GET /api/enums. */
+export const FOOD_STATE_ENUM = 'food_state'
 
 /** 加热组, kept as the wire object (§6.1.4: never flatten `name` into a string). */
 export interface HeatingGroup {
@@ -37,10 +44,12 @@ export interface SceneMembership {
   origin?: 'rule' | 'manual'
 }
 
-/** `food_state` → FoodState; anything else → null. */
+/**
+ * `food_state` → the value as sent (trimmed); null when absent, blank or not a string.
+ * Values outside the initial three are kept: they were added to the editable enum at runtime.
+ */
 export function parseFoodState(value: unknown): FoodState | null {
-  const state = asText(value)?.toLowerCase()
-  return state === 'raw' || state === 'cooked' || state === 'frozen' ? state : null
+  return asText(value)
 }
 
 /** `label_status` → LabelStatus; anything else → null. */

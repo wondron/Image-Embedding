@@ -78,9 +78,3 @@ export function sceneOutputsHeating(code: string, apiFlag?: boolean | null): boo
   if (apiFlag === false) return false
   return getSceneSeed(code)?.outputsHeating === true
 }
-
-export function foodStateLabel(value: string | null | undefined): string {
-  if (!value) return '—'
-  const map: Record<string, string> = { raw: '生', cooked: '熟', frozen: '冷冻' }
-  return map[value] ?? value
-}

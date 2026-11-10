@@ -9,5 +9,4 @@ export {
   getSceneSeed,
   sceneDisplayLabel,
   sceneOutputsHeating,
-  foodStateLabel,
 } from './model'

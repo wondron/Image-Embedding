@@ -46,6 +46,10 @@ describe('toLibraryImage (§6.1.2 / §6.1.4 List map)', () => {
     expect(toLibraryImage({ ...ovenItem, heating_group: null })?.heatingGroup).toBeNull()
   })
 
+  it('keeps a food_state value added to the enum at runtime', () => {
+    expect(toLibraryImage({ ...ovenItem, food_state: 'thawed' })?.foodState).toBe('thawed')
+  })
+
   it('never falls back to forbidden aliases (P2 / P11) and drops rows without an id', () => {
     const item = toLibraryImage({ id: 'x', image_url: 'https://legacy.example/a.png', thumbnail_url: 'https://legacy.example/t.png', qdrant_point_id: 'q', title: '旧标题', tags: ['a'] })
     expect(item).toMatchObject({ imageUrl: null, originalUrl: null, description: '', scenes: [], sceneMemberships: [] })
