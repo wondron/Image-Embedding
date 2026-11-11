@@ -173,8 +173,9 @@ class MetadataStorePort(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def mark_payloads_pushed(self, *, model_id: int, versions: dict[str, int]) -> None:
-        """Ledger: {image_id: payload_version} is now in model_id's collection."""
+    def mark_payloads_pushed(self, *, model_id: int, versions: dict[str, int]) -> list[str]:
+        """Ledger: {image_id: payload_version} is now in model_id's collection. Only versions that
+        are still the image's current one are recorded; returns the image ids recorded."""
         raise NotImplementedError
 
     # -- deletion queue -----------------------------------------------------
@@ -234,7 +235,28 @@ class CatalogStorePort(ABC):
         """Delete a node nothing uses; CATEGORY_IN_USE otherwise."""
         raise NotImplementedError
 
-    # -- scenes (each write returns the whole scene: fields, labels, rules) ---
+    # -- image scene memberships (PG only; writes return a consistent snapshot) --
+
+    @abstractmethod
+    def get_scene_memberships(self, image_id: UUID | str) -> dict[str, Any]:
+        """Full scene directory, effective codes and image payload_version; no recompute."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def put_manual_scene_membership(
+        self, image_id: UUID | str, scene_id: int, *, is_member: bool
+    ) -> dict[str, Any]:
+        """Upsert manual and recompute atomically; does not push vector payloads (the HTTP layer
+        does that after the commit when the retrieval stack is up)."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def clear_manual_scene_membership(self, image_id: UUID | str, scene_id: int) -> dict[str, Any]:
+        """Clear only manual and recompute atomically (inactive scenes may be cleared)."""
+        raise NotImplementedError
+
+    # -- scenes (each write returns the whole scene: fields, labels, rules, plus sync_required:
+    #    whether stored images need POST /api/scenes/sync; a delete returns {id, code, sync_required})
 
     @abstractmethod
     def list_scene_configs(self) -> list[dict[str, Any]]:

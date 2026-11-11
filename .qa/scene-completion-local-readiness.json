@@ -1,0 +1,41 @@
+{
+  "checked_at": "2026-11-10T11:04:21.354266-07:00",
+  "listener_check": "BLOCKED: Get-NetTCPConnection found in NetTCPIP but module could not autoload. FullyQualifiedErrorId: CouldNotAutoloadMatchingModule. No alternate port inspection attempted.",
+  "listener_tool_error": "Get-NetTCPConnection : 在模块“NetTCPIP”中找到“Get-NetTCPConnection”命令，但无法加载该模块。有关详细信息，请运行“Import-M\nodule NetTCPIP”。\n所在位置 C:\\Users\\47202\\AppData\\Local\\Temp\\ps-script-beabcfd8-7612-495e-8808-d556d808f131.ps1:611 字符: 184\n+ ... Id,CommandLine,CreationDate); $ports = @(Get-NetTCPConnection -State  ...\n+                                              ~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : ObjectNotFound: (Get-NetTCPConnection:String) [], ParentContainsErrorRecordException\n    + FullyQualifiedErrorId : CouldNotAutoloadMatchingModule\n \n\n---\nexit_code: 1\nelapsed_ms: 2866\nended_at: 2026-11-10T18:03:51.766Z",
+  "pid_check_exit_code": 0,
+  "pids": [
+    {
+      "ProcessId": 16532,
+      "CommandLine": "\"D:\\99-tools\\anaconda\\envs\\onnxgpu\\python.exe\" -u .qa/scene_completion_gui_qa.py"
+    },
+    {
+      "ProcessId": 47568,
+      "CommandLine": "D:/98-softwaredata/nodejs/node.exe C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\node_modules\\vite\\bin\\vite.js --host 127.0.0.1 --port 58290 --strictPort"
+    }
+  ],
+  "pid_error": "",
+  "HTTP_readonly_responses": [
+    {
+      "url": "http://127.0.0.1:58290/",
+      "status": 200,
+      "content_type": "text/html",
+      "bytes": 692,
+      "qa_gui_scene_present": null
+    },
+    {
+      "url": "http://127.0.0.1:58290/api/scenes",
+      "status": 200,
+      "content_type": "application/json",
+      "bytes": 2386,
+      "qa_gui_scene_present": true
+    },
+    {
+      "url": "http://127.0.0.1:58283/api/scenes",
+      "status": 200,
+      "content_type": "application/json",
+      "bytes": 2386,
+      "qa_gui_scene_present": true
+    }
+  ],
+  "boundary": "Actual wondron loopback HTTP only. Not browser/page/screenshot proof; does not identify peer browser machine."
+}

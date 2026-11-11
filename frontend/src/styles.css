@@ -580,7 +580,7 @@ main { flex: 1; min-height: 0; width: 100%; max-width: none; padding: 14px; marg
   margin-left: 6px;
 }
 .image-label-panel {
-  margin-top: 12px;
+  margin: 12px 16px 16px; /* lines up with .mg-preview-name in the preview dialog */
   text-align: left;
 }
 .image-label-heading {

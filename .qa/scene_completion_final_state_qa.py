@@ -1,0 +1,11 @@
+﻿# QA ONLY final preservation and isolated resource audit. No mutations.
+import pathlib,subprocess,json,hashlib
+from datetime import datetime
+from zoneinfo import ZoneInfo
+q=pathlib.Path('.qa');b=json.loads((q/'scene-completion-baseline.json').read_text(encoding='utf-8'));files=b['files'];changed=[];missing=[];final={}
+for name,old in files.items():
+ p=pathlib.Path(name)
+ if not p.is_file():missing.append(name);continue
+ sha=hashlib.sha256(p.read_bytes()).hexdigest();final[name]=sha
+ if sha!=old:changed.append({'path':name,'before_sha256':old,'after_sha256':sha})
+allpaths=subprocess.check_output(['git','ls-files','--cached','--others','--exclude-standard','-z']).decode().split('\0');new=sorted(set(x for x in allpaths if x and pathlib.Path(x).is_file())-set(files));ids=['797c6a3c97e166e9ad5c939c24e3bca885b355490f8a71793f1efc423176eda4','ad801c0769beada83f230dd38013d4b691249262692238756fb586aa470d8aeb'];raw=json.loads(subprocess.check_output(['docker','inspect',*ids]));containers=[{'id':x['Id'],'name':x['Name'],'running':x['State']['Running'],'mounts':x['Mounts'],'tmpfs':x['HostConfig']['Tmpfs'],'ports':x['NetworkSettings']['Ports'],'image':x['Config']['Image']} for x in raw];ready=json.loads((q/'scene-completion-gui-ready.json').read_text(encoding='utf-8'));r={'reported_at':datetime.now(ZoneInfo('America/Denver')).isoformat(),'head_initial':b['head'],'head_final':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),'status_initial':b['status'],'status_final':subprocess.check_output(['git','status','--porcelain=v1','-uall'],text=True),'baseline_files':len(files),'files_final_hashes':final,'changed':changed,'missing':missing,'new_files':new,'isolated_containers':containers,'gui_ready':ready,'application_preserved':not missing and all(x['path']=='frontend/src/entities/image/model.test.ts' and x['after_sha256']=='6b54662df47a52ec3b6928b9dfb82f97cceddbead1310219a3e579313b6299a7' for x in changed)};(q/'scene-completion-final-state.json').write_text(json.dumps(r,ensure_ascii=False,indent=2),encoding='utf-8');print(json.dumps({k:v for k,v in r.items() if k not in ['status_initial','status_final','files_final_hashes','gui_ready','new_files']},ensure_ascii=False));print('NEW_FILES',len(new))

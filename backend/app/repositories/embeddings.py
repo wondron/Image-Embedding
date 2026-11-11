@@ -124,14 +124,20 @@ class PgEmbeddingsMixin:
         except Exception as exc:
             raise err.index_postgres_failed(f"get_payload_rows: {type(exc).__name__}: {exc}") from exc
 
-    def mark_payloads_pushed(self, *, model_id: int, versions: dict[str, int]) -> None:
-        """Ledger: these payload versions are now in model_id's collection.
+    def mark_payloads_pushed(self, *, model_id: int, versions: dict[str, int]) -> list[str]:
+        """Ledger: these payload versions are now in model_id's collection. Returns the image ids
+        recorded, in id order.
+
+        A version is recorded only while it is still the image's payload_version: when the image
+        changed (or was deleted) after its payload was read, the payload just written may be
+        older than what another writer pushed, so the caller reads and pushes it again
+        (services.retrieval.sync_scenes) instead of the ledger claiming it is current.
 
         embedded_at stays as it was for images already in the ledger (only the payload moved);
         an image missing from it (its ledger write failed at index time) gets a row now.
         """
         if not versions:
-            return
+            return []
         self.ensure_schema()
         from sqlalchemy import text
 
@@ -139,18 +145,21 @@ class PgEmbeddingsMixin:
         engine = self._get_engine()
         try:
             with engine.begin() as conn:
-                conn.execute(
+                rows = conn.execute(
                     text(
                         "INSERT INTO image_embeddings (model_id, image_id, synced_version, embedded_at) "
                         "SELECT :mid, d.image_id, d.version, now() "
                         "FROM unnest(CAST(:ids AS uuid[]), CAST(:versions AS bigint[])) AS d(image_id, version) "
-                        "ON CONFLICT (model_id, image_id) DO UPDATE SET synced_version = EXCLUDED.synced_version"
+                        "JOIN images i ON i.id = d.image_id AND i.payload_version = d.version "
+                        "ON CONFLICT (model_id, image_id) DO UPDATE SET synced_version = EXCLUDED.synced_version "
+                        "RETURNING image_id::text"
                     ),
                     {
                         "mid": int(model_id),
                         "ids": [_as_uuid(image_id) for image_id, _ in items],
                         "versions": [int(version) for _, version in items],
                     },
-                )
+                ).fetchall()
+            return sorted(str(row[0]) for row in rows)
         except Exception as exc:
             raise err.index_postgres_failed(f"mark_payloads_pushed: {type(exc).__name__}: {exc}") from exc

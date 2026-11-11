@@ -1,0 +1,16 @@
+---
+pid: 9768
+cwd: "C:\\Users\\47202\\PROJECT\\Image-Embedding\\backend"
+command: "$py='D:\\99-tools\\anaconda\\envs\\onnxgpu\\python.exe'; & $py -m unittest tests.test_scene_membership tests.test_retrieval_http tests.test_retrieval_stack tests.test_qdrant_store tests.test_categories_http -v *> ../.qa/scene-completion-backend-regression.log; Write-Output \"BE_REGRESSION_EXIT=$LASTEXITCODE\""
+title: "Current backend focused nonlive regression without touching business dependencies"
+status: succeeded
+started_at: 2026-11-10T17:51:39.427Z
+running_for_ms: 9260     
+---
+BE_REGRESSION_EXIT=0
+
+---
+exit_code: 0
+elapsed_ms: 9260
+ended_at: 2026-11-10T17:51:48.687Z
+---

@@ -25,11 +25,13 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core import errors as err
 from app.core.enums import SceneOrigin
 from app.db.common import _as_uuid, _row_to_dict, _uuid_in_clause
 from app.repositories.catalog_lock import lock_catalog_for_read
+from app.services.retrieval.scene_fields import normalize_row_id
 from app.services.retrieval.scene_membership import (
     apply_manual_overrides,
     compute_rule_member_scene_ids,
@@ -280,6 +282,61 @@ def _membership_result(image_id: str, catalog: _Catalog, plan: _Plan) -> dict[st
     }
 
 
+def _read_membership_snapshot(conn: Any, image_id: str) -> dict[str, Any]:
+    """One statement / MVCC view, including an image even if the scene directory is empty.
+
+    Read stored rows only: GET must not preview rules or materialize anything. implicit is a
+    response origin, not a persisted SceneOrigin. A write calls this before releasing its locks.
+    """
+    rows = conn.execute(
+        text(
+            "SELECT i.id::text AS image_id, i.payload_version, s.id AS scene_id, s.code AS scene_code, "
+            "s.is_active, s.include_all, m.origin, m.is_member "
+            "FROM images i LEFT JOIN scenes s ON true "
+            "LEFT JOIN image_scenes m ON m.image_id = i.id AND m.scene_id = s.id "
+            "WHERE i.id = CAST(:iid AS uuid) ORDER BY s.id"
+        ),
+        {"iid": image_id},
+    ).mappings().fetchall()
+    if not rows:
+        raise err.validation_error(f"image not found: {image_id}")
+    memberships = []
+    scenes = []
+    for row in rows:
+        if row["scene_id"] is None:
+            continue
+        include_all, active = bool(row["include_all"]), bool(row["is_active"])
+        origin = "implicit" if include_all else row["origin"]
+        override = bool(row["is_member"]) if not include_all and origin == SceneOrigin.MANUAL.value else None
+        member = active and (include_all or bool(row["is_member"]))
+        memberships.append({
+            "scene_id": int(row["scene_id"]), "scene_code": row["scene_code"],
+            "is_active": active, "include_all": include_all, "is_member": member,
+            "origin": origin, "manual_override": override,
+        })
+        if member:
+            scenes.append(row["scene_code"])
+    return {
+        "image_id": rows[0]["image_id"], "payload_version": int(rows[0]["payload_version"]),
+        "scenes": scenes, "memberships": memberships,
+    }
+
+
+def _upsert_manual_row(conn: Any, image_id: str, scene_id: int, is_member: bool) -> None:
+    """Shared with the legacy code-based setter; caller holds catalog then image locks."""
+    conn.execute(
+        text(
+            "INSERT INTO image_scenes (image_id, scene_id, origin, is_member, updated_at) "
+            "VALUES (CAST(:iid AS uuid), :sid, :manual, :m, now()) "
+            "ON CONFLICT (image_id, scene_id) DO UPDATE SET "
+            "origin = :manual, is_member = EXCLUDED.is_member, updated_at = now() "
+            "WHERE image_scenes.origin IS DISTINCT FROM EXCLUDED.origin "
+            "OR image_scenes.is_member IS DISTINCT FROM EXCLUDED.is_member"
+        ),
+        {"iid": image_id, "sid": scene_id, "manual": SceneOrigin.MANUAL.value, "m": is_member},
+    )
+
+
 class PgScenesMixin:
     """scenes lookups, image_scenes materialization and scene-label mapping."""
 
@@ -406,6 +463,74 @@ class PgScenesMixin:
                 f"recompute_scene_memberships: {type(exc).__name__}: {exc}"
             ) from exc
 
+    def get_scene_memberships(self, image_id: UUID | str) -> dict[str, Any]:
+        """Read the full directory and stored membership in one consistent PG statement."""
+        uid = str(_as_uuid(image_id))
+        try:
+            self.ensure_schema()
+            with self._get_engine().connect() as conn:
+                return _read_membership_snapshot(conn, uid)
+        except SQLAlchemyError as exc:
+            raise err.index_postgres_failed(
+                f"get_scene_memberships: {type(exc).__name__}: {exc}"
+            ) from exc
+
+    def put_manual_scene_membership(
+        self, image_id: UUID | str, scene_id: int, *, is_member: bool
+    ) -> dict[str, Any]:
+        """PG-only manual include/exclude, recompute and snapshot in the same transaction."""
+        if not isinstance(is_member, bool):
+            raise err.validation_error("is_member must be true or false")
+        return self._change_manual_scene_membership(image_id, scene_id, is_member=is_member)
+
+    def clear_manual_scene_membership(self, image_id: UUID | str, scene_id: int) -> dict[str, Any]:
+        """Only clear manual, then restore the current rules, even if no manual row existed."""
+        return self._change_manual_scene_membership(image_id, scene_id, is_member=None)
+
+    def _change_manual_scene_membership(
+        self, image_id: UUID | str, scene_id: int, *, is_member: bool | None
+    ) -> dict[str, Any]:
+        uid = str(_as_uuid(image_id))
+        sid = normalize_row_id(scene_id, "scene_id")
+        try:
+            self.ensure_schema()
+            with self._get_engine().begin() as conn:
+                # Same lock order as ingestion / sync: never take a scene write lock here.
+                lock_catalog_for_read(conn)
+                image = _lock_image(conn, uid)
+                scene = conn.execute(
+                    text("SELECT id, code, include_all, is_active FROM scenes WHERE id = :sid"),
+                    {"sid": sid},
+                ).mappings().fetchone()
+                if scene is None:
+                    raise err.scene_not_found(f"scene {sid} does not exist")
+                if scene["include_all"]:
+                    raise err.validation_error(f"scene {sid} includes all images; manual membership is not allowed")
+                if is_member is not None and not scene["is_active"]:
+                    raise err.validation_error(f"scene {sid} is inactive; manual membership cannot be set")
+                # Capture before changing origin: rule=true -> manual=true must not bump.
+                before = _effective_from_rows(
+                    _load_rows(conn, [_as_uuid(uid)]).get(uid, []), _load_catalog(conn)
+                )
+                if is_member is None:
+                    conn.execute(
+                        text(
+                            "DELETE FROM image_scenes WHERE image_id = CAST(:iid AS uuid) "
+                            "AND scene_id = :sid AND origin = :manual"
+                        ),
+                        {"iid": uid, "sid": sid, "manual": SceneOrigin.MANUAL.value},
+                    )
+                else:
+                    _upsert_manual_row(conn, uid, sid, is_member)
+                _recompute(conn, [image], bump=True, before={uid: before})
+                snapshot = _read_membership_snapshot(conn, uid)
+            return snapshot
+        except SQLAlchemyError as exc:
+            # begin() has rolled back before the database error crosses the repository boundary.
+            raise err.index_postgres_failed(
+                f"change_manual_scene_membership: {type(exc).__name__}: {exc}"
+            ) from exc
+
     def set_manual_scene_membership(
         self,
         image_id: UUID | str,
@@ -428,24 +553,13 @@ class PgScenesMixin:
                 f"scene {scene_code!r} includes all images; manual membership is not allowed"
             )
         sid = int(scene["id"])
-        manual = SceneOrigin.MANUAL.value
         engine = self._get_engine()
         with engine.begin() as conn:
             lock_catalog_for_read(conn)
             image = _lock_image(conn, uid)
             # The set before the override: the recompute below compares with it, not with the new row
             before = _effective_from_rows(_load_rows(conn, [_as_uuid(uid)]).get(uid, []), _load_catalog(conn))
-            conn.execute(
-                text(
-                    "INSERT INTO image_scenes "
-                    "(image_id, scene_id, origin, is_member, updated_at) "
-                    "VALUES (CAST(:iid AS uuid), :sid, :manual, :m, now()) "
-                    "ON CONFLICT (image_id, scene_id) DO UPDATE SET "
-                    "origin = :manual, is_member = EXCLUDED.is_member, "
-                    "updated_at = now()"
-                ),
-                {"iid": uid, "sid": sid, "manual": manual, "m": bool(is_member)},
-            )
+            _upsert_manual_row(conn, uid, sid, bool(is_member))
             catalog, (plan,) = _recompute(conn, [image], bump=True, before={uid: before})
         return _membership_result(uid, catalog, plan)
 

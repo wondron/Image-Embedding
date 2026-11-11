@@ -3,12 +3,14 @@
 Reads return every scene with its labels and rules: scenes are few (tens) and rules a few
 hundred, and the page shows them all. Each write is one transaction under the catalog lock
 (app.repositories.catalog_lock) and answers with the whole scene, so the page replaces one
-entry of its list.
+entry of its list, plus sync_required (see below).
 
 What a write does not do: recompute which scenes stored images belong to. Rules, a scene's
 is_active / include_all and the category tree all feed membership; the change reaches stored
 images and their vector payloads through POST /api/scenes/sync (services.retrieval.sync_scenes).
-Labels are looked up at search time, so label changes show at once.
+Each write says whether it needs that (sync_required, decided in
+services.retrieval.scene_fields): labels, names, descriptions and outputs_heating are read at
+request time, so changing them shows at once.
 
 Deleting a scene takes its labels, rules and image_scenes rows with it (ON DELETE CASCADE); the
 default scene cannot be deleted. A label still used by a rule is not deleted (SCENE_IN_USE).
@@ -30,10 +32,13 @@ from app.db.common import _row_to_dict
 from app.repositories.catalog_lock import lock_catalog_for_write
 from app.services.retrieval.scene_fields import (
     check_default_scene_change,
+    check_rule_label,
     normalize_label_fields,
     normalize_row_id,
     normalize_rule_fields,
     normalize_scene_fields,
+    rule_write_needs_sync,
+    scene_flags_need_sync,
 )
 
 # member_count: effective members (an inactive scene has none; an include_all one has every image)
@@ -144,12 +149,55 @@ def _label_or_404(conn: Any, scene_id: int, label_id: int) -> Mapping[str, Any]:
 
 def _rule_or_404(conn: Any, scene_id: int, rule_id: int) -> Mapping[str, Any]:
     row = conn.execute(
-        text("SELECT id, category_id, cuisine FROM scene_rules WHERE id = :rid AND scene_id = :sid FOR UPDATE"),
+        text(
+            "SELECT id, category_id, cuisine, label_id FROM scene_rules "
+            "WHERE id = :rid AND scene_id = :sid FOR UPDATE"
+        ),
         {"rid": rule_id, "sid": scene_id},
     ).mappings().fetchone()
     if row is None:
         raise err.scene_not_found(f"scene {scene_id} has no rule {rule_id}")
     return row
+
+
+def _check_rule_target(conn: Any, scene_id: int, target: Mapping[str, Any], *, except_id: int | None = None) -> None:
+    """The category exists and no other rule of the scene has this target."""
+    if target["category_id"] is not None:
+        if conn.execute(text("SELECT 1 FROM categories WHERE id = :cid"), {"cid": target["category_id"]}).fetchone() is None:
+            raise err.validation_error(f"category_id {target['category_id']} does not exist")
+        taken = conn.execute(
+            text("SELECT id FROM scene_rules WHERE scene_id = :sid AND category_id = :cid"),
+            {"sid": scene_id, "cid": target["category_id"]},
+        ).fetchone()
+        if taken is not None and taken[0] != except_id:
+            raise err.scene_rule_exists(f"scene {scene_id} already has a rule for category {target['category_id']}")
+        return
+    taken = conn.execute(
+        text("SELECT id FROM scene_rules WHERE scene_id = :sid AND cuisine = :cuisine"),
+        {"sid": scene_id, "cuisine": target["cuisine"]},
+    ).fetchone()
+    if taken is not None and taken[0] != except_id:
+        raise err.scene_rule_exists(f"scene {scene_id} already has a rule for cuisine {target['cuisine']!r}")
+
+
+def _had_members(conn: Any, scene_id: int) -> bool:
+    """Whether the scene has effective members now (its code is then in their vector payloads)."""
+    return bool(
+        conn.execute(
+            text(
+                "SELECT CASE WHEN NOT s.is_active THEN false "
+                "            WHEN s.include_all THEN EXISTS (SELECT 1 FROM images) "
+                "            ELSE EXISTS (SELECT 1 FROM image_scenes m WHERE m.scene_id = s.id AND m.is_member) END "
+                "FROM scenes s WHERE s.id = :sid"
+            ),
+            {"sid": scene_id},
+        ).scalar_one()
+    )
+
+
+def _written(scene: dict[str, Any], sync_required: bool) -> dict[str, Any]:
+    """What a write answers: the scene as stored now, plus whether stored images need a sync."""
+    return {**scene, "sync_required": sync_required}
 
 
 def _check_label_in_scene(conn: Any, scene_id: int, label_id: int | None) -> None:
@@ -220,7 +268,7 @@ class PgSceneConfigMixin:
                 ),
                 new,
             ).scalar_one()
-            return _read_scene(conn, scene_id)
+            return _written(_read_scene(conn, scene_id), scene_flags_need_sync(None, new))
 
         return self._scene_write("create_scene", work)
 
@@ -235,7 +283,7 @@ class PgSceneConfigMixin:
                 raise err.scene_protected(refusal)
             assignments = ", ".join(f"{key} = :{key}" for key in changes)
             conn.execute(text(f"UPDATE scenes SET {assignments} WHERE id = :sid"), {"sid": sid, **changes})
-            return _read_scene(conn, sid)
+            return _written(_read_scene(conn, sid), scene_flags_need_sync(current, {**current, **changes}))
 
         return self._scene_write("update_scene", work)
 
@@ -246,8 +294,10 @@ class PgSceneConfigMixin:
             current = _scene_or_404(conn, sid)
             if current["code"] == DEFAULT_SCENE:
                 raise err.scene_protected(f"the default scene {DEFAULT_SCENE!r} cannot be deleted")
+            # Its code stays in the members' vector payloads until they are rewritten
+            sync_required = _had_members(conn, sid)
             conn.execute(text("DELETE FROM scenes WHERE id = :sid"), {"sid": sid})
-            return {"id": sid, "code": current["code"]}
+            return {"id": sid, "code": current["code"], "sync_required": sync_required}
 
         return self._scene_write("delete_scene", work)
 
@@ -267,7 +317,7 @@ class PgSceneConfigMixin:
                 ),
                 {"sid": sid, **new},
             )
-            return _read_scene(conn, sid)
+            return _written(_read_scene(conn, sid), False)
 
         return self._scene_write("create_scene_label", work)
 
@@ -283,7 +333,7 @@ class PgSceneConfigMixin:
                 _check_label_code_free(conn, sid, changes["code"], except_id=lid)
             assignments = ", ".join(f"{key} = :{key}" for key in changes)
             conn.execute(text(f"UPDATE scene_labels SET {assignments} WHERE id = :lid"), {"lid": lid, **changes})
-            return _read_scene(conn, sid)
+            return _written(_read_scene(conn, sid), False)
 
         return self._scene_write("update_scene_label", work)
 
@@ -298,7 +348,7 @@ class PgSceneConfigMixin:
             if used:
                 raise err.scene_in_use(f"label {label['code']!r} is used by {used} rule(s); change or delete them first")
             conn.execute(text("DELETE FROM scene_labels WHERE id = :lid"), {"lid": lid})
-            return _read_scene(conn, sid)
+            return _written(_read_scene(conn, sid), False)
 
         return self._scene_write("delete_scene_label", work)
 
@@ -309,23 +359,8 @@ class PgSceneConfigMixin:
         new = normalize_rule_fields(fields, partial=False)
 
         def work(conn: Any) -> dict[str, Any]:
-            _scene_or_404(conn, sid)
-            if new["category_id"] is not None:
-                if conn.execute(text("SELECT 1 FROM categories WHERE id = :cid"), {"cid": new["category_id"]}).fetchone() is None:
-                    raise err.validation_error(f"category_id {new['category_id']} does not exist")
-                duplicate = conn.execute(
-                    text("SELECT 1 FROM scene_rules WHERE scene_id = :sid AND category_id = :cid"),
-                    {"sid": sid, "cid": new["category_id"]},
-                ).fetchone()
-                if duplicate:
-                    raise err.scene_rule_exists(f"scene {sid} already has a rule for category {new['category_id']}")
-            else:
-                duplicate = conn.execute(
-                    text("SELECT 1 FROM scene_rules WHERE scene_id = :sid AND cuisine = :cuisine"),
-                    {"sid": sid, "cuisine": new["cuisine"]},
-                ).fetchone()
-                if duplicate:
-                    raise err.scene_rule_exists(f"scene {sid} already has a rule for cuisine {new['cuisine']!r}")
+            scene = _scene_or_404(conn, sid)
+            _check_rule_target(conn, sid, new)
             _check_label_in_scene(conn, sid, new["label_id"])
             conn.execute(
                 text(
@@ -334,23 +369,36 @@ class PgSceneConfigMixin:
                 ),
                 {"sid": sid, **new},
             )
-            return _read_scene(conn, sid)
+            return _written(_read_scene(conn, sid), rule_write_needs_sync(scene))
 
         return self._scene_write("create_scene_rule", work)
 
     def update_scene_rule(self, scene_id: int, rule_id: int, fields: dict[str, Any]) -> dict[str, Any]:
+        """Change the rule's label and / or replace its target in place (one transaction)."""
         sid = normalize_row_id(scene_id, "scene_id")
         rid = normalize_row_id(rule_id, "rule_id")
         changes = normalize_rule_fields(fields, partial=True)
 
         def work(conn: Any) -> dict[str, Any]:
-            _scene_or_404(conn, sid)
+            scene = _scene_or_404(conn, sid)
             rule = _rule_or_404(conn, sid, rid)
-            if changes["label_id"] is not None and rule["category_id"] is None:
-                raise err.validation_error("only a category rule can map to a label")
-            _check_label_in_scene(conn, sid, changes["label_id"])
-            conn.execute(text("UPDATE scene_rules SET label_id = :label_id WHERE id = :rid"), {"rid": rid, **changes})
-            return _read_scene(conn, sid)
+            merged = {
+                "category_id": rule["category_id"], "cuisine": rule["cuisine"], "label_id": rule["label_id"], **changes,
+            }
+            check_rule_label(merged, label_sent="label_id" in changes)
+            target_changed = (merged["category_id"], merged["cuisine"]) != (rule["category_id"], rule["cuisine"])
+            if target_changed:
+                _check_rule_target(conn, sid, merged, except_id=rid)
+            if merged["label_id"] != rule["label_id"]:
+                _check_label_in_scene(conn, sid, merged["label_id"])
+            conn.execute(
+                text(
+                    "UPDATE scene_rules SET category_id = :category_id, cuisine = :cuisine, label_id = :label_id "
+                    "WHERE id = :rid"
+                ),
+                {"rid": rid, **merged},
+            )
+            return _written(_read_scene(conn, sid), rule_write_needs_sync(scene, target_changed=target_changed))
 
         return self._scene_write("update_scene_rule", work)
 
@@ -359,9 +407,9 @@ class PgSceneConfigMixin:
         rid = normalize_row_id(rule_id, "rule_id")
 
         def work(conn: Any) -> dict[str, Any]:
-            _scene_or_404(conn, sid)
+            scene = _scene_or_404(conn, sid)
             _rule_or_404(conn, sid, rid)
             conn.execute(text("DELETE FROM scene_rules WHERE id = :rid"), {"rid": rid})
-            return _read_scene(conn, sid)
+            return _written(_read_scene(conn, sid), rule_write_needs_sync(scene))
 
         return self._scene_write("delete_scene_rule", work)

@@ -1,0 +1,208 @@
+{
+  "overall": "PARTIAL / NOT COMPLETE; final collection BLOCKED by machine offline",
+  "reported_at": "2026-11-10T09:53:04.612060-07:00",
+  "timezone": "America/Denver (MST)",
+  "machine": "wondron / fada9197-1d47-44f2-8e45-fdb157d8e181",
+  "initial_online": true,
+  "final_online": false,
+  "repo": "C:\\Users\\47202\\PROJECT\\Image-Embedding",
+  "head": "08dea28228cad79da67eefb3aadbc6ef55078a42",
+  "initial_dirty": [],
+  "last_observed_dirty": [
+    "?? .qa/scene-current-frontend-vitest.json"
+  ],
+  "final_dirty": "BLOCKED: machine offline before final status; logs subsequently created",
+  "preservation": "No application edits, clone/fetch/checkout/reset/commit/push/merge or old D-repo access. No user services stopped/reconfigured; no business DB, Qdrant or OSS writes.",
+  "tests": [
+    {
+      "name": "Base Python pytest initial attempt",
+      "exit": 2,
+      "result": "collection blocked by missing fastapi/cv2, NOT application fail; existing onnxgpu runtime used next"
+    },
+    {
+      "name": "Frontend Vitest",
+      "tests": 123,
+      "passed": 123,
+      "failed": 0,
+      "pending": 0,
+      "exit": 0,
+      "evidence": "terminal 879659 + parsed JSON numTotalTests/numPassedTests=123",
+      "kind": "nonbrowser unit and mocked fetch"
+    },
+    {
+      "name": "Scene membership unittest",
+      "tests": 5,
+      "exit": 0,
+      "evidence": "terminal 879660 membership=0; five source test methods",
+      "kind": "pure unit"
+    },
+    {
+      "name": "Retrieval HTTP unittest",
+      "tests": null,
+      "exit": 0,
+      "evidence": "terminal 879660 http=0; detailed count inaccessible",
+      "kind": "TestClient fake retrieval stack and mocked downloader; NOT real dependency HTTP"
+    },
+    {
+      "name": "Retrieval composition unittest",
+      "tests": null,
+      "exit": 0,
+      "evidence": "terminal 879660 stack=0",
+      "kind": "all adapters faked"
+    },
+    {
+      "name": "Qdrant store unittest",
+      "tests": null,
+      "exit": 0,
+      "evidence": "terminal 879660 qdrant_mock=0",
+      "kind": "unit/fake/in-memory, NOT live Qdrant server"
+    },
+    {
+      "name": "Scene PostgreSQL integration subset",
+      "tests": 8,
+      "passed": 8,
+      "exit": 0,
+      "evidence": "terminal 879662 isolated_pg_live_exit=0",
+      "target": "fresh QA postgres:16, loopback 127.0.0.1:52316, DB/role qa_scene, no password; tmpfs, no business mounts",
+      "kind": "real PostgreSQL repository/use-case integration; sync uses Qdrant :memory:, NOT live server or HTTP",
+      "methods": [
+        "test_index_list_and_scene_membership_flow",
+        "test_scene_requests_follow_the_scenes_table",
+        "test_an_inactive_scene_has_no_members_anywhere",
+        "test_scene_configuration_crud_and_its_guards",
+        "test_batch_recompute_follows_the_rules_and_bumps_only_what_changed",
+        "test_scene_labels_come_from_the_deepest_rule_with_an_active_label",
+        "test_sync_rewrites_payloads_and_the_ledger",
+        "test_catalog_writes_and_recomputes_wait_for_the_catalog_lock"
+      ]
+    }
+  ],
+  "count_note": "Known test-case counts 123 FE + 5 pure + 8 PG. Additional three backend suites exit0; exact counts not recovered. Individual assert/subtest counts not instrumented; do not invent aggregate assertions.",
+  "groups": [
+    {
+      "id": 1,
+      "scope": "scene list/create/edit/toggle; FE candidates",
+      "status": "BE PASS / FE incomplete",
+      "evidence": "backend/app/api/v1/scenes.py:26-168 has CRUD, labels/rules/sync; PG CRUD guards pass. frontend/entities/scene/model.ts:24-31 six SCENE_SEEDS; SceneSelect.tsx:46 maps seeds. No /api/scenes client/admin page found in tracked FE inventory/grep.",
+      "unverified": "live HTTP and browser CRUD"
+    },
+    {
+      "id": 2,
+      "scope": "general/aliases/unknown/inactive/dynamic",
+      "status": "BE PASS / FE dynamic missing",
+      "evidence": "PG test_scene_requests_follow_the_scenes_table passes general/normal, newly created steam_oven list/index resolver/search lookup, disabled rejection; inactive no-members test passes. Current backend resolves DB, old registry issue fixed.",
+      "unverified": "HTTP wire errors, browser empty values and server-driven candidates"
+    },
+    {
+      "id": 3,
+      "scope": "index/include_all/manual/rule/image_scenes update",
+      "status": "repository PASS / manual product flow TBD",
+      "evidence": "5 pure plus PG membership/recompute tests pass manual add/exclude priority, include_all nonmaterialization, category/cuisine rules, change-only payload bump and category move. index_image.py:123-124 validates hint;246-263 uses recompute membership. ManagementViews.tsx:512 apiReady=false; public manual API TBD.",
+      "unverified": "HTTP index, encoder/OSS, manual UI"
+    },
+    {
+      "id": 4,
+      "scope": "list and search Qdrant scenes consistency",
+      "status": "partial PASS / live Qdrant HTTP untested",
+      "evidence": "PG list/get_active_by_ids/payload exclude inactive scenes. Sync passes with real PG + Qdrant memory and ledger. scenes repo SQL codes=active include_all union active explicit rows. search_image.py:148-170 same scene filter on vector query and PG hydrate.",
+      "unverified": "real Qdrant server application queries and end-to-end HTTP"
+    },
+    {
+      "id": 5,
+      "scope": "heating/labels BE-FE",
+      "status": "partial PASS",
+      "evidence": "PG deepest active scene label test passes; BE Search string/null label, envelope heating flag and conditional food/heating; FE existing API/mapper units in 123-pass suite.",
+      "unverified": "actual HTTP response and browser heating/label display; real encoder"
+    },
+    {
+      "id": 6,
+      "scope": "selection/switch/echo/blank/error/refresh/requests",
+      "status": "static + mocked units only / GUI untested",
+      "evidence": "App scene passed on explicit search; ManagementViews:326 scene change resets page1; useLibraryList deps include scene/reloadKey. Mock API tests default/alias/query/error pass.",
+      "unverified": "all visual/interactions, refresh persistence and real frontend requests"
+    }
+  ],
+  "findings": [
+    {
+      "id": "SCENE-FE-1",
+      "category": "high completeness/integration gap",
+      "fact": "Backend supports dynamic scene config; FE has six hard-coded candidates and no found scene admin/client. New scenes not selectable and disabled seeds remain options. Older M6 required at least seeds, so distinguish full completion gap from that older minimum acceptance.",
+      "repro": "Against isolated target create/disable scene via backend, compare GET /api/scenes with SceneSelect seeds. Static repro only; no browser claim."
+    },
+    {
+      "id": "SCENE-TBD-1",
+      "category": "design/product gap, not proven regression",
+      "fact": "Manual membership repository exists but public API TBD and UI apiReady=false; cannot claim full manual flow completed."
+    },
+    {
+      "id": "SCENE-BLOCK-1",
+      "category": "environment",
+      "fact": "Five simultaneous normal Reads returned temporarily unreachable; immediate stop, no polling. Subsequent system reminder confirms computer offline. Final status, report on user machine, log extraction and QA cleanup blocked."
+    }
+  ],
+  "contract_sources": [
+    "docs/image-search-pg-v01-data-contract.md §§2.6-2.9,4.3-4.4,6-6.1",
+    "docs/database-structure.md scenes",
+    "frontend/docs/acceptance-pg-v01-m6-frontend.md",
+    "backend/app/schemas/scenes.py",
+    "backend/app/services/retrieval/scene_fields.py"
+  ],
+  "environment": {
+    "test_python": "D:\\99-tools\\anaconda\\envs\\onnxgpu\\python.exe (3.11.18)",
+    "rg": "not installed; used tracked git listing/grep, no repo clone",
+    "existing_backend": "No initial python/uvicorn process identified",
+    "existing_frontend": [
+      {
+        "pid": 22304,
+        "port": 5199
+      },
+      {
+        "pid": 38932,
+        "port": 5299
+      },
+      {
+        "pid": 41480,
+        "port": 5399,
+        "args_root": ".head-check/frontend"
+      }
+    ],
+    "provenance": "Existing Vite relative-root cwd not established, not used as current-code test evidence. Explicit new C working directory for every test.",
+    "fixed_port_note": "Initial PostgreSQL host port 55439 failed OS socket binding; failed self-created container removed; same Docker with assigned loopback port 52316 succeeded."
+  },
+  "last_known_running_self_created": [
+    {
+      "name": "qa-scene-20261110-pg",
+      "id": "1e150574b29c62252acb5191e05badbb6225ad09abd4502ea1832e8208d05743",
+      "port": "127.0.0.1:52316->5432",
+      "storage": "tmpfs only, no business mounts",
+      "pid": "not captured",
+      "cleanup": "BLOCKED by machine offline"
+    },
+    {
+      "name": "qa-scene-20261110-qdrant",
+      "id": "5049d6c23f80b6c2a62b5a78d0a72a213a333ec5e3644ed4423add83c63e82c5",
+      "port": "127.0.0.1:56339->6333",
+      "storage": "tmpfs only, no business mounts",
+      "pid": "not captured",
+      "application_tests": "none reached this server",
+      "cleanup": "BLOCKED by machine offline"
+    }
+  ],
+  "new_machine_files": [
+    ".qa/scene-current-frontend-vitest.json",
+    ".qa/scene-current-membership-tests.log",
+    ".qa/scene-current-http-mocked-tests.log",
+    ".qa/scene-current-stack-tests.log",
+    ".qa/scene-current-qdrant-mocked-tests.log",
+    ".qa/scene-current-pg-live-tests.log"
+  ],
+  "new_application_servers": [],
+  "ready_gui_url": null,
+  "gui_handoff": [
+    "After reconnect, normal new-C path read/status and retrieve logs/counts; do not use old D repo.",
+    "Stop/remove only exact two self-created QA container IDs when done; business roki-imageembedding-* and existing Vite untouched.",
+    "For browser testing start identified new-C frontend port and isolated backend; first read vite proxy, do not misroute to old services. No current ready app URL.",
+    "Exercise general/oven/dynamic new and disabled candidates, search explicit action, library scene switch/page1, import hint vs effective membership, heating/labels display, empty/unknown/errors, refresh. Capture screenshots and actual requests."
+  ],
+  "report_location_note": "Requested C .qa/scene-current-acceptance-report.json/.md not written before disconnect; these box fallback files can be normally copied there by parent after reconnect. No Page or cloud upload."
+}

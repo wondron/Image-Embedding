@@ -8,14 +8,16 @@
     PATCH  /api/scenes/{scene_id}/labels/{label_id}     change a label
     DELETE /api/scenes/{scene_id}/labels/{label_id}     delete a label no rule uses
     POST   /api/scenes/{scene_id}/rules                 add a rule (201)
-    PATCH  /api/scenes/{scene_id}/rules/{rule_id}       change a rule's label
+    PATCH  /api/scenes/{scene_id}/rules/{rule_id}       change a rule's target and / or label
     DELETE /api/scenes/{scene_id}/rules/{rule_id}       delete a rule
     POST   /api/scenes/sync                             recompute one batch of stored images
 
-Writes to a scene, its labels or its rules answer with the whole scene. Success bodies carry no
-trace_id (it is in the X-Trace-Id header, as for /api/enums and /api/categories). Request limits
-are app.core.scene_rules; app.services.retrieval.scene_fields checks them again together with the
-rules a schema cannot say.
+Writes to a scene, its labels or its rules answer with the whole scene and sync_required: true
+when the change reaches stored images only through POST /api/scenes/sync (rules, a scene's
+is_active / include_all), false when it already shows (labels, names, descriptions,
+outputs_heating). Success bodies carry no trace_id (it is in the X-Trace-Id header, as for
+/api/enums and /api/categories). Request limits are app.core.scene_rules;
+app.services.retrieval.scene_fields checks them again together with the rules a schema cannot say.
 """
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -89,9 +91,16 @@ class SceneListResponse(BaseModel):
     default_scene: str = Field(..., description="请求没给场景时用的场景编码")
 
 
+_SYNC_REQUIRED_DOC = (
+    "true：改动影响已入库图片的场景归属，要「重算场景归属」（POST /api/scenes/sync）后才作用到它们；"
+    "false：已经生效（场景类别、名称、描述、加热输出在请求时读取）"
+)
+
+
 class SceneResponse(BaseModel):
     ok: bool = True
     scene: SceneItem
+    sync_required: bool = Field(..., description=_SYNC_REQUIRED_DOC)
 
 
 class DeletedScene(BaseModel):
@@ -102,6 +111,7 @@ class DeletedScene(BaseModel):
 class SceneDeleteResponse(BaseModel):
     ok: bool = True
     deleted: DeletedScene
+    sync_required: bool = Field(..., description=_SYNC_REQUIRED_DOC)
 
 
 class SceneSyncResponse(BaseModel):
@@ -189,11 +199,20 @@ class SceneRuleCreateRequest(BaseModel):
 
 
 class SceneRuleUpdateRequest(BaseModel):
-    """A rule's target is fixed; only its label changes (null clears it)."""
+    """Only the fields sent change. A new target is category_id or cuisine (exactly one non-null;
+    the other one is cleared); label_id null clears the label."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    label_id: int | None = Field(..., gt=0, strict=True)
+    category_id: int | None = Field(default=None, gt=0, strict=True, description="换成按这个类别（含全部子孙）")
+    cuisine: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=CATEGORY_CUISINE_MAX_LEN,
+        pattern=CATEGORY_CUISINE_PATTERN,
+        description="换成按这个菜系；按菜系的规则不能映射场景类别",
+    )
+    label_id: int | None = Field(default=None, gt=0, strict=True, description="本场景的场景类别；null 清空")
 
 
 class SceneSyncRequest(BaseModel):

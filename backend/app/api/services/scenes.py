@@ -31,13 +31,22 @@ from app.schemas.scenes import (
 logger = logging.getLogger("svc.scenes")
 
 
-def _logged(request: Request, action: str, scene: dict[str, Any], **extra: Any) -> dict[str, Any]:
+def _logged(request: Request, action: str, result: dict[str, Any], **extra: Any) -> dict[str, Any]:
+    """Log a configuration write; result is the use case's {scene, sync_required}."""
+    scene = result["scene"]
     details = " ".join(f"{key}={value}" for key, value in extra.items())
     logger.info(
-        "scene %s id=%s code=%s %s| trace_id=%s",
-        action, scene.get("id"), scene.get("code"), f"{details} " if details else "", get_trace_id(request),
+        "scene %s id=%s code=%s %ssync_required=%s | trace_id=%s",
+        action, scene.get("id"), scene.get("code"), f"{details} " if details else "",
+        result["sync_required"], get_trace_id(request),
     )
-    return {"ok": True, "scene": scene}
+    return {"ok": True, **result}
+
+
+def _target(fields: dict[str, Any]) -> str:
+    if fields.get("category_id") is not None:
+        return f"category:{fields['category_id']}"
+    return f"cuisine:{fields.get('cuisine')}"
 
 
 def list_scenes(runtime: ApplicationState) -> dict[str, Any]:
@@ -52,55 +61,62 @@ def update_scene(
     runtime: ApplicationState, request: Request, scene_id: int, body: SceneUpdateRequest
 ) -> dict[str, Any]:
     fields = body.model_dump(exclude_unset=True)  # absent stays unchanged; an explicit null is kept
-    scene = require_catalog(runtime).scenes_uc.update(scene_id, fields)
-    return _logged(request, "updated", scene, fields=",".join(sorted(fields)))
+    result = require_catalog(runtime).scenes_uc.update(scene_id, fields)
+    return _logged(request, "updated", result, fields=",".join(sorted(fields)))
 
 
 def delete_scene(runtime: ApplicationState, request: Request, scene_id: int) -> dict[str, Any]:
-    deleted = require_catalog(runtime).scenes_uc.delete(scene_id)
-    logger.info("scene deleted id=%s code=%s | trace_id=%s", deleted.get("id"), deleted.get("code"), get_trace_id(request))
-    return {"ok": True, "deleted": deleted}
+    result = require_catalog(runtime).scenes_uc.delete(scene_id)
+    deleted = result["deleted"]
+    logger.info(
+        "scene deleted id=%s code=%s sync_required=%s | trace_id=%s",
+        deleted.get("id"), deleted.get("code"), result["sync_required"], get_trace_id(request),
+    )
+    return {"ok": True, **result}
 
 
 def create_label(
     runtime: ApplicationState, request: Request, scene_id: int, body: SceneLabelCreateRequest
 ) -> dict[str, Any]:
-    scene = require_catalog(runtime).scenes_uc.create_label(scene_id, body.model_dump())
-    return _logged(request, "label created", scene, label=body.code)
+    result = require_catalog(runtime).scenes_uc.create_label(scene_id, body.model_dump())
+    return _logged(request, "label created", result, label=body.code)
 
 
 def update_label(
     runtime: ApplicationState, request: Request, scene_id: int, label_id: int, body: SceneLabelUpdateRequest
 ) -> dict[str, Any]:
     fields = body.model_dump(exclude_unset=True)
-    scene = require_catalog(runtime).scenes_uc.update_label(scene_id, label_id, fields)
-    return _logged(request, "label updated", scene, label_id=label_id, fields=",".join(sorted(fields)))
+    result = require_catalog(runtime).scenes_uc.update_label(scene_id, label_id, fields)
+    return _logged(request, "label updated", result, label_id=label_id, fields=",".join(sorted(fields)))
 
 
 def delete_label(runtime: ApplicationState, request: Request, scene_id: int, label_id: int) -> dict[str, Any]:
-    scene = require_catalog(runtime).scenes_uc.delete_label(scene_id, label_id)
-    return _logged(request, "label deleted", scene, label_id=label_id)
+    result = require_catalog(runtime).scenes_uc.delete_label(scene_id, label_id)
+    return _logged(request, "label deleted", result, label_id=label_id)
 
 
 def create_rule(
     runtime: ApplicationState, request: Request, scene_id: int, body: SceneRuleCreateRequest
 ) -> dict[str, Any]:
     fields = body.model_dump(exclude_unset=True)
-    scene = require_catalog(runtime).scenes_uc.create_rule(scene_id, fields)
-    target = f"category:{fields['category_id']}" if fields.get("category_id") else f"cuisine:{fields.get('cuisine')}"
-    return _logged(request, "rule created", scene, target=target)
+    result = require_catalog(runtime).scenes_uc.create_rule(scene_id, fields)
+    return _logged(request, "rule created", result, target=_target(fields))
 
 
 def update_rule(
     runtime: ApplicationState, request: Request, scene_id: int, rule_id: int, body: SceneRuleUpdateRequest
 ) -> dict[str, Any]:
-    scene = require_catalog(runtime).scenes_uc.update_rule(scene_id, rule_id, body.model_dump())
-    return _logged(request, "rule updated", scene, rule_id=rule_id, label_id=body.label_id)
+    fields = body.model_dump(exclude_unset=True)  # absent stays unchanged; label_id null clears it
+    result = require_catalog(runtime).scenes_uc.update_rule(scene_id, rule_id, fields)
+    extra: dict[str, Any] = {"rule_id": rule_id, "fields": ",".join(sorted(fields))}
+    if "category_id" in fields or "cuisine" in fields:
+        extra["target"] = _target(fields)
+    return _logged(request, "rule updated", result, **extra)
 
 
 def delete_rule(runtime: ApplicationState, request: Request, scene_id: int, rule_id: int) -> dict[str, Any]:
-    scene = require_catalog(runtime).scenes_uc.delete_rule(scene_id, rule_id)
-    return _logged(request, "rule deleted", scene, rule_id=rule_id)
+    result = require_catalog(runtime).scenes_uc.delete_rule(scene_id, rule_id)
+    return _logged(request, "rule deleted", result, rule_id=rule_id)
 
 
 def sync_memberships(runtime: ApplicationState, request: Request, body: SceneSyncRequest) -> dict[str, Any]:

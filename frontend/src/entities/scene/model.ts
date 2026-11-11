@@ -2,13 +2,7 @@
 
 export const DEFAULT_SCENE = 'general' as const
 
-export type SceneCode =
-  | 'general'
-  | 'oven'
-  | 'range_hood'
-  | 'us_diet'
-  | 'cn_diet'
-  | 'jp_diet'
+export type SceneCode = string
 
 export interface SceneSeed {
   code: SceneCode
@@ -20,7 +14,7 @@ export interface SceneSeed {
   outputsHeating: boolean
 }
 
-/** Seed scenes from PG v0.1 contract §2.6 */
+/** @deprecated Historical fixtures only. Runtime authority is GET /api/scenes. */
 export const SCENE_SEEDS: readonly SceneSeed[] = [
   { code: 'general', label: '通用', hint: '日常 · include_all', includeAll: true, outputsHeating: false },
   { code: 'oven', label: '一体机', hint: '加热输出 ON', includeAll: false, outputsHeating: true },
@@ -39,18 +33,18 @@ const LEGACY_SCENE_MAP: Record<string, SceneCode> = {
 }
 
 export function isSceneCode(value: string): value is SceneCode {
-  return value in SEED_BY_CODE
+  return /^[a-z][a-z0-9_]*$/.test(value) && value.length <= 32
 }
 
 /**
- * Normalize any inbound scene token to a seed code.
+ * Canonicalize legacy tokens once; preserve case and arbitrary current codes.
  * Old codes map once; unknown codes pass through trimmed (backend may error — do not treat as empty library).
  */
 export function normalizeSceneCode(value: unknown, fallback: SceneCode = DEFAULT_SCENE): string {
   if (typeof value !== 'string') return fallback
-  const trimmed = value.trim().toLowerCase()
+  const trimmed = value.trim()
   if (!trimmed) return fallback
-  if (LEGACY_SCENE_MAP[trimmed]) return LEGACY_SCENE_MAP[trimmed]
+  if (Object.prototype.hasOwnProperty.call(LEGACY_SCENE_MAP, trimmed)) return LEGACY_SCENE_MAP[trimmed]
   return trimmed
 }
 
@@ -65,16 +59,15 @@ export function toApiSceneCode(value: unknown, fallback: SceneCode = DEFAULT_SCE
 
 export function getSceneSeed(code: string): SceneSeed | undefined {
   const normalized = normalizeSceneCode(code, DEFAULT_SCENE)
-  return isSceneCode(normalized) ? SEED_BY_CODE[normalized] : undefined
+  return Object.prototype.hasOwnProperty.call(SEED_BY_CODE, normalized) ? SEED_BY_CODE[normalized] : undefined
 }
 
 export function sceneDisplayLabel(code: string): string {
-  const seed = getSceneSeed(code)
-  return seed?.label ?? code
+  return code
 }
 
 export function sceneOutputsHeating(code: string, apiFlag?: boolean | null): boolean {
   if (apiFlag === true) return true
   if (apiFlag === false) return false
-  return getSceneSeed(code)?.outputsHeating === true
+  void code; return false
 }

@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
-import { DEFAULT_SCENE, toApiSceneCode } from '../../entities/scene'
+import { useEffect, useRef, useState } from 'react'
+import { DEFAULT_SCENE, toApiSceneCode, unknownScene, sceneError } from '../../entities/scene'
+import { refreshSceneCatalog } from '../scene-catalog'
 import { listImages, type LibraryImageItem } from '../../entities/image'
 
 export type UseLibraryListOptions = {
@@ -35,8 +36,11 @@ export function useLibraryList({
   const [error, setError] = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
 
+  const failedRequest = useRef<string | null>(null)
   useEffect(() => {
-    if (!enabled) return
+    const requestKey = JSON.stringify([apiBase, page, pageSize, q, category, scene, reloadKey])
+    if (!enabled) { setLoading(false); return }
+    if (failedRequest.current === requestKey) return
     const controller = new AbortController()
     setLoading(true)
     setError(null)
@@ -52,13 +56,14 @@ export function useLibraryList({
       if (controller.signal.aborted) return
       setItems(result.items)
       setTotal(result.total)
+      failedRequest.current = null
       setConnected(true)
       setLoading(false)
     }).catch(cause => {
       if (controller.signal.aborted || (cause instanceof Error && cause.name === 'AbortError')) return
-      setItems([])
-      setTotal(0)
-      setError(cause instanceof Error ? cause.message : '图库列表加载失败，请重试。')
+      failedRequest.current = requestKey
+      if (unknownScene(cause)) void refreshSceneCatalog(apiBase, true)
+      setError(sceneError(cause))
       setLoading(false)
     })
     return () => controller.abort()

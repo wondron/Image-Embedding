@@ -60,7 +60,7 @@ describe('toLibraryImage (§6.1.2 / §6.1.4 List map)', () => {
   })
 
   it('normalizes legacy scene codes once and drops duplicates', () => {
-    expect(toLibraryImage({ id: 'x', scenes: ['normal', 'general', ' OVEN ', 'device'] })?.scenes).toEqual(['general', 'oven'])
+    expect(toLibraryImage({ id: 'x', scenes: ['normal', 'general', ' OVEN ', 'device'] })?.scenes).toEqual(['general', 'OVEN', 'oven'])
   })
 })
 

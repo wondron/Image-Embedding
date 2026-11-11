@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUpRight, Check, CheckCircle2,
+  Layers3, ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUpRight, Check, CheckCircle2,
   CircleHelp, Database, FolderOpen, FolderTree, ImageIcon, Images, LayoutGrid, List, Link2, PanelLeftClose, PanelLeftOpen,
   ListFilter, ListTree, LoaderCircle, Menu, ScanLine, Search, Settings2, SlidersHorizontal,
   Tags, Upload, UploadCloud, Workflow, X, XCircle,
@@ -14,7 +14,10 @@ import { DownloadDialog } from './components/DownloadDialog'
 import { ImageFilePicker } from './components/ImageFilePicker'
 import { downloadImage } from './lib/downloads'
 import { EnumCatalogProvider } from './entities/enum'
-import { DEFAULT_SCENE } from './entities/scene'
+import { DEFAULT_SCENE, unknownScene, sceneError } from './entities/scene'
+import { SceneApiContext, useSceneSelection } from './features/scene-catalog'
+import { SceneConfigPage } from './pages/scenes/SceneConfigPage'
+import { SceneMembershipPanel } from './features/scene-memberships/SceneMembershipPanel'
 import {
   SourceBadge, displayCategoryLabel, getImageSources, searchGlobalImages, searchLocalImages,
   type SearchImage, type SearchResponse,
@@ -37,10 +40,11 @@ const navigation = [
   { key: 'tasks' as const, name: '入库任务', icon: Workflow, description: '任务进度与失败记录' },
   { key: 'ingredients' as const, name: '食材管理', icon: Tags, description: '名称、类别与属性' },
   { key: 'categories' as const, name: '类别配置', icon: FolderTree, description: '维护类别树' },
+  { key: 'scenes' as const, name: '场景管理', icon: Layers3, description: '目录、标签、规则与全量同步' },
   { key: 'enums' as const, name: '枚举配置', icon: ListTree, description: '查看取值并追加' },
 ]
 /** Views that are wired to the API and can be opened by URL (?view=<key>) → the parameter that selects an item in them. */
-const linkedViews: Readonly<Record<string, string>> = { enums: 'enum', categories: 'category' }
+const linkedViews: Readonly<Record<string, string>> = { enums: 'enum', categories: 'category', scenes: 'scene' }
 const pageSize = 12
 const maxBytes = 15 * 1024 * 1024
 
@@ -95,7 +99,7 @@ function ResultTable({ items, onDetail, onDownload, downloading, selected, onTog
 function initialView(): View {
   try {
     const requested = new URLSearchParams(window.location.search).get('view')
-    if (requested === 'enums' || requested === 'categories') return requested // the keys of linkedViews
+    if (requested === 'enums' || requested === 'categories' || requested === 'scenes') return requested // the keys of linkedViews
   } catch { /* keep the default view */ }
   return 'search'
 }
@@ -138,6 +142,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [connection, setConnection] = useState<'checking' | 'online' | 'offline'>('checking')
+  const sceneCatalog = useSceneSelection(scene, setScene, apiBase)
   const activeRequest = useRef<AbortController | null>(null)
 
   const checkConnection = useCallback(async () => {
@@ -162,6 +167,7 @@ export default function App() {
     setPage(1); setCategory('all'); setKeyword(''); setElapsed(null); setDownloadFailure(null)
     setSelected(new Set()); setActiveQueryName(''); setDetail(null)
   }, [])
+  useEffect(() => { resetResults() }, [scene, resetResults])
   const handleBatchRunningChange = useCallback((running: boolean) => {
     setBatchRunning(running)
     if (running) resetResults()
@@ -189,6 +195,7 @@ export default function App() {
   }
   async function runSearch() {
     if (busy || batchRunning) return
+    if (searchTarget === 'local' && !sceneCatalog.selectionValid) { setError('场景目录不可用，请刷新后重试。'); return }
     if (mode === 'file' && !file) { setError('请先上传一张查询图片。'); return }
     if (mode === 'url' && !safeHttpUrl(url.trim())) { setError('请输入有效的 HTTP 或 HTTPS 图片链接。'); return }
     const controller = new AbortController()
@@ -208,7 +215,8 @@ export default function App() {
       if (result.message) setNotice(result.message)
     } catch (cause) {
       if (activeRequest.current !== controller) return
-      setError(controller.signal.aborted ? '搜索等待超时，请稍后重试。' : cause instanceof Error ? cause.message : '搜索失败，请重试。')
+      if (unknownScene(cause)) void sceneCatalog.refresh()
+      setError(controller.signal.aborted ? '搜索等待超时，请稍后重试。' : sceneError(cause))
     } finally {
       window.clearTimeout(timer)
       if (activeRequest.current === controller) { activeRequest.current = null; setBusy(false) }
@@ -228,6 +236,7 @@ export default function App() {
       const url = new URL(window.location.href)
       if (linkedViews[next]) url.searchParams.set('view', next)
       else url.searchParams.delete('view')
+      if (next !== 'scenes') url.searchParams.delete('sceneTab')
       // Each linked view owns one parameter (?enum=, ?category=); drop the ones of the other views.
       for (const [key, param] of Object.entries(linkedViews)) if (key !== next) url.searchParams.delete(param)
       window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
@@ -265,7 +274,7 @@ export default function App() {
   }
 
   // Enum labels (GET /api/enums) for every page; loaded once the backend answers ping.
-  return <EnumCatalogProvider apiBase={apiBase} enabled={connection === 'online'}><div className={`app-shell ${navCollapsed ? 'nav-collapsed' : ''}`}>
+  return <SceneApiContext.Provider value={apiBase}><EnumCatalogProvider apiBase={apiBase} enabled={connection === 'online'}><div className={`app-shell ${navCollapsed ? 'nav-collapsed' : ''}`}>
     {mobileNav && <button className="sidebar-scrim" aria-label="关闭导航" onClick={() => setMobileNav(false)} />}
     <aside className={`sidebar ${mobileNav ? 'sidebar-open' : ''}`}>
       <div className="sidebar-heading"><span>导航</span><button className="icon-button collapse-navigation" aria-label={navCollapsed ? '展开侧栏' : '收起侧栏'} title={navCollapsed ? '展开侧栏' : '收起侧栏'} aria-expanded={!navCollapsed} onClick={() => setNavCollapsed(value => !value)}>{navCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}</button></div>
@@ -285,9 +294,10 @@ export default function App() {
 
     <div className="main-shell"><header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" aria-label="展开导航" onClick={() => setMobileNav(true)}><Menu size={20} /></button><div className="topbar-title"><h1>{pageInfo.name}</h1><span>食材图像管理 / {pageInfo.description}</span></div></div><div className="topbar-actions"><button className="icon-button" title="使用说明" aria-label="使用说明" onClick={() => setHelpOpen(true)}><CircleHelp size={17} /></button><button className="icon-button" title="连接设置" aria-label="连接设置" disabled={batchRunning} onClick={() => { setApiDraft(apiBase); setSettingsOpen(true) }}><Settings2 size={17} /></button></div></header>
     <main className={view === 'search' ? 'search-page' : 'management-page'}>
-      {view !== 'search' && view !== 'enums' && view !== 'categories' && <ManagementViews view={view} onNavigate={navigate} apiBase={apiBase} />}
+      {view !== 'search' && view !== 'enums' && view !== 'categories' && view !== 'scenes' && <ManagementViews view={view} onNavigate={navigate} apiBase={apiBase} />}
       {view === 'enums' && <EnumConfigPage apiBase={apiBase} />}
       {view === 'categories' && <CategoryConfigPage apiBase={apiBase} />}
+      {view === 'scenes' && <SceneConfigPage apiBase={apiBase} />}
       <div className="search-view" hidden={view !== 'search'}>
         {(error || notice) && <div className={`message-banner ${error ? 'message-error' : 'message-success'}`} role={error ? 'alert' : 'status'}>{error ? <XCircle size={18} /> : <CheckCircle2 size={18} />}<span>{error || notice}</span>{downloadFailure && safeHttpUrl(downloadFailure.imageUrl ?? downloadFailure.thumbnailUrl ?? '') && <a href={downloadFailure.imageUrl ?? downloadFailure.thumbnailUrl!} target="_blank" rel="noreferrer">打开原图 <ArrowUpRight size={14} /></a>}<button className="icon-button" aria-label="关闭提示" onClick={() => { setError(''); setNotice(''); setDownloadFailure(null) }}><X size={16} /></button></div>}
         <div className="search-workspace">
@@ -337,7 +347,7 @@ export default function App() {
               />
             </div>
             <div className="query-actions">
-              <button className="btn btn-primary search-button" onClick={() => void runSearch()} disabled={!inputReady || busy}>{busy ? <LoaderCircle size={15} className="spin" /> : <Search size={15} />}{busy ? '正在搜索相似图片…' : '开始搜索'}</button>
+              <button className="btn btn-primary search-button" onClick={() => void runSearch()} disabled={!inputReady || busy || (searchTarget === 'local' && !sceneCatalog.selectionValid)}>{busy ? <LoaderCircle size={15} className="spin" /> : <Search size={15} />}{busy ? '正在搜索相似图片…' : '开始搜索'}</button>
               {busy && <button className="text-button cancel-search" onClick={() => { activeRequest.current?.abort(); activeRequest.current = null; setBusy(false); setNotice('已取消本次搜索。') }}>取消搜索</button>}
               <button className="btn btn-secondary" disabled={!file && !url && !searched && !error} onClick={() => { resetResults(); setFile(null); setUrl('') }}>重置</button>
             </div>
@@ -403,6 +413,7 @@ export default function App() {
         <section className="detail-section"><h3>来源信息</h3><dl className="detail-links"><div><dt>来源网页</dt><dd>{detail.pageUrl ? <a href={detail.pageUrl} target="_blank" rel="noreferrer">{detail.pageUrl}<ArrowUpRight size={12} /></a> : '—'}</dd></div><div><dt>图片地址</dt><dd>{(detail.imageUrl || detail.thumbnailUrl) ? <a className="original-link" href={detail.imageUrl ?? detail.thumbnailUrl!} target="_blank" rel="noreferrer">打开原图 / 另存为 <ArrowUpRight size={12} /></a> : '—'}</dd></div></dl>
           {detail.snippets.length > 0 && <div className="detail-description"><span>来源描述</span><div>{detail.snippets.map((text, i) => <p key={i}>{text}</p>)}</div></div>}
         </section>
+        {detail.source === 'self' && <SceneMembershipPanel imageId={detail.id} apiBase={apiBase} onManage={() => { setDetail(null); navigate('scenes'); const u = new URL(window.location.href); u.searchParams.set('sceneTab', 'sync'); window.history.replaceState(null, '', u.toString()) }} />}
         {downloadFailure?.id === detail.id && <p className="inline-error" role="alert">{error}</p>}
       </div>
 
@@ -410,5 +421,5 @@ export default function App() {
     {downloadItems && <DownloadDialog items={downloadItems} apiBase={apiBase} onClose={() => setDownloadItems(null)} />}
     {settingsOpen && <Dialog title="搜索服务连接" onClose={() => setSettingsOpen(false)}><div className="settings-content"><p>连接现有的图像搜索服务。留空时使用当前站点的接口。</p><label htmlFor="api-base">服务地址</label><input className="input" id="api-base" type="url" placeholder="默认使用站点 /api" value={apiDraft} onChange={event => setApiDraft(event.target.value)} /><small>例如 http://127.0.0.1:8320，不包含 /api 路径。跨域连接需服务端允许访问。</small>{apiDraft.trim() && !safeHttpUrl(apiDraft.trim()) && <p className="inline-error">请输入 HTTP 或 HTTPS 地址。</p>}<div className="connection-info"><span className={`status-dot ${connection}`} />{connection === 'online' ? '接口可连接' : connection === 'checking' ? '正在检查连接…' : '当前未连接，请检查服务地址与后端运行状态'}<button className="text-button" onClick={() => void checkConnection()}>重新检查</button></div><div className="dialog-actions"><button className="btn btn-secondary" onClick={() => setSettingsOpen(false)}>取消</button><button className="btn btn-primary" disabled={Boolean(apiDraft.trim() && !safeHttpUrl(apiDraft.trim()))} onClick={saveSettings}><Check size={16} />保存连接</button></div></div></Dialog>}
     {helpOpen && <Dialog title="开始使用食图" onClose={() => setHelpOpen(false)}><div className="help-content"><div><Search size={21} /><section><h3>以图搜图</h3><p>上传图片或输入可公开访问的图片直链，在自建库中检索。默认场景为「通用」（general）；可切换场景与拒识阈值后点「开始搜索」。空库时请先去「上传与导入」入库（PG + S3），不以 FlyB 外搜兜底为完成标准。</p></section></div><div><ArrowDownToLine size={21} /><section><h3>查看与下载</h3><p>点击结果打开详情，勾选图片后可「批量下载」。一体机场景下结果会展示加热组与食物状态（缺字段显示「—」）。</p></section></div><div><FolderOpen size={21} /><section><h3>图库与入库</h3><p>图库按场景筛选（默认 general），缩略图使用 S3 https 地址。入库可指定场景意向；最终成员以规则 + 手动覆盖为准。</p></section></div><div className="help-note">相似度仅在服务返回分数时展示；类别优先展示 scene_label，否则回落通用类别。</div></div></Dialog>}
-  </div></EnumCatalogProvider>
+  </div></EnumCatalogProvider></SceneApiContext.Provider>
 }

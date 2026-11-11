@@ -1,0 +1,1539 @@
+{
+  "exit_code": 0,
+  "target": "http://127.0.0.1:58283",
+  "db": "qa_scene_completion_gui_1055",
+  "collection": "qa_scene_completion_gui_1055",
+  "evidence": "actual FastAPI HTTP + actual isolated PG; actual Qdrant search; deterministic encoder/memory OSS substitutes",
+  "checks": [
+    {
+      "name": "GET /api/scenes HTTP200",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "active protected general default dynamically reported",
+      "pass": true
+    },
+    {
+      "name": "PATCH /api/scenes/1 HTTP403",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "default protection code",
+      "pass": true
+    },
+    {
+      "name": "PATCH /api/scenes/1 HTTP403",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "default protection code",
+      "pass": true
+    },
+    {
+      "name": "DELETE /api/scenes/1 HTTP403",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "default delete protected",
+      "pass": true
+    },
+    {
+      "name": "GET /api/images HTTP200",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "list canonical default/alias",
+      "pass": true
+    },
+    {
+      "name": "POST /api/search HTTP200",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "search canonical default/alias",
+      "pass": true
+    },
+    {
+      "name": "GET /api/images?scene=normal HTTP200",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "list canonical default/alias",
+      "pass": true
+    },
+    {
+      "name": "POST /api/search HTTP200",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "search canonical default/alias",
+      "pass": true
+    },
+    {
+      "name": "GET /api/images?scene=device HTTP200",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "list canonical default/alias",
+      "pass": true
+    },
+    {
+      "name": "POST /api/search HTTP200",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "search canonical default/alias",
+      "pass": true
+    },
+    {
+      "name": "POST /api/scenes HTTP201",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "GET /api/scenes HTTP200",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "new scene in real directory",
+      "pass": true
+    },
+    {
+      "name": "PATCH /api/scenes/10 HTTP200",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "GET /api/scenes HTTP200",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "inactive edited scene remains visible",
+      "pass": true
+    },
+    {
+      "name": "GET /api/images HTTP200",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "GET /api/images?scene=Normal HTTP422",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "unknown/inactive list error",
+      "pass": true
+    },
+    {
+      "name": "POST /api/search HTTP422",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "unknown/inactive search error",
+      "pass": true
+    },
+    {
+      "name": "POST /api/index HTTP422",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "unknown/inactive index error",
+      "pass": true
+    },
+    {
+      "name": "GET /api/images?scene=OVEN HTTP422",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "unknown/inactive list error",
+      "pass": true
+    },
+    {
+      "name": "POST /api/search HTTP422",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "unknown/inactive search error",
+      "pass": true
+    },
+    {
+      "name": "POST /api/index HTTP422",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "unknown/inactive index error",
+      "pass": true
+    },
+    {
+      "name": "GET /api/images?scene=qa_missing_123 HTTP422",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "unknown/inactive list error",
+      "pass": true
+    },
+    {
+      "name": "POST /api/search HTTP422",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "unknown/inactive search error",
+      "pass": true
+    },
+    {
+      "name": "POST /api/index HTTP422",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "unknown/inactive index error",
+      "pass": true
+    },
+    {
+      "name": "GET /api/images?scene=qa_directory_932541 HTTP422",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "unknown/inactive list error",
+      "pass": true
+    },
+    {
+      "name": "POST /api/search HTTP422",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "unknown/inactive search error",
+      "pass": true
+    },
+    {
+      "name": "POST /api/index HTTP422",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "unknown/inactive index error",
+      "pass": true
+    },
+    {
+      "name": "GET /api/images HTTP200",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "rejected index did not add images",
+      "pass": true
+    },
+    {
+      "name": "PATCH /api/scenes/10 HTTP200",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "GET /api/images?scene=qa_directory_932541 HTTP200",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "DELETE /api/scenes/10 HTTP200",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "GET /api/scenes HTTP200",
+      "pass": true
+    },
+    {
+      "name": "response trace header exists",
+      "pass": true
+    },
+    {
+      "name": "deleted dynamic scene no longer in directory",
+      "pass": true
+    }
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/scenes",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "scenes": [
+          {
+            "id": 1,
+            "code": "general",
+            "name": "通用（日常）",
+            "description": "含全部图片",
+            "include_all": true,
+            "outputs_heating": false,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 1,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 2,
+            "code": "oven",
+            "name": "一体机",
+            "description": "按类别规则 + scene_labels；结果带加热组",
+            "include_all": false,
+            "outputs_heating": true,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 3,
+            "code": "range_hood",
+            "name": "抽油烟机",
+            "description": "待配置规则",
+            "include_all": false,
+            "outputs_heating": false,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 4,
+            "code": "us_diet",
+            "name": "美国饮食",
+            "description": "菜系含 american",
+            "include_all": false,
+            "outputs_heating": false,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 5,
+            "code": "cn_diet",
+            "name": "中国饮食",
+            "description": "菜系含 chinese",
+            "include_all": false,
+            "outputs_heating": false,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 6,
+            "code": "jp_diet",
+            "name": "日本饮食",
+            "description": "菜系含 japanese",
+            "include_all": false,
+            "outputs_heating": false,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 7,
+            "code": "qa_gui",
+            "name": "QA GUI dynamic",
+            "description": null,
+            "include_all": false,
+            "outputs_heating": true,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:10.881606+00:00",
+            "member_count": 1,
+            "labels": [
+              {
+                "id": 1,
+                "code": "qa_gui_label",
+                "name": "QA GUI label",
+                "sort_order": 0,
+                "is_active": true,
+                "rule_count": 1
+              }
+            ],
+            "rules": [
+              {
+                "id": 1,
+                "category": {
+                  "id": 1,
+                  "code": "dish",
+                  "name": "QA dish"
+                },
+                "cuisine": null,
+                "label": {
+                  "id": 1,
+                  "code": "qa_gui_label",
+                  "name": "QA GUI label"
+                }
+              }
+            ]
+          },
+          {
+            "id": 8,
+            "code": "qa_gui_inactive",
+            "name": "QA inactive old manual",
+            "description": null,
+            "include_all": false,
+            "outputs_heating": false,
+            "is_active": false,
+            "created_at": "2026-11-10T17:54:10.901863+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 9,
+            "code": "qa_gui_all_off",
+            "name": "QA inactive include all",
+            "description": null,
+            "include_all": true,
+            "outputs_heating": false,
+            "is_active": false,
+            "created_at": "2026-11-10T17:54:10.918406+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          }
+        ],
+        "default_scene": "general"
+      },
+      "trace": "25bbc7b7-cbfb-4324-ac80-848716f87c27"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/scenes/1",
+      "status": 403,
+      "body": {
+        "ok": false,
+        "error": "SCENE_PROTECTED",
+        "detail": "the default scene 'general' cannot be disabled: requests without a scene use it",
+        "trace_id": "796f6060-b67a-41ab-b957-bef9e05e4241"
+      },
+      "trace": "796f6060-b67a-41ab-b957-bef9e05e4241"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/scenes/1",
+      "status": 403,
+      "body": {
+        "ok": false,
+        "error": "SCENE_PROTECTED",
+        "detail": "the default scene 'general' must keep containing every image",
+        "trace_id": "a994e9a9-2af1-49a4-9972-fd92561ce992"
+      },
+      "trace": "a994e9a9-2af1-49a4-9972-fd92561ce992"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/scenes/1",
+      "status": 403,
+      "body": {
+        "ok": false,
+        "error": "SCENE_PROTECTED",
+        "detail": "the default scene 'general' cannot be deleted",
+        "trace_id": "d5ead34b-9d20-46ae-ac3a-76f066906c68"
+      },
+      "trace": "d5ead34b-9d20-46ae-ac3a-76f066906c68"
+    },
+    {
+      "method": "GET",
+      "path": "/api/images",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "trace_id": "a63dd8a7-df93-43ea-a2cb-c9339438f8d4",
+        "scene": "general",
+        "page": 1,
+        "page_size": 24,
+        "total": 1,
+        "items": [
+          {
+            "id": "7177401c-46f8-16da-d8f2-e0fab52f3465",
+            "original_url": "https://qa-scene.invalid/original/7177401c-46f8-16da-d8f2-e0fab52f3465.png",
+            "thumb_url": "https://qa-scene.invalid/thumb/7177401c-46f8-16da-d8f2-e0fab52f3465.webp",
+            "category_id": 1,
+            "category": "QA dish",
+            "scenes": [
+              "general",
+              "qa_gui"
+            ],
+            "label_status": "auto",
+            "description": "",
+            "tags": [],
+            "width": 8,
+            "height": 8,
+            "created_at": "2026-11-10T17:54:11.106939+00:00",
+            "updated_at": "2026-11-10T17:54:11.106939+00:00"
+          }
+        ]
+      },
+      "trace": "a63dd8a7-df93-43ea-a2cb-c9339438f8d4"
+    },
+    {
+      "method": "POST",
+      "path": "/api/search",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "trace_id": "8abb8065-f130-47c7-a52c-6cb1421a9067",
+        "source": "self",
+        "scene": "general",
+        "outputs_heating": false,
+        "items": [
+          {
+            "id": "7177401c-46f8-16da-d8f2-e0fab52f3465",
+            "original_url": "https://qa-scene.invalid/original/7177401c-46f8-16da-d8f2-e0fab52f3465.png",
+            "thumb_url": "https://qa-scene.invalid/thumb/7177401c-46f8-16da-d8f2-e0fab52f3465.webp",
+            "similarity": 1.0,
+            "category_id": 1,
+            "category": "QA dish",
+            "scenes": [
+              "general",
+              "qa_gui"
+            ],
+            "scene_label": null,
+            "label_status": "auto",
+            "description": "",
+            "tags": [],
+            "width": 8,
+            "height": 8
+          }
+        ]
+      },
+      "trace": "8abb8065-f130-47c7-a52c-6cb1421a9067"
+    },
+    {
+      "method": "GET",
+      "path": "/api/images?scene=normal",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "trace_id": "0d4c969b-760a-47ef-8e2b-c99727a3cf93",
+        "scene": "general",
+        "page": 1,
+        "page_size": 24,
+        "total": 1,
+        "items": [
+          {
+            "id": "7177401c-46f8-16da-d8f2-e0fab52f3465",
+            "original_url": "https://qa-scene.invalid/original/7177401c-46f8-16da-d8f2-e0fab52f3465.png",
+            "thumb_url": "https://qa-scene.invalid/thumb/7177401c-46f8-16da-d8f2-e0fab52f3465.webp",
+            "category_id": 1,
+            "category": "QA dish",
+            "scenes": [
+              "general",
+              "qa_gui"
+            ],
+            "label_status": "auto",
+            "description": "",
+            "tags": [],
+            "width": 8,
+            "height": 8,
+            "created_at": "2026-11-10T17:54:11.106939+00:00",
+            "updated_at": "2026-11-10T17:54:11.106939+00:00"
+          }
+        ]
+      },
+      "trace": "0d4c969b-760a-47ef-8e2b-c99727a3cf93"
+    },
+    {
+      "method": "POST",
+      "path": "/api/search",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "trace_id": "daee7e33-9aea-483e-b5b6-ef3b67eb13d0",
+        "source": "self",
+        "scene": "general",
+        "outputs_heating": false,
+        "items": [
+          {
+            "id": "7177401c-46f8-16da-d8f2-e0fab52f3465",
+            "original_url": "https://qa-scene.invalid/original/7177401c-46f8-16da-d8f2-e0fab52f3465.png",
+            "thumb_url": "https://qa-scene.invalid/thumb/7177401c-46f8-16da-d8f2-e0fab52f3465.webp",
+            "similarity": 1.0,
+            "category_id": 1,
+            "category": "QA dish",
+            "scenes": [
+              "general",
+              "qa_gui"
+            ],
+            "scene_label": null,
+            "label_status": "auto",
+            "description": "",
+            "tags": [],
+            "width": 8,
+            "height": 8
+          }
+        ]
+      },
+      "trace": "daee7e33-9aea-483e-b5b6-ef3b67eb13d0"
+    },
+    {
+      "method": "GET",
+      "path": "/api/images?scene=device",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "trace_id": "6ef09466-16cf-415d-bf1f-736891d256c3",
+        "scene": "oven",
+        "page": 1,
+        "page_size": 24,
+        "total": 0,
+        "items": []
+      },
+      "trace": "6ef09466-16cf-415d-bf1f-736891d256c3"
+    },
+    {
+      "method": "POST",
+      "path": "/api/search",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "trace_id": "2d074034-10a0-413e-aab6-d692a0afbe61",
+        "source": "empty",
+        "scene": "oven",
+        "outputs_heating": true,
+        "items": [],
+        "message": "no local matches for scene=oven"
+      },
+      "trace": "2d074034-10a0-413e-aab6-d692a0afbe61"
+    },
+    {
+      "method": "POST",
+      "path": "/api/scenes",
+      "status": 201,
+      "body": {
+        "ok": true,
+        "scene": {
+          "id": 10,
+          "code": "qa_directory_932541",
+          "name": "QA dynamic directory",
+          "description": null,
+          "include_all": true,
+          "outputs_heating": false,
+          "is_active": true,
+          "created_at": "2026-11-10T17:55:47.629063+00:00",
+          "member_count": 1,
+          "labels": [],
+          "rules": []
+        }
+      },
+      "trace": "e967c13b-5f31-4676-a160-60e7233790e8"
+    },
+    {
+      "method": "GET",
+      "path": "/api/scenes",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "scenes": [
+          {
+            "id": 1,
+            "code": "general",
+            "name": "通用（日常）",
+            "description": "含全部图片",
+            "include_all": true,
+            "outputs_heating": false,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 1,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 2,
+            "code": "oven",
+            "name": "一体机",
+            "description": "按类别规则 + scene_labels；结果带加热组",
+            "include_all": false,
+            "outputs_heating": true,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 3,
+            "code": "range_hood",
+            "name": "抽油烟机",
+            "description": "待配置规则",
+            "include_all": false,
+            "outputs_heating": false,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 4,
+            "code": "us_diet",
+            "name": "美国饮食",
+            "description": "菜系含 american",
+            "include_all": false,
+            "outputs_heating": false,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 5,
+            "code": "cn_diet",
+            "name": "中国饮食",
+            "description": "菜系含 chinese",
+            "include_all": false,
+            "outputs_heating": false,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 6,
+            "code": "jp_diet",
+            "name": "日本饮食",
+            "description": "菜系含 japanese",
+            "include_all": false,
+            "outputs_heating": false,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 7,
+            "code": "qa_gui",
+            "name": "QA GUI dynamic",
+            "description": null,
+            "include_all": false,
+            "outputs_heating": true,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:10.881606+00:00",
+            "member_count": 1,
+            "labels": [
+              {
+                "id": 1,
+                "code": "qa_gui_label",
+                "name": "QA GUI label",
+                "sort_order": 0,
+                "is_active": true,
+                "rule_count": 1
+              }
+            ],
+            "rules": [
+              {
+                "id": 1,
+                "category": {
+                  "id": 1,
+                  "code": "dish",
+                  "name": "QA dish"
+                },
+                "cuisine": null,
+                "label": {
+                  "id": 1,
+                  "code": "qa_gui_label",
+                  "name": "QA GUI label"
+                }
+              }
+            ]
+          },
+          {
+            "id": 8,
+            "code": "qa_gui_inactive",
+            "name": "QA inactive old manual",
+            "description": null,
+            "include_all": false,
+            "outputs_heating": false,
+            "is_active": false,
+            "created_at": "2026-11-10T17:54:10.901863+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 9,
+            "code": "qa_gui_all_off",
+            "name": "QA inactive include all",
+            "description": null,
+            "include_all": true,
+            "outputs_heating": false,
+            "is_active": false,
+            "created_at": "2026-11-10T17:54:10.918406+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 10,
+            "code": "qa_directory_932541",
+            "name": "QA dynamic directory",
+            "description": null,
+            "include_all": true,
+            "outputs_heating": false,
+            "is_active": true,
+            "created_at": "2026-11-10T17:55:47.629063+00:00",
+            "member_count": 1,
+            "labels": [],
+            "rules": []
+          }
+        ],
+        "default_scene": "general"
+      },
+      "trace": "f00d7688-e470-4454-9cd3-c27272c65564"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/scenes/10",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "scene": {
+          "id": 10,
+          "code": "qa_directory_932541",
+          "name": "QA edited",
+          "description": null,
+          "include_all": true,
+          "outputs_heating": false,
+          "is_active": false,
+          "created_at": "2026-11-10T17:55:47.629063+00:00",
+          "member_count": 0,
+          "labels": [],
+          "rules": []
+        }
+      },
+      "trace": "b1dce0ef-a81b-4d28-905b-fc07eead35e0"
+    },
+    {
+      "method": "GET",
+      "path": "/api/scenes",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "scenes": [
+          {
+            "id": 1,
+            "code": "general",
+            "name": "通用（日常）",
+            "description": "含全部图片",
+            "include_all": true,
+            "outputs_heating": false,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 1,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 2,
+            "code": "oven",
+            "name": "一体机",
+            "description": "按类别规则 + scene_labels；结果带加热组",
+            "include_all": false,
+            "outputs_heating": true,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 3,
+            "code": "range_hood",
+            "name": "抽油烟机",
+            "description": "待配置规则",
+            "include_all": false,
+            "outputs_heating": false,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 4,
+            "code": "us_diet",
+            "name": "美国饮食",
+            "description": "菜系含 american",
+            "include_all": false,
+            "outputs_heating": false,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 5,
+            "code": "cn_diet",
+            "name": "中国饮食",
+            "description": "菜系含 chinese",
+            "include_all": false,
+            "outputs_heating": false,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 6,
+            "code": "jp_diet",
+            "name": "日本饮食",
+            "description": "菜系含 japanese",
+            "include_all": false,
+            "outputs_heating": false,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 7,
+            "code": "qa_gui",
+            "name": "QA GUI dynamic",
+            "description": null,
+            "include_all": false,
+            "outputs_heating": true,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:10.881606+00:00",
+            "member_count": 1,
+            "labels": [
+              {
+                "id": 1,
+                "code": "qa_gui_label",
+                "name": "QA GUI label",
+                "sort_order": 0,
+                "is_active": true,
+                "rule_count": 1
+              }
+            ],
+            "rules": [
+              {
+                "id": 1,
+                "category": {
+                  "id": 1,
+                  "code": "dish",
+                  "name": "QA dish"
+                },
+                "cuisine": null,
+                "label": {
+                  "id": 1,
+                  "code": "qa_gui_label",
+                  "name": "QA GUI label"
+                }
+              }
+            ]
+          },
+          {
+            "id": 8,
+            "code": "qa_gui_inactive",
+            "name": "QA inactive old manual",
+            "description": null,
+            "include_all": false,
+            "outputs_heating": false,
+            "is_active": false,
+            "created_at": "2026-11-10T17:54:10.901863+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 9,
+            "code": "qa_gui_all_off",
+            "name": "QA inactive include all",
+            "description": null,
+            "include_all": true,
+            "outputs_heating": false,
+            "is_active": false,
+            "created_at": "2026-11-10T17:54:10.918406+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 10,
+            "code": "qa_directory_932541",
+            "name": "QA edited",
+            "description": null,
+            "include_all": true,
+            "outputs_heating": false,
+            "is_active": false,
+            "created_at": "2026-11-10T17:55:47.629063+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          }
+        ],
+        "default_scene": "general"
+      },
+      "trace": "fef67c2e-758b-4908-b398-901c97fde2cd"
+    },
+    {
+      "method": "GET",
+      "path": "/api/images",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "trace_id": "a6d745f3-dfc9-4d58-a08c-571c7bdc29ea",
+        "scene": "general",
+        "page": 1,
+        "page_size": 24,
+        "total": 1,
+        "items": [
+          {
+            "id": "7177401c-46f8-16da-d8f2-e0fab52f3465",
+            "original_url": "https://qa-scene.invalid/original/7177401c-46f8-16da-d8f2-e0fab52f3465.png",
+            "thumb_url": "https://qa-scene.invalid/thumb/7177401c-46f8-16da-d8f2-e0fab52f3465.webp",
+            "category_id": 1,
+            "category": "QA dish",
+            "scenes": [
+              "general",
+              "qa_gui"
+            ],
+            "label_status": "auto",
+            "description": "",
+            "tags": [],
+            "width": 8,
+            "height": 8,
+            "created_at": "2026-11-10T17:54:11.106939+00:00",
+            "updated_at": "2026-11-10T17:54:11.106939+00:00"
+          }
+        ]
+      },
+      "trace": "a6d745f3-dfc9-4d58-a08c-571c7bdc29ea"
+    },
+    {
+      "method": "GET",
+      "path": "/api/images?scene=Normal",
+      "status": 422,
+      "body": {
+        "ok": false,
+        "error": "LIST_UNKNOWN_SCENE",
+        "detail": "unknown scene 'Normal'; active scenes: general, oven, range_hood, us_diet, cn_diet, jp_diet, qa_gui",
+        "trace_id": "61851892-9c4b-47fd-b01f-54fedbd59762"
+      },
+      "trace": "61851892-9c4b-47fd-b01f-54fedbd59762"
+    },
+    {
+      "method": "POST",
+      "path": "/api/search",
+      "status": 422,
+      "body": {
+        "ok": false,
+        "error": "SEARCH_UNKNOWN_SCENE",
+        "detail": "unknown scene 'Normal'; active scenes: general, oven, range_hood, us_diet, cn_diet, jp_diet, qa_gui",
+        "trace_id": "818fe03b-ca46-4eaf-842e-e3e628b07d14"
+      },
+      "trace": "818fe03b-ca46-4eaf-842e-e3e628b07d14"
+    },
+    {
+      "method": "POST",
+      "path": "/api/index",
+      "status": 422,
+      "body": {
+        "ok": false,
+        "error": "INDEX_UNKNOWN_SCENE",
+        "detail": "unknown or inactive scene 'Normal'; active scenes: cn_diet, general, jp_diet, oven, qa_gui, range_hood, us_diet",
+        "trace_id": "7723a6db-72a3-4ba6-bb1d-955a198d61ad"
+      },
+      "trace": "7723a6db-72a3-4ba6-bb1d-955a198d61ad"
+    },
+    {
+      "method": "GET",
+      "path": "/api/images?scene=OVEN",
+      "status": 422,
+      "body": {
+        "ok": false,
+        "error": "LIST_UNKNOWN_SCENE",
+        "detail": "unknown scene 'OVEN'; active scenes: general, oven, range_hood, us_diet, cn_diet, jp_diet, qa_gui",
+        "trace_id": "980cf1bb-d91d-4b13-8a5e-7af09dff897d"
+      },
+      "trace": "980cf1bb-d91d-4b13-8a5e-7af09dff897d"
+    },
+    {
+      "method": "POST",
+      "path": "/api/search",
+      "status": 422,
+      "body": {
+        "ok": false,
+        "error": "SEARCH_UNKNOWN_SCENE",
+        "detail": "unknown scene 'OVEN'; active scenes: general, oven, range_hood, us_diet, cn_diet, jp_diet, qa_gui",
+        "trace_id": "55a5e39a-ca3f-49e5-99b4-c36305485d21"
+      },
+      "trace": "55a5e39a-ca3f-49e5-99b4-c36305485d21"
+    },
+    {
+      "method": "POST",
+      "path": "/api/index",
+      "status": 422,
+      "body": {
+        "ok": false,
+        "error": "INDEX_UNKNOWN_SCENE",
+        "detail": "unknown or inactive scene 'OVEN'; active scenes: cn_diet, general, jp_diet, oven, qa_gui, range_hood, us_diet",
+        "trace_id": "3bf90236-824a-47d2-b85d-271c6009fa69"
+      },
+      "trace": "3bf90236-824a-47d2-b85d-271c6009fa69"
+    },
+    {
+      "method": "GET",
+      "path": "/api/images?scene=qa_missing_123",
+      "status": 422,
+      "body": {
+        "ok": false,
+        "error": "LIST_UNKNOWN_SCENE",
+        "detail": "unknown scene 'qa_missing_123'; active scenes: general, oven, range_hood, us_diet, cn_diet, jp_diet, qa_gui",
+        "trace_id": "00d70fa5-832e-4dde-a797-0ad459c7eeff"
+      },
+      "trace": "00d70fa5-832e-4dde-a797-0ad459c7eeff"
+    },
+    {
+      "method": "POST",
+      "path": "/api/search",
+      "status": 422,
+      "body": {
+        "ok": false,
+        "error": "SEARCH_UNKNOWN_SCENE",
+        "detail": "unknown scene 'qa_missing_123'; active scenes: general, oven, range_hood, us_diet, cn_diet, jp_diet, qa_gui",
+        "trace_id": "599c7ad8-fa58-4e59-8844-403fa2ee1ec2"
+      },
+      "trace": "599c7ad8-fa58-4e59-8844-403fa2ee1ec2"
+    },
+    {
+      "method": "POST",
+      "path": "/api/index",
+      "status": 422,
+      "body": {
+        "ok": false,
+        "error": "INDEX_UNKNOWN_SCENE",
+        "detail": "unknown or inactive scene 'qa_missing_123'; active scenes: cn_diet, general, jp_diet, oven, qa_gui, range_hood, us_diet",
+        "trace_id": "f88fc932-ca7a-411d-8704-95f4be1e0624"
+      },
+      "trace": "f88fc932-ca7a-411d-8704-95f4be1e0624"
+    },
+    {
+      "method": "GET",
+      "path": "/api/images?scene=qa_directory_932541",
+      "status": 422,
+      "body": {
+        "ok": false,
+        "error": "LIST_UNKNOWN_SCENE",
+        "detail": "scene 'qa_directory_932541' is inactive; active scenes: general, oven, range_hood, us_diet, cn_diet, jp_diet, qa_gui",
+        "trace_id": "106c28f8-19bb-47c3-97b5-2e5400af1896"
+      },
+      "trace": "106c28f8-19bb-47c3-97b5-2e5400af1896"
+    },
+    {
+      "method": "POST",
+      "path": "/api/search",
+      "status": 422,
+      "body": {
+        "ok": false,
+        "error": "SEARCH_UNKNOWN_SCENE",
+        "detail": "scene 'qa_directory_932541' is inactive; active scenes: general, oven, range_hood, us_diet, cn_diet, jp_diet, qa_gui",
+        "trace_id": "bde6f3d1-dc85-4baf-be62-0069b311afec"
+      },
+      "trace": "bde6f3d1-dc85-4baf-be62-0069b311afec"
+    },
+    {
+      "method": "POST",
+      "path": "/api/index",
+      "status": 422,
+      "body": {
+        "ok": false,
+        "error": "INDEX_UNKNOWN_SCENE",
+        "detail": "unknown or inactive scene 'qa_directory_932541'; active scenes: cn_diet, general, jp_diet, oven, qa_gui, range_hood, us_diet",
+        "trace_id": "5026f2a5-df9f-4be9-8351-ca4393084742"
+      },
+      "trace": "5026f2a5-df9f-4be9-8351-ca4393084742"
+    },
+    {
+      "method": "GET",
+      "path": "/api/images",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "trace_id": "3af747e6-8b7e-4f79-9c34-d5713f46fde6",
+        "scene": "general",
+        "page": 1,
+        "page_size": 24,
+        "total": 1,
+        "items": [
+          {
+            "id": "7177401c-46f8-16da-d8f2-e0fab52f3465",
+            "original_url": "https://qa-scene.invalid/original/7177401c-46f8-16da-d8f2-e0fab52f3465.png",
+            "thumb_url": "https://qa-scene.invalid/thumb/7177401c-46f8-16da-d8f2-e0fab52f3465.webp",
+            "category_id": 1,
+            "category": "QA dish",
+            "scenes": [
+              "general",
+              "qa_gui"
+            ],
+            "label_status": "auto",
+            "description": "",
+            "tags": [],
+            "width": 8,
+            "height": 8,
+            "created_at": "2026-11-10T17:54:11.106939+00:00",
+            "updated_at": "2026-11-10T17:54:11.106939+00:00"
+          }
+        ]
+      },
+      "trace": "3af747e6-8b7e-4f79-9c34-d5713f46fde6"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/scenes/10",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "scene": {
+          "id": 10,
+          "code": "qa_directory_932541",
+          "name": "QA edited",
+          "description": null,
+          "include_all": true,
+          "outputs_heating": false,
+          "is_active": true,
+          "created_at": "2026-11-10T17:55:47.629063+00:00",
+          "member_count": 1,
+          "labels": [],
+          "rules": []
+        }
+      },
+      "trace": "0b8e43f6-6299-40be-b645-84ee9f70ae29"
+    },
+    {
+      "method": "GET",
+      "path": "/api/images?scene=qa_directory_932541",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "trace_id": "91b022b2-b6d5-45cc-bfe6-c56d8adb23e3",
+        "scene": "qa_directory_932541",
+        "page": 1,
+        "page_size": 24,
+        "total": 1,
+        "items": [
+          {
+            "id": "7177401c-46f8-16da-d8f2-e0fab52f3465",
+            "original_url": "https://qa-scene.invalid/original/7177401c-46f8-16da-d8f2-e0fab52f3465.png",
+            "thumb_url": "https://qa-scene.invalid/thumb/7177401c-46f8-16da-d8f2-e0fab52f3465.webp",
+            "category_id": 1,
+            "category": "QA dish",
+            "scenes": [
+              "general",
+              "qa_gui",
+              "qa_directory_932541"
+            ],
+            "label_status": "auto",
+            "description": "",
+            "tags": [],
+            "width": 8,
+            "height": 8,
+            "created_at": "2026-11-10T17:54:11.106939+00:00",
+            "updated_at": "2026-11-10T17:54:11.106939+00:00"
+          }
+        ]
+      },
+      "trace": "91b022b2-b6d5-45cc-bfe6-c56d8adb23e3"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/scenes/10",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "deleted": {
+          "id": 10,
+          "code": "qa_directory_932541"
+        }
+      },
+      "trace": "e45e4068-bfeb-4e31-8cab-3b53db03b183"
+    },
+    {
+      "method": "GET",
+      "path": "/api/scenes",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "scenes": [
+          {
+            "id": 1,
+            "code": "general",
+            "name": "通用（日常）",
+            "description": "含全部图片",
+            "include_all": true,
+            "outputs_heating": false,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 1,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 2,
+            "code": "oven",
+            "name": "一体机",
+            "description": "按类别规则 + scene_labels；结果带加热组",
+            "include_all": false,
+            "outputs_heating": true,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 3,
+            "code": "range_hood",
+            "name": "抽油烟机",
+            "description": "待配置规则",
+            "include_all": false,
+            "outputs_heating": false,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 4,
+            "code": "us_diet",
+            "name": "美国饮食",
+            "description": "菜系含 american",
+            "include_all": false,
+            "outputs_heating": false,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 5,
+            "code": "cn_diet",
+            "name": "中国饮食",
+            "description": "菜系含 chinese",
+            "include_all": false,
+            "outputs_heating": false,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 6,
+            "code": "jp_diet",
+            "name": "日本饮食",
+            "description": "菜系含 japanese",
+            "include_all": false,
+            "outputs_heating": false,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:09.903513+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 7,
+            "code": "qa_gui",
+            "name": "QA GUI dynamic",
+            "description": null,
+            "include_all": false,
+            "outputs_heating": true,
+            "is_active": true,
+            "created_at": "2026-11-10T17:54:10.881606+00:00",
+            "member_count": 1,
+            "labels": [
+              {
+                "id": 1,
+                "code": "qa_gui_label",
+                "name": "QA GUI label",
+                "sort_order": 0,
+                "is_active": true,
+                "rule_count": 1
+              }
+            ],
+            "rules": [
+              {
+                "id": 1,
+                "category": {
+                  "id": 1,
+                  "code": "dish",
+                  "name": "QA dish"
+                },
+                "cuisine": null,
+                "label": {
+                  "id": 1,
+                  "code": "qa_gui_label",
+                  "name": "QA GUI label"
+                }
+              }
+            ]
+          },
+          {
+            "id": 8,
+            "code": "qa_gui_inactive",
+            "name": "QA inactive old manual",
+            "description": null,
+            "include_all": false,
+            "outputs_heating": false,
+            "is_active": false,
+            "created_at": "2026-11-10T17:54:10.901863+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          },
+          {
+            "id": 9,
+            "code": "qa_gui_all_off",
+            "name": "QA inactive include all",
+            "description": null,
+            "include_all": true,
+            "outputs_heating": false,
+            "is_active": false,
+            "created_at": "2026-11-10T17:54:10.918406+00:00",
+            "member_count": 0,
+            "labels": [],
+            "rules": []
+          }
+        ],
+        "default_scene": "general"
+      },
+      "trace": "c11bb65e-715e-4ded-8410-8874943b2f4a"
+    }
+  ],
+  "assertions_total": 90,
+  "assertions_passed": 90,
+  "api_requests": 32,
+  "reported_at": "2026-11-10T10:55:47.904854-07:00"
+}

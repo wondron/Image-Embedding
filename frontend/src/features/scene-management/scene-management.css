@@ -1,0 +1,32 @@
+.scene-layout { display: grid; grid-template-columns: minmax(200px, 270px) minmax(0, 1fr); gap: 20px; }
+.scene-directory { align-self: start; padding: 8px; }
+.scene-directory-item { display: grid; width: 100%; text-align: left; padding: 12px; gap: 5px; border: 1px solid transparent; background: transparent; color: inherit; border-radius: 8px; cursor: pointer; }
+.scene-directory-item.active { border-color: var(--primary); }
+.scene-directory-item code, .scene-directory-item small { overflow-wrap: anywhere; }
+.scene-details { min-width: 0; padding: 20px; }
+.scene-table-scroll { overflow-x: auto; }
+.scene-table { border-collapse: collapse; width: 100%; text-align: left; }
+.scene-table td, .scene-table th { padding: 12px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.scene-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.scene-form { display: grid; gap: 16px; padding: 20px; }
+.scene-form fieldset { border: 0; padding: 0; display: grid; gap: 14px; }
+.scene-form label { display: grid; gap: 6px; }
+.scene-form label:has(input[type=checkbox]), .scene-form label:has(input[type=radio]) { display: flex; align-items: center; gap: 8px; }
+.scene-form input:not([type=checkbox]):not([type=radio]), .scene-form select, .scene-form textarea { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font: inherit; color: inherit; background: var(--surface); }
+.scene-form legend { padding: 0; margin-bottom: 4px; font-weight: 600; }
+.rule-kind { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.scene-membership-panel { margin-top: 20px; }
+.scene-membership-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.scene-membership-head h4 { margin: 0; }
+.scene-membership-table th small { display: block; font-weight: normal; color: var(--muted, inherit); }
+.scene-membership-actions { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.scene-membership-actions button[aria-pressed=true] { font-weight: 600; text-decoration: underline; }
+.scene-membership-source.is-manual { font-weight: 600; }
+.scene-inactive-tag { margin-left: 6px; font-size: 12px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 999px; }
+.scene-back { display: none; }
+@media (max-width: 800px) { .scene-layout { grid-template-columns: 1fr; } .scene-back { display: inline-block; } .scene-details { padding: 12px; } .scene-details .mg-tabs { display: flex; flex-wrap: wrap; } }
+/* Reuse the existing sm/lg Dialog shell; scope the scene sm geometry to this feature only. */
+.scene-management .dialog:not(.dialog-wide), .scene-membership-panel .dialog:not(.dialog-wide) { width: min(700px, calc(100vw - 30px)); }
+.scene-management .dialog.dialog-wide, .scene-membership-panel .dialog.dialog-wide { width: min(80vw, 980px); }
+.scene-directory-item:hover { background: var(--hover); }
+.scene-management > p, .scene-membership-panel > p { margin-block: 12px; }

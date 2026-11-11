@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEven
 import { ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Circle, Clock3, CloudUpload, FolderOpen, ImagePlus, Images, Info, Layers3, Leaf, ListChecks, LoaderCircle, Pencil, Plus, RotateCcw, Search, Square, Tags, Trash2, X, XCircle } from 'lucide-react'
 import { Dialog } from './Dialog'
 import { indexImage, type LibraryImageItem } from '../entities/image'
-import { DEFAULT_SCENE, sceneDisplayLabel, toApiSceneCode } from '../entities/scene'
+import { DEFAULT_SCENE, sceneDisplayLabel, toApiSceneCode, unknownScene, sceneError } from '../entities/scene'
 import { EmptyState, Metric } from '../shared/ui'
 import { EMPTY_COPY } from '../shared/config'
 import { formatLibraryTime } from '../shared/lib'
@@ -10,9 +10,10 @@ import { SceneSelect } from '../features/scene-select'
 import { useLibraryList } from '../features/library-list'
 import { ImageLabelPanel } from '../features/image-label'
 import { ImportSceneIntent } from '../features/index-upload'
+import { useSceneCatalog, useSceneSelection } from '../features/scene-catalog'
 import './ManagementViews.css'
 
-export type ManagementView = 'library' | 'import' | 'tasks' | 'ingredients' | 'categories' | 'enums'
+export type ManagementView = 'library' | 'import' | 'tasks' | 'ingredients' | 'categories' | 'enums' | 'scenes'
 type Props = { view: ManagementView; onNavigate: (view: ManagementView) => void; apiBase?: string }
 type IndexJobStatus = 'pending' | 'running' | 'success' | 'error' | 'cancelled'
 type IndexJob = {
@@ -99,6 +100,11 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     }
   }, [apiBase])
 
+  const sceneCatalog = useSceneCatalog(apiBase)
+  const handleLibraryScene = useCallback((code: string) => { setLibraryScene(toApiSceneCode(code)); setLibraryPage(1) }, [])
+  const librarySelection = useSceneSelection(libraryScene, handleLibraryScene, apiBase)
+  const importReady = sceneCatalog.valid && importScenes.length > 0 && importScenes.every(code => sceneCatalog.active.some(s => s.code === code))
+
   // Debounce search box → q (~300ms); empty trim omits q on request.
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -109,7 +115,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
   }, [libraryQuery])
 
   const libraryList = useLibraryList({
-    enabled: view === 'library',
+    enabled: view === 'library' && librarySelection.selectionValid,
     apiBase,
     page: libraryPage,
     pageSize: 24,
@@ -197,6 +203,8 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
 
   async function startIndexing(retryFailed = false) {
     if (indexingRef.current) return
+    if (!importReady) { setNotice('场景目录不可用或场景意向失效，请刷新复核后再提交。'); return }
+    const requestedScenes = [...importScenes]
     const targets = jobsRef.current.filter(job => retryFailed
       ? job.status === 'error' || job.status === 'cancelled'
       : job.status === 'pending' || job.status === 'cancelled')
@@ -226,7 +234,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
           const result = await indexImage({
           file: target.file,
           category,
-          scenes: importScenes,
+          scenes: requestedScenes,
             baseUrl: requestBase,
             signal: controller.signal,
           })
@@ -245,10 +253,11 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
           if (!currentRun()) break
           const error = controller.signal.aborted && controller.signal.reason === 'timeout'
             ? '入库超过 120 秒，请稍后重试。'
-            : cause instanceof Error ? cause.message : '入库失败，请重试。'
+            : sceneError(cause)
           commitJobs(jobsRef.current.map(job => job.id === target.id
             ? { ...job, status: 'error', error, elapsed: (performance.now() - started) / 1000 }
             : job))
+          if (unknownScene(cause)) { await sceneCatalog.refresh(); break }
         } finally {
           window.clearTimeout(timer)
           if (activeIndex.current?.controller === controller) activeIndex.current = null
@@ -323,7 +332,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
             variant="management"
             value={libraryScene}
             disabled={libraryLoading}
-            onChange={code => { setLibraryScene(toApiSceneCode(code)); setLibraryPage(1) }}
+            onChange={handleLibraryScene}
           />
         <div className="mg-view-toggle" aria-label="图片展示方式"><button className={libraryLayout === 'grid' ? 'active' : ''} aria-label="网格展示" aria-pressed={libraryLayout === 'grid'} onClick={() => setLibraryLayout('grid')}><Images size={17} /></button><button className={libraryLayout === 'list' ? 'active' : ''} aria-label="列表展示" aria-pressed={libraryLayout === 'list'} onClick={() => setLibraryLayout('list')}><ListChecks size={17} /></button></div>
         <button className="mg-btn mg-primary" onClick={() => onNavigate('import')}><Plus size={17} />导入图片</button>
@@ -351,7 +360,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     </div>
 
     {view === 'library' && (() => {
-      const hasFilter = Boolean(debouncedLibraryQuery) || libraryCategory !== '全部类别' || libraryScene !== DEFAULT_SCENE
+      const hasFilter = Boolean(debouncedLibraryQuery) || libraryCategory !== '全部类别' || libraryScene !== sceneCatalog.defaultScene?.code
       const totalPages = Math.max(1, Math.ceil(libraryTotal / 24) || 1)
       const pageLabel = libraryTotal === 0 ? '—' : `${libraryPage} / ${totalPages}`
       return <>
@@ -378,7 +387,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
         )}
         {!libraryError && !libraryLoading && libraryTotal === 0 && hasFilter && (
           <EmptyState icon={Images} title={EMPTY_COPY.libraryFilteredEmpty.title} description={EMPTY_COPY.libraryFilteredEmpty.description}>
-            <button className="mg-btn mg-secondary" onClick={() => { setLibraryQuery(''); setLibraryCategory('全部类别'); setLibraryScene(DEFAULT_SCENE); setLibraryPage(1) }}>清空筛选</button>
+            <button className="mg-btn mg-secondary" onClick={() => { setLibraryQuery(''); setLibraryCategory('全部类别'); setLibraryScene(sceneCatalog.defaultScene?.code ?? ''); setLibraryPage(1) }}>清空筛选</button>
           </EmptyState>
         )}
         {!libraryError && libraryItems.length > 0 && libraryLayout === 'grid' && (
@@ -401,7 +410,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
                   <strong title={item.id}>未命名图片</strong>
                   <small>
                     {item.category ? <span className="mg-category-chip">{item.category}</span> : <span>—</span>}
-                    {item.scenes.map(code => <span className="mg-library-scene" key={code}>{sceneDisplayLabel(code)}</span>)}
+                    {item.scenes.map(code => <span className="mg-library-scene" key={code}>{sceneCatalog.data?.scenes.find(s => s.code === code)?.name ?? sceneDisplayLabel(code)}</span>)}
                   </small>
                 </div>
               </article>
@@ -470,8 +479,8 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
       <div className="mg-index-actions">
         {indexing
           ? <button type="button" className="mg-btn mg-secondary mg-full" onClick={stopIndexing}><Square size={15} />取消入库</button>
-          : <button type="button" className="mg-btn mg-primary mg-full" disabled={!resumable} onClick={() => void startIndexing(false)}><CloudUpload size={17} />{hasStarted && resumable ? '继续入库' : '开始入库'}</button>}
-        {!indexing && retryable && <button type="button" className="mg-btn mg-secondary mg-full" onClick={() => void startIndexing(true)}><RotateCcw size={15} />仅重试失败</button>}
+          : <button type="button" className="mg-btn mg-primary mg-full" disabled={!resumable || !importReady} onClick={() => void startIndexing(false)}><CloudUpload size={17} />{hasStarted && resumable ? '继续入库' : '开始入库'}</button>}
+        {!indexing && retryable && <button type="button" className="mg-btn mg-secondary mg-full" disabled={!importReady} onClick={() => void startIndexing(true)}><RotateCcw size={15} />仅重试失败</button>}
       </div>
       <p className="mg-help">逐张调用 <code>POST /api/index</code>。进行中不可清空队列；离开页面后本会话队列不保留。批量端点形态待契约冻结后可改。</p></section>
       <div className="mg-workflow-note"><ListChecks size={18} /><h3>入库任务</h3><p>本批进度也会汇总到任务中心；无本会话任务时保持空态。</p><button className="mg-text-button" onClick={() => onNavigate('tasks')}>查看任务中心<ArrowRight size={15} /></button></div></aside></div>}
@@ -509,7 +518,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
         ? <img className="mg-dialog-image" src={libraryPreview.originalUrl ?? libraryPreview.imageUrl!} alt="" />
         : <div className="mg-empty"><p>暂无预览地址</p></div>}
       <p className="mg-preview-name">{libraryPreview.id}</p>
-      <ImageLabelPanel item={libraryPreview} apiReady={false} />
+      <ImageLabelPanel item={libraryPreview} apiBase={apiBase} onSaved={() => setLibraryReloadKey(key => key + 1)} onManage={() => { setLibraryPreview(null); onNavigate('scenes'); const u = new URL(window.location.href); u.searchParams.set('sceneTab', 'sync'); window.history.replaceState(null, '', u.toString()) }} />
     </Dialog>}
     {editor && <Dialog title={ingredients.some(item => item.id === editor.id) ? '编辑食材草稿' : '新建食材草稿'} onClose={() => setEditor(null)}>
       <form className="mg-editor" onSubmit={saveIngredient}>

@@ -1,0 +1,23 @@
+---
+pid: 44912
+cwd: "C:\\Users\\47202\\PROJECT\\Image-Embedding"
+command: "$ErrorActionPreference='Stop'; $p = @(Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -in @(16532,47568) } | Select-Object ProcessId,CommandLine,CreationDate); $ports = @(Get-NetTCPConnection -State Listen | Where-Object { $_.LocalPort -in @(58283,58290) } | Select-Object LocalAddress,LocalPort,OwningProcess); @{ checked_at=(Get-Date).ToString('o'); pids=$p; listeners=$ports } | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 .qa/scene-completion-local-readiness.json; @'\nimport pathlib,json,httpx\nfrom datetime import datetime\nfrom zoneinfo import ZoneInfo\np=pathlib.Path('.qa/scene-completion-local-readiness.json');r=json.loads(p.read_text(encoding='utf-8-sig'));responses=[]\nfor url in ['http://127.0.0.1:58290/','http://127.0.0.1:58290/api/scenes','http://127.0.0.1:58283/api/scenes']:\n try:\n  x=httpx.get(url,timeout=5,trust_env=False);responses.append({'url':url,'status':x.status_code,'content_type':x.headers.get('content-type'),'bytes':len(x.content),'qa_gui_scene_present':any(s['code']=='qa_gui' for s in x.json()['scenes']) if url.endswith('/api/scenes') and x.status_code==200 else None})\n except httpx.HTTPError as e:responses.append({'url':url,'error_type':type(e).__name__,'error':str(e)})\nr['http_checked_at']=datetime.now(ZoneInfo('America/Denver')).isoformat();r['HTTP_readonly_responses']=responses;r['boundary']='Actual wondron loopback HTTP only. Not browser/page/screenshot proof; does not identify peer browser machine.';p.write_text(json.dumps(r,ensure_ascii=False,indent=2),encoding='utf-8');print(json.dumps(r,ensure_ascii=False))\n'@ | & 'D:\\99-tools\\anaconda\\envs\\onnxgpu\\python.exe' -; exit $LASTEXITCODE"
+title: "Check exact QA PIDs/listeners and local read-only HTTP once to distinguish peer browser refusal from local service state"
+status: failed   
+started_at: 2026-11-10T18:03:48.900Z
+running_for_ms: 2867     
+---
+Get-NetTCPConnection : 在模块“NetTCPIP”中找到“Get-NetTCPConnection”命令，但无法加载该模块。有关详细信息，请运行“Import-M
+odule NetTCPIP”。
+所在位置 C:\Users\47202\AppData\Local\Temp\ps-script-beabcfd8-7612-495e-8808-d556d808f131.ps1:611 字符: 184
++ ... Id,CommandLine,CreationDate); $ports = @(Get-NetTCPConnection -State  ...
++                                              ~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (Get-NetTCPConnection:String) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : CouldNotAutoloadMatchingModule
+ 
+
+---
+exit_code: 1
+elapsed_ms: 2866
+ended_at: 2026-11-10T18:03:51.766Z
+---

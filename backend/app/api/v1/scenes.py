@@ -31,7 +31,10 @@ _PROTECTED = {403: {"model": ErrorResponse}}
 _SceneId = Path(..., gt=0, description="scenes.id")
 _LabelId = Path(..., gt=0, description="scene_labels.id")
 _RuleId = Path(..., gt=0, description="scene_rules.id")
-_SYNC_NOTE = "规则改动要等「重算场景归属」（POST /api/scenes/sync）后才作用到已入库的图片。"
+_SYNC_NOTE = (
+    "响应的 sync_required 为 true 时（规则、启用、包含全部图片的改动），要等「重算场景归属」"
+    "（POST /api/scenes/sync）后才作用到已入库的图片；为 false 时已经生效。"
+)
 
 
 @router.get(
@@ -87,7 +90,10 @@ def update_scene(request: Request, body: SceneUpdateRequest, scene_id: int = _Sc
     "/{scene_id}",
     response_model=SceneDeleteResponse,
     summary="Delete a scene",
-    description="删除场景及其场景类别、规则和图片归属记录；默认场景不能删除（SCENE_PROTECTED，403）。",
+    description=(
+        "删除场景及其场景类别、规则和图片归属记录；默认场景不能删除（SCENE_PROTECTED，403）。"
+        "场景原来有成员时 sync_required 为 true：向量 payload 里的旧编码要重算后才清掉。"
+    ),
     responses={**_NOT_FOUND, **_PROTECTED},
 )
 def delete_scene(request: Request, scene_id: int = _SceneId) -> Any:
@@ -147,9 +153,14 @@ def create_rule(request: Request, body: SceneRuleCreateRequest, scene_id: int = 
 @router.patch(
     "/{scene_id}/rules/{rule_id}",
     response_model=SceneResponse,
-    summary="Change a rule's label",
-    description="规则的目标（类别或菜系）不能改，只能改映射到的场景类别；label_id 为 null 时清空。",
-    responses=_NOT_FOUND,
+    summary="Change a rule's target and / or label",
+    description=(
+        "只改请求里给了的字段，在一个事务里完成，规则 id 不变。给 category_id 或 cuisine（恰好一个非空）就把目标"
+        "换成它，另一个清空；目标和本场景其他规则重复返回 SCENE_RULE_EXISTS（409）。label_id 为 null 时清空映射；"
+        "按菜系的规则不能映射场景类别（换成菜系时一并传 label_id: null）。只改映射时 sync_required 为 false。"
+        + _SYNC_NOTE
+    ),
+    responses={**_NOT_FOUND, **_CONFLICT},
 )
 def update_rule(
     request: Request, body: SceneRuleUpdateRequest, scene_id: int = _SceneId, rule_id: int = _RuleId

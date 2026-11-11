@@ -677,15 +677,119 @@ class PgLiveTests(unittest.TestCase):
         # the category admin sees the rule as a use
         self.assertEqual(next(n for n in store.list_categories() if n["code"] == "dish.steak")["scene_rule_count"], 1)
 
-        # deleting a scene takes its labels, rules and memberships
+        # deleting a scene takes its labels, rules and memberships; its code is still in the
+        # members' payloads, so the delete asks for a sync
         image = self.insert(store, 1, category_id=cat["steak"], label_status="auto")
         store.recompute_scene_memberships(limit=10)
         self.assertEqual(store.get_effective_scene_codes(image), ["general", "oven", "steam_oven"])
-        self.assertEqual(store.delete_scene(sid), {"id": sid, "code": "steam_oven"})
+        self.assertEqual(store.delete_scene(sid), {"id": sid, "code": "steam_oven", "sync_required": True})
+        empty = store.create_scene({"code": "air_fryer", "name": "空气炸锅"})
+        self.assertEqual(store.delete_scene(empty["id"])["sync_required"], False)  # never had members
         for table in ("scene_labels", "scene_rules", "image_scenes"):
             self.assertEqual(self.sql(f"SELECT count(*) FROM {table} WHERE scene_id = :s", {"s": sid}).scalar_one(), 0, table)
         self.assertEqual(store.get_effective_scene_codes(image), ["general", "oven"])
         self.assert_app_error("SCENE_NOT_FOUND", store.update_scene, sid, {"name": "x"})
+
+    def test_writes_say_whether_stored_images_need_a_sync(self):
+        cat = self.seed_catalog()
+        store = self.store()
+
+        def flag(result):
+            return result["sync_required"]
+
+        # A new rule-based scene has no members yet; a new active include_all one has every image
+        rule_based = store.create_scene({"code": "steam_oven", "name": "蒸烤箱"})
+        sid = rule_based["id"]
+        self.assertFalse(flag(rule_based))
+        self.assertTrue(flag(store.create_scene({"code": "air_fryer", "name": "空气炸锅", "include_all": True})))
+        self.assertFalse(flag(store.create_scene({"code": "grill", "name": "烤架", "include_all": True, "is_active": False})))
+
+        # Read per request: names, descriptions, outputs_heating, labels
+        self.assertFalse(flag(store.update_scene(sid, {"name": "蒸烤箱 2", "description": "x", "outputs_heating": True})))
+        self.assertFalse(flag(store.update_scene(sid, {"is_active": True, "include_all": False})))  # unchanged values
+        scene = store.create_scene_label(sid, {"code": "steak", "name": "牛排"})
+        self.assertFalse(flag(scene))
+        label = scene["labels"][0]["id"]
+        self.assertFalse(flag(store.update_scene_label(sid, label, {"name": "牛排 2", "is_active": False})))
+
+        # Rules of an active rule-based scene change membership; a label mapping does not
+        scene = store.create_scene_rule(sid, {"category_id": cat["dish"]})
+        self.assertTrue(flag(scene))
+        rule = scene["rules"][0]["id"]
+        self.assertFalse(flag(store.update_scene_rule(sid, rule, {"label_id": label})))
+        self.assertFalse(flag(store.update_scene_rule(sid, rule, {"category_id": cat["dish"], "cuisine": None})))  # same target
+        self.assertTrue(flag(store.update_scene_rule(sid, rule, {"category_id": cat["steak"]})))
+        self.assertFalse(flag(store.delete_scene_label(sid, store.create_scene_label(sid, {"code": "x", "name": "x"})["labels"][-1]["id"])))
+
+        # Turning the scene off or into include_all changes membership; while it is off, nothing does
+        self.assertTrue(flag(store.update_scene(sid, {"is_active": False})))
+        self.assertFalse(flag(store.create_scene_rule(sid, {"cuisine": "american"})))
+        self.assertFalse(flag(store.update_scene(sid, {"include_all": True})))  # still off
+        self.assertTrue(flag(store.update_scene(sid, {"is_active": True})))  # on, with every image
+        self.assertFalse(flag(store.delete_scene_rule(sid, rule)))  # an include_all scene ignores its rules
+        self.assertTrue(flag(store.update_scene(sid, {"include_all": False})))
+
+    def test_a_rule_target_changes_in_place(self):
+        cat = self.seed_catalog()  # oven: rule on dish with label steak
+        store = self.store()
+        oven = store.get_scene_by_code("oven")["id"]
+        label = cat["label"]
+        rule = self.sql("SELECT id FROM scene_rules WHERE scene_id = :s", {"s": oven}).scalar_one()
+
+        def rules():
+            return [(r["id"], r["category"]["code"] if r["category"] else None, r["cuisine"], r["label"]["code"] if r["label"] else None)
+                    for r in next(s for s in store.list_scene_configs() if s["id"] == oven)["rules"]]
+
+        # Another category: same rule id, label kept
+        store.update_scene_rule(oven, rule, {"category_id": cat["steak"]})
+        self.assertEqual(rules(), [(rule, "dish.steak", None, "steak")])
+
+        # A cuisine rule cannot keep a label: refused (nothing changes) until the label is cleared too
+        detail = self.assert_app_error("VALIDATION_ERROR", store.update_scene_rule, oven, rule, {"cuisine": "american"})
+        self.assertIn("label_id: null", detail)
+        self.assertEqual(rules(), [(rule, "dish.steak", None, "steak")])
+        result = store.update_scene_rule(oven, rule, {"cuisine": "american", "label_id": None})
+        self.assertTrue(result["sync_required"])
+        self.assertEqual(rules(), [(rule, None, "american", None)])
+
+        # Back to a category, with a label, in one request
+        store.update_scene_rule(oven, rule, {"category_id": cat["dish"], "label_id": label})
+        self.assertEqual(rules(), [(rule, "dish", None, "steak")])
+
+        # The target must be free in this scene, the category must exist, exactly one target
+        other = store.create_scene_rule(oven, {"cuisine": "american"})["rules"][-1]["id"]
+        self.assert_app_error("SCENE_RULE_EXISTS", store.update_scene_rule, oven, other, {"category_id": cat["dish"]})
+        self.assert_app_error("SCENE_RULE_EXISTS", store.update_scene_rule, oven, rule, {"cuisine": "american", "label_id": None})
+        self.assert_app_error("VALIDATION_ERROR", store.update_scene_rule, oven, rule, {"category_id": 987654})
+        self.assert_app_error("VALIDATION_ERROR", store.update_scene_rule, oven, rule, {"category_id": cat["dish"], "cuisine": "x"})
+        self.assert_app_error("VALIDATION_ERROR", store.update_scene_rule, oven, rule, {"category_id": None})
+        self.assert_app_error("VALIDATION_ERROR", store.update_scene_rule, oven, rule, {})
+        self.assertEqual(rules(), [(rule, "dish", None, "steak"), (other, None, "american", None)])
+
+        # Stored images follow the new target at the next recompute
+        steak = self.insert(store, 1, category_id=cat["steak"], label_status="auto")
+        self.assertEqual(store.get_effective_scene_codes(steak), ["general", "oven"])
+        store.delete_scene_rule(oven, other)
+        store.update_scene_rule(oven, rule, {"cuisine": "chinese", "label_id": None})
+        store.recompute_scene_memberships(limit=10)
+        self.assertEqual(store.get_effective_scene_codes(steak), ["general"])
+
+    def test_the_ledger_records_only_current_payload_versions(self):
+        store = self.store()
+        model_id = self.sql(
+            "INSERT INTO embedding_models (name, version, dim, distance, input_size, weights_uri, collection, status) "
+            "VALUES ('m', '1', 4, 'cosine', 336, 's3://w', 'c_ledger', 'current') RETURNING id"
+        ).scalar_one()
+        a, b = self.insert(store, 1), self.insert(store, 2)
+        self.sql("UPDATE images SET payload_version = 3 WHERE id = :i", {"i": uuid.UUID(b)})
+        gone = str(uuid.uuid4())  # deleted meanwhile: no row, no FK failure
+
+        recorded = store.mark_payloads_pushed(model_id=model_id, versions={a: 1, b: 2, gone: 1})
+        self.assertEqual(recorded, [a])  # b moved on to 3 after its payload was read
+        self.assertEqual(store.mark_payloads_pushed(model_id=model_id, versions={b: 3}), [b])
+        self.assertEqual(store.mark_payloads_pushed(model_id=model_id, versions={}), [])
+        ledger = dict(self.sql("SELECT image_id::text, synced_version FROM image_embeddings").fetchall())
+        self.assertEqual(ledger, {a: 1, b: 3})
 
     def test_batch_recompute_follows_the_rules_and_bumps_only_what_changed(self):
         cat = self.seed_catalog()  # oven: rule on dish (cuisines {american}) with label steak
@@ -804,6 +908,131 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual((first["membership_changed"], first["done"], first["next_after"]), (1, True, None))
         self.assertEqual(vectors.search([1, 0, 0, 0], top_k=10, scene="oven"), [])
         self.assertEqual(self.sql("SELECT synced_version FROM image_embeddings WHERE image_id = :i", {"i": uuid_mod.UUID(steak)}).scalar_one(), 2)
+
+    def test_a_manual_membership_reaches_the_vector_filter_at_once(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from app.api.v1 import scene_memberships as routes
+        from app.bootstrap.state import ApplicationState
+        from app.clients.qdrant import QdrantConnection, QdrantStore
+        from app.core.exceptions import register_exception_handlers
+        from app.core.middleware import TraceIdMiddleware
+        from app.repositories.vectors import QdrantVectorStore
+        from app.services.retrieval.active_model import ActiveModel
+        from app.services.retrieval.manage_scenes import ManageScenesUseCase
+        from app.services.retrieval.sync_scenes import SyncSceneMembershipsUseCase
+
+        store = self.store()
+        model_id = self.sql(
+            "INSERT INTO embedding_models (name, version, dim, distance, input_size, weights_uri, collection, status) "
+            "VALUES ('m', '1', 4, 'cosine', 336, 's3://w', 'c_manual', 'current') RETURNING id"
+        ).scalar_one()
+        plain = self.insert(store, 1)
+        orphan = self.insert(store, 2)  # in PG, never embedded into this collection
+        vectors = QdrantVectorStore(QdrantStore(QdrantConnection(url=":memory:"), collection="c_manual", vector_dim=4))
+        vectors.ensure_collection()
+        self.addCleanup(vectors.close)
+        vectors.upsert(plain, [1, 0, 0, 0], {"scenes": ["general"], "category_id": None, "food_state": None, "label_status": "unlabeled"})
+        model = ActiveModel(id=model_id, name="m", version="1", collection="c_manual", dim=4, distance="cosine")
+
+        runtime = ApplicationState(
+            config={}, config_info={}, http_client=Mock(), settings=SimpleNamespace(),
+            catalog=SimpleNamespace(scenes_uc=ManageScenesUseCase(store)),
+            retrieval=SimpleNamespace(scene_sync_uc=SyncSceneMembershipsUseCase(store, vectors, model=model)),
+        )
+        app = FastAPI()
+        register_exception_handlers(app)
+        app.add_middleware(TraceIdMiddleware)
+        app.include_router(routes.router)
+        client = TestClient(app)
+        self.addCleanup(client.close)
+        with patch.object(routes, "get_application_state", return_value=runtime):
+            oven = store.get_scene_by_code("oven")["id"]
+            path = f"/api/images/{plain}/scene-memberships/{oven}"
+
+            def oven_hits():
+                return [hit["id"] for hit in vectors.search([1, 0, 0, 0], top_k=5, scene="oven")]
+
+            def synced(image):
+                return self.sql(
+                    "SELECT e.synced_version = i.payload_version FROM images i "
+                    "JOIN image_embeddings e ON e.image_id = i.id WHERE i.id = :i", {"i": uuid.UUID(image)}
+                ).scalar_one()
+
+            # Included by hand: the vector filter sees it in the same request, the ledger agrees
+            response = client.put(path, json={"is_member": True})
+            self.assertEqual(response.status_code, 200, response.text)
+            body = response.json()
+            self.assertEqual((body["vector_sync"], body["sync_required"], body["scenes"]), ("pushed", False, ["general", "oven"]))
+            self.assertEqual(oven_hits(), [plain])
+            self.assertTrue(synced(plain))
+
+            # Back to the rules (none match): out of the filter again
+            body = client.delete(path).json()
+            self.assertEqual((body["vector_sync"], body["sync_required"], body["scenes"]), ("pushed", False, ["general"]))
+            self.assertEqual(oven_hits(), [])
+
+            # No vector in the current collection: saved in PG, search cannot see it
+            body = client.put(f"/api/images/{orphan}/scene-memberships/{oven}", json={"is_member": True}).json()
+            self.assertEqual((body["vector_sync"], body["sync_required"]), ("missing", True))
+            self.assertEqual(store.get_effective_scene_codes(orphan), ["general", "oven"])
+
+            # Qdrant fails: still saved, the client is told to sync
+            with patch.object(vectors, "set_payloads", side_effect=RuntimeError("qdrant down")):
+                body = client.put(path, json={"is_member": True}).json()
+            self.assertEqual((body["vector_sync"], body["sync_required"], body["scenes"]), ("failed", True, ["general", "oven"]))
+            self.assertEqual(oven_hits(), [])
+            self.assertFalse(synced(plain))  # the ledger tells the truth: the payload is behind
+
+            # Retrieval stack not built: PostgreSQL alone still takes the change
+            runtime.retrieval, runtime.retrieval_error = None, "embedding model unavailable"
+            body = client.put(path, json={"is_member": False}).json()
+            self.assertEqual((body["vector_sync"], body["sync_required"], body["scenes"]), ("not_ready", True, ["general"]))
+
+    def test_a_payload_superseded_while_it_was_written_is_pushed_again(self):
+        from unittest.mock import patch
+
+        from app.clients.qdrant import QdrantConnection, QdrantStore
+        from app.repositories.vectors import QdrantVectorStore
+        from app.services.retrieval.active_model import ActiveModel
+        from app.services.retrieval.sync_scenes import SyncSceneMembershipsUseCase
+
+        store = self.store()
+        model_id = self.sql(
+            "INSERT INTO embedding_models (name, version, dim, distance, input_size, weights_uri, collection, status) "
+            "VALUES ('m', '1', 4, 'cosine', 336, 's3://w', 'c_race', 'current') RETURNING id"
+        ).scalar_one()
+        image = self.insert(store, 1)
+        vectors = QdrantVectorStore(QdrantStore(QdrantConnection(url=":memory:"), collection="c_race", vector_dim=4))
+        vectors.ensure_collection()
+        self.addCleanup(vectors.close)
+        vectors.upsert(image, [1, 0, 0, 0], {"scenes": ["general"], "category_id": None, "food_state": None, "label_status": "unlabeled"})
+        model = ActiveModel(id=model_id, name="m", version="1", collection="c_race", dim=4, distance="cosine")
+        uc = SyncSceneMembershipsUseCase(store, vectors, model=model)
+        oven = store.get_scene_by_code("oven")["id"]
+
+        # Another writer includes the image in oven (and pushes it) between our read and our write:
+        # our payload is the older one, so it must not stay in the collection
+        real_set = vectors.set_payloads
+        calls = []
+
+        def racing_set(payloads):
+            calls.append({k: v["scenes"] for k, v in payloads.items()})
+            if len(calls) == 1:
+                store.put_manual_scene_membership(image, oven, is_member=True)
+                uc.push_images([image])  # the other writer's own push lands first
+            return real_set(payloads)
+
+        with patch.object(vectors, "set_payloads", side_effect=racing_set):
+            result = uc.push_images([image])
+        self.assertEqual(calls[0], {image: ["general"]})  # the stale write ...
+        self.assertEqual(calls[-1], {image: ["general", "oven"]})  # ... is followed by the current one
+        self.assertEqual((list(result.pushed), result.missing, result.unconfirmed), ([image], [], []))
+        self.assertEqual([hit["id"] for hit in vectors.search([1, 0, 0, 0], top_k=5, scene="oven")], [image])
 
     def run_while_locked(self, action, *, shared):
         """Start action in a thread while this test holds the catalog lock; True if it waited."""
