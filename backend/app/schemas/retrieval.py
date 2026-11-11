@@ -23,6 +23,12 @@ class IndexJsonRequest(BaseModel):
     )
     scene: str | None = None
     scenes: list[Any] | None = None
+    label_status: str | None = Field(
+        default=None,
+        description="标注状态 auto / verified（要有类别）；不传时有类别为 auto、没有类别为 unlabeled",
+    )
+    source_type: str | None = Field(default=None, description="来源，取值见 GET /api/enums/source_type；默认 user_upload")
+    license: str | None = Field(default=None, description="许可，取值见 GET /api/enums/license；默认 unknown")
     # optional food annotation (stored in image_foods); the use case checks it
     # (app.services.retrieval.food_fields). Strict ints: JSON true must not count as 1
     food_state: str | None = Field(default=None, description="食物状态，取值见 GET /api/enums/food_state")
@@ -78,6 +84,13 @@ class IndexedImage(BaseModel):
     height: int
     payload_version: int | None = None
     created_at: str | None = None
+    created: bool | None = Field(
+        default=None,
+        description=(
+            "true：这次请求新入库；false：相同图片（字节完全相同）此前已入库，"
+            "保留首次入库的类别、标签等字段，本次请求里的标注没有写入"
+        ),
+    )
 
 
 class IndexFailure(BaseModel):

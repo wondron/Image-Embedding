@@ -60,22 +60,47 @@ export async function listImages({ baseUrl, signal, ...query }: ListImagesOption
 
 export const MAX_INDEX_FILES = 100
 
-export interface IndexOptions {
+/** The optional food annotation of an index request (image_foods); omitted fields stay empty. */
+export interface IndexFoodFields {
+  foodState?: string | null
+  foodProcessing?: string | null
+  foodCount?: number | null
+  totalMassG?: number | null
+  waterMassG?: number | null
+  mainIngredientMassG?: number | null
+}
+
+const FOOD_FORM_KEYS: ReadonlyArray<[keyof IndexFoodFields, string]> = [
+  ['foodState', 'food_state'],
+  ['foodProcessing', 'food_processing'],
+  ['foodCount', 'food_count'],
+  ['totalMassG', 'total_mass_g'],
+  ['waterMassG', 'water_mass_g'],
+  ['mainIngredientMassG', 'main_ingredient_mass_g'],
+]
+
+export interface IndexOptions extends IndexFoodFields {
   file?: File
   files?: File[]
+  /** Category code (categories.code, e.g. dish.steak); the server resolves it. */
   category?: string
   tags?: string[]
-  /** Intent scenes; the caller sends ['general'] by default. */
+  /** Scene hints: only checked by the server, membership follows the scene rules. */
   scenes?: string[]
   /** 图片描述 (P6); omitted when blank, so the server default "" applies. */
   description?: string
+  /** auto / verified; only meaningful with a category. Omitted: auto when there is one. */
+  labelStatus?: 'auto' | 'verified'
+  /** Editable enums (GET /api/enums); omitted: user_upload / unknown. */
+  sourceType?: string
+  license?: string
   baseUrl?: string
   signal?: AbortSignal
 }
 
 /**
  * Index via POST /api/index — multipart `file` (one) or `files` (≤100) plus the shared
- * category / tags / scenes / description fields. Throws when nothing was stored.
+ * category / tags / scenes / description / labelling / food fields. Throws when nothing was stored.
  */
 export async function indexImage({
   file,
@@ -84,8 +109,12 @@ export async function indexImage({
   tags,
   scenes,
   description,
+  labelStatus,
+  sourceType,
+  license,
   baseUrl,
   signal,
+  ...food
 }: IndexOptions): Promise<IndexResponse> {
   const batch = files?.length ? files : file ? [file] : []
   if (!batch.length) throw new Error('请选择至少一张待入库图片。')
@@ -98,9 +127,16 @@ export async function indexImage({
   if (batch.length === 1) form.append('file', batch[0])
   else batch.forEach(item => form.append('files', item))
   if (category && category !== '未分类') form.append('category', category)
+  if (category && category !== '未分类' && labelStatus) form.append('label_status', labelStatus)
   if (tags?.length) form.append('tags', JSON.stringify(tags))
   if (scenes?.length) form.append('scenes', JSON.stringify(scenes))
   if (description?.trim()) form.append('description', description)
+  if (sourceType?.trim()) form.append('source_type', sourceType.trim())
+  if (license?.trim()) form.append('license', license.trim())
+  for (const [key, wire] of FOOD_FORM_KEYS) {
+    const value = food[key]
+    if (value !== null && value !== undefined && String(value).trim()) form.append(wire, String(value).trim())
+  }
 
   const result = toIndexResponse(await requestJson('/api/index', {
     baseUrl,

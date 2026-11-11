@@ -123,8 +123,10 @@ class IndexImageIdentityTests(unittest.TestCase):
 
     def test_reupload_pushes_the_stored_row_not_the_request(self):
         data = _png()
-        self.use_case().execute_one(image_bytes=data)  # first: unlabeled
+        first = self.use_case().execute_one(image_bytes=data)  # first: unlabeled
+        self.assertTrue(first["created"])
         out = self.use_case().execute_one(image_bytes=data, category="dish.steak", food_state="raw")
+        self.assertFalse(out["created"])  # the client is told its labels were not written
         _, payload = self.vectors.upserts[-1]
         self.assertIsNone(payload["category_id"])
         self.assertEqual(payload["label_status"], "unlabeled")

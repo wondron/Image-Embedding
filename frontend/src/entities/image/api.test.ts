@@ -58,6 +58,22 @@ describe('indexImage (POST /api/index)', () => {
     expect(result.indexed[0]).toMatchObject({ id: 'a', imageUrl: 'https://s3.example/t/a.webp', labelStatus: 'unlabeled' })
   })
 
+  it('sends the labelling and food fields; label_status only with a category', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(json({ ok: true, trace_id: 't', indexed: [indexed('a')], failed: [] })))
+    vi.stubGlobal('fetch', fetchMock)
+    await indexImage({
+      file: png(), category: 'dish.steak', labelStatus: 'verified', sourceType: ' crawled ', license: 'commercial',
+      foodState: 'cooked', foodProcessing: null, foodCount: 2, totalMassG: 350, waterMassG: 0, mainIngredientMassG: null,
+    })
+    const form = fetchMock.mock.calls[0][1].body as FormData
+    expect(Object.fromEntries([...form.entries()].filter(([key]) => key !== 'file'))).toEqual({
+      category: 'dish.steak', label_status: 'verified', source_type: 'crawled', license: 'commercial',
+      food_state: 'cooked', food_count: '2', total_mass_g: '350', water_mass_g: '0',
+    })
+    await indexImage({ file: png(), labelStatus: 'verified' })  // no category: the server would refuse the label
+    expect((fetchMock.mock.calls[1][1].body as FormData).get('label_status')).toBeNull()
+  })
+
   it('sends several files as `files` and leaves out 未分类 and blank descriptions', async () => {
     const fetchMock = vi.fn().mockResolvedValue(json({ ok: true, trace_id: 't', indexed: [indexed('a'), indexed('b')], failed: [] }))
     vi.stubGlobal('fetch', fetchMock)

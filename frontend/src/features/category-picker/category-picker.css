@@ -1,0 +1,32 @@
+/* Searchable category select: same field look as .mg-field inputs; the list opens in place. */
+.cp { margin-top: 16px; }
+.cp code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+.cp-label { display: block; color: #7b8899; font-size: 14px; line-height: 1.6; }
+
+.cp-selected { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-top: 7px; padding: 7px 8px 7px 10px; border: 1px solid #cfe0ff; border-radius: 10px; background: #f4f8ff; }
+.cp-selected > div { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.cp-selected strong { color: #1f2a3a; font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
+.cp-selected small { color: #64748b; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.cp-selected code { color: #64748b; }
+.cp-clear { display: grid; place-items: center; flex-shrink: 0; width: 24px; height: 24px; border-radius: 6px; color: #64748b; }
+.cp-clear:hover:not(:disabled) { color: #b42318; background: rgba(180, 35, 24, .06); }
+
+.cp-combo { display: flex; align-items: center; gap: 7px; min-height: 38px; margin-top: 7px; padding: 0 10px; border: 1px solid #d7e0ee; border-radius: 10px; background: #fff; color: #7b8899; }
+.cp-combo:focus-within { border-color: #9ab4dc; box-shadow: 0 0 0 3px rgba(59, 130, 246, .1); }
+.cp-combo.is-open { border-bottom-left-radius: 4px; border-bottom-right-radius: 4px; }
+.cp.is-invalid .cp-combo, .cp.is-invalid .cp-selected { border-color: #f0c2bc; }
+.cp-combo input { flex: 1; min-width: 0; height: 36px; padding: 0; border: 0; outline: 0; background: transparent; color: #223046; font-size: 14px; }
+.cp-combo input::placeholder { color: #7b8aa0; }
+.cp-combo input:disabled { cursor: not-allowed; }
+.mg-page .cp-combo input:focus-visible { outline: 0; }
+
+.cp-list { max-height: 260px; margin: 4px 0 0; padding: 4px; overflow: auto; list-style: none; border: 1px solid #d7e0ee; border-radius: 4px 4px 10px 10px; background: #fff; box-shadow: 0 6px 16px rgba(15, 23, 42, .06); overscroll-behavior: contain; }
+.cp-option { display: flex; flex-direction: column; gap: 1px; padding: 6px 10px; border-radius: 6px; color: #223046; font-size: 14px; cursor: pointer; }
+.cp-option small { color: #7b8899; font-size: 12px; overflow-wrap: anywhere; }
+.cp-option.is-active { background: #eef4ff; }
+.cp-option.is-selected > span { color: var(--primary); font-weight: 700; }
+.cp-empty, .cp-more { padding: 8px 10px; color: #7b8899; font-size: 12px; line-height: 1.6; }
+
+.cp-hint { margin: 5px 0 0; color: #7b8899; font-size: 12px; line-height: 1.7; }
+.cp-error { margin: 5px 0 0; color: #b42318; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.cp-error .mg-text-button { font-size: 12px; }

@@ -45,6 +45,8 @@ const navigation = [
 ]
 /** Views that are wired to the API and can be opened by URL (?view=<key>) → the parameter that selects an item in them. */
 const linkedViews: Readonly<Record<string, string>> = { enums: 'enum', categories: 'category', scenes: 'scene' }
+/** Views with no backend yet (local drafts only): the navigation marks them 待接入. */
+const pendingViews: ReadonlySet<View> = new Set<View>(['ingredients'])
 const pageSize = 12
 const maxBytes = 15 * 1024 * 1024
 
@@ -282,7 +284,7 @@ export default function App() {
         {navigation.map(({ key, icon: Icon, name }, index) => <div key={key}>
           {index === 1 && <span className="nav-group-label nav-group-second">数据管理</span>}
           <button className={`nav-item ${view === key ? 'active' : ''}`} onClick={() => navigate(key)} aria-label={name} title={name} aria-current={view === key ? 'page' : undefined}>
-            <span className="nav-icon"><Icon size={16} strokeWidth={1.6} /></span><span className="nav-label">{name}</span>{key !== 'search' && !linkedViews[key] && <small>待接入</small>}
+            <span className="nav-icon"><Icon size={16} strokeWidth={1.6} /></span><span className="nav-label">{name}</span>{pendingViews.has(key) && <small>待接入</small>}
           </button>
         </div>)}
       </nav>
@@ -420,6 +422,6 @@ export default function App() {
     </Dialog>}
     {downloadItems && <DownloadDialog items={downloadItems} apiBase={apiBase} onClose={() => setDownloadItems(null)} />}
     {settingsOpen && <Dialog title="搜索服务连接" onClose={() => setSettingsOpen(false)}><div className="settings-content"><p>连接现有的图像搜索服务。留空时使用当前站点的接口。</p><label htmlFor="api-base">服务地址</label><input className="input" id="api-base" type="url" placeholder="默认使用站点 /api" value={apiDraft} onChange={event => setApiDraft(event.target.value)} /><small>例如 http://127.0.0.1:8320，不包含 /api 路径。跨域连接需服务端允许访问。</small>{apiDraft.trim() && !safeHttpUrl(apiDraft.trim()) && <p className="inline-error">请输入 HTTP 或 HTTPS 地址。</p>}<div className="connection-info"><span className={`status-dot ${connection}`} />{connection === 'online' ? '接口可连接' : connection === 'checking' ? '正在检查连接…' : '当前未连接，请检查服务地址与后端运行状态'}<button className="text-button" onClick={() => void checkConnection()}>重新检查</button></div><div className="dialog-actions"><button className="btn btn-secondary" onClick={() => setSettingsOpen(false)}>取消</button><button className="btn btn-primary" disabled={Boolean(apiDraft.trim() && !safeHttpUrl(apiDraft.trim()))} onClick={saveSettings}><Check size={16} />保存连接</button></div></div></Dialog>}
-    {helpOpen && <Dialog title="开始使用食图" onClose={() => setHelpOpen(false)}><div className="help-content"><div><Search size={21} /><section><h3>以图搜图</h3><p>上传图片或输入可公开访问的图片直链，在自建库中检索。默认场景为「通用」（general）；可切换场景与拒识阈值后点「开始搜索」。空库时请先去「上传与导入」入库（PG + S3），不以 FlyB 外搜兜底为完成标准。</p></section></div><div><ArrowDownToLine size={21} /><section><h3>查看与下载</h3><p>点击结果打开详情，勾选图片后可「批量下载」。一体机场景下结果会展示加热组与食物状态（缺字段显示「—」）。</p></section></div><div><FolderOpen size={21} /><section><h3>图库与入库</h3><p>图库按场景筛选（默认 general），缩略图使用 S3 https 地址。入库可指定场景意向；最终成员以规则 + 手动覆盖为准。</p></section></div><div className="help-note">相似度仅在服务返回分数时展示；类别优先展示 scene_label，否则回落通用类别。</div></div></Dialog>}
+    {helpOpen && <Dialog title="开始使用食图" onClose={() => setHelpOpen(false)}><div className="help-content"><div><Search size={21} /><section><h3>以图搜图</h3><p>上传图片或输入可公开访问的图片直链，在自建库中检索。默认场景为「通用」（general）；可切换场景与拒识阈值后点「开始搜索」。空库时请先去「上传与导入」入库（PG + S3），不以 FlyB 外搜兜底为完成标准。</p></section></div><div><ArrowDownToLine size={21} /><section><h3>查看与下载</h3><p>点击结果打开详情，勾选图片后可「批量下载」。一体机场景下结果会展示加热组与食物状态（缺字段显示「—」）。</p></section></div><div><FolderOpen size={21} /><section><h3>图库与入库</h3><p>图库按场景筛选（默认 general），缩略图使用 S3 https 地址。入库时可设置类别（取自类别配置）、标签、描述、食物标注、来源与许可；场景按所选类别的规则预览，和规则不同的勾选入库后写成人工纳入 / 排除。单张图片可单独标注。</p></section></div><div className="help-note">相似度仅在服务返回分数时展示；类别优先展示 scene_label，否则回落通用类别。</div></div></Dialog>}
   </div></EnumCatalogProvider></SceneApiContext.Provider>
 }

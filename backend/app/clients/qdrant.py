@@ -306,6 +306,18 @@ class QdrantStore:
         )
         return {_point_id(record.id) for record in records}
 
+    def get_payloads(self, point_ids: Sequence[PointId]) -> Dict[Union[int, str], Dict[str, Any]]:
+        """{id: payload} of the given ids that are points of the collection (canonical ids, no vectors)."""
+        if not point_ids:
+            return {}
+        records = self.client.retrieve(
+            collection_name=self.collection,
+            ids=[_point_id(p) for p in point_ids],
+            with_payload=True,
+            with_vectors=False,
+        )
+        return {_point_id(record.id): dict(record.payload or {}) for record in records}
+
     def set_payloads(self, payloads: Mapping[PointId, Mapping[str, Any]]) -> int:
         """Set payload fields per point in one request (other fields and vectors stay).
 

@@ -91,6 +91,15 @@ class QdrantVectorStore(VectorStorePort):
             raise err.index_qdrant_failed(f"set_payloads: {type(exc).__name__}: {exc}") from exc
         return sorted(pid for pid in by_id if pid not in present)
 
+    def get_payloads(self, point_ids: list[UUID | str]) -> dict[str, dict[str, Any]]:
+        """{image id: payload} of the images that have a point in this collection."""
+        ids = [_image_point_id(pid) for pid in point_ids]
+        try:
+            found = self._store.get_payloads(ids)
+        except Exception as exc:
+            raise err.search_qdrant_failed(f"get_payloads: {type(exc).__name__}: {exc}") from exc
+        return {str(pid): payload for pid, payload in found.items()}
+
     def delete(self, point_id: UUID | str) -> None:
         self.delete_batch([point_id])
 

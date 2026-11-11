@@ -1,21 +1,37 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Circle, Clock3, CloudUpload, FolderOpen, ImagePlus, Images, Info, Layers3, Leaf, ListChecks, LoaderCircle, Pencil, Plus, RotateCcw, Search, Square, Tags, Trash2, X, XCircle } from 'lucide-react'
 import { Dialog } from './Dialog'
+import { categoryLabel, type CategoryTree } from '../entities/category'
 import { indexImage, type LibraryImageItem } from '../entities/image'
-import { DEFAULT_SCENE, sceneDisplayLabel, toApiSceneCode, unknownScene, sceneError } from '../entities/scene'
+import { DEFAULT_SCENE, sceneDisplayLabel, toApiSceneCode, sceneError, writeMembership, type VectorSync } from '../entities/scene'
 import { EmptyState, Metric } from '../shared/ui'
 import { EMPTY_COPY } from '../shared/config'
 import { formatLibraryTime } from '../shared/lib'
 import { SceneSelect } from '../features/scene-select'
 import { useLibraryList } from '../features/library-list'
 import { ImageLabelPanel } from '../features/image-label'
-import { ImportSceneIntent } from '../features/index-upload'
-import { useSceneCatalog, useSceneSelection } from '../features/scene-catalog'
+import { useCategoryTree } from '../features/category-picker'
+import {
+  AnnotationForm,
+  emptyAnnotation,
+  filledExtras,
+  hasErrors,
+  membershipSteps,
+  toIndexFields,
+  validateAnnotation,
+  type ImportAnnotation,
+  type MembershipStep,
+  type SceneCatalogView,
+} from '../features/index-upload'
+import { markScenePending, useSceneCatalog, useSceneSelection } from '../features/scene-catalog'
+import { beginSceneWrite, endSceneWrite } from '../features/scene-sync'
 import './ManagementViews.css'
 
 export type ManagementView = 'library' | 'import' | 'tasks' | 'ingredients' | 'categories' | 'enums' | 'scenes'
 type Props = { view: ManagementView; onNavigate: (view: ManagementView) => void; apiBase?: string }
 type IndexJobStatus = 'pending' | 'running' | 'success' | 'error' | 'cancelled'
+/** What the server stored for a job, and what is worth telling about it. */
+type JobOutcome = { categoryId: number | null; scenes: string[]; created: boolean | null; notes: string[] }
 type IndexJob = {
   id: string
   file: File
@@ -24,6 +40,9 @@ type IndexJob = {
   elapsed?: number
   error?: string
   remoteId?: string | null
+  /** The image's own annotation (单独标注); undefined: the batch annotation applies. */
+  annotation?: ImportAnnotation
+  outcome?: JobOutcome
 }
 type Ingredient = { id: string; name: string; category: string; attributes: string }
 const categories = ['蔬菜', '水果', '肉禽', '水产', '蛋奶', '粮油', '调味品', '其他']
@@ -36,6 +55,50 @@ const jobStatusText: Record<IndexJobStatus, string> = {
 }
 let nextDraftId = 0
 function draftId() { return `draft-${++nextDraftId}` }
+
+/** After a manual membership write: what its vector_sync means for this upload (pushed: nothing to say). */
+const VECTOR_SYNC_NOTE: Record<Exclude<VectorSync, 'pushed'>, string> = {
+  missing: '场景已保存，但这张图在当前向量库里没有向量。',
+  not_ready: '场景已保存；检索服务未就绪，检索要等同步后才能看到。',
+  failed: '场景已保存；更新检索索引失败，可到场景管理执行同步。',
+}
+
+/**
+ * Write the scene choices of one stored image (manual include / exclude), one at a time.
+ * Returns the image's scenes after the last successful write (null: none succeeded) and notes.
+ */
+async function applySceneSteps(base: string, imageId: string, steps: readonly MembershipStep[], stillRunning: () => boolean) {
+  let scenes: string[] | null = null
+  const notes: string[] = []
+  for (const [index, step] of steps.entries()) {
+    if (!stillRunning()) {
+      notes.push(`入库已停止，以下场景调整没有写入：${steps.slice(index).map(item => item.name).join('、')}。`)
+      break
+    }
+    if (!beginSceneWrite()) {
+      notes.push('全量场景同步进行中，场景调整没有写入，可稍后在图库里调整。')
+      break
+    }
+    try {
+      const written = await writeMembership(base, imageId, step.sceneId, step.isMember)
+      scenes = written.scenes
+      if (written.syncRequired) markScenePending(base)
+      if (written.vectorSync && written.vectorSync !== 'pushed') notes.push(VECTOR_SYNC_NOTE[written.vectorSync])
+    } catch (cause) {
+      notes.push(`${step.isMember ? '纳入' : '排除'}「${step.name}」没有写入：${sceneError(cause)}`)
+    } finally {
+      endSceneWrite()
+    }
+  }
+  return { scenes, notes: [...new Set(notes)] }
+}
+
+/** 「牛排」 / 「未设类别」 for a card; the id when the tree does not have the node. */
+function categoryText(tree: CategoryTree | null, categoryId: number | null): string {
+  if (categoryId === null) return '未设类别'
+  const node = tree?.byId.get(categoryId)?.node
+  return node ? categoryLabel(node) : `类别 #${categoryId}`
+}
 
 function supportsDirectoryPicker(): boolean {
   try {
@@ -60,8 +123,9 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
   jobsRef.current = jobs
   const [fileIssues, setFileIssues] = useState<string[]>([])
   const [dragging, setDragging] = useState(false)
-  const [importCategory, setImportCategory] = useState('未分类')
-  const [importScenes, setImportScenes] = useState<string[]>([DEFAULT_SCENE])
+  const [batchAnnotation, setBatchAnnotation] = useState<ImportAnnotation>(emptyAnnotation)
+  /** The image being annotated on its own, with the dialog's unsaved draft. */
+  const [editing, setEditing] = useState<{ jobId: string; draft: ImportAnnotation } | null>(null)
   const [preview, setPreview] = useState<IndexJob | null>(null)
   const [indexing, setIndexing] = useState(false)
   const indexingRef = useRef(false)
@@ -103,7 +167,23 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
   const sceneCatalog = useSceneCatalog(apiBase)
   const handleLibraryScene = useCallback((code: string) => { setLibraryScene(toApiSceneCode(code)); setLibraryPage(1) }, [])
   const librarySelection = useSceneSelection(libraryScene, handleLibraryScene, apiBase)
-  const importReady = sceneCatalog.valid && importScenes.length > 0 && importScenes.every(code => sceneCatalog.active.some(s => s.code === code))
+  // Read again each time the import page opens: categories may have been edited meanwhile
+  const categoryTree = useCategoryTree(apiBase, view === 'import')
+  const sceneView: SceneCatalogView = { active: sceneCatalog.active, loading: sceneCatalog.loading, error: sceneCatalog.error, refresh: sceneCatalog.refresh }
+
+  // What keeps 「开始入库」 disabled, worded for the person
+  const runnable = jobs.filter(job => job.status !== 'success' && job.status !== 'running')
+  const batchErrors = validateAnnotation(batchAnnotation, categoryTree.tree)
+  const usesBatch = runnable.some(job => !job.annotation)
+  const invalidSingles = runnable.filter(job => job.annotation && hasErrors(validateAnnotation(job.annotation, categoryTree.tree))).length
+  const wantsSceneWrites = (usesBatch && Object.keys(batchAnnotation.sceneOverrides).length > 0)
+    || runnable.some(job => job.annotation && Object.keys(job.annotation.sceneOverrides).length > 0)
+  const blockers = [
+    usesBatch && hasErrors(batchErrors) ? '批量标注里有需要修改的内容，见上方标红的字段。' : null,
+    invalidSingles ? `${invalidSingles} 张单独标注的图片有需要修改的内容，请在卡片上打开「编辑单独标注」。` : null,
+    wantsSceneWrites && !sceneCatalog.valid ? '场景目录还没读到，暂时不能写入场景调整。' : null,
+  ].filter((text): text is string => text !== null)
+  const importReady = blockers.length === 0
 
   // Debounce search box → q (~300ms); empty trim omits q on request.
   useEffect(() => {
@@ -173,6 +253,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     if (item) URL.revokeObjectURL(item.preview)
     commitJobs(jobsRef.current.filter(job => job.id !== id))
     if (preview?.id === id) setPreview(null)
+    if (editing?.jobId === id) setEditing(null)
   }
 
   function clearQueue() {
@@ -180,7 +261,21 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     jobsRef.current.forEach(item => URL.revokeObjectURL(item.preview))
     commitJobs([])
     setPreview(null)
+    setEditing(null)
     setFileIssues([])
+  }
+
+  /** Open the single-image dialog on the image's own annotation, else a copy of the batch's. */
+  function openSingle(job: IndexJob) {
+    if (indexingRef.current || job.status === 'success') return
+    setEditing({ jobId: job.id, draft: job.annotation ?? batchAnnotation })
+  }
+
+  /** annotation null: back to the batch annotation. */
+  function saveSingle(jobId: string, annotation: ImportAnnotation | null) {
+    if (indexingRef.current) return
+    commitJobs(jobsRef.current.map(job => job.id === jobId ? { ...job, annotation: annotation ?? undefined } : job))
+    setEditing(null)
   }
 
   function dropFiles(event: DragEvent<HTMLDivElement>) {
@@ -203,8 +298,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
 
   async function startIndexing(retryFailed = false) {
     if (indexingRef.current) return
-    if (!importReady) { setNotice('场景目录不可用或场景意向失效，请刷新复核后再提交。'); return }
-    const requestedScenes = [...importScenes]
+    if (!importReady) { setNotice(blockers[0] ?? '标注里有需要修改的内容。'); return }
     const targets = jobsRef.current.filter(job => retryFailed
       ? job.status === 'error' || job.status === 'cancelled'
       : job.status === 'pending' || job.status === 'cancelled')
@@ -214,50 +308,67 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     }
     const token = ++runToken.current
     const requestBase = apiBaseRef.current
-    const category = importCategory
+    // This run sends the annotations and catalogs as they are now
+    const batch = batchAnnotation
+    const tree = categoryTree.tree
+    const scenes = sceneCatalog.active
     indexingRef.current = true
     setIndexing(true)
+    setEditing(null)
     setNotice('')
     setFileIssues([])
     const currentRun = () => runToken.current === token && apiBaseRef.current === requestBase
+    const updateJob = (id: string, patch: (job: IndexJob) => Partial<IndexJob>) =>
+      commitJobs(jobsRef.current.map(job => job.id === id ? { ...job, ...patch(job) } : job))
     try {
       for (const target of targets) {
         if (!currentRun()) break
+        const annotation = target.annotation ?? batch
         const controller = new AbortController()
         const timer = window.setTimeout(() => controller.abort('timeout'), INDEX_TIMEOUT_MS)
         activeIndex.current = { controller, jobId: target.id, timer }
-        commitJobs(jobsRef.current.map(job => job.id === target.id
-          ? { ...job, status: 'running', error: undefined }
-          : job))
+        updateJob(target.id, () => ({ status: 'running', error: undefined, outcome: undefined }))
         const started = performance.now()
         try {
           const result = await indexImage({
-          file: target.file,
-          category,
-          scenes: requestedScenes,
+            file: target.file,
+            ...toIndexFields(annotation, tree),
             baseUrl: requestBase,
             signal: controller.signal,
           })
           if (!currentRun()) break
           if (controller.signal.aborted) throw new Error('入库超时')
-          commitJobs(jobsRef.current.map(job => job.id === target.id
-            ? {
-              ...job,
-              status: 'success',
-              remoteId: result.indexed[0]?.id ?? null,
-              elapsed: (performance.now() - started) / 1000,
-              error: undefined,
-            }
-            : job))
+          window.clearTimeout(timer)
+          const image = result.indexed[0]
+          const outcome: JobOutcome = {
+            categoryId: image?.categoryId ?? null,
+            scenes: image?.scenes ?? [],
+            created: image?.created ?? null,
+            notes: image?.created === false
+              ? ['相同图片已在图库中，沿用原有标注，本次填写的内容没有写入；需要修改请到图库编辑。']
+              : [],
+          }
+          updateJob(target.id, () => ({
+            status: 'success',
+            remoteId: image?.id ?? null,
+            elapsed: (performance.now() - started) / 1000,
+            error: undefined,
+            outcome,
+          }))
+          // Scene choices against the rules: manual include / exclude on the new image
+          const steps = image && image.created !== false ? membershipSteps(annotation.sceneOverrides, image.scenes, scenes) : []
+          if (image && steps.length) {
+            const written = await applySceneSteps(requestBase, image.id, steps, currentRun)
+            updateJob(target.id, job => ({
+              outcome: { ...outcome, scenes: written.scenes ?? outcome.scenes, notes: [...(job.outcome?.notes ?? []), ...written.notes] },
+            }))
+          }
         } catch (cause) {
           if (!currentRun()) break
           const error = controller.signal.aborted && controller.signal.reason === 'timeout'
             ? '入库超过 120 秒，请稍后重试。'
             : sceneError(cause)
-          commitJobs(jobsRef.current.map(job => job.id === target.id
-            ? { ...job, status: 'error', error, elapsed: (performance.now() - started) / 1000 }
-            : job))
-          if (unknownScene(cause)) { await sceneCatalog.refresh(); break }
+          updateJob(target.id, () => ({ status: 'error', error, elapsed: (performance.now() - started) / 1000 }))
         } finally {
           window.clearTimeout(timer)
           if (activeIndex.current?.controller === controller) activeIndex.current = null
@@ -459,30 +570,47 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
       </div>
       {fileIssues.length > 0 && <div className="mg-errors" role="alert"><div><strong>部分图片未添加</strong><button onClick={() => setFileIssues([])} aria-label="关闭文件提示"><X size={16} /></button></div><ul>{fileIssues.map((issue, index) => <li key={index}>{issue}</li>)}</ul></div>}
       <div className="mg-queue-heading"><h3>待入库队列 <span>{jobs.length}</span></h3>{jobs.length > 0 && <button className="mg-text-button" disabled={indexing} onClick={clearQueue}>清空列表</button>}</div>
-      {jobs.length === 0 ? <div className="mg-queue-empty"><Images size={22} /><p>选好的图片会在这里显示</p></div> : <div className="mg-upload-grid">{jobs.map(item => <article className={`mg-upload-card mg-job-${item.status}`} key={item.id}>
-        <button className="mg-upload-preview" onClick={() => setPreview(item)} aria-label={`预览 ${item.file.name}`}><img src={item.preview} alt={item.file.name} /><span>查看图片</span></button>
-        {!indexing && <button className="mg-remove-image" aria-label={`移除 ${item.file.name}`} onClick={() => removeJob(item.id)}><X size={14} /></button>}
-        <div><strong title={item.file.name}>{item.file.name}</strong>
-          <small>{(item.file.size / 1024 / 1024).toFixed(2)} MB <span className={`mg-job-status mg-job-status-${item.status}`}>{item.status === 'running' ? <LoaderCircle size={12} className="spin" /> : item.status === 'success' ? <CheckCircle2 size={12} /> : item.status === 'error' ? <XCircle size={12} /> : item.status === 'cancelled' ? <Clock3 size={12} /> : <Circle size={11} />}{jobStatusText[item.status]}</span></small>
-          {item.remoteId && <small className="mg-job-id" title={item.remoteId}>id: {item.remoteId}</small>}
-          {item.error && <small className="mg-job-error">{item.error}</small>}
-          {item.elapsed !== undefined && (item.status === 'success' || item.status === 'error') && <small className="mg-job-elapsed">{item.elapsed.toFixed(1)} 秒</small>}
-        </div></article>)}</div>}
-    </section><aside className="mg-import-aside"><section className="mg-panel mg-import-settings"><h2>整理入库信息</h2><p>为本次图片选择统一类别，然后提交到自建向量库。</p><label className="mg-field">食材类别<select className="mg-select" disabled={indexing} value={importCategory} onChange={event => setImportCategory(event.target.value)}><option>未分类</option>{categories.map(category => <option key={category}>{category}</option>)}</select></label>
-      <ImportSceneIntent scenes={importScenes} onChange={setImportScenes} disabled={indexing} />
-      <p className="mg-help">类别下拉目前为本地种子（待对接 categories API）。</p><div className="mg-import-summary"><span>已选择图片<strong>{jobs.length} 张</strong></span><span>文件总大小<strong>{(totalBytes / 1024 / 1024).toFixed(2)} MB</strong></span><span>默认类别<strong>{importCategory}</strong></span></div>
+      {jobs.length === 0 ? <div className="mg-queue-empty"><Images size={22} /><p>选好的图片会在这里显示</p></div> : <div className="mg-upload-grid">{jobs.map(item => {
+        const annotation = item.annotation ?? batchAnnotation
+        const shownCategory = item.outcome ? item.outcome.categoryId : annotation.categoryId
+        const extras = item.outcome ? 0 : filledExtras(annotation)
+        return <article className={`mg-upload-card mg-job-${item.status}`} key={item.id}>
+          <button className="mg-upload-preview" onClick={() => setPreview(item)} aria-label={`预览 ${item.file.name}`}><img src={item.preview} alt={item.file.name} /><span>查看图片</span></button>
+          {!indexing && <button className="mg-remove-image" aria-label={`移除 ${item.file.name}`} onClick={() => removeJob(item.id)}><X size={14} /></button>}
+          <div><strong title={item.file.name}>{item.file.name}</strong>
+            <small>{(item.file.size / 1024 / 1024).toFixed(2)} MB <span className={`mg-job-status mg-job-status-${item.status}`}>{item.status === 'running' ? <LoaderCircle size={12} className="spin" /> : item.status === 'success' ? <CheckCircle2 size={12} /> : item.status === 'error' ? <XCircle size={12} /> : item.status === 'cancelled' ? <Clock3 size={12} /> : <Circle size={11} />}{jobStatusText[item.status]}</span></small>
+            <div className="mg-job-annotation">
+              <span className={`mg-category-chip${shownCategory === null ? ' is-empty' : ''}`}>{categoryText(categoryTree.tree, shownCategory)}</span>
+              {item.annotation && !item.outcome && <span className="mg-job-custom">单独标注</span>}
+              {extras > 0 && <span className="mg-job-extras">另填 {extras} 项</span>}
+            </div>
+            {item.outcome && item.outcome.scenes.length > 0 && <div className="mg-job-scenes" aria-label="所属场景">{item.outcome.scenes.map(code => <span className="mg-library-scene" key={code}>{sceneCatalog.data?.scenes.find(s => s.code === code)?.name ?? sceneDisplayLabel(code)}</span>)}</div>}
+            {item.status !== 'success' && <button type="button" className="mg-text-button mg-job-edit" disabled={indexing} onClick={() => openSingle(item)}><Pencil size={13} />{item.annotation ? '编辑单独标注' : '单独标注'}</button>}
+            {item.remoteId && <small className="mg-job-id" title={item.remoteId}>id: {item.remoteId}</small>}
+            {item.outcome?.notes.map(note => <small className="mg-job-note" key={note}>{note}</small>)}
+            {item.error && <small className="mg-job-error">{item.error}</small>}
+            {item.elapsed !== undefined && (item.status === 'success' || item.status === 'error') && <small className="mg-job-elapsed">{item.elapsed.toFixed(1)} 秒</small>}
+          </div></article>
+      })}</div>}
+    </section><aside className="mg-import-aside"><section className="mg-panel mg-import-settings"><h2>批量标注</h2><p>对本批没有「单独标注」的图片统一生效，入库时一起写入。</p>
+      <AnnotationForm value={batchAnnotation} onChange={setBatchAnnotation} errors={batchErrors} categories={categoryTree} scenes={sceneView} disabled={indexing} />
+      <p className="mg-help">逐张调用 <code>POST /api/index</code>；有场景调整的图片入库后再写人工纳入 / 排除。字节完全相同的图片只入库一次，再次上传沿用原有标注。进行中不可清空队列；离开页面后本会话队列不保留。</p>
+      {/* Stays at the bottom of the screen while the form scrolls */}
+      <div className="mg-import-run">
+      <p className="mg-import-tally"><span>已选 <strong>{jobs.length}</strong> 张 · {(totalBytes / 1024 / 1024).toFixed(2)} MB</span>{jobs.some(job => job.annotation) && <span>单独标注 <strong>{jobs.filter(job => job.annotation).length}</strong> 张</span>}</p>
       {jobs.length > 0 && <div className="mg-index-progress" aria-live="polite">
         <div><b>{indexing ? '正在入库' : doneCount === jobs.length && hasStarted ? '本批入库完成' : '入库进度'}</b><span>{doneCount} / {jobs.length}</span></div>
         <progress aria-label="入库进度" value={doneCount} max={Math.max(jobs.length, 1)} />
         <p>成功 {successCount} 张{failureCount > 0 ? ` · 失败 ${failureCount} 张` : ''}{jobs.some(job => job.status === 'cancelled') ? ' · 可继续已取消项' : ''}</p>
       </div>}
+      {!indexing && (resumable || retryable) && blockers.length > 0 && <ul className="mg-import-blockers" role="alert">{blockers.map(text => <li key={text}>{text}</li>)}</ul>}
       <div className="mg-index-actions">
         {indexing
           ? <button type="button" className="mg-btn mg-secondary mg-full" onClick={stopIndexing}><Square size={15} />取消入库</button>
           : <button type="button" className="mg-btn mg-primary mg-full" disabled={!resumable || !importReady} onClick={() => void startIndexing(false)}><CloudUpload size={17} />{hasStarted && resumable ? '继续入库' : '开始入库'}</button>}
         {!indexing && retryable && <button type="button" className="mg-btn mg-secondary mg-full" disabled={!importReady} onClick={() => void startIndexing(true)}><RotateCcw size={15} />仅重试失败</button>}
       </div>
-      <p className="mg-help">逐张调用 <code>POST /api/index</code>。进行中不可清空队列；离开页面后本会话队列不保留。批量端点形态待契约冻结后可改。</p></section>
+      </div></section>
       <div className="mg-workflow-note"><ListChecks size={18} /><h3>入库任务</h3><p>本批进度也会汇总到任务中心；无本会话任务时保持空态。</p><button className="mg-text-button" onClick={() => onNavigate('tasks')}>查看任务中心<ArrowRight size={15} /></button></div></aside></div>}
 
     {view === 'tasks' && <>
@@ -513,6 +641,25 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
 
     <div className="mg-live-status" role="status" aria-live="polite">{notice}</div>
     {preview && <Dialog title="图片预览" onClose={() => setPreview(null)} wide><img className="mg-dialog-image" src={preview.preview} alt={preview.file.name} /><p className="mg-preview-name">{preview.file.name}</p>{preview.remoteId && <p className="mg-preview-name monospace">入库 id：{preview.remoteId}</p>}{preview.error && <p className="mg-form-error" role="alert">{preview.error}</p>}</Dialog>}
+    {editing && (() => {
+      const job = jobs.find(item => item.id === editing.jobId)
+      if (!job) return null
+      const draftErrors = validateAnnotation(editing.draft, categoryTree.tree)
+      return <Dialog title="单张标注" size="lg" onClose={() => setEditing(null)} footer={<div className="ia-dialog-actions">
+        {job.annotation && <button type="button" className="mg-btn mg-secondary ia-dialog-reset" onClick={() => saveSingle(job.id, null)}>改回批量设置</button>}
+        <button type="button" className="mg-btn mg-secondary" onClick={() => setEditing(null)}>取消</button>
+        <button type="button" className="mg-btn mg-primary" disabled={hasErrors(draftErrors)} onClick={() => saveSingle(job.id, editing.draft)}><Check size={15} />保存单独标注</button>
+      </div>}>
+        <div className="ia-single">
+          <div className="ia-single-preview">
+            <img src={job.preview} alt={job.file.name} />
+            <div><small title={job.file.name}>{job.file.name}</small>
+              <small>{job.annotation ? '这张图片使用自己的标注，不跟随批量设置。' : '从批量设置复制而来；保存后这张图片不再跟随批量设置。'}</small></div>
+          </div>
+          <AnnotationForm value={editing.draft} onChange={draft => setEditing({ jobId: job.id, draft })} errors={draftErrors} categories={categoryTree} scenes={sceneView} />
+        </div>
+      </Dialog>
+    })()}
     {libraryPreview && <Dialog title="图片标注" onClose={() => setLibraryPreview(null)} wide>
       {(libraryPreview.originalUrl || libraryPreview.imageUrl)
         ? <img className="mg-dialog-image" src={libraryPreview.originalUrl ?? libraryPreview.imageUrl!} alt="" />

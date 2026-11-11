@@ -434,14 +434,15 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 
 | 资源 | MVP | PG v0.1 差量 |
 |---|---|---|
-| **Index** `POST /api/index` | 本地 path 入库、scenes JSON、BIGINT id | 收字节或可拉 URL → 算 sha256/uuid → 写 S3 → 写 `images` → embed → upsert **current** collection；场景经规则/`image_scenes`；**无 path** |
+| **Index** `POST /api/index` | 本地 path 入库、scenes JSON、BIGINT id | 收字节或可拉 URL → 算 sha256/uuid → 写 S3 → 写 `images` → embed → upsert **current** collection；场景经规则/`image_scenes`；**无 path**。**2026-11-11**：multipart / JSON 另可传 `label_status`（`auto`/`verified`，要有类别）、`source_type`、`license`（取值见 `/api/enums`，不传为 `user_upload` / `unknown`）；`indexed[].created` 为 `false` 表示相同图片此前已入库、沿用首次的标注 |
 | **Search** `POST /api/search` | `scene` 默认 `normal`；拒识；仅 normal 空→FlyB | `scene` 改为默认 **`general`**（A5）；按 payload `scenes` 过滤；场景标签投票；`outputs_heating` 附加字段；**`score_threshold` 沿用 MVP（A6）**；自建空 → **`source=empty`**；**FlyB 编排 OUT OF SCOPE（A4 / M0）** |
 | **List** `GET /api/images` | 分页、scene、title/category、仅 active | 无 soft-status：未删即在库；scene 成员过滤；返回 `original_url`/`thumb_url`、类别树字段、场景 codes；category 改 ID/code |
+| **单图** `/api/images/{image_id}`（**已落地 2026-11-11**） | 无 | `GET` 详情（全部字段 + 向量写入记录 + 当前 collection 里的向量状态 `synced`/`stale`/`missing`/`unavailable`）、`PATCH` 改类别 / 标注状态 / 描述 / 标签 / 食物标注（提交后推 payload）、`POST …/vector-sync` 重推这张图的 payload、`DELETE` 删除。见 §6.3。新错误码 `IMAGE_NOT_FOUND` 404 |
 | **类别** `/api/categories`（**已落地 2026-11-10**） | 无独立 API | `GET /api/categories` 返回整棵树（不分页）`{ ok, categories: CategoryItem[], heating_groups: [{id, code, name}], root_codes: string[] }`，节点按「父在子前、同级 `sort_order`、`id`」排好；`POST /api/categories`（201）新建；`PATCH /api/categories/{id}` 只改请求里给了的字段（`parent_id` 换父节点，整棵子树一起移动，`null` 移到根；`names` 给了就整体替换；`heating_group_id: null` 清空）；`DELETE /api/categories/{id}` 返回 `{ ok, deleted: {id, code} }`。`CategoryItem` = `{ id, code, parent_id, path, name, names: [{lang, name, kind}], cuisines, heating_group, sort_order, is_active, image_count, scene_rule_count, created_at, updated_at }`（`name` 是中文主名；`cuisines` / `heating_group` 是节点自己设的，不含沿用祖先的）。规则：`code` 匹配 `^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$`、全局唯一；根节点只能用四个域的编码（新建、移到根、给根改编码时校验）；`names` 必须含中文（`zh`）主名，每种语言至多一个主名；不能移到自己或子孙下面；还有子类别、图片或场景规则引用时不能删除（场景规则不再被级联悄悄删掉）。错误码 `CATEGORY_NOT_FOUND` 404、`CATEGORY_CODE_EXISTS` 409、`CATEGORY_IN_USE` 409、`CATEGORY_POSTGRES_FAILED` 502、`VALIDATION_ERROR` 422。成功体不带 `trace_id`（在响应头 `X-Trace-Id`）。字段和上限见 `backend/app/schemas/categories.py`、`backend/app/core/category_rules.py`。加热组只随列表只读返回，管理仍 **TBD**；移动类别或改菜系**不会**重算已入库图片的 `image_scenes`，也不重推 Qdrant payload |
 | **场景** | 写死登记 | `scenes` / `scene_rules` / `scene_labels` 管理（`/api/scenes`，字段见 `backend/app/schemas/scenes.py`）；图片成员人工覆盖三接口见 §6.2（本地实现，待独立验收）。**2026-11-10 链路优化**：配置写接口的成功体除 `scene`（删除时 `deleted`）外另带 `sync_required: boolean`——`true` 表示改动要经 `POST /api/scenes/sync` 才作用到已入库图片（规则增删、规则换目标、场景 `is_active` / `include_all` 实际变化、新建启用的 `include_all` 场景、删除有成员的场景），`false` 表示已生效（场景类别、名称、描述、`outputs_heating`、只改规则映射的类别，均在请求时读取）。`PATCH /api/scenes/{id}/rules/{rule_id}` 现可原地换目标：给 `category_id` 或 `cuisine`（恰好一个非空，另一个清空）即替换，单事务、规则 id 不变；与本场景其他规则重复 `SCENE_RULE_EXISTS` 409；按菜系的规则不能带 `label_id`（换成菜系时同请求传 `label_id: null`，否则 422）。不再需要「删旧建新」两次请求 |
 | **审核候选** | 无 | `external_candidates` list/accept/reject；accept → 入库流水线 |
 | **模型** | 配置 + meta 表 | `embedding_models` 状态机；切 `current`；重建进度 **TBD** |
-| **删除** | 软删 status | 删图 API → `image_deletions` 流水线 |
+| **删除** | 软删 status | `DELETE /api/images/{image_id}`（**已落地 2026-11-11**，§6.3）→ `image_deletions` 流水线；检索栈可用时同一请求里清掉当前 collection 的点和两个文件 |
 | **Health** | 聚合 Qdrant+MySQL | 改探 PG + Qdrant(current collection) +（可选）S3；回报 current model/collection |
 | **枚举** `/api/enums`（**已落地 2026-11-09**） | 写死在代码 | `GET /api/enums`、`GET /api/enums/{name}` 返回取值 + 中文名 + `editable`；`POST /api/enums/{name}/values` `{value, label, description?}` 给可编辑枚举追加取值（201，返回整个枚举），写回 `backend/config/param/enums.yaml`。错误码 `ENUM_NOT_FOUND` 404、`ENUM_NOT_EDITABLE` 403（系统枚举）、`ENUM_VALUE_EXISTS` 409、`ENUM_FILE_INVALID` 503、`VALIDATION_ERROR` 422。字段见 `backend/app/schemas/enums.py` |
 
@@ -774,6 +775,62 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 
 ---
 
+## 6.3 图片单图管理（2026-11-11 · 本地实现，待独立测试验收）
+
+> 图库对单张图片的读、改、删和重推 payload。无新增表/迁移。PostgreSQL 部分走 catalog（只依赖 PG：检索栈未就绪时也能改、能删）；向量库部分在检索栈可用时跟上，失败不影响已提交的 PG 修改。实现：`backend/app/api/v1/images.py`、`backend/app/schemas/images.py`、`backend/app/services/retrieval/{manage_images,image_fields,vector_status}.py`。
+
+| method + path | 请求 | 成功 |
+|---|---|---|
+| GET `/api/images/{image_id}` | 无 | 200 `{ok, image, vector}` |
+| PATCH `/api/images/{image_id}` | 只传要改的字段（见下表），extra forbid、整数字段严格 | 200 `{ok, image, vector_sync, sync_required}` |
+| POST `/api/images/{image_id}/vector-sync` | 无 | 200 `{ok, image_id, payload_version, vector_sync, sync_required}` |
+| DELETE `/api/images/{image_id}` | 无 | 200 `{ok, image_id, deleted_at, cleanup:"done"\|"queued"}` |
+
+`image_id` 为 UUID（非法 422）；图片不存在 `IMAGE_NOT_FOUND` 404。成功体不带 `trace_id`（在 `X-Trace-Id` 头）；错误沿 §6 统一信封。
+
+`image`：字段名与 List item（§6.1.2）一致，另加详情专有字段；食物字段和 `heating_group` 总带，不看场景。
+
+```text
+{
+  id, sha256(hex), original_url, thumb_url, width, height,
+  category_id|null, category|null（中文主名）, category_code|null, label_status, scenes:string[],
+  description, tags:string[], source_type, license,
+  food_state, food_processing, food_count, total_mass_g, water_mass_g, main_ingredient_mass_g,
+  heating_group:{id, code, name}|null, payload_version, created_at, updated_at,
+  embeddings:[{model_id, name, version, collection, model_status, synced_version, embedded_at}]
+}
+```
+
+`vector`：按 PG 现值算出这张图应有的 payload（§4.2 四个字段，与入库 / 同步写的是同一份），和当前模型 collection 里这个点的 payload 比较（`scenes` 按集合比）。
+
+| `status` | 含义 |
+|---|---|
+| `synced` | 有点，payload 与 PG 一致：检索过滤看到的就是库里的状态 |
+| `stale` | 有点，payload 落后：`POST …/vector-sync` 修复（或 `POST /api/scenes/sync` 全量） |
+| `missing` | 当前 collection 没有这张图的点：检索查不到，需要重新入库 |
+| `unavailable` | 检索栈未就绪或读向量库失败；`detail` 给原因（不含内部地址），接口仍 200 |
+
+其余字段：`collection`、`embedding_space_id`、`exists`、`payload`（点上现有）、`expected_payload`（应有）、`payload_matches`、`payload_version`、`synced_version`（当前模型的记账，没有为 null）、`embedded_at`。
+
+PATCH 字段（不传 = 不变）：
+
+| 字段 | `null` 表示 | 进 payload |
+|---|---|---|
+| `category_id`（正整数，必须存在且启用） | 清空，图片变成未标注 | 是；换类别时同事务重算这张图的规则场景 |
+| `label_status`（`unlabeled`/`auto`/`verified`） | 不允许 | 是 |
+| `description` | `""` | 否 |
+| `tags`（整体替换，规范化同入库） | `[]` | 否 |
+| `food_state` | 清空 | 是 |
+| `food_processing`、`food_count`、`total_mass_g`、`water_mass_g`、`main_ingredient_mass_g` | 清空 | 否 |
+
+- `label_status` 不传时跟着类别走：清空类别 → `unlabeled`；设置或更换类别 → `verified`（人在图库里选的）；类别不变 → 保持。传了必须满足 unlabeled ⟺ 无类别，否则 422。
+- 单事务：catalog 共享锁 → 图片行锁（与其它图片写入同序），锁内校验类别；payload 字段**实际变化**才 bump 一次 `payload_version`（同值不 bump）；锁内读回提交后的 `image`。
+- 提交后推送同 §6.2「写后推送」（`vector_sync` / `sync_required` 四个取值含义相同）；每次 PATCH 都推一次（单点，顺带修复漂移）。`POST …/vector-sync` 只做推送。
+- DELETE：PG 单事务删 `images`（CASCADE `image_scenes` / `image_embeddings` / `image_foods`）并写 `image_deletions`，图库和检索结果立即看不到（两者都读 PG）；检索栈可用时同一请求删当前 collection 的点和原图、缩略图，再删队列行（`cleanup=done`），否则 `cleanup=queued`，由 `python -m app.workers.process_deletions` 补删。已删且仍在队列中再删：返回同一队列行。同一图片（同字节即同 id）在清理前又被入库：再删会重新删除；清理时发现已重新入库则保留点和文件、只删队列行。仍只清当前 collection（旧模型版本的点不动，同 §2.5）。
+- 错误：`VALIDATION_ERROR` 422（字段、类别不存在或停用、label 与类别矛盾）；`IMAGE_NOT_FOUND` 404；`SEARCH_POSTGRES_FAILED` / `INDEX_POSTGRES_FAILED` 502；catalog 未就绪 `NOT_READY` 503。未补角色鉴权（同 §6.2）。
+
+---
+
 ## 7. 明确不作本刀范围（含 M0 OUT OF SCOPE）
 
 | 项 | 归属 |
@@ -836,6 +893,8 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | 2026-11-09 | **图片标签入库**：此前 `POST /api/index` 收 `tags` 但直接丢弃。新增 `images.tags text[] NOT NULL DEFAULT '{}'` + GIN 索引 `ix_images_tags_gin`（迁移 `0007`）；Index 写入（规范化规则见 §2.4），Index 响应 / Search hit / List item 都带 `tags`（默认 `[]`）；List 的 `q` 也匹配标签子串，新增 `tag` 精确筛选。不进 Qdrant payload，Search 不按标签过滤。规则见 `backend/app/services/retrieval/text_fields.py` |
 | 2026-11-10 | **类别树管理接口 + 前端「类别配置」页**：新增 `GET`/`POST /api/categories`、`PATCH`/`DELETE /api/categories/{id}`（§6 类别行），读写 `categories` + `category_names`，无表结构变化、无新迁移。写操作各自一个事务并先取事务级咨询锁；`path` 仍由数据库触发器维护。前端新增 `?view=categories` 页面（`frontend/src/{pages/categories,features/category-config,entities/category}`）：树形展示，新建根/子类别、编辑、换上级、删除。未做：加热组与场景规则管理；类别变动后的 `image_scenes` 批量重算与 Qdrant 重推；入库接口仍只按 `code` 解析类别且不看 `is_active`；上传页的类别下拉仍是前端写死的中文名 |
 | 2026-11-10 | **场景配置与人工标注链路优化**（无表结构变化、无新迁移）：① 人工成员 PUT/DELETE 在 PG 提交后立即推送该图 payload，响应由固定 `sync_required:true` 改为 `vector_sync` + `sync_required` 布尔（§6.2），标注后不必再跑全库同步；② 配置写接口成功体新增 `sync_required`，只有影响已入库图片归属的改动才为 `true`（§6 场景行），前端据此决定是否提示「待同步」；③ 规则 `PATCH` 可原地换目标（单事务、id 不变），前端去掉「删旧建新」两步和中途失败的半完成状态；④ `mark_payloads_pushed` 只记仍为当前版本的 payload 并对被抢先改动的图重推（§6.2）。前端：场景管理按 `sync_required` 显示「已生效 / 待同步」、规则编辑改为「按类别 / 按菜系」单选；图片标注面板「纳入 / 排除 / 恢复规则」一键生效，不再弹确认框，也不再每次写入后重拉场景目录 |
+| 2026-11-11 | **图片单图管理接口（后端）**（无表结构变化、无新迁移）：新增 `GET`/`PATCH`/`DELETE /api/images/{image_id}` 和 `POST /api/images/{image_id}/vector-sync`（§6.3），新错误码 `IMAGE_NOT_FOUND` 404。详情带这张图在当前 collection 里的向量状态（点上的 payload 与 PG 应有值比较）；PATCH 单事务改类别 / 标注状态 / 描述 / 标签 / 食物标注，提交后推 payload（与 §6.2 同一套 `vector_sync`）；DELETE 走 `image_deletions`，检索栈可用时同请求清理点和文件。删除队列两处修正：入队时图片已在队列但又被重新入库会重新删除；清理时图片已被重新入库则保留点和文件。前端未接入 |
+| 2026-11-11 | **上传与导入页标注改造**（无表结构变化、无新迁移）：后端 `POST /api/index` 透传 `label_status` / `source_type` / `license`（此前用例支持但接口丢弃），`IndexedImage` 新增 `created`。前端：类别改为从 `GET /api/categories` 搜索选择（只列启用类别，按编码提交；此前是写死的中文名，后端按编码解析不到，一律存成未标注）；「场景意向」改为按所选类别和场景规则预览，和规则不同的勾选在入库后写成人工纳入 / 排除（只写与服务端结果不同的场景），不再发送 `scenes` 提示；新增标签、描述、食物标注六字段、来源与许可、标注状态控件；每张图片可「单独标注」（复制批量设置后独立修改）；`created=false` 的图片提示沿用原有标注、不写场景调整。实现：`frontend/src/features/{index-upload,category-picker}` |
 
 ---
 

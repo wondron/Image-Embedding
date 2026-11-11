@@ -116,6 +116,15 @@ class QdrantVectorStoreTests(unittest.TestCase):
         self.vectors.delete(a)
         self.assertEqual(self.store.count(), 1)
 
+    def test_get_payloads_reads_only_existing_points_without_vectors(self):
+        a, b = uuid.uuid4(), uuid.uuid4()
+        self.vectors.upsert(a, unit(1, 0, 0, 0), {"scenes": ["general"], "category_id": 3})
+        self.assertEqual(self.vectors.get_payloads([a, str(b)]), {str(a): {"scenes": ["general"], "category_id": 3}})
+        self.assertEqual(self.vectors.get_payloads([]), {})
+        with self.assertRaises(AppError) as ctx:
+            self.vectors.get_payloads(["not-a-uuid"])
+        self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
+
     def test_shape_mismatch_is_vector_dim_mismatch(self):
         wrong = QdrantVectorStore(QdrantStore(MEMORY, collection="c", vector_dim=8, client=self.store.client))
         with self.assertRaises(AppError) as ctx:

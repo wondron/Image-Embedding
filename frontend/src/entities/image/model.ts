@@ -175,10 +175,16 @@ export interface IndexedImage {
   labelStatus: LabelStatus | null
   foodState: FoodState | null
   description: string
+  tags: string[]
   width: number | null
   height: number | null
   payloadVersion: number | null
   createdAt: string | null
+  /**
+   * true: stored by this request; false: the same bytes were already stored, and the first
+   * upload's labels were kept (this request's were not written); null: the server did not say.
+   */
+  created: boolean | null
 }
 
 /** One file the batch could not store (IndexFailure). */
@@ -208,10 +214,12 @@ function toIndexedImage(image: Untrusted<IndexedImageWire>): IndexedImage | null
     labelStatus: parseLabelStatus(image.label_status),
     foodState: parseFoodState(image.food_state),
     description: parseDescription(image.description),
+    tags: asTextList(image.tags),
     width: asPositiveNumber(image.width),
     height: asPositiveNumber(image.height),
     payloadVersion: asInteger(image.payload_version),
     createdAt: asText(image.created_at),
+    created: typeof image.created === 'boolean' ? image.created : null,
   }
 }
 

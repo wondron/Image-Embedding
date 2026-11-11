@@ -63,6 +63,12 @@ class VectorStorePort(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def get_payloads(self, point_ids: list[UUID | str]) -> dict[str, dict[str, Any]]:
+        """{point id: payload} for the given ids that are points of the collection (no vectors);
+        an id without a point is left out."""
+        raise NotImplementedError
+
+    @abstractmethod
     def ping(self) -> dict[str, Any]:
         """{ok, collection, points_count, ...}; never raises."""
         raise NotImplementedError
@@ -253,6 +259,26 @@ class CatalogStorePort(ABC):
     @abstractmethod
     def clear_manual_scene_membership(self, image_id: UUID | str, scene_id: int) -> dict[str, Any]:
         """Clear only manual and recompute atomically (inactive scenes may be cleared)."""
+        raise NotImplementedError
+
+    # -- one stored image (PG only; the HTTP layer brings the vector store along) --
+
+    @abstractmethod
+    def get_image_detail(self, image_id: UUID | str) -> dict[str, Any] | None:
+        """The image with category, heating group, food, effective scenes and its ledger rows
+        (embeddings), read in one snapshot; None when there is no such image."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def patch_image(self, image_id: UUID | str, fields: dict[str, Any]) -> dict[str, Any]:
+        """Apply a normalized patch (services.retrieval.image_fields) in one transaction and
+        return the detail as committed; IMAGE_NOT_FOUND when there is no such image."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def enqueue_image_deletion(self, image_id: UUID | str) -> dict[str, Any]:
+        """Delete the image and queue its vector / file cleanup (image_deletions); returns the
+        queue row. IMAGE_NOT_FOUND when there is neither an image nor a queue row."""
         raise NotImplementedError
 
     # -- scenes (each write returns the whole scene: fields, labels, rules, plus sync_required:

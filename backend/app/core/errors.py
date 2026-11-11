@@ -68,6 +68,8 @@ ERROR_CODES: dict[str, ErrorSpec] = {
     # -- retrieval: gallery list
     "LIST_UNKNOWN_SCENE": ErrorSpec(422),
     "LIST_POSTGRES_FAILED": ErrorSpec(502, "metadata list query failed"),
+    # -- one stored image (GET / PATCH / DELETE /api/images/{image_id})
+    "IMAGE_NOT_FOUND": ErrorSpec(404),
     # -- enums (config/param/enums.yaml, app.core.config.enum_store)
     "ENUM_NOT_FOUND": ErrorSpec(404),
     "ENUM_NOT_EDITABLE": ErrorSpec(403),
@@ -256,6 +258,13 @@ def list_unknown_scene(detail: str) -> AppError:
 
 def list_postgres_failed(detail: str) -> AppError:
     return AppError("LIST_POSTGRES_FAILED", detail)
+
+
+# -- one stored image ------------------------------------------------------------
+
+def image_not_found(detail: str) -> AppError:
+    """No images row with this id (a deleted image counts as gone)."""
+    return AppError("IMAGE_NOT_FOUND", detail)
 
 
 # -- enums -----------------------------------------------------------------------

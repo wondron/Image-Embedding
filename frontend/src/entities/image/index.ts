@@ -20,6 +20,7 @@ export {
 } from './model'
 export {
   type ListImagesOptions,
+  type IndexFoodFields,
   type IndexOptions,
   MAX_INDEX_FILES,
   buildListImagesQuery,

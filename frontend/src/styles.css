@@ -617,9 +617,6 @@ main { flex: 1; min-height: 0; width: 100%; max-width: none; padding: 14px; marg
   align-items: center;
   gap: 8px;
 }
-.import-scene-intent {
-  margin-top: 12px;
-}
 .no-results-actions {
   margin-top: 12px;
   display: flex;

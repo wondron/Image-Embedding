@@ -244,10 +244,13 @@ export interface IndexedImageWire {
   label_status: LabelStatusWire
   food_state: FoodStateWire | null
   description: string
+  tags: string[]
   width: number
   height: number
   payload_version: number | null
   created_at: string | null
+  /** false: the same bytes were stored before and their labels were kept (absent on older servers). */
+  created?: boolean | null
 }
 
 /** schemas/retrieval.py IndexFailure. */

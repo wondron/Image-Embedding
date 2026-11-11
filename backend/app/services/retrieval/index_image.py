@@ -300,6 +300,8 @@ class IndexImageUseCase:
             "tags": created.get("tags", tag_list),
             "payload_version": payload_version,
             "created_at": created.get("created_at"),
+            # false: the same bytes were stored before; their row (labels included) was kept
+            "created": not already_stored,
         }
 
     def execute_batch(

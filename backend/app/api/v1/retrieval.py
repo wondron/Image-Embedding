@@ -26,7 +26,9 @@ router = APIRouter(prefix="/api", tags=["retrieval"])
     description=(
         "通过 multipart/form-data 上传单张 file 或多张 files，"
         "或使用 JSON 提交 {path,category,tags,scene,scenes}；"
-        "multipart 的 tags 是 JSON 字符串数组，如 [\"红薯叶\"]。参见 SSOT §3.1。"
+        "multipart 的 tags 是 JSON 字符串数组，如 [\"红薯叶\"]。"
+        "可选 description、label_status、source_type、license 和六个食物字段。"
+        "indexed[].created=false 表示相同图片已在库中，沿用首次入库的标注。参见 SSOT §3.1。"
     ),
 )
 async def index_image(request: Request) -> Any:

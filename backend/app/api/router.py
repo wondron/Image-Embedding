@@ -7,6 +7,7 @@ from app.api.v1.categories import router as categories_router
 from app.api.v1.enums import router as enums_router
 from app.api.v1.health import router as health_router
 from app.api.v1.image_download import router as image_download_router
+from app.api.v1.images import router as images_router
 from app.api.v1.predict import router as predict_router
 from app.api.v1.retrieval import router as retrieval_router
 from app.api.v1.scene_memberships import router as scene_memberships_router
@@ -26,6 +27,7 @@ for sub_router in (
     categories_router,
     scenes_router,
     scene_memberships_router,
+    images_router,  # after image_download_router: /api/images/{image_id} must not take /download
 ):
     router.include_router(sub_router, responses=ERROR_RESPONSES)
 

@@ -16,7 +16,9 @@ class PgDeletionsMixin:
 
         Contract order: delete from images then insert image_deletions.
         URLs are selected first so the insert can store original_url/thumb_url.
-        Idempotent if already queued (returns existing image_deletions row).
+        Idempotent: an image already deleted and still queued returns its queue row. An image
+        stored again (same bytes, same id) while its old row is still queued is deleted again and
+        the queue row refreshed. IMAGE_NOT_FOUND when there is neither an image nor a queue row.
         """
         self.ensure_schema()
         from sqlalchemy import text
@@ -25,16 +27,6 @@ class PgDeletionsMixin:
         engine = self._get_engine()
         try:
             with engine.begin() as conn:
-                existing = conn.execute(
-                    text(
-                        "SELECT image_id, original_url, thumb_url, deleted_at "
-                        "FROM image_deletions WHERE image_id = CAST(:id AS uuid)"
-                    ),
-                    {"id": uid},
-                ).mappings().fetchone()
-                if existing is not None:
-                    return _row_to_dict(existing)
-
                 row = conn.execute(
                     text(
                         "SELECT id, original_url, thumb_url FROM images "
@@ -43,9 +35,16 @@ class PgDeletionsMixin:
                     {"id": uid},
                 ).mappings().fetchone()
                 if row is None:
-                    raise err.validation_error(
-                        f"image not found for deletion: {uid}"
-                    )
+                    existing = conn.execute(
+                        text(
+                            "SELECT image_id, original_url, thumb_url, deleted_at "
+                            "FROM image_deletions WHERE image_id = CAST(:id AS uuid)"
+                        ),
+                        {"id": uid},
+                    ).mappings().fetchone()
+                    if existing is not None:
+                        return _row_to_dict(existing)
+                    raise err.image_not_found(f"image {uid} does not exist")
                 original_url = str(row["original_url"] or "")
                 thumb_url = str(row["thumb_url"] or "")
                 if not original_url or not thumb_url:
@@ -53,17 +52,19 @@ class PgDeletionsMixin:
                         f"image {uid} missing original_url/thumb_url"
                     )
 
-                # 1) delete images (+ CASCADE image_scenes / image_embeddings)
+                # 1) delete images (+ CASCADE image_scenes / image_embeddings / image_foods)
                 conn.execute(
                     text("DELETE FROM images WHERE id = CAST(:id AS uuid)"),
                     {"id": uid},
                 )
-                # 2) insert image_deletions for async Qdrant + S3 cleanup
+                # 2) queue the Qdrant + S3 cleanup (refresh a row left from an earlier deletion)
                 conn.execute(
                     text(
                         "INSERT INTO image_deletions "
                         "(image_id, original_url, thumb_url, deleted_at) "
-                        "VALUES (CAST(:id AS uuid), :ou, :tu, now())"
+                        "VALUES (CAST(:id AS uuid), :ou, :tu, now()) "
+                        "ON CONFLICT (image_id) DO UPDATE SET original_url = EXCLUDED.original_url, "
+                        "thumb_url = EXCLUDED.thumb_url, deleted_at = EXCLUDED.deleted_at"
                     ),
                     {"id": uid, "ou": original_url, "tu": thumb_url},
                 )

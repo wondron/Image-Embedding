@@ -39,6 +39,7 @@ from app.services.retrieval.list_images import ListImagesUseCase
 from app.services.retrieval.recompute_scenes import RecomputeScenesUseCase
 from app.services.retrieval.search_image import SearchImageUseCase
 from app.services.retrieval.sync_scenes import SyncSceneMembershipsUseCase
+from app.services.retrieval.vector_status import ImageVectorStatusUseCase
 
 logger = logging.getLogger("retrieval")
 
@@ -85,6 +86,7 @@ class RetrievalStack:
     deletion_worker: DeletionWorker
     recompute_scenes_uc: RecomputeScenesUseCase
     scene_sync_uc: SyncSceneMembershipsUseCase
+    vector_status_uc: ImageVectorStatusUseCase
 
     @property
     def model(self) -> ActiveModel:
@@ -194,4 +196,5 @@ def build_retrieval_stack(
         deletion_worker=DeletionWorker(metadata, vectors, storage),
         recompute_scenes_uc=RecomputeScenesUseCase(metadata),
         scene_sync_uc=SyncSceneMembershipsUseCase(metadata, vectors, model=model),
+        vector_status_uc=ImageVectorStatusUseCase(vectors, model=model),
     )

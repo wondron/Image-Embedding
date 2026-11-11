@@ -18,9 +18,12 @@ from app.db.common import (
     _uuid_in_clause,
 )
 from app.core import errors as err
+from app.repositories.catalog_lock import lock_catalog_for_read
 from app.repositories.foods import FOOD_JOIN, FOOD_SELECT, write_image_food
+from app.repositories.scenes import _recompute
 from app.services.retrieval.enum_fields import coerce_enum
 from app.services.retrieval.food_fields import FOOD_FIELDS, coerce_food_field
+from app.services.retrieval.image_fields import resolve_label_status
 from app.services.retrieval.image_ids import uuid_from_sha256
 from app.services.retrieval.text_fields import normalize_description, normalize_tags
 
@@ -44,6 +47,13 @@ _HYDRATE_SELECT = (
     "SELECT i.*, cn.name AS category_name, "
     "hg.id AS heating_group_id, hg.code AS heating_group_code, "
     f"hg.name AS heating_group_name, {FOOD_SELECT} "
+)
+# The ledger of one image: which model versions' collections have its point, at which version
+_LEDGER_SQL = (
+    "SELECT e.model_id, m.name, m.version, m.collection, m.status AS model_status, "
+    "e.synced_version, e.embedded_at "
+    "FROM image_embeddings e JOIN embedding_models m ON m.id = e.model_id "
+    "WHERE e.image_id = CAST(:id AS uuid) ORDER BY e.model_id"
 )
 
 # Required enum columns -> system enum class (also has a CHECK) or editable enum name (only this check)
@@ -449,3 +459,127 @@ class PgImagesMixin:
             return _row_to_dict(row) if row else None
         except Exception as exc:
             raise err.search_postgres_failed(f"{type(exc).__name__}: {exc}") from exc
+
+    # -- one image as the gallery admin reads and edits it ----------------------------
+
+    def _image_detail(self, conn: Any, uid: str) -> dict[str, Any] | None:
+        """Row + category (zh name, code) + heating group + food + effective scenes + ledger."""
+        from sqlalchemy import text
+
+        row = conn.execute(
+            text(
+                _HYDRATE_SELECT
+                + ", c.code AS category_code "
+                "FROM images i "
+                "LEFT JOIN categories c ON c.id = i.category_id "
+                + _CATEGORY_NAME_JOIN
+                + _HEATING_GROUP_JOIN
+                + FOOD_JOIN
+                + "WHERE i.id = CAST(:id AS uuid)"
+            ),
+            {"id": uid, "primary_kind": NameKind.PRIMARY.value},
+        ).mappings().fetchone()
+        if row is None:
+            return None
+        detail = _decorate(row, self._scene_codes_by_image(conn, [uid]))
+        detail["embeddings"] = [
+            _row_to_dict(ledger) for ledger in conn.execute(text(_LEDGER_SQL), {"id": uid}).mappings()
+        ]
+        return detail
+
+    def get_image_detail(self, image_id: UUID | str) -> dict[str, Any] | None:
+        """One image with everything the gallery shows of it, or None. One snapshot: the payload
+        fields and the scenes are read together, so they can be compared with the vector store."""
+        self.ensure_schema()
+        uid = str(_as_uuid(image_id))
+        try:
+            with self._get_engine().connect() as conn:
+                conn.execution_options(isolation_level="REPEATABLE READ")
+                with conn.begin():
+                    return self._image_detail(conn, uid)
+        except err.AppError:
+            raise
+        except Exception as exc:
+            raise err.search_postgres_failed(f"get_image_detail: {type(exc).__name__}: {exc}") from exc
+
+    def patch_image(self, image_id: UUID | str, fields: dict[str, Any]) -> dict[str, Any]:
+        """Apply a gallery patch (normalized by services.retrieval.image_fields) in one
+        transaction; returns the image detail as committed.
+
+        Takes the catalog read lock, then the image row lock (the order of every image writer),
+        so the category checked here cannot be deleted or disabled before the commit. Settles
+        label_status (image_fields.resolve_label_status), bumps payload_version once when a
+        payload field (category_id, label_status, food_state) actually changes, and rewrites the
+        image's rule memberships when the category changes. The vector store is not touched:
+        the HTTP layer pushes the payload after the commit.
+        """
+        self.ensure_schema()
+        from sqlalchemy import text
+
+        uid = str(_as_uuid(image_id))
+        try:
+            with self._get_engine().begin() as conn:
+                lock_catalog_for_read(conn)
+                current = conn.execute(
+                    text(
+                        "SELECT i.category_id, i.label_status, i.payload_version, f.food_state "
+                        "FROM images i LEFT JOIN image_foods f ON f.image_id = i.id "
+                        "WHERE i.id = CAST(:id AS uuid) FOR UPDATE OF i"
+                    ),
+                    {"id": uid},
+                ).mappings().fetchone()
+                if current is None:
+                    raise err.image_not_found(f"image {uid} does not exist")
+
+                category_id = fields["category_id"] if "category_id" in fields else current["category_id"]
+                category_changed = category_id != current["category_id"]
+                if category_changed and category_id is not None:
+                    category = conn.execute(
+                        text("SELECT is_active FROM categories WHERE id = :cid"), {"cid": category_id}
+                    ).fetchone()
+                    if category is None:
+                        raise err.validation_error(f"category_id {category_id} does not exist")
+                    if not category[0]:
+                        raise err.validation_error(
+                            f"category {category_id} is inactive: it is no longer used for labelling"
+                        )
+                label = resolve_label_status(
+                    current_label=current["label_status"],
+                    current_category_id=current["category_id"],
+                    new_category_id=category_id,
+                    requested=fields.get("label_status"),
+                )
+                label_changed = label.value != current["label_status"]
+                food = {key: fields[key] for key in FOOD_FIELDS if key in fields}
+                food_state_changed = "food_state" in food and food["food_state"] != current["food_state"]
+
+                sets = ["updated_at = now()"]
+                params: dict[str, Any] = {"id": uid}
+                if category_changed:
+                    sets.append("category_id = :category_id")
+                    params["category_id"] = category_id
+                if label_changed:
+                    sets.append("label_status = :label_status")
+                    params["label_status"] = label.value
+                if "description" in fields:
+                    sets.append("description = :description")
+                    params["description"] = fields["description"]
+                if "tags" in fields:
+                    sets.append("tags = CAST(:tags AS text[])")
+                    params["tags"] = fields["tags"]
+                if category_changed or label_changed or food_state_changed:
+                    sets.append("payload_version = payload_version + 1")
+                conn.execute(
+                    text(f"UPDATE images SET {', '.join(sets)} WHERE id = CAST(:id AS uuid)"), params
+                )
+                if food:
+                    write_image_food(conn, uid, food)
+                if category_changed:
+                    # Rule memberships follow the category; the version is already bumped above
+                    image = {"id": uid, "category_id": category_id, "payload_version": current["payload_version"]}
+                    _recompute(conn, [image], bump=False)
+                return self._image_detail(conn, uid)
+        except err.AppError:
+            raise
+        except Exception as exc:
+            raise err.index_postgres_failed(f"patch_image: {type(exc).__name__}: {exc}") from exc

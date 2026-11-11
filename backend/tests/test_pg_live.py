@@ -251,6 +251,163 @@ class PgLiveTests(unittest.TestCase):
                           "RETURNING status").scalar_one()
         self.assertEqual(status, "building")
 
+    # ---- one image as the gallery admin reads and edits it (patch_image / get_image_detail) ----
+
+    def current_model(self, collection):
+        return self.sql(
+            "INSERT INTO embedding_models (name, version, dim, distance, input_size, weights_uri, collection, status) "
+            "VALUES ('m', '1', 4, 'cosine', 336, 's3://w', :c, 'current') RETURNING id",
+            {"c": collection},
+        ).scalar_one()
+
+    def test_image_detail_and_patch(self):
+        from app.core.errors import AppError
+
+        cat = self.seed_catalog()
+        store = self.store()
+        iid = self.insert(store, 1, tags=["带骨"], food_state="raw")
+        detail = store.get_image_detail(iid)
+        self.assertEqual(
+            (detail["category_id"], detail["category_code"], detail["label_status"], detail["scenes"]),
+            (None, None, "unlabeled", ["general"]),
+        )
+        self.assertEqual((detail["food_state"], detail["tags"], detail["embeddings"], detail["heating_group"]),
+                         ("raw", ["带骨"], [], None))
+        self.assertEqual(len(detail["sha256"]), 64)  # hex
+        self.assertIsNone(store.get_image_detail(uuid.uuid4()))
+        model_id = self.current_model("c_detail")
+        store.upsert_image_embedding(model_id=model_id, image_id=iid, synced_version=1)
+        self.assertEqual(
+            [(e["model_id"], e["collection"], e["model_status"], e["synced_version"])
+             for e in store.get_image_detail(iid)["embeddings"]],
+            [(model_id, "c_detail", "current", 1)],
+        )
+
+        # A category picked by hand: verified, the rule memberships follow, one bump
+        out = store.patch_image(iid, {"category_id": cat["steak"]})
+        self.assertEqual(
+            (out["label_status"], out["category_name"], out["category_code"], out["scenes"], out["payload_version"]),
+            ("verified", "牛排", "dish.steak", ["general", "oven"], 2),
+        )
+        self.assertEqual(out["heating_group"]["code"], "grill")  # the nearest ancestor's
+        # Fields outside the payload, and a food_state equal to the stored one: no bump
+        out = store.patch_image(iid, {"tags": ["去骨"], "description": "煎", "total_mass_g": 300, "food_state": "raw"})
+        self.assertEqual((out["tags"], out["description"], out["total_mass_g"], out["payload_version"]),
+                         (["去骨"], "煎", 300, 2))
+        out = store.patch_image(iid, {"food_state": "cooked", "label_status": "auto"})
+        self.assertEqual((out["food_state"], out["label_status"], out["payload_version"]), ("cooked", "auto", 3))
+        # Category cleared: unlabeled and out of the rule scene
+        out = store.patch_image(iid, {"category_id": None})
+        self.assertEqual((out["category_id"], out["label_status"], out["scenes"], out["payload_version"]),
+                         (None, "unlabeled", ["general"], 4))
+        self.assertEqual(
+            self.sql("SELECT count(*) FROM image_scenes WHERE image_id = :i", {"i": uuid.UUID(iid)}).scalar_one(), 0
+        )
+
+        def refused(fields, code="VALIDATION_ERROR", image=iid):
+            with self.assertRaises(AppError) as ctx:
+                store.patch_image(image, fields)
+            self.assertEqual(ctx.exception.code, code)
+
+        refused({"label_status": "auto"})  # no category to go with it
+        self.sql("UPDATE categories SET is_active = false WHERE id = :c", {"c": cat["dish"]})
+        refused({"category_id": cat["dish"]})  # disabled: no longer used for labelling
+        refused({"category_id": 999999})
+        refused({"description": "x"}, "IMAGE_NOT_FOUND", image=str(uuid.uuid4()))
+        self.assertEqual(store.get_image_detail(iid)["payload_version"], 4)  # nothing half-written
+
+    def test_a_deleted_image_stored_again_is_deleted_again(self):
+        from app.core.errors import AppError
+
+        store = self.store()
+        with self.assertRaises(AppError) as ctx:
+            store.enqueue_image_deletion(uuid.uuid4())
+        self.assertEqual(ctx.exception.code, "IMAGE_NOT_FOUND")
+        iid = self.insert(store, 1)
+        first = store.enqueue_image_deletion(iid)
+        self.assertEqual(store.enqueue_image_deletion(iid), first)  # still queued: the same row
+        self.assertEqual(self.insert(store, 1), iid)  # the same bytes indexed again before the cleanup ran
+        store.enqueue_image_deletion(iid)
+        self.assertIsNone(store.get_image_by_uuid(iid))
+        self.assertEqual([r["image_id"] for r in store.list_pending_deletions()], [iid])
+
+    def test_the_image_admin_reads_edits_and_deletes_through_the_vector_store(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from app.api.v1 import images as routes
+        from app.bootstrap.state import ApplicationState
+        from app.clients.qdrant import QdrantConnection, QdrantStore
+        from app.core.exceptions import register_exception_handlers
+        from app.core.middleware import TraceIdMiddleware
+        from app.repositories.vectors import QdrantVectorStore
+        from app.services.retrieval.active_model import ActiveModel
+        from app.services.retrieval.delete_image import DeletionWorker
+        from app.services.retrieval.manage_images import ManageImagesUseCase
+        from app.services.retrieval.sync_scenes import SyncSceneMembershipsUseCase
+        from app.services.retrieval.vector_status import ImageVectorStatusUseCase
+
+        cat = self.seed_catalog()
+        store = self.store()
+        model_id = self.current_model("c_images")
+        iid = self.insert(store, 1)
+        orphan = self.insert(store, 2)  # in PG, never embedded into this collection
+        vectors = QdrantVectorStore(QdrantStore(QdrantConnection(url=":memory:"), collection="c_images", vector_dim=4))
+        vectors.ensure_collection()
+        self.addCleanup(vectors.close)
+        # A point whose payload is behind PostgreSQL (label_status)
+        vectors.upsert(iid, [1, 0, 0, 0], {"scenes": ["general"], "category_id": None, "food_state": None, "label_status": "auto"})
+        model = ActiveModel(id=model_id, name="m", version="1", collection="c_images", dim=4, distance="cosine")
+        storage = Mock()
+        runtime = ApplicationState(
+            config={}, config_info={}, http_client=Mock(), settings=SimpleNamespace(),
+            catalog=SimpleNamespace(images_uc=ManageImagesUseCase(store)),
+            retrieval=SimpleNamespace(
+                model=model,
+                scene_sync_uc=SyncSceneMembershipsUseCase(store, vectors, model=model),
+                vector_status_uc=ImageVectorStatusUseCase(vectors, model=model),
+                deletion_worker=DeletionWorker(store, vectors, storage),
+            ),
+        )
+        app = FastAPI()
+        register_exception_handlers(app)
+        app.add_middleware(TraceIdMiddleware)
+        app.include_router(routes.router)
+        client = TestClient(app)
+        self.addCleanup(client.close)
+        with patch.object(routes, "get_application_state", return_value=runtime):
+            def vector(image):
+                response = client.get(f"/api/images/{image}")
+                self.assertEqual(response.status_code, 200, response.text)
+                return response.json()["vector"]
+
+            self.assertEqual(vector(iid)["status"], "stale")
+            self.assertEqual(vector(orphan)["status"], "missing")
+            body = client.post(f"/api/images/{iid}/vector-sync").json()
+            self.assertEqual((body["vector_sync"], body["sync_required"]), ("pushed", False))
+            state = vector(iid)
+            self.assertEqual((state["status"], state["synced_version"], state["payload_version"]), ("synced", 1, 1))
+
+            # A category edited in the gallery reaches the search filter in the same request
+            body = client.patch(f"/api/images/{iid}", json={"category_id": cat["steak"]}).json()
+            self.assertEqual((body["vector_sync"], body["image"]["scenes"], body["image"]["label_status"]),
+                             ("pushed", ["general", "oven"], "verified"))
+            self.assertEqual([hit["id"] for hit in vectors.search([1, 0, 0, 0], top_k=5, scene="oven")], [iid])
+            self.assertEqual(vector(iid)["status"], "synced")
+            body = client.patch(f"/api/images/{orphan}", json={"tags": ["x"]}).json()
+            self.assertEqual((body["vector_sync"], body["sync_required"], body["image"]["tags"]), ("missing", True, ["x"]))
+
+            # Deleted: gone from PostgreSQL, the point and both files removed in the same request
+            body = client.delete(f"/api/images/{iid}").json()
+            self.assertEqual((body["image_id"], body["cleanup"]), (iid, "done"))
+            self.assertEqual(vectors.get_payloads([iid]), {})
+            self.assertEqual(store.list_pending_deletions(), [])
+            self.assertEqual(sorted(c.args[0] for c in storage.delete_by_url_or_key.call_args_list),
+                             ["https://cdn/o/1.jpg", "https://cdn/t/1.webp"])
+            self.assertEqual(client.get(f"/api/images/{iid}").status_code, 404)
 
     def test_a_value_added_to_the_enum_file_is_stored_and_blocks_downgrade(self):
         import shutil

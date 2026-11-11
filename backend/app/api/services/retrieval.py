@@ -42,6 +42,9 @@ FOOD_KEYS = (
     "water_mass_g",
     "main_ingredient_mass_g",
 )
+# Labelling an index request may set; omitted: label_status follows the category, source_type
+# user_upload, license unknown (app.services.retrieval.index_image)
+LABEL_KEYS = ("label_status", "source_type", "license")
 M = TypeVar("M", bound=BaseModel)
 
 
@@ -56,6 +59,14 @@ async def _json_body(request: Request, model: Type[M]) -> M:
         return model(**(await request.json()))
     except (ValueError, TypeError) as exc:  # bad JSON or schema (pydantic errors are ValueErrors)
         raise err.validation_error(str(exc)) from exc
+
+
+def _form_text(raw: Any) -> Optional[str]:
+    """A multipart text field; None when omitted or blank."""
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return text or None
 
 
 def _json_array(raw: Any, field: str) -> Optional[List[Any]]:
@@ -112,7 +123,7 @@ async def index_from_upload(
 
 async def index_from_request(runtime: ApplicationState, request: Request) -> Dict[str, Any]:
     """multipart file/files (<= 100) or JSON {path, description, category, tags, scene, scenes,
-    and the optional food fields FOOD_KEYS}."""
+    label_status, source_type, license, and the optional food fields FOOD_KEYS}."""
     trace_id = bind_trace_id(request)
     if _is_json(request):
         raw = await _json_body(request, IndexJsonRequest)
@@ -124,6 +135,7 @@ async def index_from_request(runtime: ApplicationState, request: Request) -> Dic
             "scene": raw.scene,
             "scenes": raw.scenes,
             "description": raw.description,
+            **{key: getattr(raw, key) for key in LABEL_KEYS},
             **{key: getattr(raw, key) for key in FOOD_KEYS},
         }]
     else:
@@ -145,6 +157,7 @@ async def _index_items_from_form(request: Request, max_bytes: int) -> List[Dict[
         "scene": str(scene).strip() if scene not in (None, "") else None,
         "scenes": _json_array(form.get("scenes"), "scenes"),
         "description": form.get("description"),  # normalized (and validated) by the use case
+        **{key: _form_text(form.get(key)) for key in LABEL_KEYS},  # enum values; checked by the use case
         **{key: form.get(key) for key in FOOD_KEYS},  # strings; validated by the use case
     }
     uploads = []

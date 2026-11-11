@@ -2,6 +2,8 @@
 
 1. delete_image: TX delete images (+ CASCADE deps) → insert image_deletions
 2. process_deletion_queue: drain image_deletions → Qdrant delete + S3 delete → remove row
+   (DELETE /api/images/{image_id} runs this for its own row right away, DeletionWorker.clean_up;
+   what fails there stays queued for `python -m app.workers.process_deletions`)
 
 Qdrant choice (M4): delete by uuid on the **current** collection via VectorStorePort.
 Multi-collection sweep (all embedding_models.collection) deferred — document for later.
@@ -38,6 +40,30 @@ class DeleteImageUseCase:
         }
 
 
+def _clean_up(
+    metadata: MetadataStorePort,
+    vectors: VectorStorePort,
+    storage: ImageStoragePort,
+    row: dict[str, Any],
+) -> None:
+    """Delete one queued image's point (current collection) and its two files, then its queue row.
+
+    Raises on failure, leaving the row for a retry. An image stored again since it was deleted
+    (same bytes: same id, point and object keys) keeps its point and files; only the row goes.
+    """
+    image_id = row.get("image_id")
+    if metadata.get_by_id(image_id) is None:
+        # Current collection only (VectorStorePort wired to embedding_models.current).
+        vectors.delete(image_id)
+        for url_field in ("original_url", "thumb_url"):
+            url = str(row.get(url_field) or "").strip()
+            if url:
+                storage.delete_by_url_or_key(url)
+    else:
+        logger.warning("image %s was stored again after its deletion; its point and files are kept", image_id)
+    metadata.complete_deletion(image_id)
+
+
 def process_deletion_queue(
     metadata: MetadataStorePort,
     vectors: VectorStorePort,
@@ -58,13 +84,7 @@ def process_deletion_queue(
     for row in pending:
         image_id = row.get("image_id")
         try:
-            # Current collection only (VectorStorePort wired to embedding_models.current).
-            vectors.delete(image_id)
-            for url_field in ("original_url", "thumb_url"):
-                url = str(row.get(url_field) or "").strip()
-                if url:
-                    storage.delete_by_url_or_key(url)
-            metadata.complete_deletion(image_id)
+            _clean_up(metadata, vectors, storage, row)
             processed.append(str(image_id))
             logger.info("deletion queue completed id=%s", image_id)
         except Exception as exc:
@@ -105,3 +125,14 @@ class DeletionWorker:
             self._storage,
             limit=limit,
         )
+
+    def clean_up(self, row: dict[str, Any]) -> bool:
+        """Clean one just-queued deletion now (DELETE /api/images/{image_id}). False leaves the
+        row queued for run_once (the cause is logged)."""
+        try:
+            _clean_up(self._metadata, self._vectors, self._storage, row)
+        except Exception:
+            logger.exception("deletion cleanup failed id=%s; left queued in image_deletions", row.get("image_id"))
+            return False
+        logger.info("deletion cleanup completed id=%s", row.get("image_id"))
+        return True

@@ -100,10 +100,18 @@ describe('toIndexResponse (POST /api/index)', () => {
       indexed: [{
         id: 'img-1', filename: 'a.jpg', imageUrl: 'https://s3.example/t/a.webp', originalUrl: 'https://s3.example/o/a.jpg',
         categoryId: null, scenes: ['general'], labelStatus: 'unlabeled', foodState: null, description: '描述',
-        width: 640, height: 480, payloadVersion: 1, createdAt: '2026-11-07T10:00:00+00:00',
+        tags: [], width: 640, height: 480, payloadVersion: 1, createdAt: '2026-11-07T10:00:00+00:00',
+        created: null,  // an older server does not say
       }],
       failed: [{ filename: 'b.png', error: 'INDEX_BAD_IMAGE', detail: 'cannot decode image' }],
     })
+  })
+
+  it('tells a new image from one that was already stored', () => {
+    const image = (created: unknown) => toIndexResponse({ ok: true, indexed: [{ id: 'a', tags: ['带皮'], created }] }).indexed[0]
+    expect(image(true)).toMatchObject({ created: true, tags: ['带皮'] })
+    expect(image(false).created).toBe(false)
+    expect(image('false').created).toBeNull()  // only a real boolean counts
   })
 
   it('reads missing lists as empty', () => {
