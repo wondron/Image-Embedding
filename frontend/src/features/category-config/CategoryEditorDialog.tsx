@@ -4,6 +4,8 @@ import { Dialog } from '../../components/Dialog'
 import {
   categoryDraftFromNode,
   categoryLabel,
+  effectiveCuisines,
+  effectiveHeatingGroup,
   emptyCategoryDraft,
   flattenCategoryTree,
   subtreeIds,
@@ -20,10 +22,13 @@ import {
   type HeatingGroupRef,
 } from '../../entities/category'
 import type { CategoryCreateRequestWire, CategoryUpdateRequestWire } from '../../shared/api'
+import { formatLibraryTime } from '../../shared/lib'
+import { retargetCode } from './tableModel'
 import { saveFailureText } from './messages'
 
 export type CategoryEditorTarget =
-  | { mode: 'create'; parent: CategoryNode | null }
+  /** parentId null: a root (a domain); undefined: the parent is chosen in the form. */
+  | { mode: 'create'; parentId?: number | null }
   | { mode: 'edit'; node: CategoryNode }
 
 export type CategorySaveRequest =
@@ -46,6 +51,9 @@ interface Props {
   onClose: () => void
 }
 
+/** The parent select's value for "no parent". */
+const ROOT = 'root'
+
 const FIELD_ORDER: readonly CategoryFieldName[] = [
   'parentId', 'code', 'zhName', 'otherNames', 'cuisines', 'heatingGroupId', 'sortOrder',
 ]
@@ -61,8 +69,7 @@ function FieldError({ field, errors }: { field: CategoryFieldName; errors: Categ
 
 export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, domainName, save, onClose }: Props) {
   const node = target.mode === 'edit' ? target.node : null
-  const parent = target.mode === 'create' ? target.parent : null
-  const creatingRoot = target.mode === 'create' && target.parent === null
+  const presetParentId = target.mode === 'create' ? target.parentId : undefined
 
   const entries = useMemo(() => flattenCategoryTree(tree), [tree])
   const takenCodes = useMemo(
@@ -76,10 +83,19 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
     [entries, forbiddenParentIds],
   )
   const freeRootCodes = useMemo(() => rootCodes.filter(code => !takenCodes.has(code)), [rootCodes, takenCodes])
-  const rootAllowed = node !== null && (node.parentId === null || rootCodes.includes(node.code))
+  // Only a domain may sit at the top: an existing root, or a node whose code is a domain's.
+  const rootOffered = node ? node.parentId === null || rootCodes.includes(node.code) : freeRootCodes.length > 0
 
+  const prefixOf = (parentId: number | null) => {
+    const parent = parentId === null ? undefined : tree.byId.get(parentId)?.node
+    return parent ? `${parent.code}.` : ''
+  }
+
+  const [parentPicked, setParentPicked] = useState(node !== null || presetParentId !== undefined)
   const [draft, setDraft] = useState<CategoryDraft>(() => {
     if (node) return categoryDraftFromNode(node)
+    if (presetParentId === undefined) return emptyCategoryDraft(null)
+    const parent = presetParentId === null ? undefined : tree.byId.get(presetParentId)?.node
     if (parent) return emptyCategoryDraft(parent)
     const code = freeRootCodes[0] ?? ''
     return { ...emptyCategoryDraft(null, code), zhName: domainName(code) ?? '' }
@@ -96,13 +112,17 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
     return () => { mounted.current = false }
   }, [])
 
-  // A new child opens with its parent's code as a prefix ("dish."): put the caret after it once,
-  // so typing continues the code. (Dialog has focused the field already: child effects run first.)
-  useEffect(() => {
-    if (!parent) return
-    const input = document.getElementById('category-form-code')
-    if (input instanceof HTMLInputElement) input.setSelectionRange(input.value.length, input.value.length)
-  }, [parent])
+  /**
+   * A new child's code starts as its parent's code plus a dot ("dish."). While that is all it
+   * holds, focusing the field puts the caret after it, so typing continues the code instead of
+   * replacing it (Tab would select the whole value). Only here, in the focus event: a later
+   * change could undo a selection the user made on purpose.
+   */
+  function keepPrefix(input: HTMLInputElement) {
+    if (node || !parentPicked || draft.parentId === null) return
+    const prefix = prefixOf(draft.parentId)
+    if (input.value === prefix) input.setSelectionRange(prefix.length, prefix.length)
+  }
 
   useEffect(() => {
     if (!focusField) return
@@ -113,43 +133,71 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
     setFocusField(null)
   }, [focusField])
 
-  function edit(field: CategoryFieldName | null, changes: Partial<CategoryDraft>) {
+  function edit(fields: readonly CategoryFieldName[], changes: Partial<CategoryDraft>) {
     setDraft(current => ({ ...current, ...changes }))
-    if (field && fieldErrors[field]) {
+    if (fields.some(field => fieldErrors[field])) {
       setFieldErrors(current => {
         const next = { ...current }
-        delete next[field]
+        for (const field of fields) delete next[field]
         return next
       })
     }
+  }
+
+  const rootMode = parentPicked && draft.parentId === null
+
+  function chooseParent(value: string) {
+    const parentId = value === ROOT ? null : Number(value)
+    if (node) {
+      edit(['parentId'], { parentId })
+      return
+    }
+    const wasRoot = rootMode
+    const domainNameNow = wasRoot ? domainName(draft.code) ?? '' : null
+    const followsDomain = draft.zhName.trim() === '' || draft.zhName.trim() === domainNameNow
+    if (parentId === null) {
+      // A root: its code is one of the free domain codes, its name follows the domain's
+      const code = freeRootCodes.includes(draft.code) ? draft.code : freeRootCodes[0] ?? ''
+      edit(['parentId', 'code', 'zhName'], { parentId, code, ...(followsDomain ? { zhName: domainName(code) ?? '' } : {}) })
+    } else {
+      // What was typed after the old parent's prefix moves under the new one
+      const code = wasRoot ? prefixOf(parentId) : retargetCode(draft.code, parentPicked ? prefixOf(draft.parentId) : '', prefixOf(parentId))
+      edit(['parentId', 'code'], { parentId, code, ...(wasRoot && followsDomain ? { zhName: '' } : {}) })
+    }
+    setParentPicked(true)
   }
 
   function chooseRootCode(code: string) {
     // Follow the domain with its name until the user types a name of their own.
     const typed = draft.zhName.trim()
     const followsDomain = typed === '' || typed === (domainName(draft.code) ?? '')
-    edit('code', followsDomain ? { code, zhName: domainName(code) ?? '' } : { code })
+    edit(['code'], followsDomain ? { code, zhName: domainName(code) ?? '' } : { code })
   }
 
   function editName(index: number, changes: Partial<CategoryName>) {
-    edit('otherNames', {
+    edit(['otherNames'], {
       otherNames: draft.otherNames.map((entry, at) => (at === index ? { ...entry, ...changes } : entry)),
     })
   }
 
+  function showFieldErrors(errors: CategoryFieldErrors) {
+    setFieldErrors(errors)
+    setFocusField(firstField(errors))
+    setNotice(null)
+  }
+
   function showFailure(failure: CategoryFailureView) {
-    if (Object.keys(failure.fieldErrors).length > 0) {
-      setFieldErrors(failure.fieldErrors)
-      setFocusField(firstField(failure.fieldErrors))
-      setNotice(null)
-      return
-    }
-    setNotice({ text: saveFailureText(failure), tone: 'error' })
+    if (Object.keys(failure.fieldErrors).length > 0) showFieldErrors(failure.fieldErrors)
+    else setNotice({ text: saveFailureText(failure), tone: 'error' })
   }
 
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (submitLock.current) return
+    if (!parentPicked) {
+      showFieldErrors({ parentId: '请选择上级类别。' })
+      return
+    }
     const validated = validateCategoryDraft(draft, {
       rootCodes,
       takenCodes,
@@ -157,9 +205,7 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
       forbiddenParentIds,
     })
     if (!validated.ok) {
-      setFieldErrors(validated.fieldErrors)
-      setFocusField(firstField(validated.fieldErrors))
-      setNotice(null)
+      showFieldErrors(validated.fieldErrors)
       return
     }
     let request: CategorySaveRequest
@@ -187,41 +233,58 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
     }
   }
 
-  const title = node ? '编辑类别' : creatingRoot ? '新建根类别' : '新建子类别'
   const describedBy = (field: CategoryFieldName, hint?: string) => (
     fieldErrors[field] ? `category-form-${field}-error` : hint
   )
+  // A root keeps its domain code; so does a node moved to the top (only a domain-coded one may be)
   const rootCodeFixed = node !== null && draft.parentId === null
+  const parentValue = !parentPicked ? '' : draft.parentId === null ? ROOT : String(draft.parentId)
 
-  return <Dialog title={title} size="lg" dismissDisabled={submitting} onClose={onClose}>
+  // What an empty cuisines / heating group field falls back to: the new parent's own, else its ancestors'
+  const parentNode = draft.parentId === null ? undefined : tree.byId.get(draft.parentId)?.node
+  const inheritedCuisines = parentNode ? effectiveCuisines(tree, parentNode.id) : null
+  const cuisinesFrom = inheritedCuisines?.value.length ? inheritedCuisines.from ?? parentNode! : null
+  const inheritedGroup = parentNode ? effectiveHeatingGroup(tree, parentNode.id) : null
+  const groupFrom = inheritedGroup?.value ? inheritedGroup.from ?? parentNode! : null
+  const childCount = node ? tree.byId.get(node.id)?.children.length ?? 0 : 0
+
+  return <Dialog title={node ? '编辑类别' : '新建类别'} size="lg" dismissDisabled={submitting} onClose={onClose}>
     <form className="mg-editor cat-form" onSubmit={event => void submit(event)} aria-busy={submitting} noValidate>
       <div className="mg-editor-body">
+        {node && <p className="mg-editor-note ct-editor-meta">
+          {[
+            `${childCount} 个下级类别`,
+            `${node.imageCount} 张图片`,
+            `${node.sceneRuleCount} 条场景规则`,
+            node.updatedAt ? `更新于 ${formatLibraryTime(node.updatedAt)}` : null,
+          ].filter(Boolean).join(' · ')}
+        </p>}
         <section className="mg-editor-section" aria-labelledby="category-form-place-title">
           <h3 id="category-form-place-title">位置与编码</h3>
-          {node
-            ? <label className="mg-field" htmlFor="category-form-parentId"><span className="mg-field-label">上级类别</span>
-              <select
-                id="category-form-parentId"
-                value={draft.parentId ?? ''}
-                disabled={submitting}
-                aria-invalid={Boolean(fieldErrors.parentId)}
-                aria-describedby={describedBy('parentId', 'category-form-parentId-hint')}
-                onChange={event => edit('parentId', { parentId: event.target.value === '' ? null : Number(event.target.value) })}
-              >
-                {rootAllowed && <option value="">（根节点）</option>}
-                {parentOptions.map(entry => <option key={entry.node.id} value={entry.node.id}>
-                  {`${'　'.repeat(entry.depth)}${categoryLabel(entry.node)}（${entry.node.code}）`}
-                </option>)}
-              </select>
-              <small id="category-form-parentId-hint">换上级会把它下面的子类别一起移过去。</small>
-              <FieldError field="parentId" errors={fieldErrors} />
-            </label>
-            : <div className="mg-field"><span className="mg-field-label">上级类别</span>
-              <p className="cat-form-static">{parent ? `${categoryLabel(parent)}（${parent.code}）` : '（根节点）'}</p>
-            </div>}
+          <label className="mg-field" htmlFor="category-form-parentId"><span className="mg-field-label">上级类别{!node && <span aria-hidden="true"> *</span>}</span>
+            <select
+              id="category-form-parentId"
+              data-dialog-initial-focus={!node && !parentPicked ? true : undefined}
+              value={parentValue}
+              disabled={submitting}
+              aria-invalid={Boolean(fieldErrors.parentId)}
+              aria-describedby={describedBy('parentId', 'category-form-parentId-hint')}
+              onChange={event => chooseParent(event.target.value)}
+            >
+              {!parentPicked && <option value="" disabled>请选择上级类别</option>}
+              {rootOffered && <option value={ROOT}>（根节点 · 类别域）</option>}
+              {parentOptions.map(entry => <option key={entry.node.id} value={entry.node.id}>
+                {`${'　'.repeat(entry.depth)}${categoryLabel(entry.node)}（${entry.node.code}）${entry.node.isActive ? '' : ' · 停用'}`}
+              </option>)}
+            </select>
+            <small id="category-form-parentId-hint">{node
+              ? '换上级会把它下面的下级类别一起移过去。'
+              : '新类别放在哪个类别下面；只有类别域（食材、菜品等）可以放在最顶层。'}</small>
+            <FieldError field="parentId" errors={fieldErrors} />
+          </label>
 
           <label className="mg-field" htmlFor="category-form-code"><span className="mg-field-label">编码<span aria-hidden="true"> *</span></span>
-            {creatingRoot
+            {!node && rootMode
               ? <select
                 id="category-form-code"
                 data-dialog-initial-focus
@@ -237,17 +300,19 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
               </select>
               : <input
                 id="category-form-code"
-                data-dialog-initial-focus={node ? undefined : true}
+                data-dialog-initial-focus={!node && parentPicked ? true : undefined}
                 value={draft.code}
-                disabled={submitting || rootCodeFixed}
+                disabled={submitting || rootCodeFixed || !parentPicked}
+                placeholder={parentPicked ? undefined : '先选择上级类别'}
                 spellCheck={false}
                 autoComplete="off"
                 aria-invalid={Boolean(fieldErrors.code)}
                 aria-describedby={describedBy('code', 'category-form-code-hint')}
-                onChange={event => edit('code', { code: event.target.value })}
+                onFocus={event => keepPrefix(event.currentTarget)}
+                onChange={event => edit(['code'], { code: event.target.value })}
               />}
-            <small id="category-form-code-hint">{creatingRoot || rootCodeFixed
-              ? '根类别只能使用域的编码。'
+            <small id="category-form-code-hint">{rootMode || rootCodeFixed
+              ? '根类别只能使用类别域的编码。'
               : '小写字母、数字和下划线，用点分段，例如 dish.pizza。入库时按编码引用类别。'}</small>
             <FieldError field="code" errors={fieldErrors} />
           </label>
@@ -264,7 +329,7 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
               autoComplete="off"
               aria-invalid={Boolean(fieldErrors.zhName)}
               aria-describedby={describedBy('zhName', 'category-form-zhName-hint')}
-              onChange={event => edit('zhName', { zhName: event.target.value })}
+              onChange={event => edit(['zhName'], { zhName: event.target.value })}
             />
             <small id="category-form-zhName-hint">检索结果和图库里显示的类别名。</small>
             <FieldError field="zhName" errors={fieldErrors} />
@@ -304,17 +369,17 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
                   className="icon-button"
                   aria-label={`删除第 ${index + 1} 行名称`}
                   disabled={submitting}
-                  onClick={() => edit('otherNames', { otherNames: draft.otherNames.filter((_, at) => at !== index) })}
+                  onClick={() => edit(['otherNames'], { otherNames: draft.otherNames.filter((_, at) => at !== index) })}
                 ><X size={15} /></button>
               </div>)}
               <button
                 type="button"
                 className="mg-text-button"
                 disabled={submitting}
-                onClick={() => edit('otherNames', { otherNames: [...draft.otherNames, { lang: 'zh', name: '', kind: 'alias' }] })}
+                onClick={() => edit(['otherNames'], { otherNames: [...draft.otherNames, { lang: 'zh', name: '', kind: 'alias' }] })}
               ><Plus size={14} />添加名称</button>
             </div>
-            <small>中文别名，或其他语言的名称（语言代码如 en、ja）。每种语言最多一个主名。</small>
+            <small>中文别名，或其他语言的名称（语言代码如 en、ja）。每种语言最多一个主名；搜索时别名也能找到它。</small>
             <FieldError field="otherNames" errors={fieldErrors} />
           </div>
         </section>
@@ -328,12 +393,14 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
               disabled={submitting}
               spellCheck={false}
               autoComplete="off"
-              placeholder="chinese, american"
+              placeholder={cuisinesFrom ? inheritedCuisines!.value.join(', ') : 'chinese, american'}
               aria-invalid={Boolean(fieldErrors.cuisines)}
               aria-describedby={describedBy('cuisines', 'category-form-cuisines-hint')}
-              onChange={event => edit('cuisines', { cuisines: event.target.value })}
+              onChange={event => edit(['cuisines'], { cuisines: event.target.value })}
             />
-            <small id="category-form-cuisines-hint">多个用逗号分隔；留空则沿用上级的菜系。场景规则按菜系匹配。</small>
+            <small id="category-form-cuisines-hint">{cuisinesFrom && draft.cuisines.trim() === ''
+              ? `留空：沿用「${categoryLabel(cuisinesFrom)}」的 ${inheritedCuisines!.value.join('、')}。多个用逗号分隔，场景规则按菜系匹配。`
+              : '多个用逗号分隔；留空则沿用上级的菜系。场景规则按菜系匹配。'}</small>
             <FieldError field="cuisines" errors={fieldErrors} />
           </label>
           <label className="mg-field" htmlFor="category-form-heatingGroupId"><span className="mg-field-label">加热组</span>
@@ -343,13 +410,13 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
               disabled={submitting}
               aria-invalid={Boolean(fieldErrors.heatingGroupId)}
               aria-describedby={describedBy('heatingGroupId', 'category-form-heatingGroupId-hint')}
-              onChange={event => edit('heatingGroupId', { heatingGroupId: event.target.value === '' ? null : Number(event.target.value) })}
+              onChange={event => edit(['heatingGroupId'], { heatingGroupId: event.target.value === '' ? null : Number(event.target.value) })}
             >
-              <option value="">不设置（沿用上级）</option>
+              <option value="">{groupFrom ? `不设置（沿用「${categoryLabel(groupFrom)}」：${inheritedGroup!.value!.name}）` : '不设置'}</option>
               {heatingGroups.map(group => <option key={group.id} value={group.id}>{`${group.name}（${group.code}）`}</option>)}
             </select>
             <small id="category-form-heatingGroupId-hint">{heatingGroups.length > 0
-              ? '只在一体机等输出加热信息的场景随结果给出。'
+              ? '只在一体机等输出加热信息的场景随结果给出；不设置则沿用上级的加热组。'
               : '数据库里还没有加热组（heating_groups 表为空）。'}</small>
             <FieldError field="heatingGroupId" errors={fieldErrors} />
           </label>
@@ -362,7 +429,7 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
               disabled={submitting}
               aria-invalid={Boolean(fieldErrors.sortOrder)}
               aria-describedby={describedBy('sortOrder', 'category-form-sortOrder-hint')}
-              onChange={event => edit('sortOrder', { sortOrder: event.target.value })}
+              onChange={event => edit(['sortOrder'], { sortOrder: event.target.value })}
             />
             <small id="category-form-sortOrder-hint">整数，同一上级下数字小的排在前面。</small>
             <FieldError field="sortOrder" errors={fieldErrors} />
@@ -373,17 +440,17 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
                 type="checkbox"
                 checked={draft.isActive}
                 disabled={submitting}
-                onChange={event => edit(null, { isActive: event.target.checked })}
+                onChange={event => edit([], { isActive: event.target.checked })}
               />启用
             </label>
-            <small>停用的类别仍保留在树里，它的图片和子类别不受影响。</small>
+            <small>停用后上传和图库编辑里不再列出它；它的图片和下级类别不受影响。</small>
           </div>
         </section>
         {notice && <p className={notice.tone === 'status' ? 'cat-status' : 'mg-form-error'} role={notice.tone === 'status' ? 'status' : 'alert'}>{notice.text}</p>}
       </div>
       <div className="mg-editor-actions">
         <button type="button" className="mg-btn mg-secondary" onClick={onClose} disabled={submitting}>取消</button>
-        <button type="submit" className="mg-btn mg-primary" disabled={submitting || (creatingRoot && freeRootCodes.length === 0)}>
+        <button type="submit" className="mg-btn mg-primary" disabled={submitting || (!node && rootMode && freeRootCodes.length === 0)}>
           {submitting && <LoaderCircle size={14} className="spin" />}
           {submitting ? '保存中…' : node ? '保存' : '创建'}
         </button>

@@ -135,6 +135,7 @@
 
 .mg-search input::placeholder { color: #7b8aa0; }
 .mg-search:focus-within { border-color: #9ab4dc; box-shadow: 0 0 0 3px rgba(59, 130, 246, .1); }
+.mg-page .mg-search input:focus-visible { outline: 0; }  /* the box above shows the focus */
 .mg-search button { display: grid; place-items: center; padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; }
 
 .mg-select {
@@ -235,13 +236,10 @@
 .mg-tabs button { padding: 12px 0 10px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font-family: inherit; font-size: 14px; white-space: nowrap; cursor: pointer; }
 .mg-tabs button.active { border-bottom-color: var(--primary); color: var(--primary); }
 .mg-page-toolbar > .mg-tabs { border: 0; padding: 0; }
-.mg-ingredient-row { display: grid; grid-template-columns: 1.2fr .7fr 1.5fr 80px; gap: 18px; align-items: center; }
 .mg-table-row { padding: 11px 18px; border-bottom: 1px solid #edf0f5; font-size: 14px; }
 .mg-table-row:nth-child(odd) { background: #fafbfe; }
 .mg-table-row:hover { background: #f4f8fe; }
 .mg-table-row:last-child { border-bottom: 0; }
-.mg-table-row > strong { display: flex; align-items: center; min-width: 0; gap: 8px; font-weight: 500; overflow-wrap: anywhere; }
-.mg-leaf-icon { display: grid; place-items: center; width: 25px; height: 25px; flex-shrink: 0; color: #64748b; }
 .mg-category-chip { display: inline-block; padding: 3px 7px; border: 1px solid #e5eaf2; border-radius: 6px; background: #f6f7f8; color: #475569; font-size: 13px; }
 .mg-attributes { overflow-wrap: anywhere; color: #475569; font-size: 14px; }
 .mg-row-actions { display: flex; gap: 10px; }
@@ -282,7 +280,6 @@
 
 @media (max-width: 1100px) {
   .mg-import-layout { grid-template-columns: minmax(0, 1fr) 330px; gap: 12px; }
-  .mg-ingredient-row { grid-template-columns: 1fr .7fr 1fr 80px; gap: 12px; }
 }
 
 @media (max-width: 860px) {
@@ -317,9 +314,6 @@
   .mg-queue-heading { margin-left: 14px; margin-right: 14px; }
   .mg-upload-grid { padding: 0 14px 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); gap: 10px; }
   .mg-errors { margin-left: 14px; margin-right: 14px; }
-  .mg-ingredient-table { overflow: auto; }
-  .mg-ingredient-table > .mg-ingredient-row { min-width: 500px; }
-  .mg-ingredient-table > .mg-empty { min-width: 0; }
   .mg-table-head { padding: 10px 14px; font-size: 12px; }
   .mg-library-head { gap: 8px; }
   .mg-tabs { gap: 22px; padding: 0 14px; }

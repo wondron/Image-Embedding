@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
-import { ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Circle, Clock3, CloudUpload, FolderOpen, ImagePlus, Images, Info, Layers3, Leaf, ListChecks, LoaderCircle, Pencil, Plus, RotateCcw, Search, Square, Tags, Trash2, X, XCircle } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
+import { ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Circle, Clock3, CloudUpload, FolderOpen, ImagePlus, Images, Info, Layers3, ListChecks, LoaderCircle, Pencil, Plus, RotateCcw, Search, Square, X, XCircle } from 'lucide-react'
 import { Dialog } from './Dialog'
 import { TasksPage } from '../pages/tasks'
 import { categoryLabel, type CategoryTree } from '../entities/category'
@@ -28,7 +28,7 @@ import { markScenePending, useSceneCatalog, useSceneSelection } from '../feature
 import { beginSceneWrite, endSceneWrite } from '../features/scene-sync'
 import './ManagementViews.css'
 
-export type ManagementView = 'library' | 'import' | 'tasks' | 'ingredients' | 'categories' | 'enums' | 'scenes'
+export type ManagementView = 'library' | 'import' | 'tasks' | 'categories' | 'enums' | 'scenes'
 type Props = { view: ManagementView; onNavigate: (view: ManagementView) => void; apiBase?: string }
 type IndexJobStatus = 'pending' | 'running' | 'success' | 'error' | 'cancelled'
 /** What the server stored for a job, and what is worth telling about it. */
@@ -45,8 +45,6 @@ type IndexJob = {
   annotation?: ImportAnnotation
   outcome?: JobOutcome
 }
-type Ingredient = { id: string; name: string; category: string; attributes: string }
-const categories = ['蔬菜', '水果', '肉禽', '水产', '蛋奶', '粮油', '调味品', '其他']
 const MAX_IMAGE_SIZE = 15 * 1024 * 1024
 const MAX_QUEUE = 100
 const INDEX_TIMEOUT_MS = 120_000
@@ -148,11 +146,6 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
   const fileInput = useRef<HTMLInputElement>(null)
   const dirInput = useRef<HTMLInputElement>(null)
   const [dirSupported] = useState(supportsDirectoryPicker)
-  const [ingredients, setIngredients] = useState<Ingredient[]>([])
-  const [ingredientQuery, setIngredientQuery] = useState('')
-  const [ingredientCategory, setIngredientCategory] = useState('全部类别')
-  const [editor, setEditor] = useState<Ingredient | null>(null)
-  const [formError, setFormError] = useState('')
   const [notice, setNotice] = useState('')
   const apiBaseRef = useRef(apiBase)
   apiBaseRef.current = apiBase
@@ -419,27 +412,6 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     }
   }
 
-  function saveIngredient(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!editor) return
-    const name = editor.name.trim()
-    if (!name) { setFormError('请输入食材名称'); return }
-    if (ingredients.some(item => item.id !== editor.id && item.name === name)) {
-      setFormError('此食材名称已存在，请使用其他名称'); return
-    }
-    const updated = { ...editor, name, attributes: editor.attributes.trim() }
-    setIngredients(current => current.some(item => item.id === updated.id)
-      ? current.map(item => item.id === updated.id ? updated : item)
-      : [...current, updated])
-    setEditor(null)
-    setNotice(`已保存「${name}」的本地草稿`)
-  }
-
-  function openEditor(item?: Ingredient) {
-    setFormError('')
-    setEditor(item ?? { id: draftId(), name: '', category: '蔬菜', attributes: '' })
-  }
-
   function navigateTaskTabs(event: KeyboardEvent<HTMLButtonElement>, index: number) {
     const targetIndex = event.key === 'ArrowRight' ? (index + 1) % taskStatuses.length
       : event.key === 'ArrowLeft' ? (index + taskStatuses.length - 1) % taskStatuses.length
@@ -449,10 +421,6 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     setTaskStatus(taskStatuses[targetIndex])
     event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(`#task-tab-${targetIndex}`)?.focus()
   }
-
-  const filteredIngredients = ingredients.filter(item =>
-    (ingredientCategory === '全部类别' || item.category === ingredientCategory) &&
-    `${item.name} ${item.attributes}`.toLocaleLowerCase().includes(ingredientQuery.trim().toLocaleLowerCase()))
 
   const doneCount = jobs.filter(job => job.status === 'success' || job.status === 'error').length
   const successCount = jobs.filter(job => job.status === 'success').length
@@ -500,13 +468,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
         <input ref={fileInput} type="file" className="mg-hidden" aria-label="选择待入库图片" accept="image/jpeg,image/png,image/webp" multiple onChange={event => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />
         {dirSupported && <input ref={dirInput} type="file" className="mg-hidden" aria-label="选择待入库目录" accept="image/jpeg,image/png,image/webp" multiple {...({ webkitdirectory: '', directory: '' } as object)} onChange={event => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />}
       </>}
-      {view === 'ingredients' && <>
-        <label className="mg-search"><Search size={17} /><input aria-label="搜索食材草稿" placeholder="搜索食材名称或属性…" value={ingredientQuery} onChange={event => setIngredientQuery(event.target.value)} />{ingredientQuery && <button aria-label="清空食材搜索" onClick={() => setIngredientQuery('')}><X size={15} /></button>}</label>
-        <select className="mg-select" aria-label="食材类别筛选" value={ingredientCategory} onChange={event => setIngredientCategory(event.target.value)}><option>全部类别</option>{categories.map(category => <option key={category}>{category}</option>)}</select>
-        <span className="mg-toolbar-summary">{ingredients.length} 个食材草稿</span>
-        <button className="mg-btn mg-primary" onClick={() => openEditor()}><Plus size={17} />新建食材</button>
-      </>}
-      <span className="mg-status"><span />{view === 'ingredients' ? '本地草稿模式' : view === 'import' ? (indexing ? '入库进行中' : '自建入库已接入') : libraryLoading ? '图库加载中…' : libraryError ? '图库加载失败' : libraryConnected ? '图库已接入' : '图库未连接'}</span>
+      <span className="mg-status"><span />{view === 'import' ? (indexing ? '入库进行中' : '自建入库已接入') : libraryLoading ? '图库加载中…' : libraryError ? '图库加载失败' : libraryConnected ? '图库已接入' : '图库未连接'}</span>
     </div>}
 
     {view === 'library' && (() => {
@@ -517,7 +479,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
       return <>
       <div className="mg-metrics">
         <Metric label="图片总量" value={libraryError ? '—' : String(libraryTotal)} detail={libraryConnected ? '当前筛选合计' : '接入图库后显示'} icon={Images} />
-        <Metric label="启用类别" value={activeCategories === null ? '—' : String(activeCategories)} detail={activeCategories === null ? (categoryTree.error ? '类别读取失败' : '读取类别中') : '来自类别配置'} icon={Layers3} />
+        <Metric label="启用类别" value={activeCategories === null ? '—' : String(activeCategories)} detail={activeCategories === null ? (categoryTree.error ? '类别读取失败' : '读取类别中') : '来自食材管理'} icon={Layers3} />
         <Metric label="待入库任务" value={jobs.length ? String(jobs.filter(j => j.status !== 'success').length) : '—'} detail={jobs.length ? '本会话未完成项' : '接入任务后显示'} icon={ListChecks} />
       </div>
       <section className="mg-panel">
@@ -678,12 +640,6 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
       <div className="mg-info"><Info size={17} /><p>这里只显示本会话上传队列。刷新或离开数据管理宿主后不保留；浏览器停止等待、超时或离开不保证服务器未成功或未记记录。后续人工场景调整与 notes 只属本会话，不是历史记录的全流程结果。</p></div>
     </>} />}
 
-    {view === 'ingredients' && <>
-      <section className="mg-panel">
-        <div className="mg-ingredient-table"><div className="mg-table-head mg-ingredient-row"><span>食材名称</span><span>类别</span><span>食材属性</span><span>操作</span></div>{filteredIngredients.length ? filteredIngredients.map(item => <div className="mg-ingredient-row mg-table-row" key={item.id}><strong><span className="mg-leaf-icon"><Leaf size={17} /></span>{item.name}</strong><span><span className="mg-category-chip">{item.category}</span></span><span className="mg-attributes">{item.attributes || '未填写'}</span><div className="mg-row-actions"><button aria-label={`编辑 ${item.name}`} onClick={() => openEditor(item)}><Pencil size={16} /></button><button aria-label={`删除 ${item.name}`} onClick={() => { setIngredients(current => current.filter(ingredient => ingredient.id !== item.id)); setNotice(`已删除「${item.name}」的本地草稿`) }}><Trash2 size={16} /></button></div></div>) : <EmptyState icon={Tags} title={ingredients.length ? '没有匹配的食材草稿' : '暂无食材草稿'} description={ingredients.length ? '试试其他食材名称、属性或类别。' : '从名称、类别和属性开始，先在本地整理你的食材数据。'}>{ingredients.length ? <button className="mg-btn mg-secondary" onClick={() => { setIngredientQuery(''); setIngredientCategory('全部类别') }}>重置筛选</button> : <button className="mg-btn mg-secondary" onClick={() => openEditor()}><Plus size={16} />新建食材草稿</button>}</EmptyState>}</div>
-      </section><div className="mg-info"><Info size={17} /><p>食材数据接口尚未接入。本地草稿不会写入数据库，刷新页面或离开后将清空。</p></div>
-    </>}
-
     <div className="mg-live-status" role="status" aria-live="polite">{notice}</div>
     {preview && <Dialog title="图片预览" onClose={() => setPreview(null)} wide><img className="mg-dialog-image" src={preview.preview} alt={preview.file.name} /><p className="mg-preview-name">{preview.file.name}</p>{preview.remoteId && <p className="mg-preview-name monospace">入库 id：{preview.remoteId}</p>}{preview.error && <p className="mg-form-error" role="alert">{preview.error}</p>}</Dialog>}
     {editing && (() => {
@@ -715,31 +671,6 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
         onDirtyChange={setLibraryDirty}
         onManage={() => { closeLibraryImage(); onNavigate('scenes'); const u = new URL(window.location.href); u.searchParams.set('sceneTab', 'sync'); window.history.replaceState(null, '', u.toString()) }}
       />
-    </Dialog>}
-    {editor && <Dialog title={ingredients.some(item => item.id === editor.id) ? '编辑食材草稿' : '新建食材草稿'} onClose={() => setEditor(null)}>
-      <form className="mg-editor" onSubmit={saveIngredient}>
-        <div className="mg-editor-body">
-          <p className="mg-editor-note"><Info size={14} />本地草稿，尚未连接数据库</p>
-          <section className="mg-editor-section" aria-labelledby="ingredient-basic-title">
-            <h3 id="ingredient-basic-title">基本信息</h3>
-            <label className="mg-field"><span className="mg-field-label">食材名称<span aria-hidden="true"> *</span></span>
-              <input autoFocus required maxLength={60} placeholder="例如：西红柿" value={editor.name} onChange={event => setEditor({ ...editor, name: event.target.value })} />
-            </label>
-            <label className="mg-field"><span className="mg-field-label">食材类别</span>
-              <select value={editor.category} onChange={event => setEditor({ ...editor, category: event.target.value })}>{categories.map(category => <option key={category}>{category}</option>)}</select>
-            </label>
-          </section>
-          <section className="mg-editor-section" aria-labelledby="ingredient-attributes-title">
-            <h3 id="ingredient-attributes-title">属性信息</h3>
-            <label className="mg-field"><span className="mg-field-label">食材属性</span>
-              <textarea rows={3} maxLength={300} placeholder="例如：红色、圆形、可生食（多个属性以顿号分隔）" value={editor.attributes} onChange={event => setEditor({ ...editor, attributes: event.target.value })} />
-              <small>可补充颜色、形态、产地等信息，最多 300 字</small>
-            </label>
-          </section>
-          {formError && <p className="mg-form-error" role="alert">{formError}</p>}
-        </div>
-        <div className="mg-editor-actions"><button type="button" className="mg-btn mg-secondary" onClick={() => setEditor(null)}>取消</button><button type="submit" className="mg-btn mg-primary"><Check size={15} />保存本地草稿</button></div>
-      </form>
     </Dialog>}
   </div>
 }

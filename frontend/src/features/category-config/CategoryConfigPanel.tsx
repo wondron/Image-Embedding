@@ -1,14 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ChevronDown, ChevronRight, FolderTree, LoaderCircle, Pencil, Plus, Trash2 } from 'lucide-react'
-import { Dialog } from '../../components/Dialog'
+import { AlertTriangle, FolderTree, LoaderCircle, Plus, RotateCcw, Search, X } from 'lucide-react'
 import {
   buildCategoryTree,
-  categoryAncestors,
   categoryLabel,
   createCategory,
   deleteCategory,
-  effectiveCuisines,
-  effectiveHeatingGroup,
   listCategories,
   toCategoryFailure,
   updateCategory,
@@ -18,10 +14,13 @@ import {
   type HeatingGroupRef,
 } from '../../entities/category'
 import { enumValueLabel, useEnumCatalog } from '../../entities/enum'
-import { formatLibraryTime, requestSignal } from '../../shared/lib'
+import { requestSignal } from '../../shared/lib'
 import { EmptyState } from '../../shared/ui'
+import { CategoryDeleteDialog } from './CategoryDeleteDialog'
 import { CategoryEditorDialog, type CategoryEditorTarget, type CategorySaveRequest } from './CategoryEditorDialog'
-import { deleteBlockReason, deleteFailureText, loadFailureText } from './messages'
+import { CategoryTable, rowElementId } from './CategoryTable'
+import { NO_CATEGORY_FILTER, categoryTableView, type CategoryStatusFilter, type CategoryTableFilter } from './tableModel'
+import { deleteFailureText, loadFailureText, saveFailureText } from './messages'
 import '../../components/ManagementViews.css'
 import './category-config.css'
 
@@ -33,7 +32,7 @@ type LoadState = 'applied' | 'stale' | 'aborted' | 'failed'
 
 interface RemoveState {
   node: CategoryNode
-  submitting: boolean
+  submitting: 'delete' | 'deactivate' | null
   notice: string | null
 }
 
@@ -58,47 +57,11 @@ function ancestorIds(nodes: readonly CategoryNode[], id: number): number[] {
   return ids
 }
 
-function TreeRows({ entries, expanded, selectedId, onToggle, onSelect }: {
-  entries: readonly CategoryTreeNode[]
-  expanded: ReadonlySet<number>
-  selectedId: number | null
-  onToggle: (id: number) => void
-  onSelect: (id: number) => void
-}) {
-  return <ul className="cat-tree-list">
-    {entries.map(entry => {
-      const { node, children } = entry
-      const label = categoryLabel(node)
-      const open = expanded.has(node.id)
-      return <li key={node.id}>
-        <div className="cat-row">
-          {children.length > 0
-            ? <button
-              type="button"
-              className="cat-toggle"
-              aria-expanded={open}
-              aria-label={`${open ? '收起' : '展开'}「${label}」`}
-              onClick={() => onToggle(node.id)}
-            >{open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</button>
-            : <span className="cat-toggle cat-toggle-leaf" aria-hidden="true" />}
-          <button
-            type="button"
-            className="cat-node"
-            aria-current={node.id === selectedId ? 'true' : undefined}
-            onClick={() => onSelect(node.id)}
-          >
-            <strong>{label}</strong>
-            <code>{node.code}</code>
-            {!node.isActive && <span className="cat-badge">停用</span>}
-            {children.length > 0 && <span className="cat-count" aria-label={`${children.length} 个子类别`}>{children.length}</span>}
-          </button>
-        </div>
-        {open && children.length > 0 && <TreeRows entries={children} expanded={expanded} selectedId={selectedId} onToggle={onToggle} onSelect={onSelect} />}
-      </li>
-    })}
-  </ul>
-}
-
+/**
+ * 食材管理: the category tree (categories + category_names) as one table, the way the other
+ * management pages list their data. Every food item is a node of this tree, under one of the
+ * four domains; uploads, the gallery and scene rules pick from it.
+ */
 export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
   const { catalog } = useEnumCatalog()
   const [nodes, setNodes] = useState<CategoryNode[]>([])
@@ -108,9 +71,12 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
   const [loadedOnce, setLoadedOnce] = useState(false)
   const [listFailure, setListFailure] = useState<CategoryFailureView | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+  /** The row last opened, saved or linked to (?category=): highlighted, and kept in the URL. */
   const [selectedId, setSelectedId] = useState<number | null>(readCategoryParam)
+  /** A row to scroll into view once it is listed. */
+  const [reveal, setReveal] = useState<number | null>(readCategoryParam)
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
-  const [mobilePane, setMobilePane] = useState<'tree' | 'detail'>(readCategoryParam() === null ? 'tree' : 'detail')
+  const [filter, setFilter] = useState<CategoryTableFilter>(NO_CATEGORY_FILTER)
   const [editor, setEditor] = useState<CategoryEditorTarget | null>(null)
   const [removing, setRemoving] = useState<RemoveState | null>(null)
   const [status, setStatus] = useState<string | null>(null)
@@ -124,11 +90,11 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
   nodesRef.current = nodes
 
   const tree = useMemo(() => buildCategoryTree(nodes), [nodes])
-  const selected = selectedId === null ? undefined : tree.byId.get(selectedId)
+  const view = useMemo(() => categoryTableView(tree, filter, expanded), [tree, filter, expanded])
   const domainName = useCallback((code: string) => enumValueLabel(catalog, DOMAIN_ENUM, code), [catalog])
-  const usedCodes = useMemo(() => new Set(nodes.map(node => node.code)), [nodes])
-  const freeRootCodes = rootCodes.filter(code => !usedCodes.has(code))
+  const inactiveCount = useMemo(() => nodes.filter(node => !node.isActive).length, [nodes])
   const busy = Boolean(removing?.submitting)
+  const failedEmpty = Boolean(listFailure) && nodes.length === 0
 
   const loadTree = useCallback(async (signal: AbortSignal): Promise<LoadState> => {
     const gen = ++listGen.current
@@ -173,7 +139,7 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
     return () => controller.abort()
   }, [loadTree, reloadKey])
 
-  // First load: open the roots, and the path to a deep-linked node.
+  // First load: open the roots, and the path to a linked node.
   useEffect(() => {
     if (openedRoots.current || nodes.length === 0) return
     openedRoots.current = true
@@ -185,6 +151,30 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
     })
   }, [nodes, selectedId])
 
+  // Scroll a saved or linked row into view: clear a filter that hides it, open the path down to it.
+  useEffect(() => {
+    if (reveal === null || !loadedOnce) return
+    if (view.rows.some(row => row.entry.node.id === reveal)) {
+      document.getElementById(rowElementId(reveal))?.scrollIntoView({ block: 'nearest' })
+      setReveal(null)
+      return
+    }
+    if (!tree.byId.has(reveal)) {
+      if (loading || listFailure) return // wait for a tree that loaded
+      if (reveal === selectedId) {
+        setSelectedId(null)
+        setStatus(`没有找到编号为 ${reveal} 的类别，它可能已被删除。`)
+      }
+      setReveal(null)
+      return
+    }
+    const path = ancestorIds(nodes, reveal)
+    const root = path.length > 0 ? path[path.length - 1] : reveal
+    if (view.filtering || (filter.domainId !== null && filter.domainId !== root)) setFilter(NO_CATEGORY_FILTER)
+    else if (path.some(id => !expanded.has(id))) setExpanded(current => new Set([...current, ...path]))
+    else setReveal(null)
+  }, [reveal, view, filter.domainId, tree, nodes, expanded, loadedOnce, loading, listFailure, selectedId])
+
   useEffect(() => {
     try {
       const url = new URL(window.location.href)
@@ -195,18 +185,12 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
       const current = `${window.location.pathname}${window.location.search}${window.location.hash}`
       if (next !== current) window.history.replaceState(null, '', next)
     } catch {
-      /* Deep link updates are optional; selection still works in the page. */
+      /* Deep link updates are optional; the page works without them. */
     }
   }, [selectedId])
 
   function reload(): Promise<LoadState> {
     return loadTree(requestSignal(lifetime.current.signal, REQUEST_TIMEOUT_MS))
-  }
-
-  function select(id: number) {
-    setSelectedId(id)
-    setMobilePane('detail')
-    setStatus(null) // the last result belongs to the previous step
   }
 
   function toggle(id: number) {
@@ -221,7 +205,14 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
   function openEditor(target: CategoryEditorTarget) {
     if (busy) return
     setStatus(null)
+    if (target.mode === 'edit') setSelectedId(target.node.id)
+    else if (typeof target.parentId === 'number') setSelectedId(target.parentId)
     setEditor(target)
+  }
+
+  /** 新建类别 from the toolbar: a domain when the tree is empty, else the parent is chosen in the form. */
+  function openCreate() {
+    openEditor({ mode: 'create', parentId: nodes.length === 0 ? null : undefined })
   }
 
   /** Show a node the server just returned before the reload confirms it. */
@@ -233,20 +224,20 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
     nodesRef.current = next
     setNodes(next)
     setExpanded(current => new Set([...current, ...ancestorIds(next, node.id)]))
-    select(node.id)
+    setSelectedId(node.id)
+    setReveal(node.id)
   }
 
-  async function save(request: CategorySaveRequest): Promise<CategoryFailureView | null> {
+  /** Create or patch; null once the server accepted it, else the failure for the caller to show. */
+  async function write(request: CategorySaveRequest, done: (name: string) => string): Promise<CategoryFailureView | null> {
     const options = { baseUrl: apiBase, signal: requestSignal(lifetime.current.signal, REQUEST_TIMEOUT_MS) }
     try {
       const result = request.mode === 'create'
         ? await createCategory(request.body, options)
         : await updateCategory(request.id, request.body, options)
       if (!mounted.current) return null
-      setEditor(null)
       if (result.node) showSaved(result.node)
-      const name = result.node ? `「${categoryLabel(result.node)}」` : '类别'
-      setStatus(request.mode === 'create' ? `已创建${name}。` : `已保存${name}。`)
+      setStatus(done(result.node ? `「${categoryLabel(result.node)}」` : '类别'))
       void reload() // a move changes the paths below it; counts and order come from the server
       return null
     } catch (error) {
@@ -259,10 +250,23 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
     }
   }
 
+  async function save(request: CategorySaveRequest): Promise<CategoryFailureView | null> {
+    const failure = await write(request, name => (request.mode === 'create' ? `已创建${name}。` : `已保存${name}。`))
+    if (!failure && mounted.current) setEditor(null)
+    return failure
+  }
+
+  function openRemove(entry: CategoryTreeNode) {
+    if (busy) return
+    setStatus(null)
+    setSelectedId(entry.node.id)
+    setRemoving({ node: entry.node, submitting: null, notice: null })
+  }
+
   async function confirmRemove() {
     if (!removing || removing.submitting) return
     const target = removing.node
-    setRemoving({ node: target, submitting: true, notice: null })
+    setRemoving({ node: target, submitting: 'delete', notice: null })
     try {
       await deleteCategory(target.id, {
         baseUrl: apiBase,
@@ -286,8 +290,19 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
         return
       }
       if (failure.kind === 'uncertain' || failure.kind === 'in_use') void reload()
-      setRemoving({ node: target, submitting: false, notice: deleteFailureText(failure) })
+      setRemoving({ node: target, submitting: null, notice: deleteFailureText(failure) })
     }
+  }
+
+  /** The way out when a category is still used: stop offering it for labelling. */
+  async function deactivate() {
+    if (!removing || removing.submitting) return
+    const target = removing.node
+    setRemoving({ node: target, submitting: 'deactivate', notice: null })
+    const failure = await write({ mode: 'edit', id: target.id, body: { is_active: false } }, name => `已停用${name}。`)
+    if (!mounted.current) return
+    if (failure) setRemoving({ node: target, submitting: null, notice: saveFailureText(failure) })
+    else setRemoving(null)
   }
 
   async function copyTrace(traceId: string) {
@@ -299,122 +314,95 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
     }
   }
 
-  const blockReason = selected ? deleteBlockReason(selected) : null
-  const cuisines = selected ? effectiveCuisines(tree, selected.node.id) : null
-  const heatingGroup = selected ? effectiveHeatingGroup(tree, selected.node.id) : null
-  const ancestors = selected ? categoryAncestors(tree, selected.node.id) : []
-  const newRootButton = <button
-    type="button"
-    className="mg-btn mg-primary"
-    disabled={busy || freeRootCodes.length === 0}
-    title={loadedOnce && !listFailure && freeRootCodes.length === 0 ? '可用的根类别都已建立' : undefined}
-    onClick={() => openEditor({ mode: 'create', parent: null })}
-  ><Plus size={14} />新建根类别</button>
+  const removingEntry = removing ? tree.byId.get(removing.node.id) ?? { node: removing.node, depth: 0, children: [] } : null
+  const connection = loading && !loadedOnce ? '类别树加载中…' : failedEmpty ? '类别树加载失败' : listFailure ? '刷新失败' : '类别树已接入'
 
-  return <div className="cat-page">
-    {listFailure && <div className="mg-errors cat-alert" role="alert">
-      <strong>{nodes.length > 0 ? '类别树刷新失败，仍显示已有内容' : '类别树加载失败'}</strong>
-      <p>错误码：{listFailure.code ?? '未知'}</p>
-      <p>{loadFailureText(listFailure)}</p>
-      <p className="cat-trace">追踪号：{listFailure.traceId ?? '无'}</p>
-      <div className="cat-alert-actions">
-        {listFailure.traceId && <button type="button" className="mg-text-button" onClick={() => void copyTrace(listFailure.traceId!)}>{copiedTrace === listFailure.traceId ? '已复制追踪号' : '复制追踪号'}</button>}
-        <button type="button" className="mg-btn mg-secondary" onClick={() => setReloadKey(key => key + 1)}>重试</button>
-      </div>
-    </div>}
-    <p className="cat-status" role="status" aria-live="polite">{status}</p>
-
-    <div className={`cat-split ${mobilePane === 'detail' ? 'is-detail' : 'is-tree'}`}>
-      <section className="mg-panel cat-pane cat-tree" aria-label="类别树">
-        <div className="cat-pane-heading">
-          <h2>类别树{nodes.length > 0 && <span className="cat-total">{nodes.length}</span>}</h2>
-          <div className="cat-pane-tools">
-            <button type="button" className="mg-text-button" disabled={nodes.length === 0} onClick={() => setExpanded(new Set(nodes.map(node => node.id)))}>全部展开</button>
-            <button type="button" className="mg-text-button" disabled={nodes.length === 0} onClick={() => setExpanded(new Set())}>全部收起</button>
-            <button type="button" className="mg-text-button" onClick={() => { setStatus(null); setReloadKey(key => key + 1) }}>{loading && loadedOnce ? '正在刷新…' : '刷新'}</button>
-          </div>
-        </div>
-        <div className="cat-tree-actions">{newRootButton}</div>
-        {loading && !loadedOnce && <div className="loading-state" role="status" aria-busy="true">
-          <LoaderCircle size={22} className="spin" />
-          <h3>正在加载类别树…</h3>
-          <p>请求 GET /api/categories</p>
-        </div>}
-        {loadedOnce && nodes.length === 0 && !listFailure && <EmptyState
-          icon={FolderTree}
-          title="还没有类别"
-          description="先建立根类别（食材、菜品、甜点烘焙、饮品这几个域），再在它们下面逐级添加子类别。"
-        />}
-        {nodes.length > 0 && <div className="cat-tree-scroll">
-          <TreeRows entries={tree.roots} expanded={expanded} selectedId={selectedId} onToggle={toggle} onSelect={select} />
-        </div>}
-      </section>
-
-      <section className="mg-panel cat-pane cat-detail" aria-label="类别详情">
-        <button type="button" className="mg-btn mg-secondary cat-back" onClick={() => setMobilePane('tree')}>返回类别树</button>
-        {selectedId === null && <EmptyState icon={FolderTree} title="请选择左侧类别" description="选中后可以查看它的名称和属性，新建子类别、编辑、移动或删除。" />}
-        {selectedId !== null && !selected && <div className="cat-detail-body">
-          <p className="cat-note" role="status">{!loadedOnce
-            ? '正在读取类别…'
-            : listFailure && nodes.length === 0
-              ? '类别树还没有加载出来。'
-              : `类别树里没有编号为 ${selectedId} 的类别，可能已被删除。`}</p>
-        </div>}
-        {selected && <div className="cat-detail-body">
-          <div className="cat-detail-heading">
-            <div className="cat-detail-title">
-              <h2>{categoryLabel(selected.node)}</h2>
-              <code>{selected.node.code}</code>
-              {!selected.node.isActive && <span className="cat-badge">停用</span>}
-            </div>
-            <div className="cat-detail-actions">
-              <button type="button" className="mg-btn mg-primary" disabled={busy} onClick={() => openEditor({ mode: 'create', parent: selected.node })}><Plus size={14} />新建子类别</button>
-              <button type="button" className="mg-btn mg-secondary" disabled={busy} onClick={() => openEditor({ mode: 'edit', node: selected.node })}><Pencil size={14} />编辑</button>
-              <button
-                type="button"
-                className="mg-btn mg-secondary cat-danger"
-                disabled={busy || blockReason !== null}
-                aria-describedby={blockReason ? 'category-delete-block' : undefined}
-                onClick={() => { setStatus(null); setRemoving({ node: selected.node, submitting: false, notice: null }) }}
-              ><Trash2 size={14} />删除</button>
-            </div>
-          </div>
-          {blockReason && <p className="cat-note" id="category-delete-block">{blockReason}</p>}
-          <dl className="cat-meta">
-            <dt>上级</dt>
-            <dd>{ancestors.length > 0
-              ? ancestors.map((ancestor, index) => <span key={ancestor.id}>
-                {index > 0 && ' / '}
-                <button type="button" className="mg-text-button" onClick={() => select(ancestor.id)}>{categoryLabel(ancestor)}</button>
-              </span>)
-              : '根节点'}</dd>
-            <dt>名称</dt>
-            <dd>{selected.node.names.length > 0
-              ? <ul className="cat-names-list">{selected.node.names.map(name => <li key={`${name.lang}\n${name.name}`}>
-                <span className="cat-lang">{name.lang}</span>{name.name}
-                <span className="cat-kind">{name.kind === 'primary' ? '主名' : '别名'}</span>
-              </li>)}</ul>
-              : '还没有名称'}</dd>
-            <dt>菜系</dt>
-            <dd>{cuisines && cuisines.value.length > 0
-              ? <>{cuisines.value.join('、')}{cuisines.from && <span className="cat-inherited">沿用「{categoryLabel(cuisines.from)}」</span>}</>
-              : '未设置'}</dd>
-            <dt>加热组</dt>
-            <dd>{heatingGroup?.value
-              ? <>{heatingGroup.value.name}（<code>{heatingGroup.value.code}</code>）{heatingGroup.from && <span className="cat-inherited">沿用「{categoryLabel(heatingGroup.from)}」</span>}</>
-              : '未设置'}</dd>
-            <dt>同级排序</dt><dd>{selected.node.sortOrder}</dd>
-            <dt>状态</dt><dd>{selected.node.isActive ? '启用' : '停用'}</dd>
-            <dt>子类别</dt><dd>{selected.children.length} 个</dd>
-            <dt>图片</dt><dd>{selected.node.imageCount} 张（直接标在这个类别上的）</dd>
-            <dt>场景规则</dt><dd>{selected.node.sceneRuleCount} 条</dd>
-            <dt>更新时间</dt><dd>{formatLibraryTime(selected.node.updatedAt)}</dd>
-          </dl>
-        </div>}
-      </section>
+  return <div className="mg-page ct-page">
+    <div className="mg-page-toolbar">
+      <label className="mg-search"><Search size={17} />
+        <input
+          aria-label="搜索类别"
+          placeholder="搜索名称、别名或编码…"
+          value={filter.query}
+          onChange={event => setFilter(current => ({ ...current, query: event.target.value }))}
+        />
+        {filter.query && <button type="button" aria-label="清空搜索" onClick={() => setFilter(current => ({ ...current, query: '' }))}><X size={15} /></button>}
+      </label>
+      <select
+        className="mg-select"
+        aria-label="类别域筛选"
+        value={filter.domainId ?? ''}
+        disabled={tree.roots.length === 0}
+        onChange={event => setFilter(current => ({ ...current, domainId: event.target.value === '' ? null : Number(event.target.value) }))}
+      >
+        <option value="">全部类别域</option>
+        {tree.roots.map(root => <option key={root.node.id} value={root.node.id}>{categoryLabel(root.node)}</option>)}
+      </select>
+      <select
+        className="mg-select"
+        aria-label="状态筛选"
+        value={filter.status}
+        onChange={event => setFilter(current => ({ ...current, status: event.target.value as CategoryStatusFilter }))}
+      >
+        <option value="all">全部状态</option>
+        <option value="active">仅启用</option>
+        <option value="inactive">仅停用</option>
+      </select>
+      <button type="button" className="mg-btn mg-primary" disabled={busy || failedEmpty || !loadedOnce} onClick={openCreate}><Plus size={17} />新建类别</button>
+      <span className={`mg-status ct-connection${failedEmpty ? ' is-error' : loadedOnce && !listFailure ? ' is-online' : ''}`}><span />{connection}</span>
     </div>
 
-    <div className="mg-info"><AlertTriangle size={17} /><p>移动类别或修改菜系后，已入库图片的场景归属不会自动重算。只有没有子类别、没有图片、也没有场景规则引用的类别才能删除。加热组和场景规则不在本页管理。</p></div>
+    <p className="ct-status" role="status" aria-live="polite">{status}</p>
+
+    <section className="mg-panel ct-panel" aria-label="类别列表">
+      {listFailure && <div className="mg-errors ct-alert" role="alert">
+        <div><strong>{nodes.length > 0 ? '类别树刷新失败，仍显示已有内容' : '类别树加载失败'}</strong></div>
+        <p>{loadFailureText(listFailure)}</p>
+        <p className="ct-trace">错误码：{listFailure.code ?? '未知'} · 追踪号：{listFailure.traceId ?? '无'}</p>
+        <div className="ct-alert-actions">
+          {listFailure.traceId && <button type="button" className="mg-text-button" onClick={() => void copyTrace(listFailure.traceId!)}>{copiedTrace === listFailure.traceId ? '已复制追踪号' : '复制追踪号'}</button>}
+          <button type="button" className="mg-btn mg-secondary" onClick={() => setReloadKey(key => key + 1)}><RotateCcw size={15} />重试</button>
+        </div>
+      </div>}
+      {loading && !loadedOnce && <div className="loading-state" role="status" aria-busy="true">
+        <LoaderCircle size={22} className="spin" />
+        <h3>正在加载类别树…</h3>
+        <p>请求 GET /api/categories</p>
+      </div>}
+      {loadedOnce && nodes.length === 0 && !listFailure && <EmptyState
+        icon={FolderTree}
+        title="还没有类别"
+        description="先建立类别域（食材、菜品、甜点烘焙、饮品），再在它们下面逐级添加食材类别。"
+      >
+        <button type="button" className="mg-btn mg-secondary" onClick={openCreate}><Plus size={16} />新建类别域</button>
+      </EmptyState>}
+      {nodes.length > 0 && (view.rows.length > 0
+        ? <CategoryTable
+          tree={tree}
+          view={view}
+          selectedId={selectedId}
+          busy={busy}
+          onToggle={toggle}
+          onEdit={node => openEditor({ mode: 'edit', node })}
+          onAddChild={node => openEditor({ mode: 'create', parentId: node.id })}
+          onDelete={openRemove}
+        />
+        : <EmptyState icon={Search} title="没有匹配的类别" description="试试其他名称、别名或编码，或者换一个类别域、状态。">
+          <button type="button" className="mg-btn mg-secondary" onClick={() => setFilter(NO_CATEGORY_FILTER)}>清空筛选</button>
+        </EmptyState>)}
+      {nodes.length > 0 && <div className="mg-pagination ct-footer">
+        <span>{view.filtering
+          ? `匹配 ${view.matched} 个 · 共 ${view.total} 个类别`
+          : `共 ${view.total} 个类别${filter.domainId === null && inactiveCount > 0 ? ` · 停用 ${inactiveCount} 个` : ''}`}</span>
+        <div>
+          <button type="button" className="mg-text-button" disabled={view.filtering} onClick={() => setExpanded(new Set(nodes.map(node => node.id)))}>全部展开</button>
+          <button type="button" className="mg-text-button" disabled={view.filtering} onClick={() => setExpanded(new Set())}>全部收起</button>
+          <button type="button" className="mg-text-button" disabled={loading} onClick={() => { setStatus(null); setReloadKey(key => key + 1) }}>{loading && loadedOnce ? '正在刷新…' : '刷新'}</button>
+        </div>
+      </div>}
+    </section>
+
+    <div className="mg-info"><AlertTriangle size={17} /><p>这里的类别就是上传标注、图库筛选和场景规则里选用的食材类别。移动类别或修改菜系后，已入库图片的场景归属不会自动重算，需要到「场景管理」执行同步。只有没有下级类别、图片和场景规则引用的类别才能删除，仍在使用的可以改为停用；加热组不在本页管理。</p></div>
 
     {editor && <CategoryEditorDialog
       target={editor}
@@ -426,18 +414,13 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
       onClose={() => setEditor(null)}
     />}
 
-    {removing && <Dialog title="删除类别" size="sm" dismissDisabled={removing.submitting} onClose={() => setRemoving(null)}>
-      <div className="cat-confirm">
-        <p>确定删除「{categoryLabel(removing.node)}」（<code>{removing.node.code}</code>）吗？它的全部名称会一起删除，删除后不能恢复。</p>
-        {removing.notice && <p className="mg-form-error" role="alert">{removing.notice}</p>}
-        <div className="dialog-actions">
-          <button type="button" className="mg-btn mg-secondary" data-dialog-initial-focus disabled={removing.submitting} onClick={() => setRemoving(null)}>取消</button>
-          <button type="button" className="mg-btn cat-danger-solid" disabled={removing.submitting} onClick={() => void confirmRemove()}>
-            {removing.submitting && <LoaderCircle size={14} className="spin" />}
-            {removing.submitting ? '删除中…' : '删除'}
-          </button>
-        </div>
-      </div>
-    </Dialog>}
+    {removing && removingEntry && <CategoryDeleteDialog
+      entry={removingEntry}
+      submitting={removing.submitting}
+      notice={removing.notice}
+      onClose={() => setRemoving(null)}
+      onDelete={() => void confirmRemove()}
+      onDeactivate={() => void deactivate()}
+    />}
   </div>
 }

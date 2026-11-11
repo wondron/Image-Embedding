@@ -474,32 +474,6 @@ test('图片导入队列支持预览移除且不提交后端', async ({ page }, 
   expect(writes).toEqual([])
 })
 
-test('食材本地草稿可新增编辑筛选删除', async ({ page }, info) => {
-  const writes: string[] = []
-  page.on('request', request => { if (request.method() !== 'GET') writes.push(request.url()) })
-  await navigate(page, '食材管理')
-  await page.getByRole('button', { name: '新建食材', exact: true }).click()
-  const editor = page.getByRole('dialog', { name: '新建食材草稿' })
-  await editor.getByLabel(/食材名称/).fill('西红柿')
-  await editor.getByLabel(/食材类别/).selectOption('水果')
-  await editor.getByLabel(/食材属性/).fill('红色、圆形')
-  await editor.getByRole('button', { name: '保存本地草稿' }).click()
-  await expect(page.getByRole('button', { name: '编辑 西红柿', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '编辑 西红柿', exact: true }).click()
-  const editing = page.getByRole('dialog', { name: '编辑食材草稿' })
-  await editing.getByLabel(/食材名称/).fill('番茄')
-  await editing.getByLabel(/食材类别/).selectOption('蔬菜')
-  await editing.getByRole('button', { name: '保存本地草稿' }).click()
-  await expect(page.getByRole('button', { name: '编辑 番茄', exact: true })).toBeVisible()
-  await page.getByLabel('食材类别筛选').selectOption('水果')
-  await expect(page.getByRole('heading', { name: '没有匹配的食材草稿' })).toBeVisible()
-  await page.getByRole('button', { name: '重置筛选' }).click()
-  await screenshot(page, info, 'desktop-ingredients')
-  await page.getByRole('button', { name: '删除 番茄', exact: true }).click()
-  await expect(page.getByRole('heading', { name: '暂无食材草稿' })).toBeVisible()
-  expect(writes).toEqual([])
-})
-
 test('390px 窄屏搜索与管理页面不横向溢出', async ({ page }, info) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const queryBounds = await page.locator('.query-panel').boundingBox()

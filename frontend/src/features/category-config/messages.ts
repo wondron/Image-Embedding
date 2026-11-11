@@ -17,9 +17,9 @@ export function loadFailureText(failure: CategoryFailureView): string {
 export function saveFailureText(failure: CategoryFailureView): string {
   switch (failure.kind) {
     case 'uncertain':
-      return '没有收到明确结果，无法确认是否已保存。左侧的树已刷新，请先核对，再决定是否重新提交。'
+      return '没有收到明确结果，无法确认是否已保存。类别树已刷新，请先核对，再决定是否重新提交。'
     case 'not_found':
-      return '这个类别已经不存在，可能已被删除。左侧的树已刷新，请关闭后重新选择。'
+      return '这个类别已经不存在，可能已被删除。类别树已刷新，请关闭后重新选择。'
     case 'validation':
       return `保存被拒绝：${failure.detail}。类别树可能已有变化，请刷新后重试。`
     default:
@@ -33,17 +33,23 @@ export function deleteFailureText(failure: CategoryFailureView): string {
     case 'uncertain':
       return '没有收到明确结果，无法确认是否已删除。类别树已刷新，请核对。'
     case 'in_use':
-      return '这个类别正在被使用，不能删除。类别树已刷新，可以查看它的子类别、图片和场景规则数量。'
+      return '这个类别正在被使用，不能删除。类别树已刷新，上面是它最新的使用情况。'
     default:
       return `${failure.detail}${failureSuffix(failure)}`
   }
 }
 
-/** Why a node cannot be deleted (the server refuses the same cases); null when it can. */
-export function deleteBlockReason(entry: CategoryTreeNode): string | null {
+/** What still points at a node, e.g. ["1 个下级类别", "3 张图片"]; the server refuses to delete it while any does. */
+export function categoryUses(entry: CategoryTreeNode): string[] {
   const uses: string[] = []
-  if (entry.children.length > 0) uses.push(`${entry.children.length} 个子类别`)
+  if (entry.children.length > 0) uses.push(`${entry.children.length} 个下级类别`)
   if (entry.node.imageCount > 0) uses.push(`${entry.node.imageCount} 张图片`)
   if (entry.node.sceneRuleCount > 0) uses.push(`${entry.node.sceneRuleCount} 条场景规则`)
-  return uses.length > 0 ? `还有 ${uses.join('、')} 在使用这个类别，不能删除；不再使用时可以改为停用。` : null
+  return uses
+}
+
+/** Why a node cannot be deleted; null when it can. */
+export function deleteBlockReason(entry: CategoryTreeNode): string | null {
+  const uses = categoryUses(entry)
+  return uses.length > 0 ? `还有 ${uses.join('、')} 在使用这个类别，不能删除。` : null
 }

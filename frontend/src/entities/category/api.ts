@@ -7,7 +7,7 @@ import {
 } from '../../shared/api'
 import { toCategoryDetail, toCategoryList, toDeletedCategoryId, type CategoryListResult, type CategoryNode } from './model'
 
-const LABELS: ApiLabels = { service: '类别服务', endpoint: '类别接口', action: '类别配置' }
+const LABELS: ApiLabels = { service: '类别服务', endpoint: '类别接口', action: '类别管理' }
 
 export interface CategoryRequestOptions {
   baseUrl?: string
