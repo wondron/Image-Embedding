@@ -1,0 +1,175 @@
+{
+  "config": {
+    "argv": [
+      "D:\\98-softwaredata\\nodejs\\node.exe",
+      "C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "--config",
+      ".qa/scene-detail-layout-playwright.config.ts"
+    ],
+    "configFile": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-playwright.config.ts",
+    "rootDir": "C:/Users/47202/PROJECT/Image-Embedding/.qa",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "C:/Users/47202/PROJECT/Image-Embedding/.qa/scene-detail-layout-playwright-output",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "C:/Users/47202/PROJECT/Image-Embedding/.qa",
+        "testIgnore": [],
+        "testMatch": [
+          "scene-detail-layout-gui.spec.ts"
+        ],
+        "timeout": 180000
+      }
+    ],
+    "filteredProjects": [
+      {
+        "grep": {},
+        "grepInvert": null,
+        "outputDir": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-playwright-output",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "name": "chromium",
+        "testDir": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa",
+        "snapshotDir": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa",
+        "testIgnore": [],
+        "testMatch": "scene-detail-layout-gui.spec.ts",
+        "timeout": 180000,
+        "use": {
+          "baseURL": "http://127.0.0.1:57402",
+          "viewport": {
+            "width": 1440,
+            "height": 1000
+          },
+          "locale": "zh-CN",
+          "timezoneId": "America/Denver",
+          "colorScheme": "light",
+          "screenshot": "off",
+          "video": "off",
+          "trace": "off",
+          "actionTimeout": 10000,
+          "browserName": "chromium"
+        },
+        "dependencies": [],
+        "ignoreSnapshots": false,
+        "__projectId": "chromium"
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "scene-detail-layout-playwright-results.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "default",
+    "updateSourceMethod": "patch",
+    "version": "1.64.1",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "scene-detail-layout-gui.spec.ts",
+      "file": "scene-detail-layout-gui.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "scene-detail-layout L1-L19 isolated GUI",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 180000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-gui.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 26375,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-11T05:48:06.285Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-gui.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a1c519652ef06c99a438-f2729d042a3d180eccc2",
+          "file": "scene-detail-layout-gui.spec.ts",
+          "line": 127,
+          "column": 5
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-11-11T05:48:05.732Z",
+    "duration": 27201.916,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

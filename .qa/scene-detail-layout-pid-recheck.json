@@ -1,0 +1,41 @@
+{
+  "checked_at": "2026-11-10T22:46:42.501074-07:00",
+  "pid_query_exit": 0,
+  "pid_stderr": "",
+  "pids": [
+    {
+      "id": 46208,
+      "exists": true,
+      "command": "\"D:\\99-tools\\anaconda\\envs\\onnxgpu\\python.exe\" -u .qa/scene_detail_layout_gui_qa.py"
+    },
+    {
+      "id": 53836,
+      "exists": true,
+      "command": "D:\\98-softwaredata\\nodejs\\node.exe C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\node_modules\\vite\\bin\\vite.js --host 127.0.0.1 --port 57402 --strictPort"
+    }
+  ],
+  "http": [
+    {
+      "url": "http://127.0.0.1:57402/?view=scenes",
+      "status": 200,
+      "bytes": 692
+    },
+    {
+      "url": "http://127.0.0.1:57402/api/scenes",
+      "status": 200,
+      "bytes": 2194,
+      "has_long_code": true
+    },
+    {
+      "url": "http://127.0.0.1:57401/api/ping",
+      "status": 200,
+      "bytes": 99
+    },
+    {
+      "url": "http://127.0.0.1:57401/api/scenes",
+      "status": 200,
+      "bytes": 2194,
+      "has_long_code": true
+    }
+  ]
+}

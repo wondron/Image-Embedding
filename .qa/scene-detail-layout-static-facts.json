@@ -1,0 +1,47 @@
+{
+  "diff_stat": {
+    "files": 3,
+    "plus": 167,
+    "minus": 41
+  },
+  "added_hex": [],
+  "added_rgb": [],
+  "added_color_literals": [
+    "background: none",
+    "background: var(--panel-bg)",
+    "border: 1px solid var(--border)",
+    "color: var(--muted)",
+    "color: var(--text)"
+  ],
+  "dialog_size_lines": [
+    ".scene-management .dialog:not(.dialog-wide), .scene-membership-panel .dialog:not(.dialog-wide) { width: min(700px, calc(100vw - 30px)); }",
+    ".scene-management .dialog.dialog-wide, .scene-membership-panel .dialog.dialog-wide { width: min(80vw, 980px); }"
+  ],
+  "new_css_has_unprefixed_top_level": [],
+  "container_queries": [
+    "@container scene-details (max-width: 719px) ",
+    "@container scene-details (max-width: 479px) "
+  ],
+  "tsx_or_sync_fetch": false,
+  "updateRule_path": true,
+  "createRule_path": true,
+  "save_true_text": false,
+  "save_false_text": false,
+  "pending_copy": false,
+  "forbidden_merged_copy": false,
+  "label_immediate": false,
+  "protection_copy": false,
+  "protection_not_permission": false,
+  "tab_and_header_and_panel_full_sync": false,
+  "member_caption": false,
+  "empty_labels": false,
+  "empty_rules": false,
+  "unselected_copy": false,
+  "data_scene_width_logic": true,
+  "feedbackTarget": true,
+  "files_touched_in_diff": [
+    "frontend/src/features/scene-management/SceneManagement.tsx",
+    "frontend/src/features/scene-management/SceneSyncPanel.tsx",
+    "frontend/src/features/scene-management/scene-management.css"
+  ]
+}

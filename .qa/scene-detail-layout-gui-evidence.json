@@ -1,0 +1,762 @@
+{
+  "startedAt": "2026-11-11T05:48:06.267Z",
+  "screenshots": [
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\00-unselected-wide.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\14-unselected-sync.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\05-long-scene-default.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\05-long-scene-default-panel.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\01-wide-inner800.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\01-wide-inner800-panel.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\04-inner720.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\04-inner719.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\04-inner480.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\04-inner479.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\02-medium-inner600-panel.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\03-compact-overview-479.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\03-compact-labels-table-479.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\05-06-07-long-overview-600.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\08-badges-general.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\08-badges-inactive-include.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\09-empty-labels.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\09-empty-rules.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\18-overview-groups.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\13-default-protection.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\13-default-edit-dialog.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\16-dialog-open-focus.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\16-sticky-scroll.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\10-loading.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\11-catalog-error.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\12-save-true-pending.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\12-save-false-pending-remains.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\12-switch-scene-notice-scope.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\12-unselected-pending-visible.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\11-write-error.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\19-label-in-use.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\19-createRule-error.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\19-updateRule-error.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\14-15-sync-idle.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\14-15-sync-after-scene-switch.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\15-sync-failed-retry.png",
+    "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\scene-detail-layout-screenshots\\15-sync-return-no-silent-resume.png"
+  ],
+  "measures": [
+    {
+      "label": "unselected-sync-default-width",
+      "inner": 888,
+      "dataSceneWidth": "wide",
+      "containerType": "inline-size",
+      "viewportWidth": 1440,
+      "tabs": [
+        "概览",
+        "标签",
+        "规则",
+        "全量场景同步"
+      ],
+      "hasBadges": false,
+      "headerScroll": {
+        "scrollWidth": 888,
+        "clientWidth": 888,
+        "overflows": false
+      },
+      "detailsScrollX": {
+        "scrollWidth": 920,
+        "clientWidth": 920,
+        "overflows": false
+      },
+      "titleOverflows": false
+    },
+    {
+      "label": "scene4-default-width",
+      "inner": 888,
+      "dataSceneWidth": "wide",
+      "containerType": "inline-size",
+      "viewportWidth": 1440,
+      "tabs": [
+        "概览",
+        "标签",
+        "规则",
+        "全量场景同步"
+      ],
+      "hasBadges": true,
+      "headerScroll": {
+        "scrollWidth": 888,
+        "clientWidth": 888,
+        "overflows": false
+      },
+      "detailsScrollX": {
+        "scrollWidth": 920,
+        "clientWidth": 920,
+        "overflows": false
+      },
+      "titleOverflows": false
+    },
+    {
+      "label": "L1-inner-800",
+      "inner": 798,
+      "dataSceneWidth": "wide",
+      "containerType": "inline-size",
+      "viewportWidth": 1440,
+      "tabs": [
+        "概览",
+        "标签",
+        "规则",
+        "全量场景同步"
+      ],
+      "hasBadges": true,
+      "headerScroll": {
+        "scrollWidth": 798,
+        "clientWidth": 798,
+        "overflows": false
+      },
+      "detailsScrollX": {
+        "scrollWidth": 830,
+        "clientWidth": 830,
+        "overflows": false
+      },
+      "titleOverflows": false
+    },
+    {
+      "label": "L4-inner-720",
+      "inner": 718,
+      "dataSceneWidth": "wide",
+      "containerType": "inline-size",
+      "viewportWidth": 1440,
+      "tabs": [
+        "概览",
+        "标签",
+        "规则",
+        "全量场景同步"
+      ],
+      "hasBadges": true,
+      "headerScroll": {
+        "scrollWidth": 718,
+        "clientWidth": 718,
+        "overflows": false
+      },
+      "detailsScrollX": {
+        "scrollWidth": 750,
+        "clientWidth": 750,
+        "overflows": false
+      },
+      "titleOverflows": false
+    },
+    {
+      "label": "L4-inner-719",
+      "inner": 717,
+      "dataSceneWidth": "medium",
+      "containerType": "inline-size",
+      "viewportWidth": 1440,
+      "tabs": [
+        "概览",
+        "标签",
+        "规则",
+        "全量场景同步"
+      ],
+      "hasBadges": true,
+      "headerScroll": {
+        "scrollWidth": 717,
+        "clientWidth": 717,
+        "overflows": false
+      },
+      "detailsScrollX": {
+        "scrollWidth": 749,
+        "clientWidth": 749,
+        "overflows": false
+      },
+      "titleOverflows": false
+    },
+    {
+      "label": "L4-inner-480",
+      "inner": 478,
+      "dataSceneWidth": "medium",
+      "containerType": "inline-size",
+      "viewportWidth": 1440,
+      "tabs": [
+        "概览",
+        "标签",
+        "规则",
+        "全量场景同步"
+      ],
+      "hasBadges": true,
+      "headerScroll": {
+        "scrollWidth": 478,
+        "clientWidth": 478,
+        "overflows": false
+      },
+      "detailsScrollX": {
+        "scrollWidth": 510,
+        "clientWidth": 510,
+        "overflows": false
+      },
+      "titleOverflows": false
+    },
+    {
+      "label": "L4-inner-479",
+      "inner": 477,
+      "dataSceneWidth": "compact",
+      "containerType": "inline-size",
+      "viewportWidth": 1440,
+      "tabs": [
+        "概览",
+        "标签",
+        "规则",
+        "全量场景同步"
+      ],
+      "hasBadges": true,
+      "headerScroll": {
+        "scrollWidth": 477,
+        "clientWidth": 477,
+        "overflows": false
+      },
+      "detailsScrollX": {
+        "scrollWidth": 509,
+        "clientWidth": 509,
+        "overflows": false
+      },
+      "titleOverflows": false
+    },
+    {
+      "label": "L2-inner-600",
+      "inner": 598,
+      "dataSceneWidth": "medium",
+      "containerType": "inline-size",
+      "viewportWidth": 1440,
+      "tabs": [
+        "概览",
+        "标签",
+        "规则",
+        "全量场景同步"
+      ],
+      "hasBadges": true,
+      "headerScroll": {
+        "scrollWidth": 598,
+        "clientWidth": 598,
+        "overflows": false
+      },
+      "detailsScrollX": {
+        "scrollWidth": 630,
+        "clientWidth": 630,
+        "overflows": false
+      },
+      "titleOverflows": false
+    },
+    {
+      "label": "L3-inner-479",
+      "inner": 477,
+      "dataSceneWidth": "compact",
+      "containerType": "inline-size",
+      "viewportWidth": 1440,
+      "tabs": [
+        "概览",
+        "标签",
+        "规则",
+        "全量场景同步"
+      ],
+      "hasBadges": true,
+      "headerScroll": {
+        "scrollWidth": 477,
+        "clientWidth": 477,
+        "overflows": false
+      },
+      "detailsScrollX": {
+        "scrollWidth": 509,
+        "clientWidth": 509,
+        "overflows": false
+      },
+      "titleOverflows": false
+    }
+  ],
+  "preflight": {
+    "apiPing": 200,
+    "frontend": 200,
+    "proxiedScenes": 200,
+    "proxiedHasLong": true
+  },
+  "unselectedLanding": {
+    "hasSelectPrompt": true,
+    "headerActions": 0,
+    "badges": 0
+  },
+  "unselectedSync": {
+    "measure": {
+      "inner": 888,
+      "dataSceneWidth": "wide",
+      "containerType": "inline-size",
+      "viewportWidth": 1440,
+      "tabs": [
+        "概览",
+        "标签",
+        "规则",
+        "全量场景同步"
+      ],
+      "hasBadges": false,
+      "headerScroll": {
+        "scrollWidth": 888,
+        "clientWidth": 888,
+        "overflows": false
+      },
+      "detailsScrollX": {
+        "scrollWidth": 920,
+        "clientWidth": 920,
+        "overflows": false
+      },
+      "titleOverflows": false
+    },
+    "title": "全量场景同步",
+    "badges": 0,
+    "actions": 0
+  },
+  "loadedLayout": {
+    "inner": 888,
+    "dataSceneWidth": "wide",
+    "containerType": "inline-size",
+    "viewportWidth": 1440,
+    "tabs": [
+      "概览",
+      "标签",
+      "规则",
+      "全量场景同步"
+    ],
+    "hasBadges": true,
+    "headerScroll": {
+      "scrollWidth": 888,
+      "clientWidth": 888,
+      "overflows": false
+    },
+    "detailsScrollX": {
+      "scrollWidth": 920,
+      "clientWidth": 920,
+      "overflows": false
+    },
+    "titleOverflows": false
+  },
+  "L1": {
+    "measure": {
+      "inner": 798,
+      "dataSceneWidth": "wide",
+      "containerType": "inline-size",
+      "viewportWidth": 1440,
+      "tabs": [
+        "概览",
+        "标签",
+        "规则",
+        "全量场景同步"
+      ],
+      "hasBadges": true,
+      "headerScroll": {
+        "scrollWidth": 798,
+        "clientWidth": 798,
+        "overflows": false
+      },
+      "detailsScrollX": {
+        "scrollWidth": 830,
+        "clientWidth": 830,
+        "overflows": false
+      },
+      "titleOverflows": false
+    },
+    "actionOrder": [
+      "编辑",
+      "停用",
+      "删除"
+    ],
+    "headerOverflow": false
+  },
+  "L4": {
+    "viewportRemainedWide": true,
+    "points": {
+      "inner720": {
+        "inner": 718,
+        "dataSceneWidth": "wide",
+        "containerType": "inline-size",
+        "viewportWidth": 1440,
+        "tabs": [
+          "概览",
+          "标签",
+          "规则",
+          "全量场景同步"
+        ],
+        "hasBadges": true,
+        "headerScroll": {
+          "scrollWidth": 718,
+          "clientWidth": 718,
+          "overflows": false
+        },
+        "detailsScrollX": {
+          "scrollWidth": 750,
+          "clientWidth": 750,
+          "overflows": false
+        },
+        "titleOverflows": false
+      },
+      "inner719": {
+        "inner": 717,
+        "dataSceneWidth": "medium",
+        "containerType": "inline-size",
+        "viewportWidth": 1440,
+        "tabs": [
+          "概览",
+          "标签",
+          "规则",
+          "全量场景同步"
+        ],
+        "hasBadges": true,
+        "headerScroll": {
+          "scrollWidth": 717,
+          "clientWidth": 717,
+          "overflows": false
+        },
+        "detailsScrollX": {
+          "scrollWidth": 749,
+          "clientWidth": 749,
+          "overflows": false
+        },
+        "titleOverflows": false
+      },
+      "inner480": {
+        "inner": 478,
+        "dataSceneWidth": "medium",
+        "containerType": "inline-size",
+        "viewportWidth": 1440,
+        "tabs": [
+          "概览",
+          "标签",
+          "规则",
+          "全量场景同步"
+        ],
+        "hasBadges": true,
+        "headerScroll": {
+          "scrollWidth": 478,
+          "clientWidth": 478,
+          "overflows": false
+        },
+        "detailsScrollX": {
+          "scrollWidth": 510,
+          "clientWidth": 510,
+          "overflows": false
+        },
+        "titleOverflows": false
+      },
+      "inner479": {
+        "inner": 477,
+        "dataSceneWidth": "compact",
+        "containerType": "inline-size",
+        "viewportWidth": 1440,
+        "tabs": [
+          "概览",
+          "标签",
+          "规则",
+          "全量场景同步"
+        ],
+        "hasBadges": true,
+        "headerScroll": {
+          "scrollWidth": 477,
+          "clientWidth": 477,
+          "overflows": false
+        },
+        "detailsScrollX": {
+          "scrollWidth": 509,
+          "clientWidth": 509,
+          "overflows": false
+        },
+        "titleOverflows": false
+      }
+    }
+  },
+  "L2": {
+    "measure": {
+      "inner": 598,
+      "dataSceneWidth": "medium",
+      "containerType": "inline-size",
+      "viewportWidth": 1440,
+      "tabs": [
+        "概览",
+        "标签",
+        "规则",
+        "全量场景同步"
+      ],
+      "hasBadges": true,
+      "headerScroll": {
+        "scrollWidth": 598,
+        "clientWidth": 598,
+        "overflows": false
+      },
+      "detailsScrollX": {
+        "scrollWidth": 630,
+        "clientWidth": 630,
+        "overflows": false
+      },
+      "titleOverflows": false
+    },
+    "midClip": {
+      "headerWiderThanPanel": false,
+      "overflows": false,
+      "wrap": "wrap"
+    }
+  },
+  "L3": {
+    "measure": {
+      "inner": 477,
+      "dataSceneWidth": "compact",
+      "containerType": "inline-size",
+      "viewportWidth": 1440,
+      "tabs": [
+        "概览",
+        "标签",
+        "规则",
+        "全量场景同步"
+      ],
+      "hasBadges": true,
+      "headerScroll": {
+        "scrollWidth": 477,
+        "clientWidth": 477,
+        "overflows": false
+      },
+      "detailsScrollX": {
+        "scrollWidth": 509,
+        "clientWidth": 509,
+        "overflows": false
+      },
+      "titleOverflows": false
+    },
+    "stack": {
+      "buttons": [
+        {
+          "text": "编辑",
+          "top": 287.484375,
+          "bottom": 325.484375
+        },
+        {
+          "text": "停用",
+          "top": 333.484375,
+          "bottom": 371.484375
+        }
+      ],
+      "deleteSeparateRow": true,
+      "tabRows": "maybe-wrap",
+      "tabHeight": 46,
+      "tabOverflow": false,
+      "fullSyncVisible": true,
+      "fullSyncText": "全量场景同步",
+      "titleOverflows": false
+    },
+    "table": {
+      "present": true,
+      "overflowX": "auto",
+      "scrollWidth": 477,
+      "clientWidth": 477,
+      "canScroll": false
+    }
+  },
+  "L5": {
+    "text": "长名称用于验收右栏折行与不溢出的场景标题测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测",
+    "overflowWrap": "anywhere",
+    "overflowsEl": false,
+    "rightPastPanel": false,
+    "height": 48.59375,
+    "length": 64
+  },
+  "L6": {
+    "text": "????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????",
+    "overflowWrap": "anywhere",
+    "overflowsEl": false,
+    "rightPastPanel": false,
+    "height": 90,
+    "length": 256
+  },
+  "L7": {
+    "text": "9007199254740991",
+    "overflowWrap": "anywhere",
+    "overflowsEl": false,
+    "rightPastPanel": false,
+    "height": 22.5,
+    "caption": "当前已物化值，不是新规则实时预览"
+  },
+  "L8": {
+    "generalBadges": {
+      "texts": [
+        "启用",
+        "默认（只读）",
+        "全包含"
+      ],
+      "overlap": false,
+      "wrap": true
+    },
+    "offBadges": {
+      "texts": [
+        "停用",
+        "全包含"
+      ],
+      "overlap": false,
+      "wrap": true
+    }
+  },
+  "L9": {
+    "emptyLabels": {
+      "emptyTitle": "暂无标签通过工具栏新建本场景标签。",
+      "tables": 0,
+      "status": [],
+      "overviewVisible": false
+    },
+    "emptyRules": {
+      "emptyTitle": "暂无规则通过工具栏新建类别或菜系规则。",
+      "tables": 0,
+      "status": []
+    },
+    "overviewEmptyLeak": {
+      "text": "说明—成员0当前已物化值，不是新规则实时预览属性摘要编辑全包含否输出加热信息否启用是创建时间2026/11/9 17:00:00 MST全包含会忽略规则与人工覆盖；关闭后旧人工覆盖可能恢复。多个全包含场景不等于默认。",
+      "hasEmptyLabelCopy": false,
+      "hasEmptyRuleCopy": false
+    }
+  },
+  "L18": {
+    "groups": [
+      {
+        "title": "说明",
+        "hasNestedCard": false
+      },
+      {
+        "title": "成员",
+        "hasNestedCard": false
+      },
+      {
+        "title": "属性摘要",
+        "hasNestedCard": false
+      }
+    ],
+    "directSubmitControls": 0,
+    "groupCount": 3
+  },
+  "L13": {
+    "protection": {
+      "disable": [
+        {
+          "text": "编辑",
+          "disabled": false
+        },
+        {
+          "text": "停用",
+          "disabled": true
+        },
+        {
+          "text": "删除",
+          "disabled": true
+        }
+      ],
+      "notes": [
+        "默认场景不可停用、删除或取消全包含；名称、描述和加热标志仍可编辑。"
+      ],
+      "noteCount": 1
+    },
+    "includeAllDisabled": true,
+    "activeDisabled": true,
+    "dialogText": "编辑场景\ncode\n名称\n描述\n全包含\n输出加热信息\n启用\n\n默认场景不可停用、删除或取消全包含（业务保护，不是权限）。\n\n取消\n保存"
+  },
+  "L16_focus": {
+    "focusAfterClose": "导航图像检索图搜图数据管理图片数据待接入上传与导入待接入入库任务待接入食材管理待接入类别配置场景管理枚举配置搜索服务可连接图像管理工作台前端预览 · v0.1场景管理食材图像管理 / 目录、标签、规则与全量同步场景管理刷新新建场景全量场景同步通用（日常）general启用 · 全包含 · 默认成员 3（已物化）一体机oven启用 · 按规则成员 12（已物化）空标签与空规则qa_empty启用 · 按规则成员 0（已物化）长名称用于验收右栏折行与不溢出的场景标题测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测qalongestlegalcode32charactersxx启用 · 按规则成员 9007199254740991（已物化）停用且全包含徽标qa_badges停用 · 全包含成员 1（已物化）返回列表长名称用于验收右栏折行与不溢出的场景标题测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测qalongestlegalcode32charactersxx启用编辑停用删除概览标签规则全量场景同步说明????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????成员9007199254740991当前已物化值，不是新规则实时预览属性摘要编辑全包含否输出加热信息否启用是创建时间2026/11/9 17:00:00 MST全包含会忽略规则与人工覆盖；关闭后旧人工覆盖可能恢复。多个全包含场景不等于默认。trace_id=8820be3c-3935-4a6b-8d97-5bc6e2d3aff5单张搜索批量搜索≤15 MB自建库现网 Global本地上传图片链接点击上传，或拖拽图片至此支持 JPG、PNG、WebP、BMP 格式场景通用（日常）（general）一体机（oven）空标签与空规则（qa_empty）长名称用于验收右栏折行与不溢出的场景标题测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测（qalongestlegalcode32charactersxx）刷新场景拒识阈值仅自建库生效 · 默认 0.55 · 范围 0.3–1关闭拒识（阈值=0）开始搜索重置选择或拖入一批图片最多 30 张 · 每张 ≤15 MB · JPG / PNG / WebP / BMP开始批量搜索逐张搜索，首张完成后自动展示结果，可切换查看已完成图片。搜索结果全部类别默认排序相似度优先等待查询图片上传图片或粘贴图片链接后，点击「开始搜索」。上传图片检索相似结果查看与下载搜索结果将在这里展示1 / 1类别筛选与分页仅作用于本次搜索结果"
+  },
+  "L17": {
+    "afterRight": "标签",
+    "afterEnd": "全量场景同步",
+    "afterHome": "概览",
+    "selectedAfterHome": "概览"
+  },
+  "L16_sticky": {
+    "stickyHeading": "true",
+    "headerPos": "sticky",
+    "tabsPos": "sticky",
+    "coveredByHeader": false,
+    "coveredByTabs": false,
+    "editTop": 619.671875,
+    "headerBottom": 317.1875,
+    "tabsBottom": 363.1875,
+    "scrollPaddingTop": "214.188px"
+  },
+  "L10": {
+    "text": "正在加载场景目录…",
+    "fakeTableDuringLoad": 0,
+    "directoryStillPresent": 5,
+    "waitedMs": 2976
+  },
+  "L11_catalog": {
+    "beforeItems": 5,
+    "afterFailItems": 5,
+    "error": "场景操作失败（HTTP 503 · INDEX_POSTGRES_FAILED）：QA isolated catalog failure fixture · trace_id=3c14c34a-24e3-4717-90ff-67fa4ca1042f 已保留上次结果，依赖目录的写入已禁用。重试刷新"
+  },
+  "L12_true": {
+    "directory": [
+      "有配置改动尚未同步：已入库图片仍按旧配置归属，检索也是。去同步"
+    ],
+    "scoped": [
+      "已保存。"
+    ]
+  },
+  "L12_false": {
+    "directory": [
+      "有配置改动尚未同步：已入库图片仍按旧配置归属，检索也是。去同步"
+    ],
+    "scoped": [
+      "已保存，已生效（不需要同步）。"
+    ]
+  },
+  "L12_scope": {
+    "afterSwitch": {
+      "directory": [
+        "有配置改动尚未同步：已入库图片仍按旧配置归属，检索也是。去同步",
+        "已保存，已生效（不需要同步）。"
+      ],
+      "scoped": []
+    },
+    "afterUnselect": {
+      "directory": [],
+      "scoped": []
+    }
+  },
+  "L11_write": {
+    "error": "场景操作失败（HTTP 502 · INDEX_POSTGRES_FAILED）：QA isolated write failure by name fixture · trace_id=f3d4baab-1f24-4837-a427-c4bacc6d959e",
+    "dialogOpen": 1,
+    "descriptionUnchanged": "第一次保存应返回需要同步",
+    "directoryCount": 5
+  },
+  "L19": {
+    "inUseEvidence": {
+      "error": "场景操作失败（HTTP 409 · SCENE_IN_USE）：label is still referenced by a rule · trace_id=b25208d0-98f6-4c2a-a30b-cf676a982862",
+      "rowRemains": true,
+      "errorLocations": 1
+    },
+    "createFail": {
+      "error": "场景操作失败（HTTP 422 · SCENE_PROTOCOL_ERROR）：QA isolated createRule failure fixture · trace_id=7948c825-b982-4cac-827b-42298f90a267",
+      "cuisineValue": "qa_force_fail",
+      "rulesBefore": 1,
+      "rulesAfterFail": 1,
+      "dialogOpen": 1
+    },
+    "updateFail": {
+      "error": "场景操作失败（HTTP 422 · SCENE_RULE_INVALID）：QA isolated updateRule failure fixture · trace_id=7418f254-13a6-4cca-98d3-1145f61d6e89",
+      "cuisineValue": "qa_force_fail",
+      "rules": 1,
+      "dialogOpen": 1
+    }
+  },
+  "L14": {
+    "tabLabel": "全量场景同步",
+    "headerBtn": true,
+    "afterSceneSwitch": "状态：done · 当前请求游标：从头 · limit=1\n\n最近成功批：处理 0，归属变更 0，推送 0。trace_id=574ffa04-60f8-4a8e-82c8-f91d92dba4b0\n\n处理 1\n变更 1\n推送 1\n缺失 1\n\n已成功批次合计：2 批 / 处理 1 / 变更 1 / 推送 1\n\n本轮扫描完成，不表示缺失向量已修复。\n\n本会话去重缺失向量 1 项；需另走入库或补向量：",
+    "title": "一体机"
+  },
+  "L15_fail": {
+    "statusNow": "状态：done · 当前请求游标：从头 · limit=1\n\n最近成功批：处理 0，归属变更 0，推送 0。trace_id=574ffa04-60f8-4a8e-82c8-f91d92dba4b0\n\n处理 1\n变更 1\n推送 1\n缺失 1\n\n已成功批次合计：2 批 / 处理 1 / 变更 1 / 推送 1\n\n本轮扫描完成，不表示缺失向量已修复。\n\n本会话去重缺失向量 1 项；需另走入库或补向量：",
+    "failedText": "状态：failed · 当前请求游标：从头 · limit=1\n\n处理 0\n变更 0\n推送 0\n缺失 1\n\n已成功批次合计：0 批 / 处理 0 / 变更 0 / 推送 0\n\n场景操作失败（HTTP 502 · INDEX_QDRANT_FAILED）：QA isolated sync failure fixture · trace_id=69428944-6461-46f4-91d2-a03976d1194d 本批失败，游标未前移；不会自动重试。\n\n本会话去重缺失向量 1 项；需另走入库或补向量：",
+    "hasRetry": 1,
+    "hasPercent": false
+  },
+  "L15_leave": {
+    "callsWhenLeaving": 2,
+    "callsAfterLeave": 2,
+    "syncCalls": 2,
+    "onReturn": "",
+    "autoRunning": false,
+    "continueVisible": 0
+  },
+  "finishedAt": "2026-11-11T05:48:32.764Z"
+}

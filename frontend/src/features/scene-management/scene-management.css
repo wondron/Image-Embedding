@@ -1,12 +1,12 @@
-.scene-layout { display: grid; grid-template-columns: minmax(200px, 270px) minmax(0, 1fr); gap: 20px; }
+.scene-layout { display: grid; grid-template-columns: minmax(200px, 270px) minmax(0, 1fr); gap: 20px; min-height: 0; flex: 1; align-items: stretch; }
 .scene-directory { align-self: start; padding: 8px; }
 .scene-directory-item { display: grid; width: 100%; text-align: left; padding: 12px; gap: 5px; border: 1px solid transparent; background: transparent; color: inherit; border-radius: 8px; cursor: pointer; }
 .scene-directory-item.active { border-color: var(--primary); }
 .scene-directory-item code, .scene-directory-item small { overflow-wrap: anywhere; }
-.scene-details { min-width: 0; padding: 20px; }
+.scene-details { container-type: inline-size; container-name: scene-details; min-width: 0; min-height: 0; padding: 16px; display: flex; flex-direction: column; overflow: hidden; }
 .scene-table-scroll { overflow-x: auto; }
 .scene-table { border-collapse: collapse; width: 100%; text-align: left; }
-.scene-table td, .scene-table th { padding: 12px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.scene-table td, .scene-table th { padding: 12px 16px; border-bottom: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere; }
 .scene-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .scene-form { display: grid; gap: 16px; padding: 20px; }
 .scene-form fieldset { border: 0; padding: 0; display: grid; gap: 14px; }
@@ -24,9 +24,69 @@
 .scene-membership-source.is-manual { font-weight: 600; }
 .scene-inactive-tag { margin-left: 6px; font-size: 12px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 999px; }
 .scene-back { display: none; }
-@media (max-width: 800px) { .scene-layout { grid-template-columns: 1fr; } .scene-back { display: inline-block; } .scene-details { padding: 12px; } .scene-details .mg-tabs { display: flex; flex-wrap: wrap; } }
+@media (max-width: 800px) { .scene-layout { grid-template-columns: 1fr; } .scene-back { display: inline-block; } .scene-details .mg-tabs { display: flex; flex-wrap: wrap; } }
 /* Reuse the existing sm/lg Dialog shell; scope the scene sm geometry to this feature only. */
 .scene-management .dialog:not(.dialog-wide), .scene-membership-panel .dialog:not(.dialog-wide) { width: min(700px, calc(100vw - 30px)); }
 .scene-management .dialog.dialog-wide, .scene-membership-panel .dialog.dialog-wide { width: min(80vw, 980px); }
 .scene-directory-item:hover { background: var(--hover); }
 .scene-management > p, .scene-membership-panel > p { margin-block: 12px; }
+
+.scene-management { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
+.scene-management .scene-status-stack { display: grid; gap: 8px; margin: 0 0 12px; }
+.scene-management .scene-status-stack > p { margin: 0; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+.scene-management .scene-loading { display: flex; align-items: center; gap: 8px; }
+.scene-management .scene-detail-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
+.scene-management .scene-details[data-sticky-heading=true] .scene-detail-scroll { scroll-padding-top: calc(var(--scene-heading-height, 0px) + var(--scene-tabs-height, 0px)); }
+.scene-management .scene-details[data-sticky-heading=false] .scene-detail-scroll { scroll-padding-top: var(--scene-tabs-height, 0px); }
+.scene-management .scene-scoped-status:empty { display: none; }
+.scene-management .scene-detail-header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 16px; background: var(--panel-bg); }
+.scene-management .scene-heading-text { flex: 1; min-width: 0; }
+.scene-management .scene-detail-name { margin: 0; font-size: 18px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; color: var(--text); }
+.scene-management .scene-detail-code { display: block; margin-top: 4px; font-size: 12px; line-height: 1.4; color: var(--muted); overflow-wrap: anywhere; background: none; }
+.scene-management .scene-detail-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.scene-management .scene-detail-badge { font-size: 12px; line-height: 1.4; padding: 1px 6px; border: 1px solid var(--border); border-radius: 999px; }
+.scene-management .scene-detail-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; flex: 0 1 auto; }
+.scene-management .scene-detail-primary-actions, .scene-management .scene-detail-danger-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.scene-management .scene-detail-tabs { flex-wrap: wrap; gap: 16px 25px; white-space: normal; min-width: 0; background: var(--panel-bg); }
+.scene-management .scene-detail-tabs button { white-space: normal; overflow-wrap: anywhere; }
+.scene-management .scene-details[data-sticky-heading=true] .scene-detail-header { position: sticky; top: 0; z-index: 2; }
+.scene-management .scene-details[data-sticky-heading=true] .scene-detail-tabs { position: sticky; top: var(--scene-heading-height, 0px); z-index: 1; }
+.scene-management .scene-details[data-sticky-heading=false] .scene-detail-tabs { position: sticky; top: 0; z-index: 1; }
+.scene-management .scene-tab-body { padding-top: 16px; min-width: 0; }
+.scene-management .scene-overview { display: grid; gap: 24px; }
+.scene-management .scene-overview-group { display: grid; gap: 8px; min-width: 0; }
+.scene-management .scene-overview-group h4, .scene-management .scene-tab-toolbar h4 { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.4; }
+.scene-management .scene-group-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+.scene-management .scene-description, .scene-management .scene-detail-caption { margin: 0; overflow-wrap: anywhere; }
+.scene-management .scene-detail-caption { font-size: 12px; line-height: 1.4; color: var(--muted); }
+.scene-management .scene-member-count { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.scene-management .scene-summary { display: grid; gap: 8px; margin: 0; }
+.scene-management .scene-summary > div { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); gap: 8px; align-items: start; min-width: 0; }
+.scene-management .scene-summary dt, .scene-management .scene-summary dd { margin: 0; overflow-wrap: anywhere; }
+.scene-management .scene-tab-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.scene-management .scene-tab-empty { padding: 16px; }
+.scene-management .scene-table-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.scene-management .scene-detail-trace { display: block; margin-top: 16px; color: var(--muted); overflow-wrap: anywhere; }
+.scene-management .scene-sync-panel { display: grid; gap: 16px; min-width: 0; }
+.scene-management .scene-sync-panel h3 { margin: 0; font-size: 16px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.scene-management .scene-sync-intro, .scene-management .scene-sync-progress, .scene-management .scene-sync-missing { display: grid; gap: 8px; min-width: 0; }
+.scene-management .scene-sync-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.scene-management .scene-sync-counts { display: flex; flex-wrap: wrap; gap: 8px 16px; font-variant-numeric: tabular-nums; }
+.scene-management .scene-sync-missing textarea { width: 100%; min-height: 6em; overflow-x: auto; overflow-wrap: anywhere; font: inherit; }
+
+@container scene-details (max-width: 719px) {
+  .scene-detail-header, .scene-detail-actions { width: 100%; }
+}
+@container scene-details (max-width: 479px) {
+  .scene-detail-actions, .scene-detail-primary-actions { display: flex; flex-direction: column; align-items: stretch; width: 100%; }
+  .scene-detail-danger-actions { width: 100%; }
+  .scene-summary > div { grid-template-columns: 1fr; }
+  .scene-sync-controls { flex-direction: column; align-items: stretch; }
+}
+.scene-management .scene-details[data-scene-width=medium] .scene-detail-header,
+.scene-management .scene-details[data-scene-width=medium] .scene-detail-actions { width: 100%; }
+.scene-management .scene-details[data-scene-width=compact] .scene-detail-actions,
+.scene-management .scene-details[data-scene-width=compact] .scene-detail-primary-actions { display: flex; flex-direction: column; align-items: stretch; width: 100%; }
+.scene-management .scene-details[data-scene-width=compact] .scene-detail-danger-actions { width: 100%; }
+.scene-management .scene-details[data-scene-width=compact] .scene-summary > div { grid-template-columns: 1fr; }
+.scene-management .scene-details[data-scene-width=compact] .scene-sync-controls { flex-direction: column; align-items: stretch; }
