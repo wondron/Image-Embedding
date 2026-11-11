@@ -3,6 +3,9 @@
 Library pagination via image_scenes membership for the requested scene (scenes table;
 default general). Attach heating_group and the food attributes
 (food_fields.FOOD_FIELDS) only when scene.outputs_heating (P9).
+
+Needs PostgreSQL only (built by app.bootstrap.catalog), so the gallery lists while the encoder
+or Qdrant are down; the HTTP layer adds each item's vector state when the vector store is up.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from app.services.retrieval.category_fields import normalize_category_id
 from app.services.retrieval.enum_fields import coerce_enum
 from app.services.retrieval.food_fields import FOOD_FIELDS
 from app.services.retrieval.scenes import lookup_scene, requested_scene_code
+from app.services.retrieval.vector_status import expected_payload
 
 
 def _as_id(value: Any) -> str:
@@ -68,6 +72,7 @@ class ListImagesUseCase:
         tag: str | None = None,
         category_id: int | None = None,
         label_status: str | None = None,
+        out_of_sync: bool = False,
     ) -> dict[str, Any]:
         scene_meta = lookup_scene(
             self._metadata,
@@ -120,6 +125,7 @@ class ListImagesUseCase:
             tag=tag_norm,
             category_id=subtree_id,
             label_status=label_norm,
+            out_of_sync=bool(out_of_sync),
         )
         items = [_item_from_row(row, scene_meta=scene_meta) for row in rows]
         return {
@@ -128,4 +134,7 @@ class ListImagesUseCase:
             "page_size": page_size_i,
             "total": int(total),
             "items": items,
+            # Not part of the wire: what each image's point should carry, so the HTTP layer can
+            # tell the vector state of the page when the vector store is up (one read per page)
+            "expected_payloads": {item["id"]: expected_payload(row) for item, row in zip(items, rows)},
         }

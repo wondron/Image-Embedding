@@ -24,9 +24,10 @@ from app.core.middleware import TraceIdMiddleware
 from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.delete_image import DeletionWorker
 from app.services.retrieval.image_fields import normalize_image_patch, resolve_label_status
+from app.services.retrieval.list_images import ListImagesUseCase
 from app.services.retrieval.manage_images import ManageImagesUseCase
 from app.services.retrieval.sync_scenes import PushResult
-from app.services.retrieval.vector_status import ImageVectorStatusUseCase, payload_matches
+from app.services.retrieval.vector_status import ImageVectorStatusUseCase, expected_payload, payload_matches
 
 IMAGE = "0cf457e2-4a47-9f02-fd4d-34540389f720"
 OTHER = "11111111-2222-3333-4444-555555555555"
@@ -135,6 +136,49 @@ class VectorStatusTests(unittest.TestCase):
         state = self.inspect({IMAGE: SYNCED_PAYLOAD}, image)
         self.assertEqual((state["status"], state["synced_version"], state["embedded_at"]), ("synced", None, None))
 
+    def test_the_statuses_of_a_page_take_one_read(self):
+        vectors = FakeVectors({IMAGE: SYNCED_PAYLOAD, OTHER: {**SYNCED_PAYLOAD, "category_id": 99}})
+        reads = []
+        get_payloads = vectors.get_payloads
+        vectors.get_payloads = lambda ids: reads.append(list(ids)) or get_payloads(ids)
+        third = "22222222-3333-4444-5555-666666666666"
+        statuses = ImageVectorStatusUseCase(vectors, model=MODEL).statuses(
+            {IMAGE: SYNCED_PAYLOAD, OTHER: SYNCED_PAYLOAD, third: SYNCED_PAYLOAD}
+        )
+        self.assertEqual(statuses, {IMAGE: "synced", OTHER: "stale", third: "missing"})
+        self.assertEqual(reads, [[IMAGE, OTHER, third]])
+        self.assertEqual(ImageVectorStatusUseCase(vectors, model=MODEL).statuses({}), {})  # nothing to read
+        self.assertEqual(len(reads), 1)
+
+    def test_a_gallery_page_expects_the_payload_the_detail_expects(self):
+        # The cards and the dialog must agree: the list builds each expected payload the same way
+        class Store:
+            def get_scene_by_code(self, code):
+                return {"code": code, "is_active": True, "outputs_heating": False}
+
+            def list_images(self, **_):
+                return [{**ROW, "category_name": "牛排"}], 1
+
+        result = ListImagesUseCase(Store()).execute()
+        detail = ManageImagesUseCase(FakeImageStore()).get(IMAGE)
+        self.assertEqual(result["expected_payloads"], {IMAGE: expected_payload(detail)})
+        self.assertNotIn("food_state", result["items"][0])  # not a heating scene: still not on the wire
+
+    def test_the_out_of_sync_filter_reaches_the_store(self):
+        seen = []
+
+        class Store:
+            def get_scene_by_code(self, code):
+                return {"code": code, "is_active": True, "outputs_heating": False}
+
+            def list_images(self, **kwargs):
+                seen.append(kwargs["out_of_sync"])
+                return [], 0
+
+        ListImagesUseCase(Store()).execute(out_of_sync=True)
+        ListImagesUseCase(Store()).execute()
+        self.assertEqual(seen, [True, False])
+
 
 class FakeImageStore:
     """The catalog store's image methods, answering like the repository."""
@@ -177,6 +221,7 @@ class EndpointTests(unittest.TestCase):
         self.sync_uc.push_images.return_value = PushResult(pushed={IMAGE: 5})
         self.deletion_worker = Mock()
         self.deletion_worker.clean_up.return_value = True
+        self.reembed_uc = Mock()
         self.runtime = ApplicationState(
             config={}, config_info={}, http_client=Mock(), settings=SimpleNamespace(),
             catalog=SimpleNamespace(images_uc=ManageImagesUseCase(self.store)),
@@ -185,6 +230,7 @@ class EndpointTests(unittest.TestCase):
                 scene_sync_uc=self.sync_uc,
                 vector_status_uc=ImageVectorStatusUseCase(self.vectors, model=MODEL),
                 deletion_worker=self.deletion_worker,
+                reembed_uc=self.reembed_uc,
             ),
         )
         app = FastAPI()
@@ -254,6 +300,29 @@ class EndpointTests(unittest.TestCase):
         self.assertEqual((body["image"]["tags"], body["image"]["payload_version"]), (["去皮"], 5))
         self.sync_uc.push_images.assert_called_once_with([IMAGE])
 
+    def test_a_write_answers_the_vector_state_after_its_push(self):
+        def push(ids):  # like the real push: the point gets the payload, the ledger moves
+            row = self.store.rows[IMAGE]
+            self.vectors.points[IMAGE] = {"category_id": row["category_id"], "scenes": row["scenes"],
+                                          "food_state": row["food_state"], "label_status": row["label_status"]}
+            row["embeddings"][1]["synced_version"] = row["payload_version"]
+            return PushResult(pushed={IMAGE: row["payload_version"]})
+
+        self.sync_uc.push_images.side_effect = push
+        body = self.ok(self.client.patch(f"/api/images/{IMAGE}", json={"label_status": "verified"}))
+        vector = body["vector"]
+        self.assertEqual((vector["status"], vector["payload_version"], vector["synced_version"]), ("synced", 5, 5))
+        self.assertEqual(body["image"]["payload_version"], 5)
+
+        self.vectors.points[IMAGE] = {**SYNCED_PAYLOAD, "label_status": "auto"}  # drifted again
+        body = self.ok(self.client.post(f"/api/images/{IMAGE}/vector-sync"))
+        self.assertEqual((body["vector_sync"], body["vector"]["status"], body["vector"]["synced_version"]), ("pushed", "synced", 5))
+
+        self.retrieval_down()
+        body = self.ok(self.client.patch(f"/api/images/{IMAGE}", json={"description": "z"}))
+        self.assertEqual((body["vector_sync"], body["vector"]["status"]), ("not_ready", "unavailable"))
+        self.assertEqual(body["image"]["description"], "z")
+
     def test_a_patch_is_saved_whatever_the_push_does(self):
         cases = [
             (PushResult(missing=[IMAGE]), "missing"),
@@ -287,10 +356,41 @@ class EndpointTests(unittest.TestCase):
 
     def test_a_push_repairs_one_image(self):
         body = self.ok(self.client.post(f"/api/images/{IMAGE}/vector-sync"))
+        vector = body.pop("vector")
         self.assertEqual(body, {"ok": True, "image_id": IMAGE, "payload_version": 4,
                                 "vector_sync": "pushed", "sync_required": False})
+        self.assertEqual((vector["status"], vector["collection"]), ("synced", "c_dino_v2"))
         self.error(self.client.post(f"/api/images/{OTHER}/vector-sync"), 404, "IMAGE_NOT_FOUND")
         self.sync_uc.push_images.assert_called_once_with([IMAGE])  # nothing pushed for the unknown id
+
+    # ---- POST reembed --------------------------------------------------------------
+
+    def test_a_reembed_writes_the_point_and_answers_the_state_after_it(self):
+        self.vectors.points.pop(IMAGE)  # missing
+        self.assertEqual(self.ok(self.client.get(f"/api/images/{IMAGE}"))["vector"]["status"], "missing")
+
+        def reembed(image_id):  # like the use case: the point comes back, the ledger moves
+            self.vectors.points[IMAGE] = dict(SYNCED_PAYLOAD)
+            self.store.rows[IMAGE]["embeddings"][1]["synced_version"] = 4
+            return {"image_id": str(image_id), "payload_version": 4}
+
+        self.reembed_uc.execute.side_effect = reembed
+        body = self.ok(self.client.post(f"/api/images/{IMAGE}/reembed"))
+        self.assertEqual((body["image_id"], body["payload_version"]), (IMAGE, 4))
+        self.assertEqual((body["vector"]["status"], body["vector"]["synced_version"]), ("synced", 4))
+        (called,), _ = self.reembed_uc.execute.call_args
+        self.assertEqual(str(called), IMAGE)
+
+    def test_a_reembed_needs_the_image_the_stack_and_a_readable_original(self):
+        self.error(self.client.post(f"/api/images/{OTHER}/reembed"), 404, "IMAGE_NOT_FOUND")
+        self.reembed_uc.execute.assert_not_called()  # PostgreSQL answers first
+
+        self.reembed_uc.execute.side_effect = err.image_file_unavailable("get_object image-embedding/original/x.png: NoSuchKey")
+        body = self.error(self.client.post(f"/api/images/{IMAGE}/reembed"), 502, "IMAGE_FILE_UNAVAILABLE")
+        self.assertNotIn("NoSuchKey", body["detail"])  # bucket and key stay in the log
+
+        self.retrieval_down()
+        self.error(self.client.post(f"/api/images/{IMAGE}/reembed"), 503, "NOT_READY")
 
     # ---- DELETE --------------------------------------------------------------------
 

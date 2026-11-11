@@ -16,6 +16,7 @@ from app.schemas.common import ErrorResponse
 from app.schemas.images import (
     ImageDeleteResponse,
     ImageDetailResponse,
+    ImageReembedResponse,
     ImageUpdateRequest,
     ImageUpdateResponse,
     ImageVectorSyncResponse,
@@ -69,6 +70,22 @@ def update_image(request: Request, image_id: UUID, body: ImageUpdateRequest) -> 
 )
 def push_vector(request: Request, image_id: UUID) -> Any:
     return images_service.push_vector(get_application_state(request), request, image_id)
+
+
+@router.post(
+    "/{image_id}/reembed",
+    response_model=ImageReembedResponse,
+    summary="Embed one image again from its stored original",
+    description=(
+        "从对象存储读回这张图的原图，用当前模型重新算向量，按 PostgreSQL 现在的数据写 payload，写进当前 collection "
+        "并记账 image_embeddings，用来修复 vector.status=missing（不用重新上传，标注不变）。"
+        "原图读不到返回 IMAGE_FILE_UNAVAILABLE（502）；编码器、向量库或对象存储未就绪返回 NOT_READY（503）；"
+        "图片不存在返回 IMAGE_NOT_FOUND（404）。"
+    ),
+    responses={**_NOT_FOUND, 502: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+def reembed_image(request: Request, image_id: UUID) -> Any:
+    return images_service.reembed_image(get_application_state(request), request, image_id)
 
 
 @router.delete(

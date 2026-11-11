@@ -18,6 +18,7 @@ import type {
   ListImagesResponseWire,
 } from '../../shared/api'
 import { DEFAULT_SCENE, normalizeSceneCode, toApiSceneCode } from '../scene'
+import type { VectorStatus } from './detail'
 
 // -- value types (shared by library, index and search) -----------------------------------
 
@@ -104,7 +105,11 @@ export interface LibraryImageItem {
   height: number | null
   createdAt: string | null
   updatedAt: string | null
+  /** The image in the current vector collection; null when the server does not say (older servers). */
+  vectorStatus: VectorStatus | null
 }
+
+const VECTOR_STATUSES: readonly VectorStatus[] = ['synced', 'stale', 'missing', 'unavailable']
 
 export interface ListImagesResponse {
   traceId: string | null
@@ -138,6 +143,7 @@ export function toLibraryImage(value: unknown): LibraryImageItem | null {
     height: asPositiveNumber(item.height),
     createdAt: asText(item.created_at),
     updatedAt: asText(item.updated_at),
+    vectorStatus: VECTOR_STATUSES.includes(item.vector_status as VectorStatus) ? item.vector_status as VectorStatus : null,
   }
 }
 

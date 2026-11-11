@@ -219,6 +219,8 @@ export interface ListImageItemWire {
   heating_group?: HeatingGroupWire | null
   created_at: string | null
   updated_at: string | null
+  /** The image in the current collection (as the detail's vector.status); absent from older servers. */
+  vector_status?: ImageVectorStateWire['status']
 }
 
 /** schemas/retrieval.py ListImagesResponse. */
@@ -421,6 +423,8 @@ export interface ImageUpdateRequestWire {
 export interface ImageUpdateResponseWire {
   ok: true
   image: ImageDetailWire
+  /** The vector state after the push (as GET's vector); absent from older servers. */
+  vector?: ImageVectorStateWire | null
   vector_sync: VectorSyncWire
   sync_required: boolean
 }
@@ -430,6 +434,8 @@ export interface ImageVectorSyncResponseWire {
   ok: true
   image_id: string
   payload_version: number
+  /** The vector state after the push (as GET's vector); absent from older servers. */
+  vector?: ImageVectorStateWire | null
   vector_sync: VectorSyncWire
   sync_required: boolean
 }

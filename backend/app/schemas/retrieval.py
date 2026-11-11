@@ -166,6 +166,13 @@ class ListImageItem(BaseModel):
     heating_group: HeatingGroup | None = None
     created_at: str | None = None
     updated_at: str | None = None
+    vector_status: Literal["synced", "stale", "missing", "unavailable"] | None = Field(
+        default=None,
+        description=(
+            "这张图在当前模型 collection 里的状态（同 GET /api/images/{image_id} 的 vector.status）："
+            "synced 一致；stale payload 落后于 PostgreSQL；missing 没有向量；unavailable 检索栈未就绪或读向量库失败"
+        ),
+    )
 
 
 class ListImagesResponse(BaseModel):

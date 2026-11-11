@@ -24,7 +24,15 @@
 .scene-membership-source.is-manual { font-weight: 600; }
 .scene-inactive-tag { margin-left: 6px; font-size: 12px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 999px; }
 .scene-back { display: none; }
-@media (max-width: 800px) { .scene-layout { grid-template-columns: 1fr; } .scene-back { display: inline-block; } .scene-details .mg-tabs { display: flex; flex-wrap: wrap; } }
+@media (max-width: 800px) {
+  /* One pane at a time, filling the height left under the toolbar; each scrolls on its own.
+     (Stacked, the list spilled out of its shrunken row and showed through the details.) */
+  .scene-layout { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr); }
+  .scene-layout[data-pane=detail] > .scene-directory, .scene-layout[data-pane=list] > .scene-details { display: none; }
+  .scene-layout > .scene-directory { align-self: stretch; overflow: auto; }
+  .scene-back { display: inline-block; }
+  .scene-details .mg-tabs { display: flex; flex-wrap: wrap; }
+}
 /* Reuse the existing sm/lg Dialog shell; scope the scene sm geometry to this feature only. */
 .scene-management .dialog:not(.dialog-wide), .scene-membership-panel .dialog:not(.dialog-wide) { width: min(700px, calc(100vw - 30px)); }
 .scene-management .dialog.dialog-wide, .scene-membership-panel .dialog.dialog-wide { width: min(80vw, 980px); }
@@ -67,12 +75,44 @@
 .scene-management .scene-tab-empty { padding: 16px; }
 .scene-management .scene-table-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .scene-management .scene-detail-trace { display: block; margin-top: 16px; color: var(--muted); overflow-wrap: anywhere; }
-.scene-management .scene-sync-panel { display: grid; gap: 16px; min-width: 0; }
+.scene-management .scene-sync-panel { display: grid; gap: 14px; min-width: 0; }
 .scene-management .scene-sync-panel h3 { margin: 0; font-size: 16px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
-.scene-management .scene-sync-intro, .scene-management .scene-sync-progress, .scene-management .scene-sync-missing { display: grid; gap: 8px; min-width: 0; }
-.scene-management .scene-sync-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-.scene-management .scene-sync-counts { display: flex; flex-wrap: wrap; gap: 8px 16px; font-variant-numeric: tabular-nums; }
-.scene-management .scene-sync-missing textarea { width: 100%; min-height: 6em; overflow-x: auto; overflow-wrap: anywhere; font: inherit; }
+.scene-management .scene-sync-intro, .scene-management .scene-sync-progress { display: grid; gap: 8px; min-width: 0; }
+.scene-management .scene-sync-intro p { margin: 0; color: #334155; font-size: 14px; line-height: 1.8; }
+.scene-management .scene-sync-intro .scene-sync-when { color: var(--muted); font-size: 13px; }
+.scene-management .scene-sync-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.scene-management .scene-sync-state { display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 999px; background: #eef2f7; color: #64748b; font-size: 12px; line-height: 26px; }
+.scene-management .scene-sync-state::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.scene-management .scene-sync-state.is-running { background: #eaf2ff; color: var(--primary); }
+.scene-management .scene-sync-state.is-paused { background: #fff4e5; color: #9a6700; }
+.scene-management .scene-sync-state.is-failed { background: #fdf0ee; color: #b42318; }
+.scene-management .scene-sync-state.is-done { background: #eaf5ee; color: #2f7d4a; }
+.scene-management .scene-sync-hint, .scene-management .scene-sync-note, .scene-management .scene-sync-batch { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.scene-management .scene-sync-done { margin: 0; color: #2f7d4a; font-size: 13px; line-height: 1.7; }
+.scene-management .scene-sync-counts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; font-variant-numeric: tabular-nums; }
+.scene-management .scene-sync-counts > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: #fafbfd; }
+.scene-management .scene-sync-counts strong { color: #1f2a3a; font-size: 20px; font-weight: 700; line-height: 1.2; }
+.scene-management .scene-sync-counts span { color: var(--muted); font-size: 12px; }
+.scene-management .scene-sync-counts .is-warn strong { color: #b42318; }
+.scene-management .scene-sync-missing, .scene-management .scene-sync-more { min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: #fcfdff; font-size: 13px; }
+.scene-management .scene-sync-missing summary, .scene-management .scene-sync-more summary { color: #334155; font-weight: 600; cursor: pointer; }
+.scene-management .scene-sync-missing p { margin: 8px 0; color: var(--muted); line-height: 1.7; }
+.scene-management .scene-sync-missing textarea { box-sizing: border-box; width: 100%; min-height: 6em; padding: 6px 8px; border: 1px solid #d7e0ee; border-radius: 8px; overflow-x: auto; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.scene-management .scene-sync-more ul { margin: 10px 0 0; padding-left: 18px; color: var(--muted); line-height: 1.8; }
+.scene-management .scene-sync-repair { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 8px; }
+.scene-management .scene-sync-repair [role=status] { display: inline-flex; align-items: center; gap: 6px; color: var(--primary); font-size: 13px; }
+.scene-management .scene-sync-repair-result p { margin: 0; font-size: 13px; line-height: 1.7; }
+.scene-management .scene-sync-repair-result .is-ok { color: #2f7d4a; }
+.scene-management .scene-sync-repair-result .is-warn { color: #9a6700; }
+.scene-management .scene-sync-repair-result ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: 12px; line-height: 1.8; }
+.scene-management .scene-sync-repair-result code { margin-right: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; overflow-wrap: anywhere; }
+.scene-management .scene-sync-limit { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; color: #334155; }
+.scene-management .scene-sync-limit input { width: 90px; height: 32px; padding: 0 8px; border: 1px solid #d7e0ee; border-radius: 8px; font: inherit; }
+.scene-management .scene-sync-confirm { padding: 16px; font-size: 14px; line-height: 1.8; }
+.scene-management .scene-sync-confirm p { margin: 0; }
+@media (max-width: 760px) {
+  .scene-management .scene-sync-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 @container scene-details (max-width: 719px) {
   .scene-detail-header, .scene-detail-actions { width: 100%; }

@@ -97,7 +97,7 @@ class BuildStackTests(unittest.TestCase):
         borrowed.get_current_embedding_model.return_value = dict(ROW)
         stack = rs.build_retrieval_stack(CONFIG, SETTINGS, metadata=borrowed)
         rs.PgMetadataStore.assert_not_called()  # no second pool
-        self.assertIs(stack.list_uc._metadata, borrowed)
+        self.assertIs(stack.recompute_scenes_uc._metadata, borrowed)
         stack.close()
         self.vectors.close.assert_called_once()
         borrowed.close.assert_not_called()  # the catalog owns it

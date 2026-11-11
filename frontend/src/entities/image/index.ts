@@ -56,6 +56,7 @@ export {
   type ImageDetailResult,
   type ImageUpdateResult,
   type ImageVectorPushResult,
+  type ImageReembedResult,
   type ImageDeleteResult,
   type ImagePatch,
   MAX_INDEX_FILES,
@@ -65,5 +66,6 @@ export {
   getImage,
   updateImage,
   pushImageVector,
+  reembedImage,
   deleteImage,
 } from './api'

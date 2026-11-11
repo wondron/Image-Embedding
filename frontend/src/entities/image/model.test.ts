@@ -39,7 +39,15 @@ describe('toLibraryImage (§6.1.2 / §6.1.4 List map)', () => {
       height: 768,
       createdAt: '2026-11-07T10:00:00+00:00',
       updatedAt: '2026-11-07T11:00:00+00:00',
+      vectorStatus: null,  // an older server does not say
     })
+  })
+
+  it('reads the vector state of each image; anything else is unknown, not "synced"', () => {
+    for (const status of ['synced', 'stale', 'missing', 'unavailable'] as const) {
+      expect(toLibraryImage({ ...ovenItem, vector_status: status })?.vectorStatus).toBe(status)
+    }
+    expect(toLibraryImage({ ...ovenItem, vector_status: 'pushed' })?.vectorStatus).toBeNull()
   })
 
   it('reads absent heating keys (non-heating scene) and heating_group: null as null', () => {

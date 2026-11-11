@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { buildListImagesQuery, deleteImage, getImage, indexImage, listImages, payloadDifferences, pushImageVector, updateImage } from '.'
+import { buildListImagesQuery, deleteImage, getImage, indexImage, listImages, payloadDifferences, pushImageVector, reembedImage, updateImage } from '.'
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status })
 const png = (name = 'a.png') => new File(['image-data'], name, { type: 'image/png' })
@@ -19,6 +19,11 @@ describe('listImages (GET /api/images)', () => {
     expect(buildListImagesQuery({ categoryId: 12, labelStatus: 'auto' }).toString())
       .toBe('page=1&page_size=24&scene=general&category_id=12&label_status=auto')
     expect(buildListImagesQuery({ categoryId: 0, labelStatus: null }).toString()).toBe('page=1&page_size=24&scene=general')
+  })
+
+  it('asks for the images that need a sync or a vector only when the filter is on', () => {
+    expect(buildListImagesQuery({ outOfSync: true }).toString()).toBe('page=1&page_size=24&scene=general&out_of_sync=true')
+    expect(buildListImagesQuery({ outOfSync: false }).toString()).toBe('page=1&page_size=24&scene=general')
   })
 
   it('builds the query: default scene, trimmed q, no 「全部类别」, legacy scene mapped', () => {
@@ -141,6 +146,18 @@ describe('one image (GET / PATCH / DELETE /api/images/{id}, POST vector-sync)', 
     expect(init.method).toBe('PATCH')
     expect(JSON.parse(init.body)).toEqual({ category_id: 4, label_status: 'verified' })
     expect(result).toMatchObject({ vectorSync: 'missing', syncRequired: true, image: { categoryId: 4 } })
+    expect(result.vector).toBeNull()  // an older server: the page reads the detail once more
+  })
+
+  it('reads the vector state a write answers with, so no second request is needed', async () => {
+    const vector = { status: 'synced', collection: 'c2', payload_version: 5, synced_version: 5, payload_matches: true }
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(json({ ok: true, image: IMAGE_WIRE, vector, vector_sync: 'pushed', sync_required: false }))
+      .mockResolvedValueOnce(json({ ok: true, image_id: 'img-1', payload_version: 5, vector, vector_sync: 'pushed', sync_required: false }))
+      .mockResolvedValueOnce(json({ ok: true, image_id: 'img-1', payload_version: 5, vector: { status: 'nonsense' }, vector_sync: 'failed', sync_required: true })))
+    expect((await updateImage('img-1', { tags: [] })).vector).toMatchObject({ status: 'synced', payloadVersion: 5, syncedVersion: 5 })
+    expect((await pushImageVector('img-1')).vector).toMatchObject({ status: 'synced', collection: 'c2' })
+    expect((await pushImageVector('img-1')).vector?.status).toBe('unavailable')  // off-contract reads as unknown
   })
 
   it('pushes and deletes; a missing image is IMAGE_NOT_FOUND', async () => {
@@ -154,6 +171,18 @@ describe('one image (GET / PATCH / DELETE /api/images/{id}, POST vector-sync)', 
     expect(await deleteImage('img-1')).toMatchObject({ cleanup: 'queued', deletedAt: '2026-11-11T00:00:00+00:00' })
     expect(fetchMock.mock.calls[1][1].method).toBe('DELETE')
     await expect(getImage('img-1')).rejects.toMatchObject({ code: 'IMAGE_NOT_FOUND', status: 404 })
+  })
+
+  it('re-embeds from the stored original and reads the vector state after it; failures keep their code', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json({ ok: true, image_id: 'img-1', payload_version: 4, vector: { status: 'synced', collection: 'c2', synced_version: 4 } }))
+      .mockResolvedValueOnce(json({ ok: false, error: 'IMAGE_FILE_UNAVAILABLE', detail: 'stored original could not be read', trace_id: 't' }, 502))
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await reembedImage('img-1')
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/images/img-1/reembed')
+    expect(fetchMock.mock.calls[0][1].method).toBe('POST')
+    expect(result).toMatchObject({ imageId: 'img-1', payloadVersion: 4, vector: { status: 'synced', syncedVersion: 4 } })
+    await expect(reembedImage('img-1')).rejects.toMatchObject({ code: 'IMAGE_FILE_UNAVAILABLE', status: 502 })
   })
 
   it('treats an unreadable body as unknown, not as success', async () => {

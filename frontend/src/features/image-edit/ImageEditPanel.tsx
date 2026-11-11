@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import { Check, LoaderCircle, RefreshCw, RotateCcw, Trash2, UploadCloud } from 'lucide-react'
+import { Check, LoaderCircle, RotateCcw, Trash2 } from 'lucide-react'
 import { ApiError } from '../../shared/api'
 import { formatLibraryTime } from '../../shared/lib'
 import { enumValueText, useEnumCatalog } from '../../entities/enum'
@@ -12,14 +12,13 @@ import {
   deleteImage,
   foodFieldsFilled,
   getImage,
-  payloadDifferences,
   pushImageVector,
+  reembedImage,
   updateImage,
   type ImageDeleteResult,
   type ImageDetailResult,
-  type ImageVectorState,
+  type LabelStatus,
   type LibraryImageItem,
-  type VectorStatus,
   type VectorSyncOutcome,
 } from '../../entities/image'
 import { FoodFields, TagInput } from '../annotation-fields'
@@ -27,30 +26,32 @@ import { CategoryPicker, categoryPath, type CategoryTreeState } from '../categor
 import { useSceneCatalog } from '../scene-catalog'
 import { SceneMembershipPanel } from '../scene-memberships/SceneMembershipPanel'
 import { describePatch, draftFromImage, isDirty, toImagePatch, validateDraft, withCategory, type ImageEditDraft } from './editDraft'
+import { VectorCard } from './VectorCard'
+import type { PayloadNames } from './vectorView'
 import './image-edit.css'
 
-const LABEL_TEXT = { unlabeled: '未标注', auto: '自动标注', verified: '已核验' } as const
+const LABEL_TEXT: Record<LabelStatus, string> = { unlabeled: '未标注', auto: '自动标注', verified: '已核验' }
 
 /** What a write's vector_sync means for the person (same wording as the scene membership panel). */
 const SAVED: Record<VectorSyncOutcome, string> = {
-  pushed: '已保存，检索已生效。',
-  missing: '已保存。这张图在当前向量库里没有向量，检索查不到它，需要重新入库。',
-  not_ready: '已保存到数据库；检索服务未就绪，检索要等同步后才能看到这次修改。',
-  failed: '已保存到数据库；更新检索索引失败，可稍后点「重推 payload」。',
+  pushed: '已保存，向量库已同步，检索已生效。',
+  missing: '已保存到数据库。这张图在当前向量库里没有向量，检索查不到它；可以在上方用原图重新生成向量。',
+  not_ready: '已保存到数据库；检索服务未就绪，向量库要等它恢复后再同步。',
+  failed: '已保存到数据库；写入向量库失败，可以稍后点「按数据库同步到向量库」。',
 }
 const PUSHED: Record<VectorSyncOutcome, string> = {
-  pushed: '已重推，向量库和数据库一致了。',
-  missing: '这张图在当前向量库里没有向量，无法重推，需要重新入库。',
-  not_ready: '检索服务未就绪，暂时不能重推。',
-  failed: '重推失败，请稍后再试（服务端日志有原因）。',
+  pushed: '已同步，向量库和数据库一致了。',
+  missing: '这张图在当前向量库里没有向量，没法同步；可以用原图重新生成向量。',
+  not_ready: '检索服务未就绪，暂时不能同步。',
+  failed: '同步失败，请稍后再试（服务端日志有原因）。',
 }
-const VECTOR_VIEW: Record<VectorStatus, { label: string; help: string }> = {
-  synced: { label: '已同步', help: '检索按这里保存的类别、场景和食物状态过滤。' },
-  stale: { label: '待同步', help: '向量库里的过滤信息落后于数据库，检索结果可能不准，可以重推。' },
-  missing: { label: '没有向量', help: '当前模型的向量库里没有这张图，检索查不到它，需要重新入库。' },
-  unavailable: { label: '无法读取', help: '' },
+
+/** Why the stored original could not become a vector, in words. */
+const REEMBED_FAILED: Record<string, string> = {
+  IMAGE_FILE_UNAVAILABLE: '读不到存储里的原图（可能已被清理，或对象存储没有保留文件），只能重新上传这张图片。',
+  NOT_READY: '检索服务未就绪（编码模型、向量库或对象存储没有启动），暂时不能重新生成向量。',
+  INDEX_BAD_IMAGE: '存储里的原图无法识别为图片，只能重新上传这张图片。',
 }
-const PAYLOAD_FIELDS: Record<string, string> = { category_id: '类别', scenes: '场景', food_state: '食物状态', label_status: '标注状态' }
 
 type Notice = { tone: 'ok' | 'warn' | 'error'; text: string }
 
@@ -59,7 +60,6 @@ function failure(error: unknown): string {
   return error instanceof Error ? error.message : '操作失败，请稍后重试。'
 }
 const notFound = (error: unknown) => error instanceof ApiError && error.code === 'IMAGE_NOT_FOUND'
-const payloadValue = (value: unknown) => Array.isArray(value) ? value.join('、') || '（空）' : value === null || value === undefined ? '（空）' : String(value)
 
 export interface ImageEditPanelProps {
   item: LibraryImageItem
@@ -72,6 +72,8 @@ export interface ImageEditPanelProps {
   onDeleted: (result: ImageDeleteResult | null) => void
   /** Open the scene management sync tab. */
   onManage?: () => void
+  /** Open 上传与导入 (uploading the same image again restores a missing vector). */
+  onUpload?: () => void
   /** Unsaved edits: the parent keeps the dialog open until they are saved or undone. */
   onDirtyChange?: (dirty: boolean) => void
 }
@@ -81,7 +83,7 @@ export interface ImageEditPanelProps {
  * re-push, the editable fields (PATCH, only what changed), the scene membership panel, and delete.
  */
 export function ImageEditPanel({
-  item, apiBase = '', categories, onChanged, onDeleted, onManage, onDirtyChange,
+  item, apiBase = '', categories, onChanged, onDeleted, onManage, onUpload, onDirtyChange,
 }: ImageEditPanelProps) {
   const base = useId()
   const { catalog } = useEnumCatalog()
@@ -90,7 +92,7 @@ export function ImageEditPanel({
   const [draft, setDraft] = useState<ImageEditDraft | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [busy, setBusy] = useState<null | 'save' | 'push' | 'delete'>(null)
+  const [busy, setBusy] = useState<null | 'save' | 'push' | 'reembed' | 'delete'>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [membershipKey, setMembershipKey] = useState(0)
@@ -143,17 +145,25 @@ export function ImageEditPanel({
 
   useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
 
+  /** A write answered with fresh state: a read still in flight started before it and must not overwrite it. */
+  function retireReads() {
+    generation.current++
+    setLoading(false)
+  }
+
   async function save() {
     if (!image || !draft || busy || invalid || !Object.keys(patch).length) return
     setBusy('save'); setNotice(null)
     try {
       const result = await updateImage(image.id, patch, { baseUrl: apiBase })
-      setDetail(current => current ? { ...current, image: result.image } : current)
+      // The response carries the vector state after the push; an older server needs one more read
+      retireReads()
+      setDetail(current => current ? { ...current, image: result.image, vector: result.vector ?? current.vector } : current)
       setDraft(draftFromImage(result.image))
       setNotice({ tone: result.vectorSync === 'pushed' ? 'ok' : 'warn', text: result.vectorSync ? SAVED[result.vectorSync] : '已保存到数据库。' })
       setMembershipKey(key => key + 1)  // a new category may move rule memberships
       onChangedRef.current()
-      void load(false)  // the vector state after the push
+      if (!result.vector) void load(false)
     } catch (cause) {
       if (notFound(cause)) { gone(null); return }
       setNotice({ tone: 'error', text: `保存失败：${failure(cause)}` })
@@ -169,11 +179,40 @@ export function ImageEditPanel({
     setBusy('push'); setNotice(null)
     try {
       const result = await pushImageVector(image.id, { baseUrl: apiBase })
-      setNotice({ tone: result.vectorSync === 'pushed' ? 'ok' : 'warn', text: result.vectorSync ? PUSHED[result.vectorSync] : '已请求重推。' })
-      void load(false)
+      setNotice({ tone: result.vectorSync === 'pushed' ? 'ok' : 'warn', text: result.vectorSync ? PUSHED[result.vectorSync] : '已请求同步。' })
+      if (result.vector) {
+        const vector = result.vector
+        retireReads()
+        setDetail(current => current ? { ...current, vector } : current)
+      } else {
+        void load(false)
+      }
+      onChangedRef.current()  // the gallery card shows the vector state too
     } catch (cause) {
       if (notFound(cause)) { gone(null); return }
-      setNotice({ tone: 'error', text: `重推失败：${failure(cause)}` })
+      setNotice({ tone: 'error', text: `同步失败：${failure(cause)}` })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function reembed() {
+    if (!image || busy) return
+    setBusy('reembed'); setNotice(null)
+    try {
+      const result = await reembedImage(image.id, { baseUrl: apiBase })
+      const vector = result.vector
+      retireReads()
+      setDetail(current => current ? { ...current, vector } : current)
+      setNotice(vector.status === 'synced'
+        ? { tone: 'ok', text: '已用原图重新生成向量，检索可以查到这张图了。' }
+        : { tone: 'warn', text: '向量已写入，但向量库的状态还不对，可以刷新后再看。' })
+      onChangedRef.current()
+    } catch (cause) {
+      if (notFound(cause)) { gone(null); return }
+      setNotice({ tone: 'error', text: cause instanceof ApiError && REEMBED_FAILED[cause.code ?? '']
+        ? REEMBED_FAILED[cause.code!]
+        : `重新生成向量失败：${failure(cause)}` })
     } finally {
       setBusy(null)
     }
@@ -194,6 +233,12 @@ export function ImageEditPanel({
   }
 
   const sceneName = (code: string) => scenes.data?.scenes.find(scene => scene.code === code)?.name ?? code
+  const payloadNames: PayloadNames = {
+    category: id => categories.tree ? categoryPath(categories.tree, id) : null,
+    scene: sceneName,
+    foodState: value => enumValueText(catalog, FOOD_STATE_ENUM, value),
+    labelStatus: value => LABEL_TEXT[value as LabelStatus] ?? value,
+  }
   const preview = image?.originalUrl ?? image?.imageUrl ?? item.originalUrl ?? item.imageUrl
   const shownPath = image?.categoryId != null && categories.tree ? categoryPath(categories.tree, image.categoryId) : null
   const descriptionLength = draft ? charLength(draft.description.trim()) : 0
@@ -213,7 +258,18 @@ export function ImageEditPanel({
           <div><dt>入库时间</dt><dd>{formatLibraryTime(image?.createdAt ?? item.createdAt)}</dd></div>
           <div className="ie-meta-wide"><dt>图片 ID</dt><dd className="monospace">{item.id}</dd></div>
         </dl>
-        {detail && <VectorCard vector={detail.vector} busy={busy !== null || loading} onPush={() => void push()} onReload={() => void load(false)} />}
+        {detail && <VectorCard
+          vector={detail.vector}
+          ledger={detail.image.embeddings}
+          names={payloadNames}
+          busy={busy !== null || loading}
+          pushing={busy === 'push'}
+          reembedding={busy === 'reembed'}
+          onPush={() => void push()}
+          onReembed={() => void reembed()}
+          onReload={() => void load(false)}
+          onUpload={onUpload}
+        />}
       </div>
     </div>
 
@@ -286,20 +342,3 @@ export function ImageEditPanel({
   </div>
 }
 
-function VectorCard({ vector, busy, onPush, onReload }: { vector: ImageVectorState; busy: boolean; onPush: () => void; onReload: () => void }) {
-  const view = VECTOR_VIEW[vector.status]
-  const differences = vector.status === 'stale' ? payloadDifferences(vector) : []
-  return <section className={`ie-vector is-${vector.status}`} aria-label="向量库状态">
-    <div className="ie-vector-head">
-      <strong>向量库</strong>
-      <span className="ie-vector-badge">{view.label}</span>
-      {vector.status === 'stale' && <button type="button" className="mg-text-button" disabled={busy} onClick={onPush}><UploadCloud size={13} />重推 payload</button>}
-      {vector.status === 'unavailable' && <button type="button" className="mg-text-button" disabled={busy} onClick={onReload}><RefreshCw size={13} />刷新</button>}
-    </div>
-    <p>{view.help || vector.detail || '读不到这张图在向量库里的状态。'}</p>
-    {differences.length > 0 && <ul className="ie-diff">{differences.map(([key, stored, expected]) => <li key={key}>
-      <span>{PAYLOAD_FIELDS[key] ?? key}</span>库中 {payloadValue(stored)}，应为 {payloadValue(expected)}
-    </li>)}</ul>}
-    {vector.collection && <small>{vector.embeddingSpaceId ?? vector.collection} · payload v{vector.payloadVersion ?? '—'} · 已同步 v{vector.syncedVersion ?? '—'}</small>}
-  </section>
-}

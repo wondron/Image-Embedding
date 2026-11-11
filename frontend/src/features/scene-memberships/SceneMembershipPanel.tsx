@@ -12,7 +12,7 @@ function subscribe(fn: () => void) { listeners.add(fn); return () => { listeners
 /** What the server did with the image's search payload after saving (vector_sync). */
 const SAVED: Record<VectorSync, string> = {
   pushed: '已保存，检索已生效。',
-  missing: '已保存。这张图在当前向量库里没有向量，检索查不到它，需要重新入库。',
+  missing: '已保存到数据库。这张图在当前向量库里没有向量，检索查不到它；可以用原图重新生成向量（见上方向量库）。',
   not_ready: '已保存到数据库；检索服务未就绪，检索要等同步后才能看到这次修改。',
   failed: '已保存到数据库；更新检索索引失败，可稍后再保存一次或到场景管理执行同步。',
 }
@@ -102,7 +102,7 @@ export function SceneMembershipPanel({ imageId, apiBase = '', onSaved, onManage 
         })}
       </tbody></table></div>
       <p className="mg-help">人工调整优先于规则；「恢复规则」只清除人工调整，按当前规则重新判断，不等于排除。</p>
-      <small>payload v{snapshot.payloadVersion}{snapshot.traceId ? ` · trace_id=${snapshot.traceId}` : ''}</small>
+      <small title={snapshot.traceId ? `trace_id=${snapshot.traceId}` : undefined}>数据版本 v{snapshot.payloadVersion}（场景、类别、食物状态或标注状态变化时加 1）</small>
     </>}
   </section>
 }

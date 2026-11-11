@@ -12,6 +12,8 @@ export type UseLibraryListOptions = {
   /** That category and its subtree. */
   categoryId?: number | null
   labelStatus?: LabelStatus | null
+  /** Only images that need a sync or a vector. */
+  outOfSync?: boolean
   scene: string
   /** Bump to refetch the same page (retry). */
   reloadKey?: number
@@ -30,6 +32,7 @@ export function useLibraryList({
   q,
   categoryId = null,
   labelStatus = null,
+  outOfSync = false,
   scene,
   reloadKey = 0,
 }: UseLibraryListOptions) {
@@ -41,7 +44,7 @@ export function useLibraryList({
 
   const failedRequest = useRef<string | null>(null)
   useEffect(() => {
-    const requestKey = JSON.stringify([apiBase, page, pageSize, q, categoryId, labelStatus, scene, reloadKey])
+    const requestKey = JSON.stringify([apiBase, page, pageSize, q, categoryId, labelStatus, outOfSync, scene, reloadKey])
     if (!enabled) { setLoading(false); return }
     if (failedRequest.current === requestKey) return
     const controller = new AbortController()
@@ -53,6 +56,7 @@ export function useLibraryList({
       q: q || undefined,
       categoryId,
       labelStatus,
+      outOfSync,
       scene: toApiSceneCode(scene, DEFAULT_SCENE),
       baseUrl: apiBase,
       signal: controller.signal,
@@ -71,7 +75,7 @@ export function useLibraryList({
       setLoading(false)
     })
     return () => controller.abort()
-  }, [enabled, page, pageSize, q, categoryId, labelStatus, scene, apiBase, reloadKey])
+  }, [enabled, page, pageSize, q, categoryId, labelStatus, outOfSync, scene, apiBase, reloadKey])
 
   return { items, total, loading, error, connected }
 }

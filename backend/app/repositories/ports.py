@@ -113,8 +113,10 @@ class MetadataStorePort(ABC):
         tag: str | None = None,
         category_id: int | None = None,
         label_status: str | None = None,
+        out_of_sync: bool = False,
     ) -> tuple[list[dict[str, Any]], int]:
-        """category_id filters on the category's subtree; label_status on the exact value."""
+        """category_id filters on the category's subtree; label_status on the exact value;
+        out_of_sync keeps images whose current-model ledger row is missing or behind."""
         raise NotImplementedError
 
     @abstractmethod
@@ -417,6 +419,12 @@ class ImageStoragePort(ABC):
         content_type: str | None = None,
     ) -> str:
         """Upload staging/{candidate_id}.{ext}; return full https staged_url."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def read_by_url_or_key(self, url_or_key: str) -> bytes:
+        """The bytes of a stored object, by full https URL or object key (re-embedding reads the
+        original back). Raises IMAGE_FILE_UNAVAILABLE when it is gone or cannot be read."""
         raise NotImplementedError
 
     @abstractmethod

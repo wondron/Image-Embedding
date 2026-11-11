@@ -85,6 +85,8 @@ def mvp_health(request: Request) -> JSONResponse:
         "可通过 q 按分类名称、标签、图片 URL 或 ID 进行子串匹配，"
         "通过 category 按分类代码、名称或 ID 筛选，通过 category_id 按类别及其所有下级类别筛选，"
         "通过 tag 按单个标签精确筛选，通过 label_status 按标注状态筛选。参见 SSOT §3.5。"
+        "只读 PostgreSQL，编码器或向量库未就绪时照常返回；每张图带 vector_status（当前 collection 里的状态，"
+        "一页只读一次向量库，读不到时为 unavailable）。"
     ),
 )
 def list_library_images(
@@ -99,6 +101,13 @@ def list_library_images(
         None, gt=0, le=2_147_483_647, description="可选类别筛选（categories.id）：这个类别及其所有下级类别；未标注的图片不匹配"
     ),
     label_status: Optional[str] = Query(None, description="可选标注状态筛选：unlabeled / auto / verified"),
+    out_of_sync: Optional[bool] = Query(
+        None,
+        description=(
+            "true：只列需要处理的图片——当前模型的写入记录（image_embeddings）缺失或落后于 payload_version，"
+            "即向量库里的 payload 待同步或没有向量。按记账判断，不读向量库"
+        ),
+    ),
     trace_id: Optional[str] = Query(None),
 ) -> Any:
     return retrieval_service.run_list_images(
@@ -112,5 +121,6 @@ def list_library_images(
         tag=tag,
         category_id=category_id,
         label_status=label_status,
+        out_of_sync=out_of_sync,
         trace_id=trace_id,
     )

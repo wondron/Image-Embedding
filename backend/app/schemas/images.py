@@ -98,9 +98,13 @@ class ImageDetailResponse(BaseModel):
     vector: ImageVectorState
 
 
+_VECTOR_AFTER = "写入并推送之后这张图在当前 collection 里的状态（同 GET 详情的 vector），页面不必再读一次详情"
+
+
 class ImageUpdateResponse(BaseModel):
     ok: Literal[True] = True
     image: ImageDetail
+    vector: ImageVectorState | None = Field(default=None, description=_VECTOR_AFTER)
     vector_sync: VectorSync = Field(..., description=_VECTOR_SYNC)
     sync_required: bool = Field(..., description=_SYNC_REQUIRED)
 
@@ -109,8 +113,16 @@ class ImageVectorSyncResponse(BaseModel):
     ok: Literal[True] = True
     image_id: str
     payload_version: int
+    vector: ImageVectorState | None = Field(default=None, description=_VECTOR_AFTER)
     vector_sync: VectorSync = Field(..., description=_VECTOR_SYNC)
     sync_required: bool = Field(..., description=_SYNC_REQUIRED)
+
+
+class ImageReembedResponse(BaseModel):
+    ok: Literal[True] = True
+    image_id: str
+    payload_version: int
+    vector: ImageVectorState = Field(..., description="重新写入向量之后这张图在当前 collection 里的状态")
 
 
 class ImageDeleteResponse(BaseModel):

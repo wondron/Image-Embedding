@@ -151,6 +151,9 @@
   line-height: 1.4;
 }
 
+/* A filter that narrows the list: the same look as the category filter's chosen state */
+.mg-select.is-set { border-color: #cfe0ff; background: #f4f8ff; color: var(--primary); }
+
 .mg-view-toggle { display: flex; gap: 1px; padding: 2px; border: 1px solid var(--border); border-radius: 10px; }
 .mg-view-toggle button { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 7px; color: #6b7280; background: transparent; cursor: pointer; }
 .mg-view-toggle button.active { color: var(--primary); background: #edf3fc; }
@@ -433,6 +436,13 @@
 .mg-label-status.is-verified { background: #eaf5ee; color: #2f7d4a; }
 .mg-library-tags { justify-content: flex-start !important; gap: 4px 8px !important; margin-top: 4px !important; color: #64748b !important; font-size: 11px !important; overflow-wrap: anywhere; }
 .mg-attributes .mg-label-status { margin-right: 6px; }
+/* The image's vector store state, only when it needs attention */
+.mg-vector-flag { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border-radius: 999px; font-size: 11px; line-height: 18px; white-space: nowrap; cursor: help; }
+.mg-vector-flag::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.mg-vector-flag.is-stale { background: #fff4e5; color: #9a6700; }
+.mg-vector-flag.is-missing { background: #fdf0ee; color: #b42318; }
+.mg-attributes .mg-vector-flag { margin-right: 6px; }
+.mg-vector-tally { color: #9a6700; }
 .mg-library-list { display: flex; flex-direction: column; }
 .mg-library-row {
   display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; align-items: center;

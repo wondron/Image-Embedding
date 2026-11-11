@@ -32,6 +32,8 @@ export interface ListImagesOptions {
   /** The category and every category below it. */
   categoryId?: number | null
   labelStatus?: LabelStatus | null
+  /** Only images whose vector store side needs attention (stale payload or no vector), by the server's ledger. */
+  outOfSync?: boolean
   /** Default general (PG v0.1). Do not omit to mean "all scenes". */
   scene?: string
   baseUrl?: string
@@ -47,9 +49,10 @@ export function buildListImagesQuery({
   category,
   categoryId,
   labelStatus,
+  outOfSync,
   scene = DEFAULT_SCENE,
   traceId,
-}: Pick<ListImagesOptions, 'page' | 'pageSize' | 'q' | 'category' | 'categoryId' | 'labelStatus' | 'scene' | 'traceId'>): URLSearchParams {
+}: Pick<ListImagesOptions, 'page' | 'pageSize' | 'q' | 'category' | 'categoryId' | 'labelStatus' | 'outOfSync' | 'scene' | 'traceId'>): URLSearchParams {
   const params = new URLSearchParams()
   params.set('page', String(Math.max(1, Math.floor(page) || 1)))
   params.set('page_size', String(pageSize > 0 ? Math.floor(pageSize) : 24))
@@ -60,6 +63,7 @@ export function buildListImagesQuery({
   if (trimmedCategory && trimmedCategory !== '全部类别') params.set('category', trimmedCategory)
   if (typeof categoryId === 'number' && Number.isSafeInteger(categoryId) && categoryId > 0) params.set('category_id', String(categoryId))
   if (labelStatus) params.set('label_status', labelStatus)
+  if (outOfSync) params.set('out_of_sync', 'true')
   if (traceId?.trim()) params.set('trace_id', traceId.trim())
   return params
 }
@@ -192,6 +196,8 @@ export interface ImageDetailResult {
 /** A write the server accepted; vectorSync says how it reached the search index. */
 export interface ImageUpdateResult {
   image: ImageDetail
+  /** The vector state after the push; null when the server does not send it (read the detail then). */
+  vector: ImageVectorState | null
   vectorSync: VectorSyncOutcome | null
   syncRequired: boolean
   traceId: string | null
@@ -200,9 +206,16 @@ export interface ImageUpdateResult {
 export interface ImageVectorPushResult {
   imageId: string
   payloadVersion: number | null
+  /** The vector state after the push; null when the server does not send it (read the detail then). */
+  vector: ImageVectorState | null
   vectorSync: VectorSyncOutcome | null
   syncRequired: boolean
   traceId: string | null
+}
+
+/** The optional `vector` of a write body: parsed when present, null when absent. */
+function vectorAfterWrite(value: unknown): ImageVectorState | null {
+  return value === undefined || value === null ? null : toVectorState(value)
 }
 
 export interface ImageDeleteResult {
@@ -240,7 +253,13 @@ export async function updateImage(id: string, patch: ImagePatch, { baseUrl, sign
   const body = asObject(result.body)
   const image = toImageDetail(body?.image)
   if (body?.ok !== true || !image) throw unreadable(result.status, result.traceId)
-  return { image, vectorSync: toVectorSync(body.vector_sync), syncRequired: body.sync_required !== false, traceId: result.traceId }
+  return {
+    image,
+    vector: vectorAfterWrite(body.vector),
+    vectorSync: toVectorSync(body.vector_sync),
+    syncRequired: body.sync_required !== false,
+    traceId: result.traceId,
+  }
 }
 
 /** POST /api/images/{id}/vector-sync: write the current payload to the current collection again. */
@@ -251,8 +270,35 @@ export async function pushImageVector(id: string, { baseUrl, signal }: ImageRequ
   return {
     imageId: asText(body.image_id) ?? id,
     payloadVersion: typeof body.payload_version === 'number' ? body.payload_version : null,
+    vector: vectorAfterWrite(body.vector),
     vectorSync: toVectorSync(body.vector_sync),
     syncRequired: body.sync_required !== false,
+    traceId: result.traceId,
+  }
+}
+
+export interface ImageReembedResult {
+  imageId: string
+  payloadVersion: number | null
+  /** The vector state after the point was written. */
+  vector: ImageVectorState
+  traceId: string | null
+}
+
+/**
+ * POST /api/images/{id}/reembed: embed the stored original again with the current model and
+ * write the point (repairs a missing vector; the annotation does not change). Fails with
+ * IMAGE_FILE_UNAVAILABLE when the original cannot be read back, NOT_READY when the encoder,
+ * the vector store or the object storage is down.
+ */
+export async function reembedImage(id: string, { baseUrl, signal }: ImageRequestOptions = {}): Promise<ImageReembedResult> {
+  const result = await requestJsonResult(imagePath(id, '/reembed'), { baseUrl, signal, method: 'POST', labels: IMAGE_LABELS })
+  const body = asObject(result.body)
+  if (body?.ok !== true) throw unreadable(result.status, result.traceId)
+  return {
+    imageId: asText(body.image_id) ?? id,
+    payloadVersion: typeof body.payload_version === 'number' ? body.payload_version : null,
+    vector: toVectorState(body.vector),
     traceId: result.traceId,
   }
 }

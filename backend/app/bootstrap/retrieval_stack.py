@@ -35,7 +35,7 @@ from app.repositories.vectors import QdrantVectorStore
 from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.delete_image import DeleteImageUseCase, DeletionWorker
 from app.services.retrieval.index_image import IndexImageUseCase
-from app.services.retrieval.list_images import ListImagesUseCase
+from app.services.retrieval.reembed_image import ReembedImageUseCase
 from app.services.retrieval.recompute_scenes import RecomputeScenesUseCase
 from app.services.retrieval.search_image import SearchImageUseCase
 from app.services.retrieval.sync_scenes import SyncSceneMembershipsUseCase
@@ -80,8 +80,8 @@ class RetrievalStack:
     infra: RetrievalInfra
     embedding: Embedder
     index_uc: IndexImageUseCase
+    reembed_uc: ReembedImageUseCase
     search_uc: SearchImageUseCase
-    list_uc: ListImagesUseCase
     delete_uc: DeleteImageUseCase
     deletion_worker: DeletionWorker
     recompute_scenes_uc: RecomputeScenesUseCase
@@ -190,8 +190,8 @@ def build_retrieval_stack(
         index_uc=IndexImageUseCase(
             embedding, vectors, metadata, model=model, storage=storage, indexed_dir=save_dir
         ),
+        reembed_uc=ReembedImageUseCase(embedding, vectors, metadata, model=model, storage=storage),
         search_uc=SearchImageUseCase(embedding, vectors, metadata, model=model),
-        list_uc=ListImagesUseCase(metadata),
         delete_uc=DeleteImageUseCase(metadata),
         deletion_worker=DeletionWorker(metadata, vectors, storage),
         recompute_scenes_uc=RecomputeScenesUseCase(metadata),

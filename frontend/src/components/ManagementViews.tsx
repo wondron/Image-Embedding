@@ -3,7 +3,7 @@ import { ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Circle, Clo
 import { Dialog } from './Dialog'
 import { TasksPage } from '../pages/tasks'
 import { categoryLabel, type CategoryTree } from '../entities/category'
-import { indexImage, type ImageDeleteResult, type LabelStatus, type LibraryImageItem } from '../entities/image'
+import { indexImage, type ImageDeleteResult, type LabelStatus, type LibraryImageItem, type VectorStatus } from '../entities/image'
 import { DEFAULT_SCENE, sceneDisplayLabel, toApiSceneCode, sceneError, writeMembership, type VectorSync } from '../entities/scene'
 import { EmptyState, Metric } from '../shared/ui'
 import { EMPTY_COPY } from '../shared/config'
@@ -94,6 +94,17 @@ async function applySceneSteps(base: string, imageId: string, steps: readonly Me
 
 const LABEL_STATUS_TEXT: Record<LabelStatus, string> = { unlabeled: '未标注', auto: '自动标注', verified: '已核验' }
 
+/** Only what needs attention gets a flag: an image in step with the vector store stays quiet. */
+const VECTOR_FLAG: Partial<Record<VectorStatus, { text: string; title: string }>> = {
+  stale: { text: '待同步', title: '向量库里的过滤信息落后于数据库，检索可能按旧标注命中它；打开图片可以同步' },
+  missing: { text: '没有向量', title: '向量库里没有这张图，检索查不到它；重新上传同一张图片即可补上' },
+}
+
+function VectorFlag({ status }: { status: VectorStatus | null }) {
+  const flag = status ? VECTOR_FLAG[status] : undefined
+  return flag ? <span className={`mg-vector-flag is-${status}`} title={flag.title}>{flag.text}</span> : null
+}
+
 /** A library card's title: the start of its description, else a short id. */
 function libraryTitle(item: LibraryImageItem): string {
   const text = Array.from(item.description.trim())
@@ -121,6 +132,8 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
   /** The category filter: that category and its subtree; null: all. */
   const [libraryCategoryId, setLibraryCategoryId] = useState<number | null>(null)
   const [libraryLabelStatus, setLibraryLabelStatus] = useState<LabelStatus | ''>('')
+  /** Only images whose vector store side needs attention (by the server's ledger). */
+  const [libraryOutOfSync, setLibraryOutOfSync] = useState(false)
   /** The open editor has unsaved edits: its dialog stays open until they are saved or undone. */
   const [libraryDirty, setLibraryDirty] = useState(false)
   const [libraryScene, setLibraryScene] = useState<string>(DEFAULT_SCENE)
@@ -209,6 +222,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     q: debouncedLibraryQuery || undefined,
     categoryId: libraryCategoryId,
     labelStatus: libraryLabelStatus || null,
+    outOfSync: libraryOutOfSync,
     scene: libraryScene,
     reloadKey: libraryReloadKey,
   })
@@ -221,6 +235,11 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     }
   }, [view, libraryList.total, libraryList.items.length, libraryPage])
   const libraryItems = libraryList.items
+  // Each item says how it stands in the vector store; a page where none could be read means the store is down
+  const vectorUnreadable = libraryItems.length > 0 && libraryItems.every(item => item.vectorStatus === 'unavailable')
+  const staleOnPage = libraryItems.filter(item => item.vectorStatus === 'stale').length
+  const missingOnPage = libraryItems.filter(item => item.vectorStatus === 'missing').length
+  const vectorTally = [staleOnPage ? `${staleOnPage} 张待同步` : '', missingOnPage ? `${missingOnPage} 张没有向量` : ''].filter(Boolean).join('、')
   const libraryTotal = libraryList.total
   const libraryLoading = libraryList.loading
   const libraryError = libraryList.error
@@ -449,6 +468,10 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
           <option value="auto">自动标注</option>
           <option value="verified">已核验</option>
         </select>
+        <select className={`mg-select${libraryOutOfSync ? ' is-set' : ''}`} aria-label="向量库状态筛选" title="按写入记录：向量库里的过滤信息落后于数据库，或当前模型还没有这张图的向量" value={libraryOutOfSync ? 'out' : ''} onChange={event => { setLibraryOutOfSync(event.target.value === 'out'); setLibraryPage(1) }}>
+          <option value="">全部向量状态</option>
+          <option value="out">待同步或没有向量</option>
+        </select>
           <SceneSelect
             id="library-scene"
             variant="management"
@@ -468,11 +491,11 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
         <input ref={fileInput} type="file" className="mg-hidden" aria-label="选择待入库图片" accept="image/jpeg,image/png,image/webp" multiple onChange={event => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />
         {dirSupported && <input ref={dirInput} type="file" className="mg-hidden" aria-label="选择待入库目录" accept="image/jpeg,image/png,image/webp" multiple {...({ webkitdirectory: '', directory: '' } as object)} onChange={event => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />}
       </>}
-      <span className="mg-status"><span />{view === 'import' ? (indexing ? '入库进行中' : '自建入库已接入') : libraryLoading ? '图库加载中…' : libraryError ? '图库加载失败' : libraryConnected ? '图库已接入' : '图库未连接'}</span>
+      <span className="mg-status"><span />{view === 'import' ? (indexing ? '入库进行中' : '自建入库已接入') : libraryLoading ? '图库加载中…' : libraryError ? '图库加载失败' : libraryConnected ? (vectorUnreadable ? '图库已接入 · 向量库状态读不到' : '图库已接入') : '图库未连接'}</span>
     </div>}
 
     {view === 'library' && (() => {
-      const hasFilter = Boolean(debouncedLibraryQuery) || libraryCategoryId !== null || libraryLabelStatus !== '' || libraryScene !== sceneCatalog.defaultScene?.code
+      const hasFilter = Boolean(debouncedLibraryQuery) || libraryCategoryId !== null || libraryLabelStatus !== '' || libraryOutOfSync || libraryScene !== sceneCatalog.defaultScene?.code
       const totalPages = Math.max(1, Math.ceil(libraryTotal / 24) || 1)
       const pageLabel = libraryTotal === 0 ? '—' : `${libraryPage} / ${totalPages}`
       const activeCategories = categoryTree.tree ? [...categoryTree.tree.byId.values()].filter(entry => entry.node.isActive).length : null
@@ -500,7 +523,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
         )}
         {!libraryError && !libraryLoading && libraryTotal === 0 && hasFilter && (
           <EmptyState icon={Images} title={EMPTY_COPY.libraryFilteredEmpty.title} description={EMPTY_COPY.libraryFilteredEmpty.description}>
-            <button className="mg-btn mg-secondary" onClick={() => { setLibraryQuery(''); setLibraryCategoryId(null); setLibraryLabelStatus(''); setLibraryScene(sceneCatalog.defaultScene?.code ?? ''); setLibraryPage(1) }}>清空筛选</button>
+            <button className="mg-btn mg-secondary" onClick={() => { setLibraryQuery(''); setLibraryCategoryId(null); setLibraryLabelStatus(''); setLibraryOutOfSync(false); setLibraryScene(sceneCatalog.defaultScene?.code ?? ''); setLibraryPage(1) }}>清空筛选</button>
           </EmptyState>
         )}
         {!libraryError && libraryItems.length > 0 && libraryLayout === 'grid' && (
@@ -523,6 +546,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
                   <small>
                     <span className={`mg-category-chip${item.category ? '' : ' is-empty'}`}>{item.category ?? '未标注'}</span>
                     {item.labelStatus && item.labelStatus !== 'unlabeled' && <span className={`mg-label-status is-${item.labelStatus}`}>{LABEL_STATUS_TEXT[item.labelStatus]}</span>}
+                    <VectorFlag status={item.vectorStatus} />
                     {item.scenes.map(code => <span className="mg-library-scene" key={code}>{sceneCatalog.data?.scenes.find(s => s.code === code)?.name ?? sceneDisplayLabel(code)}</span>)}
                   </small>
                   {item.tags.length > 0 && <small className="mg-library-tags">{item.tags.slice(0, 4).map(tag => <span key={tag}>#{tag}</span>)}{item.tags.length > 4 && <span>+{item.tags.length - 4}</span>}</small>}
@@ -547,14 +571,14 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
                   <strong title={item.description || item.id}>{libraryTitle(item)}</strong>
                 </button>
                 <span><span className={`mg-category-chip${item.category ? '' : ' is-empty'}`}>{item.category ?? '未标注'}</span></span>
-                <span className="mg-attributes">{item.labelStatus && item.labelStatus !== 'unlabeled' && <span className={`mg-label-status is-${item.labelStatus}`}>{LABEL_STATUS_TEXT[item.labelStatus]}</span>}{item.tags.length ? item.tags.map(tag => `#${tag}`).join(' ') : item.labelStatus === 'unlabeled' ? '' : '—'}</span>
+                <span className="mg-attributes">{item.labelStatus && item.labelStatus !== 'unlabeled' && <span className={`mg-label-status is-${item.labelStatus}`}>{LABEL_STATUS_TEXT[item.labelStatus]}</span>}<VectorFlag status={item.vectorStatus} />{item.tags.length ? item.tags.map(tag => `#${tag}`).join(' ') : item.labelStatus === 'unlabeled' ? '' : '—'}</span>
                 <span>{formatLibraryTime(item.createdAt)}</span>
               </div>
             ))}
           </div>
         )}
         <div className="mg-pagination">
-          <span>{libraryError ? '加载失败' : libraryLoading && libraryItems.length === 0 ? '加载中…' : libraryTotal === 0 ? '暂无已入库图片' : `共 ${libraryTotal} 张`}</span>
+          <span>{libraryError ? '加载失败' : libraryLoading && libraryItems.length === 0 ? '加载中…' : libraryTotal === 0 ? '暂无已入库图片' : `共 ${libraryTotal} 张`}{!libraryError && vectorTally && <span className="mg-vector-tally"> · 本页 {vectorTally}</span>}</span>
           <div>
             <span>每页 24 张</span>
             <button aria-label="上一页" disabled={libraryLoading || libraryPage <= 1 || libraryTotal === 0} onClick={() => setLibraryPage(page => Math.max(1, page - 1))}><ChevronLeft size={16} /></button>
@@ -563,7 +587,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
           </div>
         </div>
       </section>
-      <div className="mg-info"><Info size={17} /><p>点击图片查看与标注：可改类别、标注状态、标签、描述和食物标注，保存后同步到检索；向量库里的过滤信息落后时可以重推，也可以删除图片。按类别筛选时包含它的所有下级类别。</p></div>
+      <div className="mg-info"><Info size={17} /><p>点击图片查看与标注：可改类别、标注状态、标签、描述和食物标注，保存后自动同步到向量库；也可以删除图片。标着「待同步」的图片，向量库里的过滤信息落后于数据库，打开后可一键同步（批量同步在「场景管理」）；「没有向量」的检索查不到，打开后可用存储里的原图重新生成。用「待同步或没有向量」筛选可以一次找出它们。按类别筛选时包含它的所有下级类别。</p></div>
     </>
     })()}
 
@@ -670,6 +694,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
         onDeleted={libraryImageDeleted}
         onDirtyChange={setLibraryDirty}
         onManage={() => { closeLibraryImage(); onNavigate('scenes'); const u = new URL(window.location.href); u.searchParams.set('sceneTab', 'sync'); window.history.replaceState(null, '', u.toString()) }}
+        onUpload={libraryDirty ? undefined : () => { closeLibraryImage(); onNavigate('import') }}
       />
     </Dialog>}
   </div>

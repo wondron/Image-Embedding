@@ -9,6 +9,7 @@ from app.core.enums import (
     LICENSE,
     SOURCE_TYPE,
     LabelStatus,
+    ModelStatus,
     NameKind,
     StrEnum,
 )
@@ -355,6 +356,7 @@ class PgImagesMixin:
         tag: str | None = None,
         category_id: int | None = None,
         label_status: str | None = None,
+        out_of_sync: bool = False,
     ) -> tuple[list[dict[str, Any]], int]:
         """Paginate images that are effective members of scene code.
 
@@ -362,6 +364,9 @@ class PgImagesMixin:
         tag: exact match on one element of images.tags.
         category_id: that category and every category below it (an unlabeled image never matches).
         label_status: exact value (unlabeled / auto / verified).
+        out_of_sync: only images whose current-model ledger row is missing or behind their
+        payload_version - they need a push, or a vector. By the ledger, not by reading Qdrant:
+        a point deleted behind the ledger's back is not found this way.
         """
         self.ensure_schema()
         from sqlalchemy import text
@@ -409,6 +414,14 @@ class PgImagesMixin:
                 if label_status:
                     where.append("i.label_status = :label_status")
                     params["label_status"] = label_status
+                if out_of_sync:
+                    # served by pk_image_embeddings (model_id, image_id); no current model: every image
+                    where.append(
+                        "NOT EXISTS (SELECT 1 FROM image_embeddings e "
+                        "JOIN embedding_models m ON m.id = e.model_id AND m.status = :current_status "
+                        "WHERE e.image_id = i.id AND e.synced_version >= i.payload_version)"
+                    )
+                    params["current_status"] = ModelStatus.CURRENT.value
                 if q:
                     where.append(
                         "(cn.name ILIKE :q OR i.original_url ILIKE :q OR "

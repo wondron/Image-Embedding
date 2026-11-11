@@ -11,7 +11,7 @@ import { SceneSyncPanel } from './SceneSyncPanel'
 import './scene-management.css'
 type Tab = 'overview' | 'labels' | 'rules' | 'sync'
 type Editor = { type: 'scene'; scene?: Scene } | { type: 'label'; scene: Scene; label?: SceneLabel } | { type: 'rule'; scene: Scene; rule?: SceneRule }
-const tabs: { key: Tab; label: string }[] = [{ key: 'overview', label: '概览' }, { key: 'labels', label: '标签' }, { key: 'rules', label: '规则' }, { key: 'sync', label: '全量场景同步' }]
+const tabs: { key: Tab; label: string }[] = [{ key: 'overview', label: '概览' }, { key: 'labels', label: '标签' }, { key: 'rules', label: '规则' }, { key: 'sync', label: '全量同步' }]
 function initial() { const p = new URLSearchParams(window.location.search); return { id: Number(p.get('scene')) || null, tab: tabs.some(t => t.key === p.get('sceneTab')) ? p.get('sceneTab') as Tab : 'overview' as Tab } }
 export function SceneManagement({ apiBase }: { apiBase: string }) {
   const c = useSceneCatalog(apiBase); const sync = useSceneSync(); const [selected, setSelected] = useState<number | null>(() => initial().id); const [tab, setTab] = useState<Tab>(() => initial().tab)
@@ -71,7 +71,7 @@ export function SceneManagement({ apiBase }: { apiBase: string }) {
   }, [selected, tab, Boolean(scene)])
   useLayoutEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = 0 }, [selected, tab])
   return <div className="scene-management">
-    <div className="mg-page-toolbar"><h2>场景管理</h2><button className="mg-btn mg-secondary" onClick={() => void c.refresh()}>刷新</button><button className="mg-btn mg-primary" disabled={!canWrite} onClick={() => open({ type: 'scene' })}>新建场景</button><button className="mg-btn mg-secondary" onClick={() => setTab('sync')}>全量场景同步</button></div>
+    <div className="mg-page-toolbar"><h2>场景管理</h2><button className="mg-btn mg-secondary" onClick={() => void c.refresh()}>刷新</button><button className="mg-btn mg-primary" disabled={!canWrite} onClick={() => open({ type: 'scene' })}>新建场景</button><button className="mg-btn mg-secondary" onClick={() => setTab('sync')}>全量同步</button></div>
     <div className="scene-status-stack scene-directory-status" aria-label="场景目录状态">
       {c.error && <p className="mg-form-error" role="alert">{c.error} 已保留上次结果，依赖目录的写入已禁用。<button type="button" className="text-button" onClick={() => void c.refresh()}>重试刷新</button></p>}
       {locked && <p role="status">全量同步正在进行，本页配置与同窗口人工成员写入已禁用。</p>}
@@ -80,7 +80,8 @@ export function SceneManagement({ apiBase }: { apiBase: string }) {
       {detachedFeedback && notice && <p role="status">{notice}</p>}
       {c.loading && <p className="scene-loading" role="status"><LoaderCircle size={15} className="spin" aria-hidden />正在加载场景目录…</p>}
     </div>
-    <div className="scene-layout"><aside className="mg-panel scene-directory" aria-label="全量场景列表">
+    {/* Narrow screens show one pane at a time: the list, or what was picked from it (a scene, or the full sync) */}
+    <div className="scene-layout" data-pane={scene || tab === 'sync' ? 'detail' : 'list'}><aside className="mg-panel scene-directory" aria-label="全量场景列表">
       {c.data?.scenes.map(s => <button className={`scene-directory-item ${s.id === selected ? 'active' : ''}`} key={s.id} aria-pressed={s.id === selected} onClick={() => setSelected(s.id)}><strong>{s.name}</strong><code>{s.code}</code><small>{s.isActive ? '启用' : '停用'} · {s.includeAll ? '全包含' : '按规则'}{s.code === c.data?.defaultScene ? ' · 默认' : ''}</small><small>成员 {s.memberCount}（已物化）</small></button>)}
       {c.data && !c.data.scenes.length && <EmptyState icon={Layers3} title="暂无场景" description="目录为空，可新建场景；全量同步仍可从页头进入。" />}
     </aside><section className="mg-panel scene-details" ref={detailsRef} aria-label="场景详情">
@@ -95,10 +96,10 @@ export function SceneManagement({ apiBase }: { apiBase: string }) {
           {feedbackMatches && notice && <p role="status">{notice}</p>}
           {protectedScene && !editor && !confirmation && <p id="scene-protection-note">默认场景不可停用、删除或取消全包含；名称、描述和加热标志仍可编辑。</p>}
         </div>
-        <button type="button" className="text-button scene-back" onClick={() => setSelected(null)}>返回列表</button>
+        {(scene || tab === 'sync') && <button type="button" className="text-button scene-back" onClick={() => { setSelected(null); if (tab === 'sync') setTab('overview') }}>返回列表</button>}
         {(scene || tab === 'sync') && <header className="scene-detail-header" ref={headingRef}>
           <div className="scene-heading-text">
-            <h3 className="scene-detail-name">{scene ? scene.name : '全量场景同步'}</h3>
+            <h3 className="scene-detail-name">{scene ? scene.name : '全量同步'}</h3>
             {scene && <><code className="scene-detail-code">{scene.code}</code><div className="scene-detail-badges"><span className="scene-detail-badge">{scene.isActive ? '启用' : '停用'}</span>{scene.code === c.data?.defaultScene && <span className="scene-detail-badge">默认（只读）</span>}{scene.includeAll && <span className="scene-detail-badge">全包含</span>}</div></>}
           </div>
           {scene && <div className="scene-detail-actions"><div className="scene-detail-primary-actions">

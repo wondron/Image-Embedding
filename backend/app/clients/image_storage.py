@@ -42,6 +42,14 @@ def _key_from_url_or_key(url_or_key: str, public_base_url: str) -> str:
     return raw.lstrip("/")
 
 
+def _readable_key(url_or_key: str, public_base_url: str) -> str:
+    """The key to read; a URL that is not one of this storage's objects cannot be read back."""
+    try:
+        return _key_from_url_or_key(url_or_key, public_base_url)
+    except err.AppError as exc:
+        raise err.image_file_unavailable(f"not a stored object: {exc.detail}") from exc
+
+
 class MockImageStorage(ImageStoragePort):
     """In-process mock: records puts; optional mirror dir for local bytes."""
 
@@ -94,6 +102,19 @@ class MockImageStorage(ImageStoragePort):
         content_type: str | None = None,
     ) -> str:
         return self._put(staging_key(candidate_id, ext), data)
+
+    def read_by_url_or_key(self, url_or_key: str) -> bytes:
+        """From memory, else from the mirror dir: what survives a restart is what was mirrored."""
+        key = _readable_key(url_or_key, self.public_base_url)
+        if key in self._objects:
+            return self._objects[key]
+        if self._mirror is not None:
+            path = self._mirror / key
+            try:
+                return path.read_bytes()
+            except OSError as exc:
+                raise err.image_file_unavailable(f"mock storage: {key!r} not in memory, mirror read failed: {exc}") from exc
+        raise err.image_file_unavailable(f"mock storage keeps no bytes for {key!r} (set mock_mirror_dir to keep them)")
 
     def delete_by_url_or_key(self, url_or_key: str) -> None:
         key = _key_from_url_or_key(url_or_key, self.public_base_url)
@@ -182,6 +203,13 @@ class S3ImageStorage(ImageStoragePort):
         content_type: str | None = None,
     ) -> str:
         return self._put(staging_key(candidate_id, ext), data, content_type)
+
+    def read_by_url_or_key(self, url_or_key: str) -> bytes:
+        key = _readable_key(url_or_key, self.public_base_url)
+        try:
+            return self._client.get_object(Bucket=self.bucket, Key=key)["Body"].read()
+        except Exception as exc:  # NoSuchKey, access denied, network: all mean "cannot read it now"
+            raise err.image_file_unavailable(f"get_object {self.bucket}/{key}: {type(exc).__name__}: {exc}") from exc
 
     def delete_by_url_or_key(self, url_or_key: str) -> None:
         key = _key_from_url_or_key(url_or_key, self.public_base_url)

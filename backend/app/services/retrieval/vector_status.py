@@ -53,6 +53,21 @@ class ImageVectorStatusUseCase:
         self._vectors = vectors
         self._model = model
 
+    def statuses(self, expected: Mapping[str, Mapping[str, Any]]) -> dict[str, str]:
+        """{image id: synced / stale / missing} for many images with one read of the collection
+        (a gallery page). expected: {image id: expected_payload(image)}.
+
+        Raises AppError (SEARCH_QDRANT_FAILED) when the vector store cannot be read.
+        """
+        if not expected:
+            return {}
+        payloads = self._vectors.get_payloads(list(expected))
+        out: dict[str, str] = {}
+        for image_id, want in expected.items():
+            payload = payloads.get(image_id)
+            out[image_id] = "missing" if payload is None else "synced" if payload_matches(payload, want) else "stale"
+        return out
+
     def inspect(self, image: Mapping[str, Any]) -> dict[str, Any]:
         """The vector part of the image detail; image is what ManageImagesUseCase.get returns.
 

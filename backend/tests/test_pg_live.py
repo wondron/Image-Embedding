@@ -333,6 +333,31 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual(ids(category_id=cat["dish"], label_status="verified"), [steak])
         self.assertEqual(store.list_images(scene="general", category_id=cat["dish"])[1], 2)  # the total honours it
 
+    def test_list_out_of_sync_follows_the_current_model_s_ledger(self):
+        store = self.store()
+        synced, behind, never = (self.insert(store, n) for n in (1, 2, 3))
+
+        def ids(**kw):
+            return sorted(item["id"] for item in store.list_images(scene="general", **kw)[0])
+
+        def model(version, status):
+            return self.sql(
+                "INSERT INTO embedding_models (name, version, dim, distance, input_size, weights_uri, collection, status) "
+                "VALUES ('dino', :v, 4, 'cosine', 224, 'w', :c, :s) RETURNING id",
+                {"v": version, "c": f"c_{version}", "s": status},
+            ).scalar_one()
+
+        self.assertEqual(ids(out_of_sync=True), sorted([synced, behind, never]))  # no current model: all of them
+        old, current = model("v1", "retired"), model("v2", "current")
+        for image, mid, version in ((synced, current, 1), (behind, current, 1), (never, old, 5)):
+            self.sql("INSERT INTO image_embeddings (model_id, image_id, synced_version) VALUES (:m, :i, :v)",
+                     {"m": mid, "i": uuid.UUID(image), "v": version})
+        self.sql("UPDATE images SET payload_version = 2 WHERE id = :i", {"i": uuid.UUID(behind)})
+        # behind: ledger v1 < payload v2; never: only an older model wrote it
+        self.assertEqual(ids(out_of_sync=True), sorted([behind, never]))
+        self.assertEqual(store.list_images(scene="general", out_of_sync=True)[1], 2)  # the total honours it
+        self.assertEqual(ids(), sorted([synced, behind, never]))  # off by default
+
     def test_a_deleted_image_stored_again_is_deleted_again(self):
         from app.core.errors import AppError
 

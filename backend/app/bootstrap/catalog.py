@@ -16,6 +16,7 @@ from typing import Any
 
 from app.core.config.settings import PostgresSettings
 from app.repositories.metadata import PgMetadataStore
+from app.services.retrieval.list_images import ListImagesUseCase
 from app.services.retrieval.manage_categories import ManageCategoriesUseCase
 from app.services.retrieval.manage_images import ManageImagesUseCase
 from app.services.retrieval.manage_scenes import ManageScenesUseCase
@@ -33,6 +34,7 @@ class CatalogServices:
     scenes_uc: ManageScenesUseCase
     images_uc: ManageImagesUseCase
     tasks_uc: TaskCenterUseCase
+    list_uc: ListImagesUseCase
 
     def close(self) -> None:
         self.store.close()
@@ -54,4 +56,5 @@ def build_catalog(config: Mapping[str, Any]) -> CatalogServices:
         scenes_uc=ManageScenesUseCase(store),
         images_uc=ManageImagesUseCase(store),
         tasks_uc=TaskCenterUseCase(store),
+        list_uc=ListImagesUseCase(store),
     )

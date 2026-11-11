@@ -11,9 +11,12 @@ when the retrieval stack is up and never fails a request whose PostgreSQL part s
 - DELETE removes the point and the two files at once: cleanup=done, or queued when that is not
   possible now (the image_deletions worker finishes it). The image leaves the gallery and the
   search results either way: both read PostgreSQL.
+- POST .../reembed writes the point again from the stored original (services.retrieval
+  reembed_image): the one write here that needs the whole retrieval stack.
 
 Failures are AppError: IMAGE_NOT_FOUND 404, VALIDATION_ERROR 422, SEARCH_POSTGRES_FAILED /
-INDEX_POSTGRES_FAILED 502, NOT_READY 503. Routes are sync, so FastAPI runs them in the threadpool.
+INDEX_POSTGRES_FAILED / IMAGE_FILE_UNAVAILABLE 502, NOT_READY 503. Routes are sync, so FastAPI
+runs them in the threadpool.
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ from uuid import UUID
 
 from fastapi import Request
 
-from app.api.deps import require_catalog
+from app.api.deps import require_catalog, require_retrieval
 from app.api.services.vector_sync import push_image_payload
 from app.bootstrap.state import ApplicationState
 from app.core import errors as err
@@ -62,28 +65,67 @@ def get_image(runtime: ApplicationState, image_id: UUID) -> dict[str, Any]:
     return {"ok": True, "image": image, "vector": _vector_state(runtime, image)}
 
 
+def _after_push(runtime: ApplicationState, image_id: UUID, image: dict[str, Any], sync: dict[str, Any]) -> dict[str, Any]:
+    """The image as it stands after the push: a push moves its ledger row (synced_version), so
+    read it again; keep the given one when there was no push or the image went away meanwhile."""
+    if sync["vector_sync"] == "not_ready":
+        return image
+    try:
+        return require_catalog(runtime).images_uc.get(image_id)
+    except err.AppError:
+        return image
+
+
 def update_image(
     runtime: ApplicationState, request: Request, image_id: UUID, body: ImageUpdateRequest
 ) -> dict[str, Any]:
     fields = body.model_dump(exclude_unset=True)  # absent stays unchanged; an explicit null is kept
     image = require_catalog(runtime).images_uc.update(image_id, fields)
     sync = push_image_payload(runtime, image_id)
+    image = _after_push(runtime, image_id, image, sync)
     logger.info(
         "image updated id=%s fields=%s payload_version=%s vector_sync=%s | trace_id=%s",
         image_id, ",".join(sorted(fields)), image.get("payload_version"), sync["vector_sync"], get_trace_id(request),
     )
-    return {"ok": True, "image": image, **sync}
+    # vector: what the detail would show now, so the page needs no second request
+    return {"ok": True, "image": image, "vector": _vector_state(runtime, image), **sync}
 
 
 def push_vector(runtime: ApplicationState, request: Request, image_id: UUID) -> dict[str, Any]:
     """Write the image's current payload to the current collection again (repairs stale)."""
     image = require_catalog(runtime).images_uc.get(image_id)  # IMAGE_NOT_FOUND before any push
     sync = push_image_payload(runtime, image_id)
+    image = _after_push(runtime, image_id, image, sync)
     logger.info(
         "image payload pushed id=%s payload_version=%s vector_sync=%s | trace_id=%s",
         image_id, image.get("payload_version"), sync["vector_sync"], get_trace_id(request),
     )
-    return {"ok": True, "image_id": image["id"], "payload_version": image["payload_version"], **sync}
+    return {
+        "ok": True,
+        "image_id": image["id"],
+        "payload_version": image["payload_version"],
+        "vector": _vector_state(runtime, image),
+        **sync,
+    }
+
+
+def reembed_image(runtime: ApplicationState, request: Request, image_id: UUID) -> dict[str, Any]:
+    """Embed the stored original again and write the point (repairs vector.status=missing).
+    Needs the whole retrieval stack: encoder, Qdrant and object storage (NOT_READY otherwise)."""
+    require_catalog(runtime).images_uc.get(image_id)  # IMAGE_NOT_FOUND before anything else
+    stack = require_retrieval(runtime)
+    stack.reembed_uc.execute(image_id)
+    image = require_catalog(runtime).images_uc.get(image_id)  # the ledger row moved
+    logger.info(
+        "image re-embedded id=%s payload_version=%s | trace_id=%s",
+        image_id, image.get("payload_version"), get_trace_id(request),
+    )
+    return {
+        "ok": True,
+        "image_id": image["id"],
+        "payload_version": image["payload_version"],
+        "vector": _vector_state(runtime, image),
+    }
 
 
 def delete_image(runtime: ApplicationState, request: Request, image_id: UUID) -> dict[str, Any]:

@@ -289,7 +289,7 @@ class RetrievalHttpTests(unittest.TestCase):
                 "items": [{"id": "abc", "tags": ["红薯叶"]}],
             }
 
-        self.stack.list_uc = SimpleNamespace(execute=list_execute)
+        self.runtime.catalog = SimpleNamespace(list_uc=SimpleNamespace(execute=list_execute))
         response = self.client.get("/api/images", params={"tag": "红薯叶", "q": "薯"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual((self.calls["list"]["tag"], self.calls["list"]["q"]), ("红薯叶", "薯"))
@@ -297,17 +297,54 @@ class RetrievalHttpTests(unittest.TestCase):
         self.client.get("/api/images")
         self.assertIsNone(self.calls["list"]["tag"])
 
+    def test_list_reads_postgres_only_and_tells_each_image_s_vector_state(self):
+        expected = {"a": {"category_id": 1}, "b": {"category_id": 2}}
+        self.runtime.catalog = SimpleNamespace(list_uc=SimpleNamespace(execute=lambda **_: {
+            "scene": "general", "page": 1, "page_size": 24, "total": 2,
+            "items": [{"id": "a"}, {"id": "b"}], "expected_payloads": dict(expected),
+        }))
+        reads = []
+        self.stack.vector_status_uc = SimpleNamespace(
+            statuses=lambda wanted: reads.append(wanted) or {"a": "synced", "b": "stale"}
+        )
+        body = self.client.get("/api/images").json()
+        self.assertEqual([item["vector_status"] for item in body["items"]], ["synced", "stale"])
+        self.assertEqual(reads, [expected])  # one read for the page
+        self.assertNotIn("expected_payloads", body)
+
+        def broken(_):
+            raise AppError("SEARCH_QDRANT_FAILED", "get_payloads: refused", http_status=502)
+
+        self.stack.vector_status_uc = SimpleNamespace(statuses=broken)
+        response = self.client.get("/api/images")
+        self.assertEqual(response.status_code, 200)  # the list is PostgreSQL's answer
+        self.assertEqual([item["vector_status"] for item in response.json()["items"]], ["unavailable", "unavailable"])
+
+        # Encoder / Qdrant down: the gallery still lists
+        self.runtime.retrieval, self.runtime.retrieval_error = None, "embedding model unavailable"
+        response = self.client.get("/api/images")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual([item["vector_status"] for item in response.json()["items"]], ["unavailable", "unavailable"])
+
+        self.runtime.catalog, self.runtime.catalog_error = None, "postgres down"
+        response = self.client.get("/api/images")
+        self.assertEqual((response.status_code, response.json()["error"]), (503, "NOT_READY"))
+
     def test_list_forwards_the_category_subtree_and_label_filters(self):
         def list_execute(**kwargs):
             self.calls["list"] = kwargs
             return {"scene": "general", "page": 1, "page_size": 24, "total": 0, "items": []}
 
-        self.stack.list_uc = SimpleNamespace(execute=list_execute)
-        response = self.client.get("/api/images", params={"category_id": "12", "label_status": "auto"})
+        self.runtime.catalog = SimpleNamespace(list_uc=SimpleNamespace(execute=list_execute))
+        response = self.client.get("/api/images", params={"category_id": "12", "label_status": "auto", "out_of_sync": "true"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual((self.calls["list"]["category_id"], self.calls["list"]["label_status"]), (12, "auto"))
+        self.assertIs(self.calls["list"]["out_of_sync"], True)
         self.client.get("/api/images")
         self.assertEqual((self.calls["list"]["category_id"], self.calls["list"]["label_status"]), (None, None))
+        self.assertIs(self.calls["list"]["out_of_sync"], False)
+        response = self.client.get("/api/images", params={"out_of_sync": "maybe"})
+        self.assertEqual((response.status_code, response.json()["error"]), (422, "VALIDATION_ERROR"))
         for bad in ({"category_id": "0"}, {"category_id": "x"}):
             with self.subTest(params=bad):
                 response = self.client.get("/api/images", params=bad)

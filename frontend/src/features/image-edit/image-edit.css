@@ -25,9 +25,32 @@
 .ie-vector.is-missing .ie-vector-badge { background: #fdf0ee; color: #b42318; }
 .ie-vector.is-unavailable .ie-vector-badge { background: #eef2f7; color: #64748b; }
 .ie-vector p { margin: 5px 0 0; color: #475569; font-size: 12px; line-height: 1.7; }
-.ie-vector small { display: block; margin-top: 4px; color: #7b8899; font-size: 11px; overflow-wrap: anywhere; }
-.ie-diff { margin: 5px 0 0; padding-left: 16px; color: #7a5a1f; font-size: 12px; line-height: 1.7; }
-.ie-diff span { margin-right: 6px; font-weight: 700; }
+/* What lags: one row per field, the vector store's value next to the database's */
+.ie-diff { width: 100%; margin: 8px 0 0; border-collapse: collapse; font-size: 12px; line-height: 1.6; table-layout: fixed; }
+.ie-diff th, .ie-diff td { padding: 4px 8px; border-bottom: 1px solid #f1e3c8; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.ie-diff thead th { color: #9a7b45; font-weight: 600; }
+.ie-diff thead th:first-child { width: 72px; }
+.ie-diff tbody th { color: #7a5a1f; font-weight: 700; }
+.ie-diff tbody td:nth-child(2) { color: #9a6700; text-decoration: line-through; text-decoration-color: rgba(154, 103, 0, .45); }
+.ie-diff tbody td:nth-child(3) { color: #223046; font-weight: 600; }
+.ie-diff tbody tr:last-child th, .ie-diff tbody tr:last-child td { border-bottom: 0; }
+.ie-vector-action { height: 32px; margin-top: 10px; padding: 0 12px; font-size: 13px; }
+.ie-vector-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+.ie-vector-actions .ie-vector-link { margin-top: 10px; }
+.ie-vector-link { margin-top: 6px; font-size: 12px; }
+.ie-vector-link:disabled { color: var(--muted); cursor: not-allowed; text-decoration: none; }
+/* The collection, versions and ledger: for whoever debugs a sync, out of the way otherwise */
+.ie-tech { margin-top: 8px; color: #7b8899; font-size: 11px; }
+.ie-tech summary { width: max-content; cursor: pointer; }
+.ie-tech summary:hover { color: var(--primary); }
+.ie-tech dl { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 3px 10px; margin: 6px 0 0; }
+.ie-tech dl > div { display: contents; }
+.ie-tech dt { color: #94a3b8; }
+.ie-tech dd { margin: 0; color: #64748b; line-height: 1.6; overflow-wrap: anywhere; }
+.ie-tech code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+.ie-tech-note { color: #9a6700; }
+.ie-tech-ledger { display: block; }
+.ie-tech-raw { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
 .ie-status { display: flex; align-items: center; gap: 6px; margin: 0; color: #64748b; font-size: 13px; }
 .ie-alert { margin: 0; padding: 8px 10px; border: 1px solid #f0c2bc; border-radius: 8px; background: #fffafa; color: #b42318; font-size: 13px; line-height: 1.6; }

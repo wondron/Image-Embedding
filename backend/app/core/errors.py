@@ -70,6 +70,7 @@ ERROR_CODES: dict[str, ErrorSpec] = {
     "LIST_POSTGRES_FAILED": ErrorSpec(502, "metadata list query failed"),
     # -- one stored image (GET / PATCH / DELETE /api/images/{image_id})
     "IMAGE_NOT_FOUND": ErrorSpec(404),
+    "IMAGE_FILE_UNAVAILABLE": ErrorSpec(502, "stored original could not be read"),
     # -- enums (config/param/enums.yaml, app.core.config.enum_store)
     "ENUM_NOT_FOUND": ErrorSpec(404),
     "ENUM_NOT_EDITABLE": ErrorSpec(403),
@@ -265,6 +266,12 @@ def list_postgres_failed(detail: str) -> AppError:
 def image_not_found(detail: str) -> AppError:
     """No images row with this id (a deleted image counts as gone)."""
     return AppError("IMAGE_NOT_FOUND", detail)
+
+
+def image_file_unavailable(detail: str) -> AppError:
+    """The image's stored original could not be read from object storage (gone, or the storage
+    failed); the detail may name buckets and keys, so clients get the public message."""
+    return AppError("IMAGE_FILE_UNAVAILABLE", detail)
 
 
 # -- enums -----------------------------------------------------------------------

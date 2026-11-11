@@ -41,15 +41,35 @@ function steakImage(): Image {
   }
 }
 
-const listItem = (image: Image) => ({
+const listItem = (image: Image, vectorStatus: string) => ({
   id: image.id, original_url: image.original_url, thumb_url: image.thumb_url, category_id: image.category_id, category: image.category,
   scenes: image.scenes, label_status: image.label_status, description: image.description, tags: image.tags,
-  width: 640, height: 480, created_at: image.created_at, updated_at: image.updated_at,
+  width: 640, height: 480, created_at: image.created_at, updated_at: image.updated_at, vector_status: vectorStatus,
 })
 
-async function mockApi(page: Page) {
-  const state = { image: steakImage(), vector: 'stale' as 'stale' | 'synced', deleted: false }
-  const calls = { list: [] as Array<Record<string, string>>, patches: [] as unknown[], pushes: 0, deletes: [] as string[] }
+/**
+ * legacyWrites: answer PATCH / vector-sync like a server from before writes carried `vector`.
+ * vector: the steak image's state in the vector store; reembed: how POST .../reembed answers.
+ */
+async function mockApi(page: Page, { legacyWrites = false, vector = 'stale' as 'stale' | 'missing', reembed = 'ok' as 'ok' | 'unreadable' } = {}) {
+  const state = { image: steakImage(), vector: vector as 'stale' | 'synced' | 'missing', deleted: false }
+  const calls = { list: [] as Array<Record<string, string>>, patches: [] as unknown[], pushes: 0, reembeds: 0, deletes: [] as string[], details: 0 }
+  // The vector state as the server reports it: before a push the point still has the old scenes
+  const vectorWire = () => {
+    const expected_payload = { category_id: state.image.category_id, scenes: state.image.scenes, food_state: state.image.food_state, label_status: state.image.label_status }
+    if (state.vector === 'missing') {
+      return { status: 'missing', collection: 'c_dino_v2', embedding_space_id: 'dino:v2', exists: false, payload: null, expected_payload,
+        payload_matches: null, payload_version: state.image.payload_version, synced_version: 2, embedded_at: null }
+    }
+    const synced = state.vector === 'synced'
+    return {
+      status: state.vector, collection: 'c_dino_v2', embedding_space_id: 'dino:v2', exists: true,
+      payload: { category_id: synced ? state.image.category_id : 3, scenes: synced ? state.image.scenes : ['general'], food_state: state.image.food_state, label_status: state.image.label_status },
+      expected_payload,
+      payload_matches: synced, payload_version: state.image.payload_version, synced_version: synced ? state.image.payload_version : 2, embedded_at: null,
+    }
+  }
+  const afterWrite = () => (legacyWrites ? {} : { vector: vectorWire() })
   const plain = { ...steakImage(), id: PLAIN_IMAGE, category_id: null, category: null, label_status: 'unlabeled', description: '', tags: [], scenes: ['general'] }
   // Only the backend: Vite also serves source modules under paths such as /src/shared/api/
   await page.route(url => url.pathname.startsWith('/api/'), async route => {
@@ -63,7 +83,7 @@ async function mockApi(page: Page) {
     if (path === '/api/scenes') return route.fulfill({ json: { ok: true, scenes: SCENES, default_scene: 'general' } })
     if (path === '/api/images' && method === 'GET') {
       calls.list.push(Object.fromEntries(url.searchParams))
-      const items = state.deleted ? [listItem(plain)] : [listItem(state.image), listItem(plain)]
+      const items = state.deleted ? [listItem(plain, 'synced')] : [listItem(state.image, state.vector), listItem(plain, 'synced')]
       return route.fulfill({ json: { ok: true, trace_id: 't', scene: 'general', page: 1, page_size: 24, total: items.length, items } })
     }
     if (path.endsWith('/scene-memberships') && method === 'GET') {
@@ -75,18 +95,21 @@ async function mockApi(page: Page) {
     if (path === `/api/images/${STEAK_IMAGE}/vector-sync` && method === 'POST') {
       calls.pushes++
       state.vector = 'synced'
-      return route.fulfill({ json: { ok: true, image_id: STEAK_IMAGE, payload_version: state.image.payload_version, vector_sync: 'pushed', sync_required: false } })
+      return route.fulfill({ json: { ok: true, image_id: STEAK_IMAGE, payload_version: state.image.payload_version, ...afterWrite(), vector_sync: 'pushed', sync_required: false } })
+    }
+    if (path === `/api/images/${STEAK_IMAGE}/reembed` && method === 'POST') {
+      calls.reembeds++
+      if (reembed === 'unreadable') {
+        return route.fulfill({ status: 502, json: { ok: false, error: 'IMAGE_FILE_UNAVAILABLE', detail: 'stored original could not be read', trace_id: 't' } })
+      }
+      state.vector = 'synced'
+      return route.fulfill({ json: { ok: true, image_id: STEAK_IMAGE, payload_version: state.image.payload_version, vector: vectorWire() } })
     }
     if (path === `/api/images/${STEAK_IMAGE}`) {
       if (state.deleted) return route.fulfill({ status: 404, json: { ok: false, error: 'IMAGE_NOT_FOUND', detail: 'gone', trace_id: 't' } })
       if (method === 'GET') {
-        const synced = state.vector === 'synced'
-        return route.fulfill({ json: { ok: true, image: state.image, vector: {
-          status: state.vector, collection: 'c_dino_v2', embedding_space_id: 'dino:v2', exists: true,
-          payload: { category_id: 3, scenes: synced ? state.image.scenes : ['general'], food_state: state.image.food_state, label_status: state.image.label_status },
-          expected_payload: { category_id: state.image.category_id, scenes: state.image.scenes, food_state: state.image.food_state, label_status: state.image.label_status },
-          payload_matches: synced, payload_version: state.image.payload_version, synced_version: synced ? state.image.payload_version : 2, embedded_at: null,
-        } } })
+        calls.details++
+        return route.fulfill({ json: { ok: true, image: state.image, vector: vectorWire() } })
       }
       if (method === 'PATCH') {
         const patch = request.postDataJSON() as Record<string, unknown>
@@ -98,7 +121,7 @@ async function mockApi(page: Page) {
         }
         state.image = next
         state.vector = 'synced'
-        return route.fulfill({ json: { ok: true, image: next, vector_sync: 'pushed', sync_required: false } })
+        return route.fulfill({ json: { ok: true, image: next, ...afterWrite(), vector_sync: 'pushed', sync_required: false } })
       }
       if (method === 'DELETE') {
         calls.deletes.push(STEAK_IMAGE)
@@ -152,17 +175,25 @@ test('图库：类别与标注状态筛选取自数据库；单张图片可查�
   await page.getByLabel('标注状态筛选').selectOption('auto')
   await expect.poll(() => calls.list.at(-1)).toMatchObject({ category_id: '2', label_status: 'auto' })
 
-  // The editor: what is stored, the vector state, the re-push
+  // The card says the image lags the vector store; the footer counts the page
+  await expect(steakCard.locator('.mg-vector-flag')).toHaveText('待同步')
+  await expect(page.locator('.mg-pagination')).toContainText('本页 1 张待同步')
+
+  // The editor: what is stored, the vector state in words, the push
   await page.getByRole('button', { name: '标注 煎牛排' }).click()
   const dialog = page.getByRole('dialog', { name: '图片标注' })
   await expect(dialog.locator('.ie-vector')).toContainText('待同步')
-  await expect(dialog.locator('.ie-diff')).toContainText('场景')
+  // Scene names, not codes: the point still has only 通用, the database says 通用 and 一体机
+  await expect(dialog.locator('.ie-diff tbody tr')).toHaveText([/所属场景\s*通用\s*通用、一体机/])
   await expect(dialog.locator('.ie-meta')).toContainText('菜品 / 肉类 / 牛排')
   await screenshot(page, info, 'library-editor')
-  await dialog.getByRole('button', { name: '重推 payload' }).click()
-  await expect(dialog.getByText('已重推，向量库和数据库一致了。')).toBeVisible()
+  const detailReads = calls.details
+  await dialog.getByRole('button', { name: '按数据库同步到向量库' }).click()
+  await expect(dialog.getByText('已同步，向量库和数据库一致了。')).toBeVisible()
   await expect(dialog.locator('.ie-vector')).toContainText('已同步')
   expect(calls.pushes).toBe(1)
+  expect(calls.details).toBe(detailReads)  // the push answered the new state itself
+  await expect(steakCard.locator('.mg-vector-flag')).toHaveCount(0)  // the gallery reloaded
 
   // Edit: a category picked by hand becomes verified; only what changed is sent
   await pickCategory(dialog, '红烧', '红烧肉')
@@ -179,9 +210,12 @@ test('图库：类别与标注状态筛选取自数据库；单张图片可查�
   await expect(dialog.getByRole('button', { name: '关闭弹窗' })).toBeDisabled()  // unsaved edits keep it open
   await screenshot(page, info, 'library-editor-dirty')
   const listsBefore = calls.list.length
+  const readsBeforeSave = calls.details
   await dialog.getByRole('button', { name: '保存修改' }).click()
-  await expect(dialog.getByText('已保存，检索已生效。')).toBeVisible()
+  await expect(dialog.getByText('已保存，向量库已同步，检索已生效。')).toBeVisible()
   expect(calls.patches).toEqual([{ category_id: 4, label_status: 'verified', tags: ['带骨', '红烧'], food_state: 'cooked', total_mass_g: 300 }])
+  await expect(dialog.locator('.ie-vector')).toContainText('已同步')
+  expect(calls.details).toBe(readsBeforeSave)  // the PATCH answered the vector state
   await expect(dialog.locator('.ie-meta')).toContainText('菜品 / 肉类 / 红烧肉')
   await expect(dialog.getByRole('button', { name: '关闭弹窗' })).toBeEnabled()
   await expect.poll(() => calls.list.length).toBeGreaterThan(listsBefore)  // the library page reloads
@@ -209,6 +243,57 @@ test('图库：撤销修改后可以关闭，没有改动的保存按钮不可�
   await expect(save).toBeDisabled()
   await dialog.getByRole('button', { name: '关闭弹窗' }).click()
   await expect(dialog).toBeHidden()
+})
+
+test('图库：旧版服务端的写入不带向量状态时，再读一次详情', async ({ page }) => {
+  const calls = await mockApi(page, { legacyWrites: true })
+  await openLibrary(page)
+  await page.getByRole('button', { name: '标注 煎牛排' }).click()
+  const dialog = page.getByRole('dialog', { name: '图片标注' })
+  await expect(dialog.locator('.ie-vector')).toContainText('待同步')
+  const reads = calls.details
+  await dialog.getByRole('button', { name: '按数据库同步到向量库' }).click()
+  await expect(dialog.locator('.ie-vector')).toContainText('已同步')
+  expect(calls.details).toBe(reads + 1)
+})
+
+test('图库：没有向量的图片用存储里的原图重新生成，不用重新上传', async ({ page }) => {
+  const calls = await mockApi(page, { vector: 'missing' })
+  await openLibrary(page)
+  const steakCard = page.locator('.mg-library-card').first()
+  await expect(steakCard.locator('.mg-vector-flag')).toHaveText('没有向量')
+  await page.getByRole('button', { name: '标注 煎牛排' }).click()
+  const dialog = page.getByRole('dialog', { name: '图片标注' })
+  const vector = dialog.locator('.ie-vector')
+  await expect(vector).toContainText('没有向量')
+  await expect(vector.getByRole('button', { name: /或去「上传与导入」重新上传/ })).toBeVisible()  // the fallback stays offered
+  const reads = calls.details
+  await vector.getByRole('button', { name: '用存储里的原图重新生成向量' }).click()
+  await expect(dialog.getByText('已用原图重新生成向量，检索可以查到这张图了。')).toBeVisible()
+  await expect(vector).toContainText('已同步')
+  expect(calls.reembeds).toBe(1)
+  expect(calls.details).toBe(reads)  // the answer carried the new state
+  await expect(steakCard.locator('.mg-vector-flag')).toHaveCount(0)
+})
+
+test('图库：原图读不到时说明只能重新上传', async ({ page }) => {
+  await mockApi(page, { vector: 'missing', reembed: 'unreadable' })
+  await openLibrary(page)
+  await page.getByRole('button', { name: '标注 煎牛排' }).click()
+  const dialog = page.getByRole('dialog', { name: '图片标注' })
+  await dialog.locator('.ie-vector').getByRole('button', { name: '用存储里的原图重新生成向量' }).click()
+  await expect(dialog.getByRole('alert')).toContainText('读不到存储里的原图')
+  await expect(dialog.locator('.ie-vector')).toContainText('没有向量')
+})
+
+test('图库：可以只看待同步或没有向量的图片', async ({ page }) => {
+  const calls = await mockApi(page)
+  await openLibrary(page)
+  await expect(page.locator('.mg-library-card')).toHaveCount(2)
+  await page.getByLabel('向量库状态筛选').selectOption({ label: '待同步或没有向量' })
+  await expect.poll(() => calls.list.at(-1)?.out_of_sync).toBe('true')
+  await page.getByLabel('向量库状态筛选').selectOption({ label: '全部向量状态' })
+  await expect.poll(() => calls.list.at(-1)).not.toHaveProperty('out_of_sync')
 })
 
 test('窄屏：筛选弹层和编辑弹窗不产生横向滚动', async ({ page }, info) => {

@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from app.api.deps import require_retrieval
+from app.api.deps import require_catalog, require_retrieval
 from app.api.uploads import form_upload, read_upload
 from app.bootstrap.state import ApplicationState
 from app.clients.image_fetch import read_url_bytes
@@ -282,15 +282,38 @@ def run_list_images(
     tag: Optional[str] = None,
     category_id: Optional[int] = None,
     label_status: Optional[str] = None,
+    out_of_sync: Optional[bool] = None,
     trace_id: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """PostgreSQL only (the catalog), so the gallery lists while the encoder or Qdrant are down;
+    each item gets vector_status when the vector store can be read (one read for the page)."""
     trace_id = bind_trace_id(request, trace_id)
-    stack = require_retrieval(runtime)
-    result = stack.list_uc.execute(
+    result = require_catalog(runtime).list_uc.execute(
         scene=scene, page=page, page_size=page_size, q=q, category=category, tag=tag,
-        category_id=category_id, label_status=label_status,
+        category_id=category_id, label_status=label_status, out_of_sync=bool(out_of_sync),
     )
+    expected = result.pop("expected_payloads", None) or {}
+    _attach_vector_status(runtime, result["items"], expected)
     return {"ok": True, "trace_id": trace_id, **result}
+
+
+def _attach_vector_status(runtime: ApplicationState, items: List[Dict[str, Any]], expected: Dict[str, Any]) -> None:
+    """vector_status on every item: synced / stale / missing, or unavailable when the retrieval
+    stack is not built or the read fails. Never fails the list: it is PostgreSQL's answer."""
+    if not items:
+        return
+    statuses: Dict[str, str] = {}
+    try:
+        stack = runtime.require_retrieval()
+    except RuntimeError:
+        stack = None
+    if stack is not None:
+        try:
+            statuses = stack.vector_status_uc.statuses(expected)
+        except Exception as exc:
+            logger.warning("list vector status read failed | %s: %s", type(exc).__name__, exc)
+    for item in items:
+        item["vector_status"] = statuses.get(item["id"], "unavailable")
 
 
 # -- GET /api/health ---------------------------------------------------------------------

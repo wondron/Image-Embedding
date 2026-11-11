@@ -38,6 +38,12 @@ export function startSceneSync(base: string, limit: number, restart = true) {
   if (restart) { successful.clear(); update({ base, after: null, limit, batch: null, batches: 0, processed: 0, changed: 0, pushed: 0, missing: state.base === base ? state.missing : [] }) }
   schedule = true; void run()
 }
+/** Images that got their vector back (re-embedded) or are gone: no longer missing. */
+export function resolveMissing(ids: readonly string[]) {
+  if (!ids.length) return
+  const done = new Set(ids.map(id => id.toLowerCase()))
+  update({ missing: state.missing.filter(id => !done.has(id.toLowerCase())) })
+}
 export function stopSceneSync() {
   schedule = false
   if (state.running && !state.inFlight) update({ running: false, status: 'paused' })
