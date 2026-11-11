@@ -35,6 +35,7 @@ from app.repositories.images import PgImagesMixin
 from app.repositories.ports import CatalogStorePort, MetadataStorePort
 from app.repositories.scene_config import PgSceneConfigMixin
 from app.repositories.scenes import PgScenesMixin
+from app.repositories.tasks import PgIndexTasksMixin
 
 
 class PgMetadataStore(
@@ -42,6 +43,7 @@ class PgMetadataStore(
     PgImagesMixin,
     PgEmbeddingsMixin,
     PgDeletionsMixin,
+    PgIndexTasksMixin,
     PgScenesMixin,
     PgCategoriesMixin,
     PgSceneConfigMixin,

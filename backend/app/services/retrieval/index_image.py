@@ -7,6 +7,11 @@ collection → image_embeddings ledger records the payload_version just pushed.
 
 Path-based local disk store is legacy MVP; when storage is present we prefer
 put_original_and_thumb and DB https URLs (no path column in PG).
+
+Task center: execute_batch / execute_file write one index_tasks row per file right after it
+(succeeded with the image id, or failed with the code and the client-safe detail). Best effort:
+a record that cannot be written is logged and the index result stands. execute_one records
+nothing (it is the indexing itself).
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any, Optional, Sequence
 from uuid import UUID
@@ -23,6 +29,7 @@ from app.core.enums import (
     DEFAULT_SOURCE_TYPE,
     LICENSE,
     SOURCE_TYPE,
+    IndexTaskStatus,
     LabelStatus,
 )
 from app.services.retrieval.active_model import ActiveModel
@@ -307,37 +314,99 @@ class IndexImageUseCase:
     def execute_batch(
         self,
         items: list[dict[str, Any]],
+        *,
+        trace_id: str | None = None,
     ) -> dict[str, Any]:
+        """Index each item on its own: {indexed, failed}. Each file's outcome is recorded in
+        index_tasks right after it (task center), with trace_id."""
         if not items:
             raise err.index_empty_request()
         indexed: list[dict[str, Any]] = []
         failed: list[dict[str, Any]] = []
         for item in items:
-            label = item.get("filename") or item.get("source_path") or "unknown"
+            started = time.perf_counter()
             try:
-                indexed.append(
-                    self.execute_one(
-                        image_bytes=item.get("image_bytes"),
-                        source_path=item.get("source_path"),
-                        filename=item.get("filename"),
-                        category=item.get("category"),
-                        category_id=item.get("category_id"),
-                        tags=item.get("tags"),
-                        scene=item.get("scene"),
-                        scenes=item.get("scenes"),
-                        **{key: item.get(key) for key in FOOD_FIELDS},
-                        label_status=item.get("label_status"),
-                        source_type=item.get("source_type"),
-                        license=item.get("license"),
-                        description=item.get("description"),
-                    )
-                )
-            except err.AppError as exc:
-                if err.is_internal(exc):  # the client sees the public text; the cause stays in the log
-                    logger.error("index item failed: %s | %s: %s", label, exc.code, exc.detail, exc_info=exc)
-                failed.append({"filename": label, "error": exc.code, "detail": err.client_detail(exc)})
-            except Exception:
-                # Details go to the log; the item reports a generic failure.
-                logger.exception("index item failed: %s", label)
-                failed.append({"filename": label, "error": "INTERNAL_ERROR", "detail": "internal error"})
+                out = self._index_item(item)
+            except Exception as exc:
+                failure = _failure(_item_label(item), exc)
+                failed.append(failure)
+                self._record(_failure_record(failure, started, trace_id))
+            else:
+                indexed.append(out)
+                self._record(_success_record(item, out, started, trace_id))
         return {"indexed": indexed, "failed": failed}
+
+    def execute_file(self, item: dict[str, Any], *, trace_id: str | None = None) -> dict[str, Any]:
+        """One file (POST /api/index/file), recorded like a batch item; its failure is raised."""
+        started = time.perf_counter()
+        try:
+            out = self._index_item(item)
+        except Exception as exc:
+            self._record(_failure_record(_failure(_item_label(item), exc), started, trace_id))
+            raise
+        self._record(_success_record(item, out, started, trace_id))
+        return out
+
+    def _index_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        return self.execute_one(
+            image_bytes=item.get("image_bytes"),
+            source_path=item.get("source_path"),
+            filename=item.get("filename"),
+            category=item.get("category"),
+            category_id=item.get("category_id"),
+            tags=item.get("tags"),
+            scene=item.get("scene"),
+            scenes=item.get("scenes"),
+            **{key: item.get(key) for key in FOOD_FIELDS},
+            label_status=item.get("label_status"),
+            source_type=item.get("source_type"),
+            license=item.get("license"),
+            description=item.get("description"),
+        )
+
+    def _record(self, row: dict[str, Any]) -> None:
+        """Best effort: the index result stands when its record cannot be written."""
+        try:
+            self._metadata.record_index_tasks([row])
+        except Exception:
+            logger.exception("index task record not written: %s %s", row.get("filename"), row.get("status"))
+
+
+def _item_label(item: dict[str, Any]) -> str:
+    return str(item.get("filename") or item.get("source_path") or "unknown")
+
+
+def _failure(label: str, exc: Exception) -> dict[str, Any]:
+    """{filename, error, detail} as a client may see it; an internal cause stays in the log."""
+    if isinstance(exc, err.AppError):
+        if err.is_internal(exc):
+            logger.error("index item failed: %s | %s: %s", label, exc.code, exc.detail, exc_info=exc)
+        return {"filename": label, "error": exc.code, "detail": err.client_detail(exc)}
+    logger.error("index item failed: %s", label, exc_info=exc)
+    return {"filename": label, "error": "INTERNAL_ERROR", "detail": "internal error"}
+
+
+def _elapsed_ms(started: float) -> int:
+    return int((time.perf_counter() - started) * 1000)
+
+
+def _success_record(item: dict[str, Any], out: dict[str, Any], started: float, trace_id: str | None) -> dict[str, Any]:
+    return {
+        "filename": _item_label(item),
+        "status": IndexTaskStatus.SUCCEEDED,
+        "image_id": out["id"],
+        "new_image": bool(out.get("created", True)),
+        "duration_ms": _elapsed_ms(started),
+        "trace_id": trace_id,
+    }
+
+
+def _failure_record(failure: dict[str, Any], started: float, trace_id: str | None) -> dict[str, Any]:
+    return {
+        "filename": failure["filename"],
+        "status": IndexTaskStatus.FAILED,
+        "error_code": failure["error"],
+        "error_detail": failure["detail"],
+        "duration_ms": _elapsed_ms(started),
+        "trace_id": trace_id,
+    }

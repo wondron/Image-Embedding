@@ -109,14 +109,14 @@ def parse_score_threshold(raw: Any) -> Optional[float]:
 async def index_from_upload(
     runtime: ApplicationState, request: Request, file: UploadFile
 ) -> Dict[str, Any]:
-    """Read one uploaded image and run the existing indexing use case."""
+    """Read one uploaded image and index it (recorded in index_tasks; its failure is raised)."""
     trace_id = bind_trace_id(request)
     data = await read_upload(file, runtime.max_image_bytes)
     stack = require_retrieval(runtime)
     indexed = await run_in_threadpool(
-        stack.index_uc.execute_one,
-        image_bytes=data,
-        filename=file.filename or "upload.bin",
+        stack.index_uc.execute_file,
+        {"image_bytes": data, "filename": file.filename or "upload.bin"},
+        trace_id=trace_id,
     )
     return {"ok": True, "trace_id": trace_id, "indexed": [indexed], "failed": []}
 
@@ -142,7 +142,7 @@ async def index_from_request(runtime: ApplicationState, request: Request) -> Dic
         items = await _index_items_from_form(request, runtime.max_image_bytes)
 
     stack = require_retrieval(runtime)
-    outcome = await run_in_threadpool(stack.index_uc.execute_batch, items)
+    outcome = await run_in_threadpool(stack.index_uc.execute_batch, items, trace_id=trace_id)
     _raise_if_batch_failed_uniformly(outcome)
     return {"ok": True, "trace_id": trace_id, "indexed": outcome["indexed"], "failed": outcome["failed"]}
 

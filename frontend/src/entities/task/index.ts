@@ -1,0 +1,27 @@
+export {
+  type IndexTaskStatus,
+  type IndexTask,
+  type IndexTaskImage,
+  type IndexTaskCounts,
+  type IndexTaskPage,
+  type ImageDeletion,
+  type ImageDeletionQueue,
+  type ImageDeletionFailure,
+  type ImageDeletionRun,
+  INDEX_TASK_STATUSES,
+  parseIndexTaskStatus,
+  toIndexTask,
+  toIndexTaskPage,
+  toDeletionQueue,
+  toDeletionRun,
+} from './model'
+export {
+  type TaskRequestOptions,
+  type ListIndexTasksOptions,
+  MAX_TASK_PAGE_SIZE,
+  MAX_DELETION_BATCH,
+  listIndexTasks,
+  clearIndexTasks,
+  listImageDeletions,
+  processImageDeletions,
+} from './api'

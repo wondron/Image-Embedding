@@ -1,0 +1,28 @@
+test_the_task_routes_are_served (tests.test_tasks_http.RouteRegistrationTests.test_the_task_routes_are_served) ... ok
+test_bounds_are_checked_whatever_the_caller (tests.test_tasks_http.TaskCenterUseCaseTests.test_bounds_are_checked_whatever_the_caller) ... ok
+test_a_failure_stays_queued_with_a_client_safe_reason (tests.test_tasks_http.TaskEndpointTests.test_a_failure_stays_queued_with_a_client_safe_reason) ... ok
+test_a_status_filter_and_paging_reach_the_store (tests.test_tasks_http.TaskEndpointTests.test_a_status_filter_and_paging_reach_the_store) ... ok
+test_bad_list_parameters_are_validation_errors (tests.test_tasks_http.TaskEndpointTests.test_bad_list_parameters_are_validation_errors) ... ok
+test_bad_process_bodies_reach_nothing (tests.test_tasks_http.TaskEndpointTests.test_bad_process_bodies_reach_nothing) ... ok
+test_cleaning_needs_the_retrieval_stack (tests.test_tasks_http.TaskEndpointTests.test_cleaning_needs_the_retrieval_stack) ... POST /api/image-deletions/process -> 503 NOT_READY: NOT_READY: qdrant unreachable | trace_id=4a36dd25-7433-4710-88db-6636a6b824b8
+ok
+test_cleaning_removes_the_points_and_files_then_the_rows (tests.test_tasks_http.TaskEndpointTests.test_cleaning_removes_the_points_and_files_then_the_rows) ... ok
+test_clearing_needs_a_status_and_deletes_only_those_records (tests.test_tasks_http.TaskEndpointTests.test_clearing_needs_a_status_and_deletes_only_those_records) ... ok
+test_records_come_newest_first_with_the_image_as_it_is_now (tests.test_tasks_http.TaskEndpointTests.test_records_come_newest_first_with_the_image_as_it_is_now) ... ok
+test_the_queue_is_readable_without_the_retrieval_stack (tests.test_tasks_http.TaskEndpointTests.test_the_queue_is_readable_without_the_retrieval_stack) ... ok
+test_without_the_catalog_every_route_is_not_ready (tests.test_tasks_http.TaskEndpointTests.test_without_the_catalog_every_route_is_not_ready) ... GET /api/index-tasks -> 503 NOT_READY: postgres down | trace_id=fb2fa473-bc7d-47c9-92c8-6f8d0fbcbe65
+DELETE /api/index-tasks -> 503 NOT_READY: postgres down | trace_id=ac926770-aef3-4790-9648-cf4e62151fb9
+GET /api/image-deletions -> 503 NOT_READY: postgres down | trace_id=138eeafb-1b31-43a8-978c-94acb5908715
+POST /api/image-deletions/process -> 503 NOT_READY: postgres down | trace_id=69492b3c-185b-40a8-be0f-b7096d181599
+ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.180s
+
+OK
+
+---
+exit_code: 0
+elapsed_ms: 10775
+ended_at: 2026-11-11T13:11:48.163Z
+---

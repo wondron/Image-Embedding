@@ -1,2 +1,1 @@
-/** Tasks page — ManagementViews tasks view. */
-export {}
+export { TasksPage } from './TasksPage'

@@ -442,6 +442,90 @@ export interface ImageDeleteResponseWire {
   cleanup: 'done' | 'queued'
 }
 
+// -- task center: /api/index-tasks, /api/image-deletions (schemas/tasks.py) ----------------
+
+/** System enum (app.core.enums.IndexTaskStatus): an index is synchronous, so only the outcome. */
+export type IndexTaskStatusWire = 'succeeded' | 'failed'
+
+/** schemas/tasks.py IndexTaskImage: the record's image as it is now. */
+export interface IndexTaskImageWire {
+  id: string
+  thumb_url: string | null
+  category_id: number | null
+  category: string | null
+  label_status: LabelStatusWire | null
+}
+
+/** schemas/tasks.py IndexTaskItem: one file of an index request. */
+export interface IndexTaskWire {
+  id: number
+  filename: string
+  status: IndexTaskStatusWire
+  /** Kept after the image is deleted; null when the file failed. */
+  image_id: string | null
+  /** false: the same bytes were stored before (their annotation was kept); null when failed. */
+  new_image: boolean | null
+  error_code: string | null
+  error_detail: string | null
+  duration_ms: number | null
+  trace_id: string | null
+  created_at: string | null
+  /** null when the file failed, or its image was deleted since. */
+  image: IndexTaskImageWire | null
+}
+
+/** GET /api/index-tasks?status=&page=&page_size= (newest first). */
+export interface IndexTaskListResponseWire {
+  ok: true
+  status: IndexTaskStatusWire | null
+  page: number
+  page_size: number
+  /** Records matching the filter. */
+  total: number
+  /** Every record by outcome, whatever the filter. */
+  counts: Record<IndexTaskStatusWire, number>
+  items: IndexTaskWire[]
+}
+
+/** DELETE /api/index-tasks?status= */
+export interface IndexTaskClearResponseWire {
+  ok: true
+  status: IndexTaskStatusWire
+  deleted: number
+}
+
+/** schemas/tasks.py ImageDeletionItem: deleted from the gallery, point and files not yet removed. */
+export interface ImageDeletionWire {
+  image_id: string
+  original_url: string | null
+  thumb_url: string | null
+  deleted_at: string | null
+}
+
+/** GET /api/image-deletions?limit= (oldest first). */
+export interface ImageDeletionListResponseWire {
+  ok: true
+  total: number
+  items: ImageDeletionWire[]
+  /** false: POST /api/image-deletions/process answers NOT_READY now. */
+  cleanup_ready: boolean
+}
+
+export interface ImageDeletionFailureWire {
+  image_id: string
+  error: string
+  detail: string
+}
+
+/** POST /api/image-deletions/process {limit?} */
+export interface ImageDeletionProcessResponseWire {
+  ok: true
+  scanned: number
+  processed: string[]
+  failed: ImageDeletionFailureWire[]
+  remaining: number
+}
+
 // -- GET /api/ping ------------------------------------------------------------------------
 
 /** schemas/predict.py PingResponse. */

@@ -1,0 +1,6 @@
+INFO:     Started server process [23184]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:57511 (Press CTRL+C to quit)
+GET /api/index-tasks -> 503 NOT_READY: database 'qa_ingest' is at migration 20261109_0007, this code needs 20261111_0008; run `alembic upgrade head` from backend/ | trace_id=qa-647c81f1-2
+INFO:     127.0.0.1:61554 - "GET /api/index-tasks?page=1&page_size=20 HTTP/1.1" 503 Service Unavailable

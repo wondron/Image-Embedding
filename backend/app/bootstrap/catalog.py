@@ -1,4 +1,5 @@
-"""Composition root for the catalog admin (category tree, scene configuration, stored images).
+"""Composition root for the catalog admin (category tree, scene configuration, stored images,
+task center).
 
 Needs PostgreSQL only, so it is built on its own: the admin pages keep working while the
 encoder, Qdrant or object storage are down, or when retrieval is switched off
@@ -18,6 +19,7 @@ from app.repositories.metadata import PgMetadataStore
 from app.services.retrieval.manage_categories import ManageCategoriesUseCase
 from app.services.retrieval.manage_images import ManageImagesUseCase
 from app.services.retrieval.manage_scenes import ManageScenesUseCase
+from app.services.retrieval.task_center import TaskCenterUseCase
 
 logger = logging.getLogger("catalog")
 
@@ -30,6 +32,7 @@ class CatalogServices:
     categories_uc: ManageCategoriesUseCase
     scenes_uc: ManageScenesUseCase
     images_uc: ManageImagesUseCase
+    tasks_uc: TaskCenterUseCase
 
     def close(self) -> None:
         self.store.close()
@@ -50,4 +53,5 @@ def build_catalog(config: Mapping[str, Any]) -> CatalogServices:
         categories_uc=ManageCategoriesUseCase(store),
         scenes_uc=ManageScenesUseCase(store),
         images_uc=ManageImagesUseCase(store),
+        tasks_uc=TaskCenterUseCase(store),
     )

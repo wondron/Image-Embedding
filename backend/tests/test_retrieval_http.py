@@ -30,8 +30,8 @@ class RetrievalHttpTests(unittest.TestCase):
     def setUp(self):
         self.calls = {}
 
-        def execute_batch(items):
-            self.calls["index"] = {"items": items, "off_loop": _off_event_loop()}
+        def execute_batch(items, *, trace_id=None):
+            self.calls["index"] = {"items": items, "trace_id": trace_id, "off_loop": _off_event_loop()}
             return {
                 "indexed": [{
                     "id": "abc", "filename": "a.png", "original_url": "https://cdn/o/abc.png",
@@ -41,10 +41,10 @@ class RetrievalHttpTests(unittest.TestCase):
                 "failed": [],
             }
 
-        def execute_one(**kwargs):
-            self.calls["index_file"] = {**kwargs, "off_loop": _off_event_loop()}
+        def execute_file(item, *, trace_id=None):
+            self.calls["index_file"] = {**item, "trace_id": trace_id, "off_loop": _off_event_loop()}
             return {
-                "id": "single", "filename": kwargs["filename"],
+                "id": "single", "filename": item["filename"],
                 "original_url": "https://cdn/o/single.png", "thumb_url": "https://cdn/t/single.webp",
                 "scenes": ["general"], "label_status": "unlabeled", "width": 8, "height": 6,
             }
@@ -63,7 +63,7 @@ class RetrievalHttpTests(unittest.TestCase):
             infra=infra,
             model=MODEL,
             embedding=SimpleNamespace(model_path="config/model/dino/multitask_cls.onnx"),
-            index_uc=SimpleNamespace(execute_batch=execute_batch, execute_one=execute_one),
+            index_uc=SimpleNamespace(execute_batch=execute_batch, execute_file=execute_file),
             search_uc=SimpleNamespace(execute=search),
         )
         self.runtime = ApplicationState(
@@ -102,6 +102,8 @@ class RetrievalHttpTests(unittest.TestCase):
         self.assertEqual([i["image_bytes"] for i in items], [b"aaa", b"bbb"])
         self.assertEqual({i["category"] for i in items}, {"dish.steak"})
         self.assertTrue(self.calls["index"]["off_loop"])
+        # the task records of this request carry its trace id
+        self.assertEqual(self.calls["index"]["trace_id"], response.json()["trace_id"])
 
     def test_index_without_files_is_400(self):
         response = self.client.post("/api/index", data={"category": "x"})
@@ -120,7 +122,7 @@ class RetrievalHttpTests(unittest.TestCase):
         self.assertEqual(body["indexed"][0]["filename"], "single.png")
         self.assertEqual(body["failed"], [])
         self.assertEqual(self.calls["index_file"], {
-            "image_bytes": b"image-bytes", "filename": "single.png", "off_loop": True,
+            "image_bytes": b"image-bytes", "filename": "single.png", "trace_id": body["trace_id"], "off_loop": True,
         })
         self.assertNotIn("index", self.calls)
 
@@ -161,13 +163,15 @@ class RetrievalHttpTests(unittest.TestCase):
             ("INDEX_QDRANT_FAILED", 502, "vector store write failed"),
         ):
             with self.subTest(code=code):
-                execute_one = Mock(side_effect=AppError(code, "index failed", http_status=status))
-                self.stack.index_uc.execute_one = execute_one
+                execute_file = Mock(side_effect=AppError(code, "index failed", http_status=status))
+                self.stack.index_uc.execute_file = execute_file
                 response = self.client.post("/api/index/file", files={"file": ("single.png", b"image", "image/png")})
                 self.assertEqual(response.status_code, status, response.text)
                 body = response.json()
                 self.assertEqual((body["error"], body["detail"]), (code, detail))
-                execute_one.assert_called_once_with(image_bytes=b"image", filename="single.png")
+                execute_file.assert_called_once_with(
+                    {"image_bytes": b"image", "filename": "single.png"}, trace_id=body["trace_id"]
+                )
 
     def test_index_file_openapi_declares_only_one_required_binary_file(self):
         document = self.client.get("/openapi.json").json()

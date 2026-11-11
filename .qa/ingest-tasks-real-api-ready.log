@@ -1,0 +1,126 @@
+INFO:     Started server process [9852]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:57511 (Press CTRL+C to quit)
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?page=1&page_size=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?page=1&page_size=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?page=2&page_size=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?page=3&page_size=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?status=succeeded&page=1&page_size=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?status=failed&page=1&page_size=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?status=all HTTP/1.1" 422 Unprocessable Entity
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?status= HTTP/1.1" 422 Unprocessable Entity
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?status=running HTTP/1.1" 422 Unprocessable Entity
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?status=null HTTP/1.1" 422 Unprocessable Entity
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?status=SUCCEEDED HTTP/1.1" 422 Unprocessable Entity
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?page=0 HTTP/1.1" 422 Unprocessable Entity
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?page=1000001 HTTP/1.1" 422 Unprocessable Entity
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?page=x HTTP/1.1" 422 Unprocessable Entity
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?page_size=0 HTTP/1.1" 422 Unprocessable Entity
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?page_size=101 HTTP/1.1" 422 Unprocessable Entity
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?page=1000000&page_size=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?page=1&page_size=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?page=1&page_size=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks/1 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:57866 - "GET /api/index-tasks?page=1&page_size=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57867 - "GET /api/index-tasks?page=2&page_size=20&status=succeeded HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57866 - "GET /api/index-tasks?page=1&page_size=20&status=failed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57867 - "GET /api/index-tasks?page=3&page_size=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57866 - "GET /api/index-tasks?page=2&page_size=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?page=3&page_size=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?page=3&page_size=20 HTTP/1.1" 200 OK
+GET /api/index-tasks -> 502 LIST_POSTGRES_FAILED: list_index_tasks: ProgrammingError: (psycopg.errors.UndefinedTable) relation "index_tasks" does not exist
+LINE 1: SELECT status, count(*) FROM index_tasks GROUP BY status
+                                     ^
+[SQL: SELECT status, count(*) FROM index_tasks GROUP BY status]
+(Background on this error at: https://sqlalche.me/e/21/f405) | trace_id=qa-10c167e6-26
+Traceback (most recent call last):
+  File "D:\99-tools\anaconda\envs\onnxgpu\Lib\site-packages\sqlalchemy\engine\base.py", line 1977, in _exec_single_context
+    self.dialect.do_execute(
+  File "D:\99-tools\anaconda\envs\onnxgpu\Lib\site-packages\sqlalchemy\engine\default.py", line 1192, in do_execute
+    cursor.execute(statement, parameters)
+  File "D:\99-tools\anaconda\envs\onnxgpu\Lib\site-packages\psycopg\cursor.py", line 117, in execute
+    raise ex.with_traceback(None)
+psycopg.errors.UndefinedTable: relation "index_tasks" does not exist
+LINE 1: SELECT status, count(*) FROM index_tasks GROUP BY status
+                                     ^
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\47202\PROJECT\Image-Embedding\backend\app\repositories\tasks.py", line 88, in list_index_tasks
+    for row in conn.execute(text("SELECT status, count(*) FROM index_tasks GROUP BY status")):
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\99-tools\anaconda\envs\onnxgpu\Lib\site-packages\sqlalchemy\engine\base.py", line 1494, in execute
+    return meth(
+           ^^^^^
+  File "D:\99-tools\anaconda\envs\onnxgpu\Lib\site-packages\sqlalchemy\sql\elements.py", line 534, in _execute_on_connection
+    return connection._execute_clauseelement(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\99-tools\anaconda\envs\onnxgpu\Lib\site-packages\sqlalchemy\engine\base.py", line 1714, in _execute_clauseelement
+    ret = self._execute_context(
+          ^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\99-tools\anaconda\envs\onnxgpu\Lib\site-packages\sqlalchemy\engine\base.py", line 1868, in _execute_context
+    return self._exec_single_context(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\99-tools\anaconda\envs\onnxgpu\Lib\site-packages\sqlalchemy\engine\base.py", line 1996, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "D:\99-tools\anaconda\envs\onnxgpu\Lib\site-packages\sqlalchemy\engine\base.py", line 2351, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "D:\99-tools\anaconda\envs\onnxgpu\Lib\site-packages\sqlalchemy\engine\base.py", line 1977, in _exec_single_context
+    self.dialect.do_execute(
+  File "D:\99-tools\anaconda\envs\onnxgpu\Lib\site-packages\sqlalchemy\engine\default.py", line 1192, in do_execute
+    cursor.execute(statement, parameters)
+  File "D:\99-tools\anaconda\envs\onnxgpu\Lib\site-packages\psycopg\cursor.py", line 117, in execute
+    raise ex.with_traceback(None)
+sqlalchemy.exc.ProgrammingError: (psycopg.errors.UndefinedTable) relation "index_tasks" does not exist
+LINE 1: SELECT status, count(*) FROM index_tasks GROUP BY status
+                                     ^
+[SQL: SELECT status, count(*) FROM index_tasks GROUP BY status]
+(Background on this error at: https://sqlalche.me/e/21/f405)
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\99-tools\anaconda\envs\onnxgpu\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "D:\99-tools\anaconda\envs\onnxgpu\Lib\site-packages\starlette\routing.py", line 73, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "D:\99-tools\anaconda\envs\onnxgpu\Lib\site-packages\fastapi\routing.py", line 301, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\99-tools\anaconda\envs\onnxgpu\Lib\site-packages\fastapi\routing.py", line 214, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\99-tools\anaconda\envs\onnxgpu\Lib\site-packages\starlette\concurrency.py", line 37, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\99-tools\anaconda\envs\onnxgpu\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\99-tools\anaconda\envs\onnxgpu\Lib\site-packages\anyio\_backends\_asyncio.py", line 2779, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "D:\99-tools\anaconda\envs\onnxgpu\Lib\site-packages\anyio\_backends\_asyncio.py", line 1124, in run
+    result = context.run(func, *args)
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\47202\PROJECT\Image-Embedding\backend\app\api\v1\tasks.py", line 40, in list_index_tasks
+    return tasks_service.list_index_tasks(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\47202\PROJECT\Image-Embedding\backend\app\api\services\tasks.py", line 28, in list_index_tasks
+    result = require_catalog(runtime).tasks_uc.list_index_tasks(status=status, page=page, page_size=page_size)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\47202\PROJECT\Image-Embedding\backend\app\services\retrieval\task_center.py", line 77, in list_index_tasks
+    result = self._catalog.list_index_tasks(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\47202\PROJECT\Image-Embedding\backend\app\repositories\tasks.py", line 106, in list_index_tasks
+    raise err.list_postgres_failed(f"list_index_tasks: {type(exc).__name__}: {exc}") from exc
+app.core.errors.AppError: list_index_tasks: ProgrammingError: (psycopg.errors.UndefinedTable) relation "index_tasks" does not exist
+LINE 1: SELECT status, count(*) FROM index_tasks GROUP BY status
+                                     ^
+[SQL: SELECT status, count(*) FROM index_tasks GROUP BY status]
+(Background on this error at: https://sqlalche.me/e/21/f405)
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?page_size=20 HTTP/1.1" 502 Bad Gateway
+INFO:     127.0.0.1:57863 - "GET /api/index-tasks?page=1&page_size=20 HTTP/1.1" 200 OK

@@ -12,6 +12,7 @@ from app.api.v1.predict import router as predict_router
 from app.api.v1.retrieval import router as retrieval_router
 from app.api.v1.scene_memberships import router as scene_memberships_router
 from app.api.v1.scenes import router as scenes_router
+from app.api.v1.tasks import router as tasks_router
 from app.api.v1.tools import router as tools_router
 from app.schemas.common import ERROR_RESPONSES
 
@@ -28,6 +29,7 @@ for sub_router in (
     scenes_router,
     scene_memberships_router,
     images_router,  # after image_download_router: /api/images/{image_id} must not take /download
+    tasks_router,
 ):
     router.include_router(sub_router, responses=ERROR_RESPONSES)
 

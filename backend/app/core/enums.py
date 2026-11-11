@@ -83,6 +83,13 @@ class ReviewStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class IndexTaskStatus(StrEnum):
+    """入库任务的结果。入库是同步的，记录写在请求结束时，没有「进行中」。"""
+
+    SUCCEEDED = "succeeded"  # 成功：得到一张图片（新入库或已存在）
+    FAILED = "failed"  # 失败：没有写入任何东西
+
+
 # 枚举名（文件里的键、接口路径里的 {name}）-> 类
 SYSTEM_ENUMS: dict[str, type[StrEnum]] = {
     "category_domain": CategoryDomain,
@@ -92,6 +99,7 @@ SYSTEM_ENUMS: dict[str, type[StrEnum]] = {
     "distance": Distance,
     "model_status": ModelStatus,
     "review_status": ReviewStatus,
+    "index_task_status": IndexTaskStatus,
 }
 
 

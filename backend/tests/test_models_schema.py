@@ -15,11 +15,12 @@ from app.db.base import Base
 
 BACKEND = Path(__file__).resolve().parents[1]
 
-# The 12 tables of contract v0.1 + image_foods (0006); ensure_schema checks whatever app.models registers
+# The 12 tables of contract v0.1 + image_foods (0006) + index_tasks (0008); ensure_schema checks
+# whatever app.models registers
 TABLES = {
     "heating_groups", "categories", "category_names", "images", "image_deletions", "scenes",
     "scene_labels", "scene_rules", "image_scenes", "embedding_models", "image_embeddings",
-    "external_candidates", "image_foods",
+    "external_candidates", "image_foods", "index_tasks",
 }
 # editable enum (app.core.enums.EDITABLE_ENUMS) -> the column that stores it
 EDITABLE_COLUMNS = {
@@ -60,6 +61,7 @@ class ModelsSchemaTests(unittest.TestCase):
             ("embedding_models", "distance"): enums.Distance,
             ("embedding_models", "status"): enums.ModelStatus,
             ("external_candidates", "review_status"): enums.ReviewStatus,
+            ("index_tasks", "status"): enums.IndexTaskStatus,
         }
         for (table, column), enum_cls in expected.items():
             col_type = self.tables[table].c[column].type
@@ -122,7 +124,8 @@ class MigrationChainTests(unittest.TestCase):
         cfg = Config(str(BACKEND / "alembic.ini"))
         cfg.set_main_option("script_location", str(BACKEND / "alembic"))
         script = ScriptDirectory.from_config(cfg)
-        self.assertEqual(script.get_heads(), ["20261109_0007"])
+        self.assertEqual(script.get_heads(), ["20261111_0008"])
+        self.assertEqual(script.get_revision("20261111_0008").down_revision, "20261109_0007")
         self.assertEqual(script.get_revision("20261109_0007").down_revision, "20261109_0006")
         self.assertEqual(script.get_revision("20261109_0006").down_revision, "20261109_0005")
         self.assertEqual(script.get_revision("20261109_0005").down_revision, "20261109_0004")

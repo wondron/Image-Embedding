@@ -201,6 +201,14 @@ class MetadataStorePort(ABC):
     def complete_deletion(self, image_id: UUID | str) -> None:
         raise NotImplementedError
 
+    # -- task center ----------------------------------------------------------
+
+    @abstractmethod
+    def record_index_tasks(self, rows: list[dict[str, Any]]) -> None:
+        """index_tasks: one row per indexed file {filename, status, image_id?, new_image?,
+        error_code?, error_detail?, duration_ms?, trace_id?}."""
+        raise NotImplementedError
+
     # -- lifecycle ------------------------------------------------------------
 
     @abstractmethod
@@ -282,6 +290,28 @@ class CatalogStorePort(ABC):
     def enqueue_image_deletion(self, image_id: UUID | str) -> dict[str, Any]:
         """Delete the image and queue its vector / file cleanup (image_deletions); returns the
         queue row. IMAGE_NOT_FOUND when there is neither an image nor a queue row."""
+        raise NotImplementedError
+
+    # -- task center (PG only: readable while the retrieval stack is down) ------
+
+    @abstractmethod
+    def list_index_tasks(self, *, status: str | None = None, page: int = 1, page_size: int = 50) -> dict[str, Any]:
+        """Newest first: {items, total, counts: {succeeded, failed}}; each item carries its image's
+        thumb_url / category while the image still exists (image_exists)."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def clear_index_tasks(self, *, status: str) -> int:
+        """Delete the records of one status; returns how many went."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_pending_deletions(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        """Queued deletions, oldest first: {image_id, original_url, thumb_url, deleted_at}."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def count_pending_deletions(self) -> int:
         raise NotImplementedError
 
     # -- scenes (each write returns the whole scene: fields, labels, rules, plus sync_required:

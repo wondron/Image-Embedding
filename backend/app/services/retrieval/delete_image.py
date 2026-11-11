@@ -3,7 +3,8 @@
 1. delete_image: TX delete images (+ CASCADE deps) → insert image_deletions
 2. process_deletion_queue: drain image_deletions → Qdrant delete + S3 delete → remove row
    (DELETE /api/images/{image_id} runs this for its own row right away, DeletionWorker.clean_up;
-   what fails there stays queued for `python -m app.workers.process_deletions`)
+   what fails there stays queued for `python -m app.workers.process_deletions` or
+   POST /api/image-deletions/process, the task center's 「立即清理」)
 
 Qdrant choice (M4): delete by uuid on the **current** collection via VectorStorePort.
 Multi-collection sweep (all embedding_models.collection) deferred — document for later.
@@ -64,6 +65,16 @@ def _clean_up(
     metadata.complete_deletion(image_id)
 
 
+def _failure(image_id: Any, exc: Exception) -> dict[str, Any]:
+    """One item that stays queued. `error` is the raw cause, for the operator's CLI output only;
+    `code` / `detail` are what an HTTP client may see (POST /api/image-deletions/process)."""
+    if isinstance(exc, err.AppError):
+        code, detail = exc.code, err.client_detail(exc)
+    else:
+        code, detail = "INTERNAL_ERROR", "cleanup failed"
+    return {"image_id": str(image_id), "error": f"{type(exc).__name__}: {exc}", "code": code, "detail": detail}
+
+
 def process_deletion_queue(
     metadata: MetadataStorePort,
     vectors: VectorStorePort,
@@ -89,12 +100,7 @@ def process_deletion_queue(
             logger.info("deletion queue completed id=%s", image_id)
         except Exception as exc:
             logger.exception("deletion queue item failed id=%s", image_id)
-            failed.append(
-                {
-                    "image_id": str(image_id),
-                    "error": f"{type(exc).__name__}: {exc}",
-                }
-            )
+            failed.append(_failure(image_id, exc))
     return {
         "ok": len(failed) == 0,
         "scanned": len(pending),

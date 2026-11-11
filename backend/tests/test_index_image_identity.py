@@ -57,6 +57,13 @@ class FakeMetadata:
         self.ledger = {}
         self.ledger_fails = False
         self.categories = categories or {}
+        self.tasks = []  # index_tasks rows, in write order
+        self.tasks_fail = False
+
+    def record_index_tasks(self, rows):
+        if self.tasks_fail:
+            raise AppError("INDEX_POSTGRES_FAILED", "index_tasks down", http_status=502)
+        self.tasks.extend(dict(row) for row in rows)
 
     def upsert_image_embedding(self, *, model_id, image_id, synced_version=None):
         if self.ledger_fails:
@@ -261,6 +268,84 @@ class IndexImageIdentityTests(unittest.TestCase):
         out = self.use_case().execute_one(image_bytes=_png(), category="no.such.code", label_status="auto")
         self.assertEqual(out["label_status"], "unlabeled")
         self.assertIsNone(out["category_id"])
+
+
+class IndexTaskRecordTests(unittest.TestCase):
+    """Each file of a batch / single upload leaves one index_tasks record (task center)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.meta = FakeMetadata(categories={"dish.steak": 7})
+
+    def use_case(self, vectors=None):
+        return IndexImageUseCase(
+            FakeEmbedding(), vectors or FakeVectors(), self.meta, model=MODEL, indexed_dir=self.tmp.name
+        )
+
+    def test_batch_records_each_file_in_order_with_the_trace_id(self):
+        out = self.use_case().execute_batch(
+            [{"image_bytes": _png((1, 1, 1)), "filename": "ok.png"}, {"image_bytes": b"junk", "filename": "bad.png"}],
+            trace_id="t-1",
+        )
+        self.assertEqual((len(out["indexed"]), len(out["failed"])), (1, 1))
+        ok, bad = self.meta.tasks
+        self.assertEqual(
+            (ok["filename"], ok["status"], ok["image_id"], ok["new_image"], ok["trace_id"]),
+            ("ok.png", "succeeded", out["indexed"][0]["id"], True, "t-1"),
+        )
+        self.assertNotIn("error_code", ok)
+        self.assertEqual(
+            (bad["filename"], bad["status"], bad["error_code"], bad["error_detail"], bad["trace_id"]),
+            ("bad.png", "failed", "INDEX_BAD_IMAGE", "cannot decode image", "t-1"),
+        )
+        self.assertNotIn("image_id", bad)
+        for row in self.meta.tasks:
+            self.assertIsInstance(row["duration_ms"], int)
+            self.assertGreaterEqual(row["duration_ms"], 0)
+
+    def test_the_same_bytes_again_are_recorded_as_not_new(self):
+        data = _png((2, 2, 2))
+        self.use_case().execute_batch([{"image_bytes": data, "filename": "a.png"}])
+        self.use_case().execute_batch([{"image_bytes": data, "filename": "again.png"}])
+        self.assertEqual([row["new_image"] for row in self.meta.tasks], [True, False])
+        self.assertEqual(len({row["image_id"] for row in self.meta.tasks}), 1)
+
+    def test_an_internal_failure_is_recorded_with_its_public_text_only(self):
+        with self.assertLogs("retrieval.index", level="ERROR"):
+            out = self.use_case(FakeVectors(fail=True)).execute_batch(
+                [{"image_bytes": _png((3, 3, 3)), "filename": "q.png"}]
+            )
+        (row,) = self.meta.tasks
+        self.assertEqual((row["error_code"], row["error_detail"]), ("INDEX_QDRANT_FAILED", "vector store write failed"))
+        self.assertEqual(out["failed"][0]["detail"], "vector store write failed")  # same text as the response
+        self.assertNotIn("qdrant down", repr(self.meta.tasks))
+
+    def test_execute_file_records_and_still_raises_its_failure(self):
+        uc = self.use_case()
+        out = uc.execute_file({"image_bytes": _png((4, 4, 4)), "filename": "one.png"}, trace_id="t-2")
+        with self.assertRaises(AppError) as caught:
+            uc.execute_file({"image_bytes": b"junk", "filename": "junk.png"}, trace_id="t-3")
+        self.assertEqual(caught.exception.code, "INDEX_BAD_IMAGE")
+        self.assertEqual(
+            [(r["filename"], r["status"], r["trace_id"]) for r in self.meta.tasks],
+            [("one.png", "succeeded", "t-2"), ("junk.png", "failed", "t-3")],
+        )
+        self.assertEqual(self.meta.tasks[0]["image_id"], out["id"])
+
+    def test_a_record_that_cannot_be_written_does_not_change_the_index_result(self):
+        self.meta.tasks_fail = True
+        with self.assertLogs("retrieval.index", level="ERROR") as logs:
+            out = self.use_case().execute_batch([{"image_bytes": _png((5, 5, 5)), "filename": "kept.png"}])
+            single = self.use_case().execute_file({"image_bytes": _png((6, 6, 6)), "filename": "kept2.png"})
+        self.assertEqual(len(out["indexed"]), 1)
+        self.assertTrue(single["id"])
+        self.assertEqual(len(self.meta.rows), 2)  # both images stored
+        self.assertTrue(any("index task record not written" in line for line in logs.output))
+
+    def test_execute_one_records_nothing(self):
+        self.use_case().execute_one(image_bytes=_png((7, 7, 7)))
+        self.assertEqual(self.meta.tasks, [])
 
 
 if __name__ == "__main__":

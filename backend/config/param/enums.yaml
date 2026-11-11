@@ -108,3 +108,11 @@ review_status:
   - {value: pending, label: 待审核}
   - {value: accepted, label: 已通过}
   - {value: rejected, label: 已拒绝}
+
+index_task_status:
+  label: 入库任务结果
+  description: 入库任务记录（index_tasks）的结果；入库是同步的，只记最终结果
+  editable: false
+  values:
+  - {value: succeeded, label: 成功, description: 得到一张图片（新入库或已存在）}
+  - {value: failed, label: 失败, description: 没有写入任何东西}

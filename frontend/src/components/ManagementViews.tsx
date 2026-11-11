@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Circle, Clock3, CloudUpload, FolderOpen, ImagePlus, Images, Info, Layers3, Leaf, ListChecks, LoaderCircle, Pencil, Plus, RotateCcw, Search, Square, Tags, Trash2, X, XCircle } from 'lucide-react'
 import { Dialog } from './Dialog'
+import { TasksPage } from '../pages/tasks'
 import { categoryLabel, type CategoryTree } from '../entities/category'
 import { indexImage, type ImageDeleteResult, type LabelStatus, type LibraryImageItem } from '../entities/image'
 import { DEFAULT_SCENE, sceneDisplayLabel, toApiSceneCode, sceneError, writeMembership, type VectorSync } from '../entities/scene'
@@ -470,7 +471,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
   })
 
   return <div className="mg-page">
-    <div className="mg-page-toolbar">
+    {view !== 'tasks' && <div className="mg-page-toolbar">
       {view === 'library' && <>
         <label className="mg-search"><Search size={17} /><input aria-label="搜索图库" placeholder="搜索图片名称或食材…" value={libraryQuery} onChange={event => setLibraryQuery(event.target.value)} />{libraryQuery && <button aria-label="清空搜索" onClick={() => setLibraryQuery('')}><X size={15} /></button>}</label>
         <CategoryFilter tree={categoryTree.tree} loading={categoryTree.loading} loadError={categoryTree.error} onRetry={categoryTree.refresh} value={libraryCategoryId} onChange={id => { setLibraryCategoryId(id); setLibraryPage(1) }} />
@@ -499,18 +500,14 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
         <input ref={fileInput} type="file" className="mg-hidden" aria-label="选择待入库图片" accept="image/jpeg,image/png,image/webp" multiple onChange={event => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />
         {dirSupported && <input ref={dirInput} type="file" className="mg-hidden" aria-label="选择待入库目录" accept="image/jpeg,image/png,image/webp" multiple {...({ webkitdirectory: '', directory: '' } as object)} onChange={event => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />}
       </>}
-      {view === 'tasks' && <>
-        <div className="mg-tabs" role="tablist" aria-label="任务状态">{taskStatuses.map((status, index) => <button key={status} id={`task-tab-${index}`} role="tab" aria-selected={taskStatus === status} aria-controls="task-panel" tabIndex={taskStatus === status ? 0 : -1} className={taskStatus === status ? 'active' : ''} onClick={() => setTaskStatus(status)} onKeyDown={event => navigateTaskTabs(event, index)}>{status}</button>)}</div>
-        <button className="mg-btn mg-secondary" onClick={() => onNavigate('import')}><Plus size={16} />准备图片</button>
-      </>}
       {view === 'ingredients' && <>
         <label className="mg-search"><Search size={17} /><input aria-label="搜索食材草稿" placeholder="搜索食材名称或属性…" value={ingredientQuery} onChange={event => setIngredientQuery(event.target.value)} />{ingredientQuery && <button aria-label="清空食材搜索" onClick={() => setIngredientQuery('')}><X size={15} /></button>}</label>
         <select className="mg-select" aria-label="食材类别筛选" value={ingredientCategory} onChange={event => setIngredientCategory(event.target.value)}><option>全部类别</option>{categories.map(category => <option key={category}>{category}</option>)}</select>
         <span className="mg-toolbar-summary">{ingredients.length} 个食材草稿</span>
         <button className="mg-btn mg-primary" onClick={() => openEditor()}><Plus size={17} />新建食材</button>
       </>}
-      <span className="mg-status"><span />{view === 'ingredients' ? '本地草稿模式' : view === 'import' || view === 'tasks' ? (indexing ? '入库进行中' : '自建入库已接入') : libraryLoading ? '图库加载中…' : libraryError ? '图库加载失败' : libraryConnected ? '图库已接入' : '图库未连接'}</span>
-    </div>
+      <span className="mg-status"><span />{view === 'ingredients' ? '本地草稿模式' : view === 'import' ? (indexing ? '入库进行中' : '自建入库已接入') : libraryLoading ? '图库加载中…' : libraryError ? '图库加载失败' : libraryConnected ? '图库已接入' : '图库未连接'}</span>
+    </div>}
 
     {view === 'library' && (() => {
       const hasFilter = Boolean(debouncedLibraryQuery) || libraryCategoryId !== null || libraryLabelStatus !== '' || libraryScene !== sceneCatalog.defaultScene?.code
@@ -638,7 +635,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
       })}</div>}
     </section><aside className="mg-import-aside"><section className="mg-panel mg-import-settings"><h2>批量标注</h2><p>对本批没有「单独标注」的图片统一生效，入库时一起写入。</p>
       <AnnotationForm value={batchAnnotation} onChange={setBatchAnnotation} errors={batchErrors} categories={categoryTree} scenes={sceneView} disabled={indexing} />
-      <p className="mg-help">逐张调用 <code>POST /api/index</code>；有场景调整的图片入库后再写人工纳入 / 排除。字节完全相同的图片只入库一次，再次上传沿用原有标注。进行中不可清空队列；离开页面后本会话队列不保留。</p>
+      <p className="mg-help">逐张调用 <code>POST /api/index</code>；有场景调整的图片入库后再写人工纳入 / 排除。字节完全相同的图片只入库一次，再次上传沿用原有标注。进行中不可清空队列；切换到入库任务仍保留本会话队列，整页刷新或离开数据管理宿主后不保留。停止等待不保证服务端未成功。</p>
       {/* Stays at the bottom of the screen while the form scrolls */}
       <div className="mg-import-run">
       <p className="mg-import-tally"><span>已选 <strong>{jobs.length}</strong> 张 · {(totalBytes / 1024 / 1024).toFixed(2)} MB</span>{jobs.some(job => job.annotation) && <span>单独标注 <strong>{jobs.filter(job => job.annotation).length}</strong> 张</span>}</p>
@@ -655,9 +652,13 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
         {!indexing && retryable && <button type="button" className="mg-btn mg-secondary mg-full" disabled={!importReady} onClick={() => void startIndexing(true)}><RotateCcw size={15} />仅重试失败</button>}
       </div>
       </div></section>
-      <div className="mg-workflow-note"><ListChecks size={18} /><h3>入库任务</h3><p>本批进度也会汇总到任务中心；无本会话任务时保持空态。</p><button className="mg-text-button" onClick={() => onNavigate('tasks')}>查看任务中心<ArrowRight size={15} /></button></div></aside></div>}
+      <div className="mg-workflow-note"><ListChecks size={18} /><h3>入库任务</h3><p>在任务中心的「本会话上传队列」查看本批进度；服务端入库记录只显示已记录的同步终态，可能缺行。</p><button className="mg-text-button" onClick={() => onNavigate('tasks')}>查看任务中心<ArrowRight size={15} /></button></div></aside></div>}
 
-    {view === 'tasks' && <>
+    {view === 'tasks' && <TasksPage apiBase={apiBase} queue={<>
+      <div className="mg-page-toolbar">
+        <div className="mg-tabs" role="tablist" aria-label="任务状态">{taskStatuses.map((status, index) => <button key={status} id={`task-tab-${index}`} role="tab" aria-selected={taskStatus === status} aria-controls="task-panel" tabIndex={taskStatus === status ? 0 : -1} className={taskStatus === status ? 'active' : ''} onClick={() => setTaskStatus(status)} onKeyDown={event => navigateTaskTabs(event, index)}>{status}</button>)}</div>
+        <button className="mg-btn mg-secondary" onClick={() => onNavigate('import')}><Plus size={16} />准备图片</button>
+      </div>
       <div className="mg-metrics">
         <Metric label="正在处理" value={jobs.length ? String(runningCount + jobs.filter(j => j.status === 'pending' || j.status === 'cancelled').length) : '—'} detail={jobs.length ? '本会话队列' : '暂无本会话任务'} icon={CloudUpload} />
         <Metric label="成功入库" value={jobs.length ? String(successCount) : '—'} detail={jobs.length ? '本会话成功' : '暂无本会话任务'} icon={Check} />
@@ -674,8 +675,8 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
             <div className="mg-task-detail" title={job.remoteId ?? job.error ?? ''}>{job.remoteId ? `id: ${job.remoteId}` : job.error ? job.error : '—'}</div>
           </div>)}</div>}
       </div></section>
-      <div className="mg-info"><Info size={17} /><p>任务列表仅反映本浏览器会话的入库队列，刷新页面后清空；不使用假进度或假成功数据。</p></div>
-    </>}
+      <div className="mg-info"><Info size={17} /><p>这里只显示本会话上传队列。刷新或离开数据管理宿主后不保留；浏览器停止等待、超时或离开不保证服务器未成功或未记记录。后续人工场景调整与 notes 只属本会话，不是历史记录的全流程结果。</p></div>
+    </>} />}
 
     {view === 'ingredients' && <>
       <section className="mg-panel">

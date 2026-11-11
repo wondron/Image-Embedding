@@ -1,0 +1,86 @@
+ATTEMPT1_CONTAINER_ABSENT True
+PASS Fresh isolated PG public schema has no tables
+PASS Empty real schema produces503 NOT_READY not fake empty
+PASS NOT_READY contains real GET trace
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 20261104_0001, PG v0.1 initial: 12 tables + ltree + path trigger + scene seeds.
+INFO  [alembic.runtime.migration] Running upgrade 20261104_0001 -> 20261105_0002, Align PG v0.1 schema with app.models (ORM is now the schema SSOT).
+INFO  [alembic.runtime.migration] Running upgrade 20261105_0002 -> 20261106_0003, images.description: free-text description, default empty string.
+INFO  [alembic.runtime.migration] Running upgrade 20261106_0003 -> 20261109_0004, images.source_type / license / food_state become editable enums: drop their CHECK lists.
+INFO  [alembic.runtime.migration] Running upgrade 20261109_0004 -> 20261109_0005, images: food attributes besides food_state — food_processing, food_weight_g, food_count.
+INFO  [alembic.runtime.migration] Running upgrade 20261109_0005 -> 20261109_0006, Food annotation moves out of images into its own table image_foods (like image_embeddings).
+INFO  [alembic.runtime.migration] Running upgrade 20261109_0006 -> 20261109_0007, images.tags: free-text tag array, '{}' while untagged; GIN index for exact-tag filters.
+PASS Real schema0007 missing0008 gives503 NOT_READY
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade 20261109_0007 -> 20261111_0008, index_tasks: one row per file of an index request (succeeded / failed), for the task center.
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.schemas
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.tables
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.types
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.constraints
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.defaults
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.comments
+C:\Users\47202\PROJECT\Image-Embedding\.qa\ingest-tasks-real-http-pg-qa.py:97: SAWarning: Did not recognize type 'ltree' of column 'path'
+  rev=conn.execute(text('SELECT version_num FROM alembic_version')).scalar_one();diff=compare_metadata(MigrationContext.configure(conn,opts={'compare_type':True}),Base.metadata)
+INFO  [alembic.autogenerate.compare.types] Couldn't determine database type for column 'categories.path'
+INFO  [alembic.autogenerate.compare.types] Couldn't determine database type for column 'categories.path'
+PASS Isolated database at real migration20261111_0008
+PASS Migrated schema matches actual ORM metadata
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+PASS Migrated empty task table real200 zero counts
+PASS Page1200 echoes20 and correct total/counts
+PASS Page1expected length
+PASS Page1all business fields returned
+PASS Page1GET trace distinct from original index traces
+PASS Page2200 echoes20 and correct total/counts
+PASS Page2expected length
+PASS Page2all business fields returned
+PASS Page2GET trace distinct from original index traces
+PASS Page3200 echoes20 and correct total/counts
+PASS Page3expected length
+PASS Page3all business fields returned
+PASS Page3GET trace distinct from original index traces
+PASS Actual PG ordering created_at DESC then id DESC across pages
+PASS No same-image record merge;43 unique numeric ids
+PASS Real PG/Wire duration0 and newImage false preserved
+PASS Real PG/Wire failure null duration/newImage/image preserved
+PASS Real PG newImage true distinct
+PASS Missing current image projection keeps historical success/image id
+PASS Current projection complete with schema-legal empty thumbnail
+PASS Actual record writer clips filename255 and error detail1000
+PASS Record timestamps carry timezone (not UI MST claim)
+PASS succeededfiltered total/global counts real SQL
+PASS failedfiltered total/global counts real SQL
+PASS Omitted query status null; BE default50 (FE separately sends20)
+PASS Invalid query {'status': 'all'} =>422 VALIDATION_ERROR
+PASS Invalid query {'status': ''} =>422 VALIDATION_ERROR
+PASS Invalid query {'status': 'running'} =>422 VALIDATION_ERROR
+PASS Invalid query {'status': 'null'} =>422 VALIDATION_ERROR
+PASS Invalid query {'status': 'SUCCEEDED'} =>422 VALIDATION_ERROR
+PASS Invalid query {'page': 0} =>422 VALIDATION_ERROR
+PASS Invalid query {'page': 1000001} =>422 VALIDATION_ERROR
+PASS Invalid query {'page': 'x'} =>422 VALIDATION_ERROR
+PASS Invalid query {'page_size': 0} =>422 VALIDATION_ERROR
+PASS Invalid query {'page_size': 101} =>422 VALIDATION_ERROR
+PASS Legal boundary {'page': 1000000, 'page_size': 20}
+PASS Backend returns requested out-of-range page empty, does not clamp
+PASS Legal boundary {'page': 1, 'page_size': 1}
+PASS Legal boundary {'page': 1, 'page_size': 100}
+PASS No task-detail route: GET collection/id is404
+PASS Actual FE client realHTTP/PG integration5/5
+PASS Historical status stable while current category projection changes
+PASS Real PG LEFT JOIN deletion preserves43 history rows/status/image_id
+PASS Actual SQL failure becomes502 LIST_POSTGRES_FAILED not fake empty
+PASS Restored real relation GET recovers43 rows
+PASS GET-only HTTP run did not create/delete history rows
+FINAL {"completed": true, "counts": {"pass": 52, "fail": 0}, "exception": null, "cleanup": [{"kind": "api", "pid": 59848, "command_line": "D:\\99-tools\\anaconda\\envs\\onnxgpu\\python.exe -u C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\ingest-tasks-real-app.py --run-id 10c167e6f2b24111b8c509eb4d7620a0 --pg-port 57512 --port 57511 --phase empty-schema", "matched": true, "exit_code": 1, "port_closed": true}, {"kind": "api", "pid": 47416, "command_line": "D:\\99-tools\\anaconda\\envs\\onnxgpu\\python.exe -u C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\ingest-tasks-real-app.py --run-id 10c167e6f2b24111b8c509eb4d7620a0 --pg-port 57512 --port 57511 --phase missing-0008", "matched": true, "exit_code": 1, "port_closed": true}, {"kind": "api", "pid": 9852, "command_line": "D:\\99-tools\\anaconda\\envs\\onnxgpu\\python.exe -u C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\ingest-tasks-real-app.py --run-id 10c167e6f2b24111b8c509eb4d7620a0 --pg-port 57512 --port 57511 --phase ready", "matched": true, "exit_code": 1, "port_closed": true}, {"kind": "postgres-container", "id": "eb6a930b75a946ceca1202af057ee85c70410c70af20e8496509b417ed5b0ce1", "matched": true, "labels": {"com.grok.qa.run": "10c167e6f2b24111b8c509eb4d7620a0"}, "port_bindings": {"5432/tcp": [{"HostIp": "127.0.0.1", "HostPort": "57512"}]}, "ttl_seconds": 900, "stop_output": "Flag --time has been deprecated, use --timeout instead\neb6a930b75a946ceca1202af057ee85c70410c70af20e8496509b417ed5b0ce1", "absent_after": true, "inspect_after_stderr": "error: no such object: eb6a930b75a946ceca1202af057ee85c70410c70af20e8496509b417ed5b0ce1\n", "pg_port_closed": true}]}
+
+---
+exit_code: 0
+elapsed_ms: 20805
+ended_at: 2026-11-11T13:25:01.397Z
+---

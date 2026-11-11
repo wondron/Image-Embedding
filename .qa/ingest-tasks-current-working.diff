@@ -1,0 +1,956 @@
+diff --git a/backend/app/api/router.py b/backend/app/api/router.py
+index 8a8cabc..515807f 100644
+--- a/backend/app/api/router.py
++++ b/backend/app/api/router.py
+@@ -12,6 +12,7 @@ from app.api.v1.predict import router as predict_router
+ from app.api.v1.retrieval import router as retrieval_router
+ from app.api.v1.scene_memberships import router as scene_memberships_router
+ from app.api.v1.scenes import router as scenes_router
++from app.api.v1.tasks import router as tasks_router
+ from app.api.v1.tools import router as tools_router
+ from app.schemas.common import ERROR_RESPONSES
+ 
+@@ -28,6 +29,7 @@ for sub_router in (
+     scenes_router,
+     scene_memberships_router,
+     images_router,  # after image_download_router: /api/images/{image_id} must not take /download
++    tasks_router,
+ ):
+     router.include_router(sub_router, responses=ERROR_RESPONSES)
+ 
+diff --git a/backend/app/api/services/retrieval.py b/backend/app/api/services/retrieval.py
+index cc3f189..0a78354 100644
+--- a/backend/app/api/services/retrieval.py
++++ b/backend/app/api/services/retrieval.py
+@@ -109,14 +109,14 @@ def parse_score_threshold(raw: Any) -> Optional[float]:
+ async def index_from_upload(
+     runtime: ApplicationState, request: Request, file: UploadFile
+ ) -> Dict[str, Any]:
+-    """Read one uploaded image and run the existing indexing use case."""
++    """Read one uploaded image and index it (recorded in index_tasks; its failure is raised)."""
+     trace_id = bind_trace_id(request)
+     data = await read_upload(file, runtime.max_image_bytes)
+     stack = require_retrieval(runtime)
+     indexed = await run_in_threadpool(
+-        stack.index_uc.execute_one,
+-        image_bytes=data,
+-        filename=file.filename or "upload.bin",
++        stack.index_uc.execute_file,
++        {"image_bytes": data, "filename": file.filename or "upload.bin"},
++        trace_id=trace_id,
+     )
+     return {"ok": True, "trace_id": trace_id, "indexed": [indexed], "failed": []}
+ 
+@@ -142,7 +142,7 @@ async def index_from_request(runtime: ApplicationState, request: Request) -> Dic
+         items = await _index_items_from_form(request, runtime.max_image_bytes)
+ 
+     stack = require_retrieval(runtime)
+-    outcome = await run_in_threadpool(stack.index_uc.execute_batch, items)
++    outcome = await run_in_threadpool(stack.index_uc.execute_batch, items, trace_id=trace_id)
+     _raise_if_batch_failed_uniformly(outcome)
+     return {"ok": True, "trace_id": trace_id, "indexed": outcome["indexed"], "failed": outcome["failed"]}
+ 
+diff --git a/backend/app/bootstrap/catalog.py b/backend/app/bootstrap/catalog.py
+index 429005e..784ccba 100644
+--- a/backend/app/bootstrap/catalog.py
++++ b/backend/app/bootstrap/catalog.py
+@@ -1,4 +1,5 @@
+-"""Composition root for the catalog admin (category tree, scene configuration, stored images).
++"""Composition root for the catalog admin (category tree, scene configuration, stored images,
++task center).
+ 
+ Needs PostgreSQL only, so it is built on its own: the admin pages keep working while the
+ encoder, Qdrant or object storage are down, or when retrieval is switched off
+@@ -18,6 +19,7 @@ from app.repositories.metadata import PgMetadataStore
+ from app.services.retrieval.manage_categories import ManageCategoriesUseCase
+ from app.services.retrieval.manage_images import ManageImagesUseCase
+ from app.services.retrieval.manage_scenes import ManageScenesUseCase
++from app.services.retrieval.task_center import TaskCenterUseCase
+ 
+ logger = logging.getLogger("catalog")
+ 
+@@ -30,6 +32,7 @@ class CatalogServices:
+     categories_uc: ManageCategoriesUseCase
+     scenes_uc: ManageScenesUseCase
+     images_uc: ManageImagesUseCase
++    tasks_uc: TaskCenterUseCase
+ 
+     def close(self) -> None:
+         self.store.close()
+@@ -50,4 +53,5 @@ def build_catalog(config: Mapping[str, Any]) -> CatalogServices:
+         categories_uc=ManageCategoriesUseCase(store),
+         scenes_uc=ManageScenesUseCase(store),
+         images_uc=ManageImagesUseCase(store),
++        tasks_uc=TaskCenterUseCase(store),
+     )
+diff --git a/backend/app/core/enums.py b/backend/app/core/enums.py
+index 615765f..b1bb57f 100644
+--- a/backend/app/core/enums.py
++++ b/backend/app/core/enums.py
+@@ -83,6 +83,13 @@ class ReviewStatus(StrEnum):
+     REJECTED = "rejected"
+ 
+ 
++class IndexTaskStatus(StrEnum):
++    """入库任务的结果。入库是同步的，记录写在请求结束时，没有「进行中」。"""
++
++    SUCCEEDED = "succeeded"  # 成功：得到一张图片（新入库或已存在）
++    FAILED = "failed"  # 失败：没有写入任何东西
++
++
+ # 枚举名（文件里的键、接口路径里的 {name}）-> 类
+ SYSTEM_ENUMS: dict[str, type[StrEnum]] = {
+     "category_domain": CategoryDomain,
+@@ -92,6 +99,7 @@ SYSTEM_ENUMS: dict[str, type[StrEnum]] = {
+     "distance": Distance,
+     "model_status": ModelStatus,
+     "review_status": ReviewStatus,
++    "index_task_status": IndexTaskStatus,
+ }
+ 
+ 
+diff --git a/backend/app/models/__init__.py b/backend/app/models/__init__.py
+index afb5bdf..0d564a2 100644
+--- a/backend/app/models/__init__.py
++++ b/backend/app/models/__init__.py
+@@ -1,4 +1,4 @@
+-"""ORM 模型：导入这里即注册全部 13 张表（Alembic 依赖它拿到完整的 metadata）。
++"""ORM 模型：导入这里即注册全部 14 张表（Alembic 依赖它拿到完整的 metadata）。
+ 
+ 表结构以这里为准；迁移脚本（alembic/versions/）负责把数据库变成这个样子，
+ `alembic check` 可以确认两者一致。仓储层目前仍是手写 SQL，取值统一用 app.core.enums。
+@@ -11,6 +11,7 @@ from app.models.external import ExternalCandidate
+ from app.models.food import ImageFood
+ from app.models.image import Image, ImageDeletion
+ from app.models.scene import ImageScene, Scene, SceneLabel, SceneRule
++from app.models.task import IndexTask
+ 
+ __all__ = [
+     "Base",
+@@ -24,6 +25,7 @@ __all__ = [
+     "ImageEmbedding",
+     "ImageFood",
+     "ImageScene",
++    "IndexTask",
+     "Scene",
+     "SceneLabel",
+     "SceneRule",
+diff --git a/backend/app/repositories/deletions.py b/backend/app/repositories/deletions.py
+index 3662ef3..c379b3a 100644
+--- a/backend/app/repositories/deletions.py
++++ b/backend/app/repositories/deletions.py
+@@ -107,6 +107,19 @@ class PgDeletionsMixin:
+                 f"list_pending_deletions: {type(exc).__name__}: {exc}"
+             ) from exc
+ 
++    def count_pending_deletions(self) -> int:
++        """How many deleted images still wait for their vector / file cleanup."""
++        self.ensure_schema()
++        from sqlalchemy import text
++
++        try:
++            with self._get_engine().connect() as conn:
++                return int(conn.execute(text("SELECT count(*) FROM image_deletions")).scalar_one())
++        except Exception as exc:
++            raise err.list_postgres_failed(
++                f"count_pending_deletions: {type(exc).__name__}: {exc}"
++            ) from exc
++
+     def complete_deletion(self, image_id: UUID | str) -> None:
+         """Remove image_deletions row after Qdrant + S3 cleanup succeeded."""
+         self.ensure_schema()
+diff --git a/backend/app/repositories/metadata.py b/backend/app/repositories/metadata.py
+index eee7198..bab62fb 100644
+--- a/backend/app/repositories/metadata.py
++++ b/backend/app/repositories/metadata.py
+@@ -35,6 +35,7 @@ from app.repositories.images import PgImagesMixin
+ from app.repositories.ports import CatalogStorePort, MetadataStorePort
+ from app.repositories.scene_config import PgSceneConfigMixin
+ from app.repositories.scenes import PgScenesMixin
++from app.repositories.tasks import PgIndexTasksMixin
+ 
+ 
+ class PgMetadataStore(
+@@ -42,6 +43,7 @@ class PgMetadataStore(
+     PgImagesMixin,
+     PgEmbeddingsMixin,
+     PgDeletionsMixin,
++    PgIndexTasksMixin,
+     PgScenesMixin,
+     PgCategoriesMixin,
+     PgSceneConfigMixin,
+diff --git a/backend/app/repositories/ports.py b/backend/app/repositories/ports.py
+index 56de01a..cff20e5 100644
+--- a/backend/app/repositories/ports.py
++++ b/backend/app/repositories/ports.py
+@@ -201,6 +201,14 @@ class MetadataStorePort(ABC):
+     def complete_deletion(self, image_id: UUID | str) -> None:
+         raise NotImplementedError
+ 
++    # -- task center ----------------------------------------------------------
++
++    @abstractmethod
++    def record_index_tasks(self, rows: list[dict[str, Any]]) -> None:
++        """index_tasks: one row per indexed file {filename, status, image_id?, new_image?,
++        error_code?, error_detail?, duration_ms?, trace_id?}."""
++        raise NotImplementedError
++
+     # -- lifecycle ------------------------------------------------------------
+ 
+     @abstractmethod
+@@ -284,6 +292,28 @@ class CatalogStorePort(ABC):
+         queue row. IMAGE_NOT_FOUND when there is neither an image nor a queue row."""
+         raise NotImplementedError
+ 
++    # -- task center (PG only: readable while the retrieval stack is down) ------
++
++    @abstractmethod
++    def list_index_tasks(self, *, status: str | None = None, page: int = 1, page_size: int = 50) -> dict[str, Any]:
++        """Newest first: {items, total, counts: {succeeded, failed}}; each item carries its image's
++        thumb_url / category while the image still exists (image_exists)."""
++        raise NotImplementedError
++
++    @abstractmethod
++    def clear_index_tasks(self, *, status: str) -> int:
++        """Delete the records of one status; returns how many went."""
++        raise NotImplementedError
++
++    @abstractmethod
++    def list_pending_deletions(self, *, limit: int = 50) -> list[dict[str, Any]]:
++        """Queued deletions, oldest first: {image_id, original_url, thumb_url, deleted_at}."""
++        raise NotImplementedError
++
++    @abstractmethod
++    def count_pending_deletions(self) -> int:
++        raise NotImplementedError
++
+     # -- scenes (each write returns the whole scene: fields, labels, rules, plus sync_required:
+     #    whether stored images need POST /api/scenes/sync; a delete returns {id, code, sync_required})
+ 
+diff --git a/backend/app/services/retrieval/delete_image.py b/backend/app/services/retrieval/delete_image.py
+index 5f52255..37ca5eb 100644
+--- a/backend/app/services/retrieval/delete_image.py
++++ b/backend/app/services/retrieval/delete_image.py
+@@ -3,7 +3,8 @@
+ 1. delete_image: TX delete images (+ CASCADE deps) → insert image_deletions
+ 2. process_deletion_queue: drain image_deletions → Qdrant delete + S3 delete → remove row
+    (DELETE /api/images/{image_id} runs this for its own row right away, DeletionWorker.clean_up;
+-   what fails there stays queued for `python -m app.workers.process_deletions`)
++   what fails there stays queued for `python -m app.workers.process_deletions` or
++   POST /api/image-deletions/process, the task center's 「立即清理」)
+ 
+ Qdrant choice (M4): delete by uuid on the **current** collection via VectorStorePort.
+ Multi-collection sweep (all embedding_models.collection) deferred — document for later.
+@@ -64,6 +65,16 @@ def _clean_up(
+     metadata.complete_deletion(image_id)
+ 
+ 
++def _failure(image_id: Any, exc: Exception) -> dict[str, Any]:
++    """One item that stays queued. `error` is the raw cause, for the operator's CLI output only;
++    `code` / `detail` are what an HTTP client may see (POST /api/image-deletions/process)."""
++    if isinstance(exc, err.AppError):
++        code, detail = exc.code, err.client_detail(exc)
++    else:
++        code, detail = "INTERNAL_ERROR", "cleanup failed"
++    return {"image_id": str(image_id), "error": f"{type(exc).__name__}: {exc}", "code": code, "detail": detail}
++
++
+ def process_deletion_queue(
+     metadata: MetadataStorePort,
+     vectors: VectorStorePort,
+@@ -89,12 +100,7 @@ def process_deletion_queue(
+             logger.info("deletion queue completed id=%s", image_id)
+         except Exception as exc:
+             logger.exception("deletion queue item failed id=%s", image_id)
+-            failed.append(
+-                {
+-                    "image_id": str(image_id),
+-                    "error": f"{type(exc).__name__}: {exc}",
+-                }
+-            )
++            failed.append(_failure(image_id, exc))
+     return {
+         "ok": len(failed) == 0,
+         "scanned": len(pending),
+diff --git a/backend/app/services/retrieval/index_image.py b/backend/app/services/retrieval/index_image.py
+index 2a6e6e3..62debda 100644
+--- a/backend/app/services/retrieval/index_image.py
++++ b/backend/app/services/retrieval/index_image.py
+@@ -7,6 +7,11 @@ collection → image_embeddings ledger records the payload_version just pushed.
+ 
+ Path-based local disk store is legacy MVP; when storage is present we prefer
+ put_original_and_thumb and DB https URLs (no path column in PG).
++
++Task center: execute_batch / execute_file write one index_tasks row per file right after it
++(succeeded with the image id, or failed with the code and the client-safe detail). Best effort:
++a record that cannot be written is logged and the index result stands. execute_one records
++nothing (it is the indexing itself).
+ """
+ 
+ from __future__ import annotations
+@@ -14,6 +19,7 @@ from __future__ import annotations
+ import hashlib
+ import logging
+ import os
++import time
+ from pathlib import Path
+ from typing import Any, Optional, Sequence
+ from uuid import UUID
+@@ -23,6 +29,7 @@ from app.core.enums import (
+     DEFAULT_SOURCE_TYPE,
+     LICENSE,
+     SOURCE_TYPE,
++    IndexTaskStatus,
+     LabelStatus,
+ )
+ from app.services.retrieval.active_model import ActiveModel
+@@ -307,37 +314,99 @@ class IndexImageUseCase:
+     def execute_batch(
+         self,
+         items: list[dict[str, Any]],
++        *,
++        trace_id: str | None = None,
+     ) -> dict[str, Any]:
++        """Index each item on its own: {indexed, failed}. Each file's outcome is recorded in
++        index_tasks right after it (task center), with trace_id."""
+         if not items:
+             raise err.index_empty_request()
+         indexed: list[dict[str, Any]] = []
+         failed: list[dict[str, Any]] = []
+         for item in items:
+-            label = item.get("filename") or item.get("source_path") or "unknown"
++            started = time.perf_counter()
+             try:
+-                indexed.append(
+-                    self.execute_one(
+-                        image_bytes=item.get("image_bytes"),
+-                        source_path=item.get("source_path"),
+-                        filename=item.get("filename"),
+-                        category=item.get("category"),
+-                        category_id=item.get("category_id"),
+-                        tags=item.get("tags"),
+-                        scene=item.get("scene"),
+-                        scenes=item.get("scenes"),
+-                        **{key: item.get(key) for key in FOOD_FIELDS},
+-                        label_status=item.get("label_status"),
+-                        source_type=item.get("source_type"),
+-                        license=item.get("license"),
+-                        description=item.get("description"),
+-                    )
+-                )
+-            except err.AppError as exc:
+-                if err.is_internal(exc):  # the client sees the public text; the cause stays in the log
+-                    logger.error("index item failed: %s | %s: %s", label, exc.code, exc.detail, exc_info=exc)
+-                failed.append({"filename": label, "error": exc.code, "detail": err.client_detail(exc)})
+-            except Exception:
+-                # Details go to the log; the item reports a generic failure.
+-                logger.exception("index item failed: %s", label)
+-                failed.append({"filename": label, "error": "INTERNAL_ERROR", "detail": "internal error"})
++                out = self._index_item(item)
++            except Exception as exc:
++                failure = _failure(_item_label(item), exc)
++                failed.append(failure)
++                self._record(_failure_record(failure, started, trace_id))
++            else:
++                indexed.append(out)
++                self._record(_success_record(item, out, started, trace_id))
+         return {"indexed": indexed, "failed": failed}
++
++    def execute_file(self, item: dict[str, Any], *, trace_id: str | None = None) -> dict[str, Any]:
++        """One file (POST /api/index/file), recorded like a batch item; its failure is raised."""
++        started = time.perf_counter()
++        try:
++            out = self._index_item(item)
++        except Exception as exc:
++            self._record(_failure_record(_failure(_item_label(item), exc), started, trace_id))
++            raise
++        self._record(_success_record(item, out, started, trace_id))
++        return out
++
++    def _index_item(self, item: dict[str, Any]) -> dict[str, Any]:
++        return self.execute_one(
++            image_bytes=item.get("image_bytes"),
++            source_path=item.get("source_path"),
++            filename=item.get("filename"),
++            category=item.get("category"),
++            category_id=item.get("category_id"),
++            tags=item.get("tags"),
++            scene=item.get("scene"),
++            scenes=item.get("scenes"),
++            **{key: item.get(key) for key in FOOD_FIELDS},
++            label_status=item.get("label_status"),
++            source_type=item.get("source_type"),
++            license=item.get("license"),
++            description=item.get("description"),
++        )
++
++    def _record(self, row: dict[str, Any]) -> None:
++        """Best effort: the index result stands when its record cannot be written."""
++        try:
++            self._metadata.record_index_tasks([row])
++        except Exception:
++            logger.exception("index task record not written: %s %s", row.get("filename"), row.get("status"))
++
++
++def _item_label(item: dict[str, Any]) -> str:
++    return str(item.get("filename") or item.get("source_path") or "unknown")
++
++
++def _failure(label: str, exc: Exception) -> dict[str, Any]:
++    """{filename, error, detail} as a client may see it; an internal cause stays in the log."""
++    if isinstance(exc, err.AppError):
++        if err.is_internal(exc):
++            logger.error("index item failed: %s | %s: %s", label, exc.code, exc.detail, exc_info=exc)
++        return {"filename": label, "error": exc.code, "detail": err.client_detail(exc)}
++    logger.error("index item failed: %s", label, exc_info=exc)
++    return {"filename": label, "error": "INTERNAL_ERROR", "detail": "internal error"}
++
++
++def _elapsed_ms(started: float) -> int:
++    return int((time.perf_counter() - started) * 1000)
++
++
++def _success_record(item: dict[str, Any], out: dict[str, Any], started: float, trace_id: str | None) -> dict[str, Any]:
++    return {
++        "filename": _item_label(item),
++        "status": IndexTaskStatus.SUCCEEDED,
++        "image_id": out["id"],
++        "new_image": bool(out.get("created", True)),
++        "duration_ms": _elapsed_ms(started),
++        "trace_id": trace_id,
++    }
++
++
++def _failure_record(failure: dict[str, Any], started: float, trace_id: str | None) -> dict[str, Any]:
++    return {
++        "filename": failure["filename"],
++        "status": IndexTaskStatus.FAILED,
++        "error_code": failure["error"],
++        "error_detail": failure["detail"],
++        "duration_ms": _elapsed_ms(started),
++        "trace_id": trace_id,
++    }
+diff --git a/backend/config/param/enums.yaml b/backend/config/param/enums.yaml
+index c985f08..7a31c5a 100644
+--- a/backend/config/param/enums.yaml
++++ b/backend/config/param/enums.yaml
+@@ -108,3 +108,11 @@ review_status:
+   - {value: pending, label: 待审核}
+   - {value: accepted, label: 已通过}
+   - {value: rejected, label: 已拒绝}
++
++index_task_status:
++  label: 入库任务结果
++  description: 入库任务记录（index_tasks）的结果；入库是同步的，只记最终结果
++  editable: false
++  values:
++  - {value: succeeded, label: 成功, description: 得到一张图片（新入库或已存在）}
++  - {value: failed, label: 失败, description: 没有写入任何东西}
+diff --git a/backend/tests/test_index_image_identity.py b/backend/tests/test_index_image_identity.py
+index 01f2c56..0ff8ad4 100644
+--- a/backend/tests/test_index_image_identity.py
++++ b/backend/tests/test_index_image_identity.py
+@@ -57,6 +57,13 @@ class FakeMetadata:
+         self.ledger = {}
+         self.ledger_fails = False
+         self.categories = categories or {}
++        self.tasks = []  # index_tasks rows, in write order
++        self.tasks_fail = False
++
++    def record_index_tasks(self, rows):
++        if self.tasks_fail:
++            raise AppError("INDEX_POSTGRES_FAILED", "index_tasks down", http_status=502)
++        self.tasks.extend(dict(row) for row in rows)
+ 
+     def upsert_image_embedding(self, *, model_id, image_id, synced_version=None):
+         if self.ledger_fails:
+@@ -263,5 +270,83 @@ class IndexImageIdentityTests(unittest.TestCase):
+         self.assertIsNone(out["category_id"])
+ 
+ 
++class IndexTaskRecordTests(unittest.TestCase):
++    """Each file of a batch / single upload leaves one index_tasks record (task center)."""
++
++    def setUp(self):
++        self.tmp = tempfile.TemporaryDirectory()
++        self.addCleanup(self.tmp.cleanup)
++        self.meta = FakeMetadata(categories={"dish.steak": 7})
++
++    def use_case(self, vectors=None):
++        return IndexImageUseCase(
++            FakeEmbedding(), vectors or FakeVectors(), self.meta, model=MODEL, indexed_dir=self.tmp.name
++        )
++
++    def test_batch_records_each_file_in_order_with_the_trace_id(self):
++        out = self.use_case().execute_batch(
++            [{"image_bytes": _png((1, 1, 1)), "filename": "ok.png"}, {"image_bytes": b"junk", "filename": "bad.png"}],
++            trace_id="t-1",
++        )
++        self.assertEqual((len(out["indexed"]), len(out["failed"])), (1, 1))
++        ok, bad = self.meta.tasks
++        self.assertEqual(
++            (ok["filename"], ok["status"], ok["image_id"], ok["new_image"], ok["trace_id"]),
++            ("ok.png", "succeeded", out["indexed"][0]["id"], True, "t-1"),
++        )
++        self.assertNotIn("error_code", ok)
++        self.assertEqual(
++            (bad["filename"], bad["status"], bad["error_code"], bad["error_detail"], bad["trace_id"]),
++            ("bad.png", "failed", "INDEX_BAD_IMAGE", "cannot decode image", "t-1"),
++        )
++        self.assertNotIn("image_id", bad)
++        for row in self.meta.tasks:
++            self.assertIsInstance(row["duration_ms"], int)
++            self.assertGreaterEqual(row["duration_ms"], 0)
++
++    def test_the_same_bytes_again_are_recorded_as_not_new(self):
++        data = _png((2, 2, 2))
++        self.use_case().execute_batch([{"image_bytes": data, "filename": "a.png"}])
++        self.use_case().execute_batch([{"image_bytes": data, "filename": "again.png"}])
++        self.assertEqual([row["new_image"] for row in self.meta.tasks], [True, False])
++        self.assertEqual(len({row["image_id"] for row in self.meta.tasks}), 1)
++
++    def test_an_internal_failure_is_recorded_with_its_public_text_only(self):
++        with self.assertLogs("retrieval.index", level="ERROR"):
++            out = self.use_case(FakeVectors(fail=True)).execute_batch(
++                [{"image_bytes": _png((3, 3, 3)), "filename": "q.png"}]
++            )
++        (row,) = self.meta.tasks
++        self.assertEqual((row["error_code"], row["error_detail"]), ("INDEX_QDRANT_FAILED", "vector store write failed"))
++        self.assertEqual(out["failed"][0]["detail"], "vector store write failed")  # same text as the response
++        self.assertNotIn("qdrant down", repr(self.meta.tasks))
++
++    def test_execute_file_records_and_still_raises_its_failure(self):
++        uc = self.use_case()
++        out = uc.execute_file({"image_bytes": _png((4, 4, 4)), "filename": "one.png"}, trace_id="t-2")
++        with self.assertRaises(AppError) as caught:
++            uc.execute_file({"image_bytes": b"junk", "filename": "junk.png"}, trace_id="t-3")
++        self.assertEqual(caught.exception.code, "INDEX_BAD_IMAGE")
++        self.assertEqual(
++            [(r["filename"], r["status"], r["trace_id"]) for r in self.meta.tasks],
++            [("one.png", "succeeded", "t-2"), ("junk.png", "failed", "t-3")],
++        )
++        self.assertEqual(self.meta.tasks[0]["image_id"], out["id"])
++
++    def test_a_record_that_cannot_be_written_does_not_change_the_index_result(self):
++        self.meta.tasks_fail = True
++        with self.assertLogs("retrieval.index", level="ERROR") as logs:
++            out = self.use_case().execute_batch([{"image_bytes": _png((5, 5, 5)), "filename": "kept.png"}])
++            single = self.use_case().execute_file({"image_bytes": _png((6, 6, 6)), "filename": "kept2.png"})
++        self.assertEqual(len(out["indexed"]), 1)
++        self.assertTrue(single["id"])
++        self.assertEqual(len(self.meta.rows), 2)  # both images stored
++        self.assertTrue(any("index task record not written" in line for line in logs.output))
++
++    def test_execute_one_records_nothing(self):
++        self.use_case().execute_one(image_bytes=_png((7, 7, 7)))
++        self.assertEqual(self.meta.tasks, [])
++
++
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/backend/tests/test_models_schema.py b/backend/tests/test_models_schema.py
+index ee63a98..f54bbc5 100644
+--- a/backend/tests/test_models_schema.py
++++ b/backend/tests/test_models_schema.py
+@@ -15,11 +15,12 @@ from app.db.base import Base
+ 
+ BACKEND = Path(__file__).resolve().parents[1]
+ 
+-# The 12 tables of contract v0.1 + image_foods (0006); ensure_schema checks whatever app.models registers
++# The 12 tables of contract v0.1 + image_foods (0006) + index_tasks (0008); ensure_schema checks
++# whatever app.models registers
+ TABLES = {
+     "heating_groups", "categories", "category_names", "images", "image_deletions", "scenes",
+     "scene_labels", "scene_rules", "image_scenes", "embedding_models", "image_embeddings",
+-    "external_candidates", "image_foods",
++    "external_candidates", "image_foods", "index_tasks",
+ }
+ # editable enum (app.core.enums.EDITABLE_ENUMS) -> the column that stores it
+ EDITABLE_COLUMNS = {
+@@ -60,6 +61,7 @@ class ModelsSchemaTests(unittest.TestCase):
+             ("embedding_models", "distance"): enums.Distance,
+             ("embedding_models", "status"): enums.ModelStatus,
+             ("external_candidates", "review_status"): enums.ReviewStatus,
++            ("index_tasks", "status"): enums.IndexTaskStatus,
+         }
+         for (table, column), enum_cls in expected.items():
+             col_type = self.tables[table].c[column].type
+@@ -122,7 +124,8 @@ class MigrationChainTests(unittest.TestCase):
+         cfg = Config(str(BACKEND / "alembic.ini"))
+         cfg.set_main_option("script_location", str(BACKEND / "alembic"))
+         script = ScriptDirectory.from_config(cfg)
+-        self.assertEqual(script.get_heads(), ["20261109_0007"])
++        self.assertEqual(script.get_heads(), ["20261111_0008"])
++        self.assertEqual(script.get_revision("20261111_0008").down_revision, "20261109_0007")
+         self.assertEqual(script.get_revision("20261109_0007").down_revision, "20261109_0006")
+         self.assertEqual(script.get_revision("20261109_0006").down_revision, "20261109_0005")
+         self.assertEqual(script.get_revision("20261109_0005").down_revision, "20261109_0004")
+diff --git a/backend/tests/test_pg_live.py b/backend/tests/test_pg_live.py
+index a4ed9ba..0ed780d 100644
+--- a/backend/tests/test_pg_live.py
++++ b/backend/tests/test_pg_live.py
+@@ -348,6 +348,53 @@ class PgLiveTests(unittest.TestCase):
+         self.assertIsNone(store.get_image_by_uuid(iid))
+         self.assertEqual([r["image_id"] for r in store.list_pending_deletions()], [iid])
+ 
++    # ---- task center: index_tasks and the deletion queue count ----------
++
++    def test_index_records_list_with_the_image_as_it_is_now_and_clear_by_status(self):
++        from app.core.errors import AppError
++
++        cat = self.seed_catalog()
++        store = self.store()
++        kept = self.insert(store, 1, category_id=cat["steak"], label_status="verified")
++        gone = self.insert(store, 2)
++        store.record_index_tasks([  # one transaction: the same created_at, id breaks the tie
++            {"filename": "gone.jpg", "status": "succeeded", "image_id": gone, "new_image": True,
++             "duration_ms": 640, "trace_id": "t-1"},
++            {"filename": "junk.png", "status": "failed", "error_code": "INDEX_BAD_IMAGE",
++             "error_detail": "cannot decode image", "duration_ms": 4, "trace_id": "t-2",
++             "image_id": kept},  # a failed record never keeps an image id
++        ])
++        store.record_index_tasks([{"filename": "x" * 300, "status": "succeeded", "image_id": kept, "new_image": False}])
++        store.enqueue_image_deletion(gone)
++
++        result = store.list_index_tasks()
++        self.assertEqual((result["total"], result["counts"]), (3, {"succeeded": 2, "failed": 1}))
++        newest, failed, deleted = result["items"]
++        self.assertEqual((len(newest["filename"]), newest["filename"][-1]), (255, "…"))  # clipped
++        self.assertEqual(
++            (newest["image_exists"], newest["category_name"], newest["image_label_status"], newest["new_image"]),
++            (True, "牛排", "verified", False),
++        )
++        self.assertEqual((newest["image_id"], newest["thumb_url"]), (kept, "https://cdn/t/1.webp"))
++        self.assertEqual((failed["image_id"], failed["error_code"], failed["image_exists"]), (None, "INDEX_BAD_IMAGE", False))
++        self.assertEqual((deleted["image_id"], deleted["image_exists"], deleted["thumb_url"]), (gone, False, None))
++        self.assertIsInstance(deleted["created_at"], str)
++
++        page = store.list_index_tasks(status="succeeded", page=2, page_size=1)
++        self.assertEqual((page["total"], [r["filename"] for r in page["items"]]), (2, ["gone.jpg"]))
++        self.assertEqual(page["counts"], {"succeeded": 2, "failed": 1})
++
++        with self.assertRaises(AppError) as ctx:  # a succeeded record names its image
++            store.record_index_tasks([{"filename": "a.png", "status": "succeeded"}])
++        self.assertEqual(ctx.exception.code, "INDEX_POSTGRES_FAILED")
++        self.assertEqual(store.list_index_tasks()["total"], 3)
++
++        self.assertEqual(store.clear_index_tasks(status="failed"), 1)
++        self.assertEqual(store.list_index_tasks()["counts"], {"succeeded": 2, "failed": 0})
++        self.assertEqual(store.count_pending_deletions(), 1)
++        store.complete_deletion(gone)
++        self.assertEqual(store.count_pending_deletions(), 0)
++
+     def test_the_image_admin_reads_edits_and_deletes_through_the_vector_store(self):
+         from types import SimpleNamespace
+         from unittest.mock import Mock, patch
+diff --git a/backend/tests/test_retrieval_http.py b/backend/tests/test_retrieval_http.py
+index 42038f3..8785afc 100644
+--- a/backend/tests/test_retrieval_http.py
++++ b/backend/tests/test_retrieval_http.py
+@@ -30,8 +30,8 @@ class RetrievalHttpTests(unittest.TestCase):
+     def setUp(self):
+         self.calls = {}
+ 
+-        def execute_batch(items):
+-            self.calls["index"] = {"items": items, "off_loop": _off_event_loop()}
++        def execute_batch(items, *, trace_id=None):
++            self.calls["index"] = {"items": items, "trace_id": trace_id, "off_loop": _off_event_loop()}
+             return {
+                 "indexed": [{
+                     "id": "abc", "filename": "a.png", "original_url": "https://cdn/o/abc.png",
+@@ -41,10 +41,10 @@ class RetrievalHttpTests(unittest.TestCase):
+                 "failed": [],
+             }
+ 
+-        def execute_one(**kwargs):
+-            self.calls["index_file"] = {**kwargs, "off_loop": _off_event_loop()}
++        def execute_file(item, *, trace_id=None):
++            self.calls["index_file"] = {**item, "trace_id": trace_id, "off_loop": _off_event_loop()}
+             return {
+-                "id": "single", "filename": kwargs["filename"],
++                "id": "single", "filename": item["filename"],
+                 "original_url": "https://cdn/o/single.png", "thumb_url": "https://cdn/t/single.webp",
+                 "scenes": ["general"], "label_status": "unlabeled", "width": 8, "height": 6,
+             }
+@@ -63,7 +63,7 @@ class RetrievalHttpTests(unittest.TestCase):
+             infra=infra,
+             model=MODEL,
+             embedding=SimpleNamespace(model_path="config/model/dino/multitask_cls.onnx"),
+-            index_uc=SimpleNamespace(execute_batch=execute_batch, execute_one=execute_one),
++            index_uc=SimpleNamespace(execute_batch=execute_batch, execute_file=execute_file),
+             search_uc=SimpleNamespace(execute=search),
+         )
+         self.runtime = ApplicationState(
+@@ -102,6 +102,8 @@ class RetrievalHttpTests(unittest.TestCase):
+         self.assertEqual([i["image_bytes"] for i in items], [b"aaa", b"bbb"])
+         self.assertEqual({i["category"] for i in items}, {"dish.steak"})
+         self.assertTrue(self.calls["index"]["off_loop"])
++        # the task records of this request carry its trace id
++        self.assertEqual(self.calls["index"]["trace_id"], response.json()["trace_id"])
+ 
+     def test_index_without_files_is_400(self):
+         response = self.client.post("/api/index", data={"category": "x"})
+@@ -120,7 +122,7 @@ class RetrievalHttpTests(unittest.TestCase):
+         self.assertEqual(body["indexed"][0]["filename"], "single.png")
+         self.assertEqual(body["failed"], [])
+         self.assertEqual(self.calls["index_file"], {
+-            "image_bytes": b"image-bytes", "filename": "single.png", "off_loop": True,
++            "image_bytes": b"image-bytes", "filename": "single.png", "trace_id": body["trace_id"], "off_loop": True,
+         })
+         self.assertNotIn("index", self.calls)
+ 
+@@ -161,13 +163,15 @@ class RetrievalHttpTests(unittest.TestCase):
+             ("INDEX_QDRANT_FAILED", 502, "vector store write failed"),
+         ):
+             with self.subTest(code=code):
+-                execute_one = Mock(side_effect=AppError(code, "index failed", http_status=status))
+-                self.stack.index_uc.execute_one = execute_one
++                execute_file = Mock(side_effect=AppError(code, "index failed", http_status=status))
++                self.stack.index_uc.execute_file = execute_file
+                 response = self.client.post("/api/index/file", files={"file": ("single.png", b"image", "image/png")})
+                 self.assertEqual(response.status_code, status, response.text)
+                 body = response.json()
+                 self.assertEqual((body["error"], body["detail"]), (code, detail))
+-                execute_one.assert_called_once_with(image_bytes=b"image", filename="single.png")
++                execute_file.assert_called_once_with(
++                    {"image_bytes": b"image", "filename": "single.png"}, trace_id=body["trace_id"]
++                )
+ 
+     def test_index_file_openapi_declares_only_one_required_binary_file(self):
+         document = self.client.get("/openapi.json").json()
+diff --git a/docs/image-search-pg-v01-data-contract.md b/docs/image-search-pg-v01-data-contract.md
+index 582a1c1..289ad00 100644
+--- a/docs/image-search-pg-v01-data-contract.md
++++ b/docs/image-search-pg-v01-data-contract.md
+@@ -831,6 +831,42 @@ PATCH 字段（不传 = 不变）：
+ 
+ ---
+ 
++## 6.4 入库结果历史记录（2026-11-11 America/Denver · 工作区已有接口，FE 待接线，未实测）
++
++> 依据新 C 仓本轮实际 HEAD `54547ad960fed37c9c742fa96d2912953a28ca3d` 及未提交差异。`backend/app/{api/v1/tasks.py,schemas/tasks.py,repositories/tasks.py,services/retrieval/task_center.py}`、`models/task.py`、迁移 `20261111_0008`、FE `entities/task` 为当前工作区成果，**不等于已合并、已迁移或已验收**。本刀只补文档，无应用/DB/服务/测试操作。完整设计/实施交接为共享电脑 `/workspace/deliverables/ingest-tasks-contract.md`，本节压缩记录现有 wire 与最小范围。
++
++### 6.4.1 已有查询与字段
++
++- **GET `/api/index-tasks`**（已在 `api/router.py` 注册，无额外 `/v1`），无 body。query：`status` 可省略（全部），否则仅 `succeeded` / `failed`；`page=1`（1..1000000）、`page_size=50`（1..100）。已有 FE `listIndexTasks` 默认显式发 `page_size=20`，与 BE 缺省 50 区分；本轮页面沿 FE 每页 20。
++- 只需 catalog/PG，不依赖编码器/Qdrant/OSS 就绪。HTTP 200：`{ok:true,status:"succeeded"|"failed"|null,page:int,page_size:int,total:int,counts:{succeeded:int,failed:int},items:IndexTaskItem[]}`，业务键必返，空 items 为 []。`total` 是当前筛选**记录行数**，counts 是不受筛选/分页影响的全历史两态行数，不是图片去重数/请求数/本页数。
++- OFFSET/LIMIT，`created_at DESC, id DESC`（id 为同时间 tie-breaker）。counts/items 分开 SQL，无整页/跨页一致快照保证，并发新增或外部清记录可令页偏移；超出总页数不自动纠正。
++- `IndexTaskItem`：`id:int`（bigint identity，记录 ID，非图片 UUID）、`filename:string`、`status:"succeeded"|"failed"`；以下键必返且可 null：`image_id:UUID string|null`、`new_image:bool|null`、`error_code:string|null`、`error_detail:string|null`、`duration_ms:int|null`、`trace_id:string|null`、`created_at:string|null`（schema 默认 null）、`image:IndexTaskImage|null`。其余 nullable 键无 schema 缺省值。
++- `IndexTaskImage`：`id:string` 必填，`thumb_url:string|null=null`、`category_id:int|null=null`、`category:string|null=null`（中文主名）、`label_status:"unlabeled"|"auto"|"verified"|null=null`。LEFT JOIN 取得**当前图片投影**，不是入库时快照。成功图删除后历史仍 succeeded、image_id 保留、image=null；同 ID 重新入库后可能重新有投影。无缩略图不等于图已删。
++- **无独立 `GET /api/index-tasks/{id}`**。本轮明细直接用列表 item 全字段；图库 `GET /api/images/{image_id}` 不是任务记录详情，本轮不依赖它、不新增详情 API。
++- 成功列表顶层无 trace_id，当前 GET trace 取 `X-Trace-Id`；item.trace_id 是原入库请求 trace，不能混用。失败沿 §6 信封：`VALIDATION_ERROR` 422、`NOT_READY` 503、`LIST_POSTGRES_FAILED` 502；schema/建连接失败还可 `INDEX_POSTGRES_FAILED` 502；未预期错误 `INTERNAL_ERROR` 500。
++
++### 6.4.2 结果粒度、失败与保留边界
++
++- `POST /api/index` / `/api/index/file` 正常进入执行后，**每文件完成即独立记最终结果**；多文件请求部分成功为不同 succeeded/failed 行，无 request-level partial/running/progress/job 状态。相同图片重复处理可多条成功，`new_image=false` 代表沿用已有图标注，失败为 null。
++- `created_at` 为 PG 插入事务时间（timestamptz，正常非空），非请求/文件创建时间；`duration_ms` 是服务端单文件用例耗时（正常非负、可 0），不是上传/排队/后续 manual 场景 PUT 耗时。前端解析自带时区后以 America/Denver（MST）展示，null 显示未提供。
++- 成功记录只表示 index 用例成功，FE 后续人工场景调整及 notes 不回写记录。failed 表示用例抛错，**不保证零写入或跨存储完全回滚**（后阶段失败可能已有 PG/OSS/Qdrant 副作用）；不能沿 enum 陈旧注释宣称“失败未写任何东西”。
++- 解析/预读上传/整请求格式校验/NOT_READY 在执行前拒绝不产生逐文件记录；已执行失败被记录后，HTTP 适配器仍可能把全失败提升为非 2xx。因此非 200 不等于没历史；浏览器超时/取消不保证服务端停止。
++- 历史失败用 item 的 `error_code/error_detail`（非 index 响应 failed[].error/detail），公开说明已净化；未知异常为 INTERNAL_ERROR。filename 仅文本、可能为源路径，不作图片 URL/文件恢复 token。
++- 记录写入独立事务、best effort：失败只日志，不改变入库结果，无可靠补偿重试保证，可缺行。裁剪上限 filename 255、error_code 64、error_detail 1000、trace_id 128 字符；不伪造被截原文。
++- image_id 无 FK，删图保留历史。已查引用未发现 TTL/自动轮转，不承诺永久或固定天数；已有人工清记录能力及 downgrade 丢表，保留政策另刀。0008 文件存在不证明实际 DB 已迁移，schema 检查不自动迁移，本刀不执行迁移。
++
++### 6.4.3 最小 FE 接线规范（待实施）
++
++- 历史列表只做全部/成功/失败、分页、手动刷新、已有明细；与本会话 jobs（pending/running/success/error/cancelled、File/进度/本地重传）明确分区、计数不混算。刷新/卸载丢本地队列不删除服务端历史；不假称 abort 撤销服务端。
++- 复用 `entities/task/listIndexTasks`、DTO 与共享 client/error，映射 `page_size→pageSize`、`image_id→imageId`、`new_image→newImage`、`error_code/detail→errorCode/Detail`、`duration_ms→durationMs`、`trace_id→traceId`、`created_at→createdAt`、`image.thumb_url→image.imageUrl`、`category_id/label_status→categoryId/labelStatus`；其余原名。nullable bool/0 不得变成假默认；现有 mapper 宽松兜底/过滤不是严格协议保障，关键缺字段/整页被滤掉不能伪装正常空页。
++- 首入/重新进入/分页筛选或 baseUrl 改变读取，切筛选/页大小回 1；手动刷新保留当前页/筛选。成功后发现页越界只有限一次回合法末页重读，total=0 回第一页；持续并发空页提示刷新，不无限循环。
++- 首次加载、全空、筛选空、网络/HTTP/JSON/协议失败明确区分；刷新失败可留旧行但标旧数据，不能归零/回退成本地假历史。带取消信号及请求 token 防迟到覆盖；baseUrl 改变清旧历史/详情；无后台轮询、无页面 fetch、不继续加厚 ManagementViews。
++- 明细只读 item；选中行不在刷新返回页时关闭提示重新选择，不推断记录已删除。失败/error/filename 纯文本转义，缺图/缺字段显示占位。容器交设计，不修改受保护 Dialog/.qa。
++- 既有 `DELETE /api/index-tasks?status=...`、`GET /api/image-deletions`、`POST /api/image-deletions/process` **不纳本轮**，不展示清空/清理/删除操作；process 不是失败入库重试。无服务端 cancel/replay/retry/progress API，不造异步 job；失败可展示，重传需用户重新提供 File。
++- 本范围**无需新增 BE API/schema**，列表已有明细；需 FE 接线及独立测试验证未提交实现/迁移部署。测试应覆盖真实分页/统计/trace/null/重复图/混合失败/best-effort 缺行、服务端和本地状态分离、刷新越界/错误/迟到请求。本刀不执行验收，不借旧 scene 测试结论。
++
++---
++
+ ## 7. 明确不作本刀范围（含 M0 OUT OF SCOPE）
+ 
+ | 项 | 归属 |
+@@ -881,6 +917,7 @@ PATCH 字段（不传 = 不变）：
+ 
+ | 日期 | 说明 |
+ |---|---|
++| 2026-11-11 | **入库结果历史最小契约 §6.4（America/Denver）**：按本轮 HEAD 54547ad 及未提交任务链核现有 GET /api/index-tasks 的 wire/分页/全历史 counts/列表内明细；明确逐文件同步终态、best-effort 缺行、当前图片投影及本地上传队列边界。FE 只读历史/刷新/分页/明细待接线，无新增 BE API，不纳清记录/删除清理/异步 job/重试。0008 及并行源码存在不证明已合并/迁移/验收。本刀只改文档、未测试、未 commit。 |
+ | 2026-11-04 | **M1 草案**：按《图搜图数据结构设计 v0.1》落 12 表字典、Qdrant/S3/API 差量、作废旧 §9/双轨；ASSUMPTION A1–A8 |
+ | 2026-11-04 | **M0 总裁已拍**：空库重建（无迁移脚本）；FlyB 本轮 OUT OF SCOPE；`scene_labels` 纳入冻结；ASSUMPTION A2–A4 改写 |
+ | 2026-11-05 | **§6.1 Wire/结果卡草案（FE 对齐刀）**：Search/List 字段表、external_candidates 最小 wire、FE snake→camel 映射、破坏性清单与 P1–P12 待拍板；更新 §6/§7 交叉引用；未 commit |
+diff --git a/frontend/src/components/ManagementViews.tsx b/frontend/src/components/ManagementViews.tsx
+index 8b9b581..a6c7853 100644
+--- a/frontend/src/components/ManagementViews.tsx
++++ b/frontend/src/components/ManagementViews.tsx
+@@ -1,6 +1,7 @@
+ import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+ import { ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Circle, Clock3, CloudUpload, FolderOpen, ImagePlus, Images, Info, Layers3, Leaf, ListChecks, LoaderCircle, Pencil, Plus, RotateCcw, Search, Square, Tags, Trash2, X, XCircle } from 'lucide-react'
+ import { Dialog } from './Dialog'
++import { TasksPage } from '../pages/tasks'
+ import { categoryLabel, type CategoryTree } from '../entities/category'
+ import { indexImage, type ImageDeleteResult, type LabelStatus, type LibraryImageItem } from '../entities/image'
+ import { DEFAULT_SCENE, sceneDisplayLabel, toApiSceneCode, sceneError, writeMembership, type VectorSync } from '../entities/scene'
+@@ -470,7 +471,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
+   })
+ 
+   return <div className="mg-page">
+-    <div className="mg-page-toolbar">
++    {view !== 'tasks' && <div className="mg-page-toolbar">
+       {view === 'library' && <>
+         <label className="mg-search"><Search size={17} /><input aria-label="搜索图库" placeholder="搜索图片名称或食材…" value={libraryQuery} onChange={event => setLibraryQuery(event.target.value)} />{libraryQuery && <button aria-label="清空搜索" onClick={() => setLibraryQuery('')}><X size={15} /></button>}</label>
+         <CategoryFilter tree={categoryTree.tree} loading={categoryTree.loading} loadError={categoryTree.error} onRetry={categoryTree.refresh} value={libraryCategoryId} onChange={id => { setLibraryCategoryId(id); setLibraryPage(1) }} />
+@@ -499,18 +500,14 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
+         <input ref={fileInput} type="file" className="mg-hidden" aria-label="选择待入库图片" accept="image/jpeg,image/png,image/webp" multiple onChange={event => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />
+         {dirSupported && <input ref={dirInput} type="file" className="mg-hidden" aria-label="选择待入库目录" accept="image/jpeg,image/png,image/webp" multiple {...({ webkitdirectory: '', directory: '' } as object)} onChange={event => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />}
+       </>}
+-      {view === 'tasks' && <>
+-        <div className="mg-tabs" role="tablist" aria-label="任务状态">{taskStatuses.map((status, index) => <button key={status} id={`task-tab-${index}`} role="tab" aria-selected={taskStatus === status} aria-controls="task-panel" tabIndex={taskStatus === status ? 0 : -1} className={taskStatus === status ? 'active' : ''} onClick={() => setTaskStatus(status)} onKeyDown={event => navigateTaskTabs(event, index)}>{status}</button>)}</div>
+-        <button className="mg-btn mg-secondary" onClick={() => onNavigate('import')}><Plus size={16} />准备图片</button>
+-      </>}
+       {view === 'ingredients' && <>
+         <label className="mg-search"><Search size={17} /><input aria-label="搜索食材草稿" placeholder="搜索食材名称或属性…" value={ingredientQuery} onChange={event => setIngredientQuery(event.target.value)} />{ingredientQuery && <button aria-label="清空食材搜索" onClick={() => setIngredientQuery('')}><X size={15} /></button>}</label>
+         <select className="mg-select" aria-label="食材类别筛选" value={ingredientCategory} onChange={event => setIngredientCategory(event.target.value)}><option>全部类别</option>{categories.map(category => <option key={category}>{category}</option>)}</select>
+         <span className="mg-toolbar-summary">{ingredients.length} 个食材草稿</span>
+         <button className="mg-btn mg-primary" onClick={() => openEditor()}><Plus size={17} />新建食材</button>
+       </>}
+-      <span className="mg-status"><span />{view === 'ingredients' ? '本地草稿模式' : view === 'import' || view === 'tasks' ? (indexing ? '入库进行中' : '自建入库已接入') : libraryLoading ? '图库加载中…' : libraryError ? '图库加载失败' : libraryConnected ? '图库已接入' : '图库未连接'}</span>
+-    </div>
++      <span className="mg-status"><span />{view === 'ingredients' ? '本地草稿模式' : view === 'import' ? (indexing ? '入库进行中' : '自建入库已接入') : libraryLoading ? '图库加载中…' : libraryError ? '图库加载失败' : libraryConnected ? '图库已接入' : '图库未连接'}</span>
++    </div>}
+ 
+     {view === 'library' && (() => {
+       const hasFilter = Boolean(debouncedLibraryQuery) || libraryCategoryId !== null || libraryLabelStatus !== '' || libraryScene !== sceneCatalog.defaultScene?.code
+@@ -638,7 +635,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
+       })}</div>}
+     </section><aside className="mg-import-aside"><section className="mg-panel mg-import-settings"><h2>批量标注</h2><p>对本批没有「单独标注」的图片统一生效，入库时一起写入。</p>
+       <AnnotationForm value={batchAnnotation} onChange={setBatchAnnotation} errors={batchErrors} categories={categoryTree} scenes={sceneView} disabled={indexing} />
+-      <p className="mg-help">逐张调用 <code>POST /api/index</code>；有场景调整的图片入库后再写人工纳入 / 排除。字节完全相同的图片只入库一次，再次上传沿用原有标注。进行中不可清空队列；离开页面后本会话队列不保留。</p>
++      <p className="mg-help">逐张调用 <code>POST /api/index</code>；有场景调整的图片入库后再写人工纳入 / 排除。字节完全相同的图片只入库一次，再次上传沿用原有标注。进行中不可清空队列；切换到入库任务仍保留本会话队列，整页刷新或离开数据管理宿主后不保留。停止等待不保证服务端未成功。</p>
+       {/* Stays at the bottom of the screen while the form scrolls */}
+       <div className="mg-import-run">
+       <p className="mg-import-tally"><span>已选 <strong>{jobs.length}</strong> 张 · {(totalBytes / 1024 / 1024).toFixed(2)} MB</span>{jobs.some(job => job.annotation) && <span>单独标注 <strong>{jobs.filter(job => job.annotation).length}</strong> 张</span>}</p>
+@@ -655,9 +652,13 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
+         {!indexing && retryable && <button type="button" className="mg-btn mg-secondary mg-full" disabled={!importReady} onClick={() => void startIndexing(true)}><RotateCcw size={15} />仅重试失败</button>}
+       </div>
+       </div></section>
+-      <div className="mg-workflow-note"><ListChecks size={18} /><h3>入库任务</h3><p>本批进度也会汇总到任务中心；无本会话任务时保持空态。</p><button className="mg-text-button" onClick={() => onNavigate('tasks')}>查看任务中心<ArrowRight size={15} /></button></div></aside></div>}
++      <div className="mg-workflow-note"><ListChecks size={18} /><h3>入库任务</h3><p>在任务中心的「本会话上传队列」查看本批进度；服务端入库记录只显示已记录的同步终态，可能缺行。</p><button className="mg-text-button" onClick={() => onNavigate('tasks')}>查看任务中心<ArrowRight size={15} /></button></div></aside></div>}
+ 
+-    {view === 'tasks' && <>
++    {view === 'tasks' && <TasksPage apiBase={apiBase} queue={<>
++      <div className="mg-page-toolbar">
++        <div className="mg-tabs" role="tablist" aria-label="任务状态">{taskStatuses.map((status, index) => <button key={status} id={`task-tab-${index}`} role="tab" aria-selected={taskStatus === status} aria-controls="task-panel" tabIndex={taskStatus === status ? 0 : -1} className={taskStatus === status ? 'active' : ''} onClick={() => setTaskStatus(status)} onKeyDown={event => navigateTaskTabs(event, index)}>{status}</button>)}</div>
++        <button className="mg-btn mg-secondary" onClick={() => onNavigate('import')}><Plus size={16} />准备图片</button>
++      </div>
+       <div className="mg-metrics">
+         <Metric label="正在处理" value={jobs.length ? String(runningCount + jobs.filter(j => j.status === 'pending' || j.status === 'cancelled').length) : '—'} detail={jobs.length ? '本会话队列' : '暂无本会话任务'} icon={CloudUpload} />
+         <Metric label="成功入库" value={jobs.length ? String(successCount) : '—'} detail={jobs.length ? '本会话成功' : '暂无本会话任务'} icon={Check} />
+@@ -674,8 +675,8 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
+             <div className="mg-task-detail" title={job.remoteId ?? job.error ?? ''}>{job.remoteId ? `id: ${job.remoteId}` : job.error ? job.error : '—'}</div>
+           </div>)}</div>}
+       </div></section>
+-      <div className="mg-info"><Info size={17} /><p>任务列表仅反映本浏览器会话的入库队列，刷新页面后清空；不使用假进度或假成功数据。</p></div>
+-    </>}
++      <div className="mg-info"><Info size={17} /><p>这里只显示本会话上传队列。刷新或离开数据管理宿主后不保留；浏览器停止等待、超时或离开不保证服务器未成功或未记记录。后续人工场景调整与 notes 只属本会话，不是历史记录的全流程结果。</p></div>
++    </>} />}
+ 
+     {view === 'ingredients' && <>
+       <section className="mg-panel">
+diff --git a/frontend/src/pages/tasks/index.ts b/frontend/src/pages/tasks/index.ts
+index fcef504..21d001b 100644
+--- a/frontend/src/pages/tasks/index.ts
++++ b/frontend/src/pages/tasks/index.ts
+@@ -1,2 +1 @@
+-/** Tasks page — ManagementViews tasks view. */
+-export {}
++export { TasksPage } from './TasksPage'
+diff --git a/frontend/src/shared/api/wire.ts b/frontend/src/shared/api/wire.ts
+index ec6abe5..b54b54a 100644
+--- a/frontend/src/shared/api/wire.ts
++++ b/frontend/src/shared/api/wire.ts
+@@ -442,6 +442,90 @@ export interface ImageDeleteResponseWire {
+   cleanup: 'done' | 'queued'
+ }
+ 
++// -- task center: /api/index-tasks, /api/image-deletions (schemas/tasks.py) ----------------
++
++/** System enum (app.core.enums.IndexTaskStatus): an index is synchronous, so only the outcome. */
++export type IndexTaskStatusWire = 'succeeded' | 'failed'
++
++/** schemas/tasks.py IndexTaskImage: the record's image as it is now. */
++export interface IndexTaskImageWire {
++  id: string
++  thumb_url: string | null
++  category_id: number | null
++  category: string | null
++  label_status: LabelStatusWire | null
++}
++
++/** schemas/tasks.py IndexTaskItem: one file of an index request. */
++export interface IndexTaskWire {
++  id: number
++  filename: string
++  status: IndexTaskStatusWire
++  /** Kept after the image is deleted; null when the file failed. */
++  image_id: string | null
++  /** false: the same bytes were stored before (their annotation was kept); null when failed. */
++  new_image: boolean | null
++  error_code: string | null
++  error_detail: string | null
++  duration_ms: number | null
++  trace_id: string | null
++  created_at: string | null
++  /** null when the file failed, or its image was deleted since. */
++  image: IndexTaskImageWire | null
++}
++
++/** GET /api/index-tasks?status=&page=&page_size= (newest first). */
++export interface IndexTaskListResponseWire {
++  ok: true
++  status: IndexTaskStatusWire | null
++  page: number
++  page_size: number
++  /** Records matching the filter. */
++  total: number
++  /** Every record by outcome, whatever the filter. */
++  counts: Record<IndexTaskStatusWire, number>
++  items: IndexTaskWire[]
++}
++
++/** DELETE /api/index-tasks?status= */
++export interface IndexTaskClearResponseWire {
++  ok: true
++  status: IndexTaskStatusWire
++  deleted: number
++}
++
++/** schemas/tasks.py ImageDeletionItem: deleted from the gallery, point and files not yet removed. */
++export interface ImageDeletionWire {
++  image_id: string
++  original_url: string | null
++  thumb_url: string | null
++  deleted_at: string | null
++}
++
++/** GET /api/image-deletions?limit= (oldest first). */
++export interface ImageDeletionListResponseWire {
++  ok: true
++  total: number
++  items: ImageDeletionWire[]
++  /** false: POST /api/image-deletions/process answers NOT_READY now. */
++  cleanup_ready: boolean
++}
++
++export interface ImageDeletionFailureWire {
++  image_id: string
++  error: string
++  detail: string
++}
++
++/** POST /api/image-deletions/process {limit?} */
++export interface ImageDeletionProcessResponseWire {
++  ok: true
++  scanned: number
++  processed: string[]
++  failed: ImageDeletionFailureWire[]
++  remaining: number
++}
++
+ // -- GET /api/ping ------------------------------------------------------------------------
+ 
+ /** schemas/predict.py PingResponse. */

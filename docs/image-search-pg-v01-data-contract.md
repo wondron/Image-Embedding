@@ -831,6 +831,42 @@ PATCH 字段（不传 = 不变）：
 
 ---
 
+## 6.4 入库结果历史记录（2026-11-11 America/Denver · 工作区已有接口，FE 待接线，未实测）
+
+> 依据新 C 仓本轮实际 HEAD `54547ad960fed37c9c742fa96d2912953a28ca3d` 及未提交差异。`backend/app/{api/v1/tasks.py,schemas/tasks.py,repositories/tasks.py,services/retrieval/task_center.py}`、`models/task.py`、迁移 `20261111_0008`、FE `entities/task` 为当前工作区成果，**不等于已合并、已迁移或已验收**。本刀只补文档，无应用/DB/服务/测试操作。完整设计/实施交接为共享电脑 `/workspace/deliverables/ingest-tasks-contract.md`，本节压缩记录现有 wire 与最小范围。
+
+### 6.4.1 已有查询与字段
+
+- **GET `/api/index-tasks`**（已在 `api/router.py` 注册，无额外 `/v1`），无 body。query：`status` 可省略（全部），否则仅 `succeeded` / `failed`；`page=1`（1..1000000）、`page_size=50`（1..100）。已有 FE `listIndexTasks` 默认显式发 `page_size=20`，与 BE 缺省 50 区分；本轮页面沿 FE 每页 20。
+- 只需 catalog/PG，不依赖编码器/Qdrant/OSS 就绪。HTTP 200：`{ok:true,status:"succeeded"|"failed"|null,page:int,page_size:int,total:int,counts:{succeeded:int,failed:int},items:IndexTaskItem[]}`，业务键必返，空 items 为 []。`total` 是当前筛选**记录行数**，counts 是不受筛选/分页影响的全历史两态行数，不是图片去重数/请求数/本页数。
+- OFFSET/LIMIT，`created_at DESC, id DESC`（id 为同时间 tie-breaker）。counts/items 分开 SQL，无整页/跨页一致快照保证，并发新增或外部清记录可令页偏移；超出总页数不自动纠正。
+- `IndexTaskItem`：`id:int`（bigint identity，记录 ID，非图片 UUID）、`filename:string`、`status:"succeeded"|"failed"`；以下键必返且可 null：`image_id:UUID string|null`、`new_image:bool|null`、`error_code:string|null`、`error_detail:string|null`、`duration_ms:int|null`、`trace_id:string|null`、`created_at:string|null`（schema 默认 null）、`image:IndexTaskImage|null`。其余 nullable 键无 schema 缺省值。
+- `IndexTaskImage`：`id:string` 必填，`thumb_url:string|null=null`、`category_id:int|null=null`、`category:string|null=null`（中文主名）、`label_status:"unlabeled"|"auto"|"verified"|null=null`。LEFT JOIN 取得**当前图片投影**，不是入库时快照。成功图删除后历史仍 succeeded、image_id 保留、image=null；同 ID 重新入库后可能重新有投影。无缩略图不等于图已删。
+- **无独立 `GET /api/index-tasks/{id}`**。本轮明细直接用列表 item 全字段；图库 `GET /api/images/{image_id}` 不是任务记录详情，本轮不依赖它、不新增详情 API。
+- 成功列表顶层无 trace_id，当前 GET trace 取 `X-Trace-Id`；item.trace_id 是原入库请求 trace，不能混用。失败沿 §6 信封：`VALIDATION_ERROR` 422、`NOT_READY` 503、`LIST_POSTGRES_FAILED` 502；schema/建连接失败还可 `INDEX_POSTGRES_FAILED` 502；未预期错误 `INTERNAL_ERROR` 500。
+
+### 6.4.2 结果粒度、失败与保留边界
+
+- `POST /api/index` / `/api/index/file` 正常进入执行后，**每文件完成即独立记最终结果**；多文件请求部分成功为不同 succeeded/failed 行，无 request-level partial/running/progress/job 状态。相同图片重复处理可多条成功，`new_image=false` 代表沿用已有图标注，失败为 null。
+- `created_at` 为 PG 插入事务时间（timestamptz，正常非空），非请求/文件创建时间；`duration_ms` 是服务端单文件用例耗时（正常非负、可 0），不是上传/排队/后续 manual 场景 PUT 耗时。前端解析自带时区后以 America/Denver（MST）展示，null 显示未提供。
+- 成功记录只表示 index 用例成功，FE 后续人工场景调整及 notes 不回写记录。failed 表示用例抛错，**不保证零写入或跨存储完全回滚**（后阶段失败可能已有 PG/OSS/Qdrant 副作用）；不能沿 enum 陈旧注释宣称“失败未写任何东西”。
+- 解析/预读上传/整请求格式校验/NOT_READY 在执行前拒绝不产生逐文件记录；已执行失败被记录后，HTTP 适配器仍可能把全失败提升为非 2xx。因此非 200 不等于没历史；浏览器超时/取消不保证服务端停止。
+- 历史失败用 item 的 `error_code/error_detail`（非 index 响应 failed[].error/detail），公开说明已净化；未知异常为 INTERNAL_ERROR。filename 仅文本、可能为源路径，不作图片 URL/文件恢复 token。
+- 记录写入独立事务、best effort：失败只日志，不改变入库结果，无可靠补偿重试保证，可缺行。裁剪上限 filename 255、error_code 64、error_detail 1000、trace_id 128 字符；不伪造被截原文。
+- image_id 无 FK，删图保留历史。已查引用未发现 TTL/自动轮转，不承诺永久或固定天数；已有人工清记录能力及 downgrade 丢表，保留政策另刀。0008 文件存在不证明实际 DB 已迁移，schema 检查不自动迁移，本刀不执行迁移。
+
+### 6.4.3 最小 FE 接线规范（待实施）
+
+- 历史列表只做全部/成功/失败、分页、手动刷新、已有明细；与本会话 jobs（pending/running/success/error/cancelled、File/进度/本地重传）明确分区、计数不混算。刷新/卸载丢本地队列不删除服务端历史；不假称 abort 撤销服务端。
+- 复用 `entities/task/listIndexTasks`、DTO 与共享 client/error，映射 `page_size→pageSize`、`image_id→imageId`、`new_image→newImage`、`error_code/detail→errorCode/Detail`、`duration_ms→durationMs`、`trace_id→traceId`、`created_at→createdAt`、`image.thumb_url→image.imageUrl`、`category_id/label_status→categoryId/labelStatus`；其余原名。nullable bool/0 不得变成假默认；现有 mapper 宽松兜底/过滤不是严格协议保障，关键缺字段/整页被滤掉不能伪装正常空页。
+- 首入/重新进入/分页筛选或 baseUrl 改变读取，切筛选/页大小回 1；手动刷新保留当前页/筛选。成功后发现页越界只有限一次回合法末页重读，total=0 回第一页；持续并发空页提示刷新，不无限循环。
+- 首次加载、全空、筛选空、网络/HTTP/JSON/协议失败明确区分；刷新失败可留旧行但标旧数据，不能归零/回退成本地假历史。带取消信号及请求 token 防迟到覆盖；baseUrl 改变清旧历史/详情；无后台轮询、无页面 fetch、不继续加厚 ManagementViews。
+- 明细只读 item；选中行不在刷新返回页时关闭提示重新选择，不推断记录已删除。失败/error/filename 纯文本转义，缺图/缺字段显示占位。容器交设计，不修改受保护 Dialog/.qa。
+- 既有 `DELETE /api/index-tasks?status=...`、`GET /api/image-deletions`、`POST /api/image-deletions/process` **不纳本轮**，不展示清空/清理/删除操作；process 不是失败入库重试。无服务端 cancel/replay/retry/progress API，不造异步 job；失败可展示，重传需用户重新提供 File。
+- 本范围**无需新增 BE API/schema**，列表已有明细；需 FE 接线及独立测试验证未提交实现/迁移部署。测试应覆盖真实分页/统计/trace/null/重复图/混合失败/best-effort 缺行、服务端和本地状态分离、刷新越界/错误/迟到请求。本刀不执行验收，不借旧 scene 测试结论。
+
+---
+
 ## 7. 明确不作本刀范围（含 M0 OUT OF SCOPE）
 
 | 项 | 归属 |
@@ -881,6 +917,7 @@ PATCH 字段（不传 = 不变）：
 
 | 日期 | 说明 |
 |---|---|
+| 2026-11-11 | **入库结果历史最小契约 §6.4（America/Denver）**：按本轮 HEAD 54547ad 及未提交任务链核现有 GET /api/index-tasks 的 wire/分页/全历史 counts/列表内明细；明确逐文件同步终态、best-effort 缺行、当前图片投影及本地上传队列边界。FE 只读历史/刷新/分页/明细待接线，无新增 BE API，不纳清记录/删除清理/异步 job/重试。0008 及并行源码存在不证明已合并/迁移/验收。本刀只改文档、未测试、未 commit。 |
 | 2026-11-04 | **M1 草案**：按《图搜图数据结构设计 v0.1》落 12 表字典、Qdrant/S3/API 差量、作废旧 §9/双轨；ASSUMPTION A1–A8 |
 | 2026-11-04 | **M0 总裁已拍**：空库重建（无迁移脚本）；FlyB 本轮 OUT OF SCOPE；`scene_labels` 纳入冻结；ASSUMPTION A2–A4 改写 |
 | 2026-11-05 | **§6.1 Wire/结果卡草案（FE 对齐刀）**：Search/List 字段表、external_candidates 最小 wire、FE snake→camel 映射、破坏性清单与 P1–P12 待拍板；更新 §6/§7 交叉引用；未 commit |

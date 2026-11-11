@@ -348,6 +348,53 @@ class PgLiveTests(unittest.TestCase):
         self.assertIsNone(store.get_image_by_uuid(iid))
         self.assertEqual([r["image_id"] for r in store.list_pending_deletions()], [iid])
 
+    # ---- task center: index_tasks and the deletion queue count ----------
+
+    def test_index_records_list_with_the_image_as_it_is_now_and_clear_by_status(self):
+        from app.core.errors import AppError
+
+        cat = self.seed_catalog()
+        store = self.store()
+        kept = self.insert(store, 1, category_id=cat["steak"], label_status="verified")
+        gone = self.insert(store, 2)
+        store.record_index_tasks([  # one transaction: the same created_at, id breaks the tie
+            {"filename": "gone.jpg", "status": "succeeded", "image_id": gone, "new_image": True,
+             "duration_ms": 640, "trace_id": "t-1"},
+            {"filename": "junk.png", "status": "failed", "error_code": "INDEX_BAD_IMAGE",
+             "error_detail": "cannot decode image", "duration_ms": 4, "trace_id": "t-2",
+             "image_id": kept},  # a failed record never keeps an image id
+        ])
+        store.record_index_tasks([{"filename": "x" * 300, "status": "succeeded", "image_id": kept, "new_image": False}])
+        store.enqueue_image_deletion(gone)
+
+        result = store.list_index_tasks()
+        self.assertEqual((result["total"], result["counts"]), (3, {"succeeded": 2, "failed": 1}))
+        newest, failed, deleted = result["items"]
+        self.assertEqual((len(newest["filename"]), newest["filename"][-1]), (255, "…"))  # clipped
+        self.assertEqual(
+            (newest["image_exists"], newest["category_name"], newest["image_label_status"], newest["new_image"]),
+            (True, "牛排", "verified", False),
+        )
+        self.assertEqual((newest["image_id"], newest["thumb_url"]), (kept, "https://cdn/t/1.webp"))
+        self.assertEqual((failed["image_id"], failed["error_code"], failed["image_exists"]), (None, "INDEX_BAD_IMAGE", False))
+        self.assertEqual((deleted["image_id"], deleted["image_exists"], deleted["thumb_url"]), (gone, False, None))
+        self.assertIsInstance(deleted["created_at"], str)
+
+        page = store.list_index_tasks(status="succeeded", page=2, page_size=1)
+        self.assertEqual((page["total"], [r["filename"] for r in page["items"]]), (2, ["gone.jpg"]))
+        self.assertEqual(page["counts"], {"succeeded": 2, "failed": 1})
+
+        with self.assertRaises(AppError) as ctx:  # a succeeded record names its image
+            store.record_index_tasks([{"filename": "a.png", "status": "succeeded"}])
+        self.assertEqual(ctx.exception.code, "INDEX_POSTGRES_FAILED")
+        self.assertEqual(store.list_index_tasks()["total"], 3)
+
+        self.assertEqual(store.clear_index_tasks(status="failed"), 1)
+        self.assertEqual(store.list_index_tasks()["counts"], {"succeeded": 2, "failed": 0})
+        self.assertEqual(store.count_pending_deletions(), 1)
+        store.complete_deletion(gone)
+        self.assertEqual(store.count_pending_deletions(), 0)
+
     def test_the_image_admin_reads_edits_and_deletes_through_the_vector_store(self):
         from types import SimpleNamespace
         from unittest.mock import Mock, patch

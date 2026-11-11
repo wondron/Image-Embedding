@@ -107,6 +107,19 @@ class PgDeletionsMixin:
                 f"list_pending_deletions: {type(exc).__name__}: {exc}"
             ) from exc
 
+    def count_pending_deletions(self) -> int:
+        """How many deleted images still wait for their vector / file cleanup."""
+        self.ensure_schema()
+        from sqlalchemy import text
+
+        try:
+            with self._get_engine().connect() as conn:
+                return int(conn.execute(text("SELECT count(*) FROM image_deletions")).scalar_one())
+        except Exception as exc:
+            raise err.list_postgres_failed(
+                f"count_pending_deletions: {type(exc).__name__}: {exc}"
+            ) from exc
+
     def complete_deletion(self, image_id: UUID | str) -> None:
         """Remove image_deletions row after Qdrant + S3 cleanup succeeded."""
         self.ensure_schema()
