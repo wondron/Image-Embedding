@@ -26,6 +26,18 @@ class ListTagFilterTests(unittest.TestCase):
             with self.subTest(tag=blank):
                 self.assertIsNone(self.run_list(tag=blank)[1]["tag"])
 
+    def test_label_status_and_category_subtree_filters(self):
+        _, calls = self.run_list(label_status=" verified ", category_id=7)
+        self.assertEqual((calls["label_status"], calls["category_id"]), ("verified", 7))
+        _, calls = self.run_list(label_status="  ")
+        self.assertEqual((calls["label_status"], calls["category_id"]), (None, None))
+        from app.core.errors import AppError
+
+        for bad in ({"label_status": "done"}, {"category_id": 0}, {"category_id": True}):
+            with self.subTest(**bad), self.assertRaises(AppError) as ctx:
+                self.run_list(**bad)
+            self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
+
     def test_items_always_carry_a_tags_list(self):
         result, _ = self.run_list()
         self.assertEqual([item["tags"] for item in result["items"]], [["红薯叶"], []])

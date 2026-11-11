@@ -11,7 +11,10 @@ from typing import Any
 from uuid import UUID
 
 from app.core import errors as err
+from app.core.enums import LabelStatus
 from app.repositories.ports import MetadataStorePort
+from app.services.retrieval.category_fields import normalize_category_id
+from app.services.retrieval.enum_fields import coerce_enum
 from app.services.retrieval.food_fields import FOOD_FIELDS
 from app.services.retrieval.scenes import lookup_scene, requested_scene_code
 
@@ -63,6 +66,8 @@ class ListImagesUseCase:
         q: str | None = None,
         category: str | None = None,
         tag: str | None = None,
+        category_id: int | None = None,
+        label_status: str | None = None,
     ) -> dict[str, Any]:
         scene_meta = lookup_scene(
             self._metadata,
@@ -101,6 +106,11 @@ class ListImagesUseCase:
             if t:
                 tag_norm = t
 
+        subtree_id = None if category_id is None else normalize_category_id(category_id)
+        label_norm: str | None = None
+        if label_status is not None and str(label_status).strip():
+            label_norm = coerce_enum(LabelStatus, label_status, field="label_status").value
+
         rows, total = self._metadata.list_images(
             scene=active_scene,
             page=page_i,
@@ -108,6 +118,8 @@ class ListImagesUseCase:
             q=q_norm,
             category=cat_norm,
             tag=tag_norm,
+            category_id=subtree_id,
+            label_status=label_norm,
         )
         items = [_item_from_row(row, scene_meta=scene_meta) for row in rows]
         return {

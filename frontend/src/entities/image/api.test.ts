@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { buildListImagesQuery, indexImage, listImages } from '.'
+import { buildListImagesQuery, deleteImage, getImage, indexImage, listImages, payloadDifferences, pushImageVector, updateImage } from '.'
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status })
 const png = (name = 'a.png') => new File(['image-data'], name, { type: 'image/png' })
@@ -15,6 +15,12 @@ afterEach(() => {
 })
 
 describe('listImages (GET /api/images)', () => {
+  it('adds the category subtree and label status filters', () => {
+    expect(buildListImagesQuery({ categoryId: 12, labelStatus: 'auto' }).toString())
+      .toBe('page=1&page_size=24&scene=general&category_id=12&label_status=auto')
+    expect(buildListImagesQuery({ categoryId: 0, labelStatus: null }).toString()).toBe('page=1&page_size=24&scene=general')
+  })
+
   it('builds the query: default scene, trimmed q, no 「全部类别」, legacy scene mapped', () => {
     expect(buildListImagesQuery({}).toString()).toBe('page=1&page_size=24&scene=general')
     expect(buildListImagesQuery({ page: 0, pageSize: -1, q: '  番茄 ', category: '全部类别', scene: 'device' }).toString())
@@ -100,5 +106,58 @@ describe('indexImage (POST /api/index)', () => {
     await expect(indexImage({ files: Array.from({ length: 101 }, (_, i) => png(`${i}.png`)) })).rejects.toThrow('最多入库 100 张')
     await expect(indexImage({ file: new File([], 'empty.png') })).rejects.toThrow('empty.png：图片文件为空')
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+const IMAGE_WIRE = {
+  id: 'img-1', sha256: 'ab'.repeat(32), original_url: 'https://s3.example/o.jpg', thumb_url: 'https://s3.example/t.webp',
+  width: 640, height: 480, category_id: 3, category: '牛排', category_code: 'dish.steak', label_status: 'auto',
+  scenes: ['general', 'oven'], description: '', tags: ['带骨'], source_type: 'user_upload', license: 'unknown',
+  food_state: 'raw', food_processing: null, food_count: 2, total_mass_g: null, water_mass_g: 0, main_ingredient_mass_g: null,
+  heating_group: null, payload_version: 4, created_at: null, updated_at: null,
+  embeddings: [{ model_id: 7, name: 'dino', version: 'v2', collection: 'c2', model_status: 'current', synced_version: 3, embedded_at: null }],
+}
+
+describe('one image (GET / PATCH / DELETE /api/images/{id}, POST vector-sync)', () => {
+  it('reads the detail and its vector state', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(json({ ok: true, image: IMAGE_WIRE, vector: {
+      status: 'stale', collection: 'c2', payload: { scenes: ['general'], category_id: 3 }, expected_payload: { scenes: ['oven', 'general'], category_id: 3 },
+      payload_version: 4, synced_version: 3,
+    } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await getImage('img/1', { baseUrl: 'http://api' })
+    expect(fetchMock.mock.calls[0][0]).toBe('http://api/api/images/img%2F1')
+    expect(result.image).toMatchObject({ id: 'img-1', categoryCode: 'dish.steak', foodCount: 2, waterMassG: 0, tags: ['带骨'] })
+    expect(result.image.embeddings).toEqual([{ modelId: 7, name: 'dino', version: 'v2', collection: 'c2', modelStatus: 'current', syncedVersion: 3, embeddedAt: null }])
+    expect(result.vector).toMatchObject({ status: 'stale', payloadVersion: 4, syncedVersion: 3 })
+    expect(payloadDifferences(result.vector)).toEqual([['scenes', ['general'], ['oven', 'general']]])
+  })
+
+  it('sends the patch as JSON and reads how it reached the index', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(json({ ok: true, image: { ...IMAGE_WIRE, category_id: 4 }, vector_sync: 'missing', sync_required: true }))
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await updateImage('img-1', { category_id: 4, label_status: 'verified' })
+    const [, init] = fetchMock.mock.calls[0]
+    expect(init.method).toBe('PATCH')
+    expect(JSON.parse(init.body)).toEqual({ category_id: 4, label_status: 'verified' })
+    expect(result).toMatchObject({ vectorSync: 'missing', syncRequired: true, image: { categoryId: 4 } })
+  })
+
+  it('pushes and deletes; a missing image is IMAGE_NOT_FOUND', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json({ ok: true, image_id: 'img-1', payload_version: 4, vector_sync: 'pushed', sync_required: false }))
+      .mockResolvedValueOnce(json({ ok: true, image_id: 'img-1', deleted_at: '2026-11-11T00:00:00+00:00', cleanup: 'queued' }))
+      .mockResolvedValueOnce(json({ ok: false, error: 'IMAGE_NOT_FOUND', detail: 'image img-1 does not exist', trace_id: 't' }, 404))
+    vi.stubGlobal('fetch', fetchMock)
+    expect(await pushImageVector('img-1')).toMatchObject({ vectorSync: 'pushed', syncRequired: false, payloadVersion: 4 })
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/images/img-1/vector-sync')
+    expect(await deleteImage('img-1')).toMatchObject({ cleanup: 'queued', deletedAt: '2026-11-11T00:00:00+00:00' })
+    expect(fetchMock.mock.calls[1][1].method).toBe('DELETE')
+    await expect(getImage('img-1')).rejects.toMatchObject({ code: 'IMAGE_NOT_FOUND', status: 404 })
+  })
+
+  it('treats an unreadable body as unknown, not as success', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ ok: true, image: { no: 'id' } })))
+    await expect(updateImage('img-1', { tags: [] })).rejects.toMatchObject({ code: 'IMAGE_PROTOCOL_ERROR' })
   })
 })

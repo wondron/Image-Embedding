@@ -1,21 +1,18 @@
 import { useId, useState } from 'react'
 import { enumOptions, enumValueText, useEnumCatalog } from '../../entities/enum'
-import type { Scene } from '../../entities/scene'
-import { CategoryPicker, type CategoryTreeState } from '../category-picker'
 import {
-  AMOUNT_FIELDS,
-  FOOD_PROCESSING_ENUM,
-  FOOD_STATE_ENUM,
   LICENSE_ENUM,
   MAX_DESCRIPTION_LENGTH,
   SOURCE_TYPE_ENUM,
   charLength,
-  type AnnotationErrors,
-  type ImportAnnotation,
-} from './annotation'
+  foodFieldsFilled,
+} from '../../entities/image'
+import type { Scene } from '../../entities/scene'
+import { FoodFields, TagInput } from '../annotation-fields'
+import { CategoryPicker, type CategoryTreeState } from '../category-picker'
+import type { AnnotationErrors, ImportAnnotation } from './annotation'
 import { effectiveOverrides, planScenes, toggleSceneOverride } from './scenePlan'
 import { SceneAssignment } from './SceneAssignment'
-import { TagInput } from './TagInput'
 import './index-upload.css'
 
 export interface SceneCatalogView {
@@ -43,7 +40,7 @@ export interface AnnotationFormProps {
 export function AnnotationForm({ value, onChange, errors, categories, scenes, disabled = false }: AnnotationFormProps) {
   const base = useId()
   const { catalog } = useEnumCatalog()
-  const [foodOpen, setFoodOpen] = useState(() => Boolean(value.foodState || value.foodProcessing || AMOUNT_FIELDS.some(field => value[field.key].trim())))
+  const [foodOpen, setFoodOpen] = useState(() => foodFieldsFilled(value) > 0)
   const rows = planScenes(scenes.active, value.categoryId, categories.tree, value.sceneOverrides)
   const set = (patch: Partial<ImportAnnotation>) => onChange({ ...value, ...patch })
   const setCategory = (categoryId: number | null) => onChange({
@@ -53,7 +50,7 @@ export function AnnotationForm({ value, onChange, errors, categories, scenes, di
     sceneOverrides: effectiveOverrides(scenes.active, categoryId, categories.tree, value.sceneOverrides),
   })
   const descriptionLength = charLength(value.description.trim())
-  const foodFilled = [value.foodState, value.foodProcessing, ...AMOUNT_FIELDS.map(field => value[field.key].trim())].filter(Boolean).length
+  const foodFilled = foodFieldsFilled(value)
 
   return <div className="ia-form">
     <section className="ia-section" aria-labelledby={`${base}-category-title`}>
@@ -113,43 +110,7 @@ export function AnnotationForm({ value, onChange, errors, categories, scenes, di
 
     <details className="ia-section ia-collapsible" open={foodOpen} onToggle={event => setFoodOpen(event.currentTarget.open)}>
       <summary><h3>食物标注</h3><small>{foodFilled ? `已填 ${foodFilled} 项` : '可选'}</small></summary>
-      <div className="ia-grid">
-        <div className="ia-field">
-          <label htmlFor={`${base}-food-state`}>食物状态</label>
-          <select id={`${base}-food-state`} disabled={disabled} value={value.foodState} onChange={event => set({ foodState: event.target.value })}>
-            <option value="">未填写</option>
-            {enumOptions(catalog, FOOD_STATE_ENUM, value.foodState).map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-        </div>
-        <div className="ia-field">
-          <label htmlFor={`${base}-food-processing`}>加工状态</label>
-          <select id={`${base}-food-processing`} disabled={disabled} value={value.foodProcessing} onChange={event => set({ foodProcessing: event.target.value })}>
-            <option value="">未填写</option>
-            {enumOptions(catalog, FOOD_PROCESSING_ENUM, value.foodProcessing).map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-        </div>
-        {AMOUNT_FIELDS.map(field => {
-          const id = `${base}-${field.key}`
-          const problem = errors[field.key]
-          return <div className="ia-field" key={field.key}>
-            <label htmlFor={id}>{field.label}</label>
-            <div className={`ia-unit${problem ? ' is-invalid' : ''}`}>
-              <input
-                id={id}
-                inputMode="numeric"
-                disabled={disabled}
-                placeholder={field.min === 0 ? '≥ 0' : '≥ 1'}
-                value={value[field.key]}
-                aria-invalid={problem ? true : undefined}
-                aria-describedby={problem ? `${id}-error` : undefined}
-                onChange={event => set({ [field.key]: event.target.value } as Partial<ImportAnnotation>)}
-              />
-              {field.unit && <span aria-hidden="true">{field.unit}</span>}
-            </div>
-            {problem && <small className="ia-field-error" id={`${id}-error`} role="alert">{problem}</small>}
-          </div>
-        })}
-      </div>
+      <FoodFields idBase={base} value={value} onChange={set} errors={errors} disabled={disabled} />
       <p className="ia-muted">只有食物状态参与检索过滤；其余用于展示和后续加热计算，都可留空。</p>
     </details>
 

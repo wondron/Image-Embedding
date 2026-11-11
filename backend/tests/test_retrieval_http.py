@@ -293,6 +293,22 @@ class RetrievalHttpTests(unittest.TestCase):
         self.client.get("/api/images")
         self.assertIsNone(self.calls["list"]["tag"])
 
+    def test_list_forwards_the_category_subtree_and_label_filters(self):
+        def list_execute(**kwargs):
+            self.calls["list"] = kwargs
+            return {"scene": "general", "page": 1, "page_size": 24, "total": 0, "items": []}
+
+        self.stack.list_uc = SimpleNamespace(execute=list_execute)
+        response = self.client.get("/api/images", params={"category_id": "12", "label_status": "auto"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual((self.calls["list"]["category_id"], self.calls["list"]["label_status"]), (12, "auto"))
+        self.client.get("/api/images")
+        self.assertEqual((self.calls["list"]["category_id"], self.calls["list"]["label_status"]), (None, None))
+        for bad in ({"category_id": "0"}, {"category_id": "x"}):
+            with self.subTest(params=bad):
+                response = self.client.get("/api/images", params=bad)
+                self.assertEqual((response.status_code, response.json()["error"]), (422, "VALIDATION_ERROR"))
+
     def test_index_food_attributes_from_form_and_json_reach_the_use_case(self):
         def food_of_last_item():
             item = self.calls["index"]["items"][0]

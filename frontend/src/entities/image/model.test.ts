@@ -11,6 +11,7 @@ const ovenItem = {
   scenes: ['general', 'oven'],
   label_status: 'auto',
   description: '',
+  tags: ['带骨'],
   width: 1024,
   height: 768,
   created_at: '2026-11-07T10:00:00+00:00',
@@ -31,6 +32,7 @@ describe('toLibraryImage (§6.1.2 / §6.1.4 List map)', () => {
       sceneMemberships: [{ code: 'general' }, { code: 'oven' }],
       labelStatus: 'auto',
       description: '',
+      tags: ['带骨'],
       foodState: 'frozen',
       heatingGroup: { id: 5, code: 'meat_grill', name: '肉类烧烤' },
       width: 1024,
@@ -52,9 +54,10 @@ describe('toLibraryImage (§6.1.2 / §6.1.4 List map)', () => {
 
   it('never falls back to forbidden aliases (P2 / P11) and drops rows without an id', () => {
     const item = toLibraryImage({ id: 'x', image_url: 'https://legacy.example/a.png', thumbnail_url: 'https://legacy.example/t.png', qdrant_point_id: 'q', title: '旧标题', tags: ['a'] })
-    expect(item).toMatchObject({ imageUrl: null, originalUrl: null, description: '', scenes: [], sceneMemberships: [] })
+    expect(item).toMatchObject({ imageUrl: null, originalUrl: null, description: '', scenes: [], sceneMemberships: [], tags: ['a'] })
     expect(item).not.toHaveProperty('title')
-    expect(item).not.toHaveProperty('tags')
+    expect(item).not.toHaveProperty('qdrantPointId')
+    expect(toLibraryImage({ id: 'y' })?.tags).toEqual([])  // list items carry tags since 2026-11-09
     expect(toLibraryImage({ thumb_url: 'https://s3.example/t.webp' })).toBeNull()
     expect(toLibraryImage('bad')).toBeNull()
   })

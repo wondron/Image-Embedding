@@ -353,11 +353,15 @@ class PgImagesMixin:
         q: str | None = None,
         category: str | None = None,
         tag: str | None = None,
+        category_id: int | None = None,
+        label_status: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         """Paginate images that are effective members of scene code.
 
         q: substring of the category name, any tag, the original URL or the id.
         tag: exact match on one element of images.tags.
+        category_id: that category and every category below it (an unlabeled image never matches).
+        label_status: exact value (unlabeled / auto / verified).
         """
         self.ensure_schema()
         from sqlalchemy import text
@@ -398,6 +402,13 @@ class PgImagesMixin:
                     # served by ix_images_tags_gin (@>, not = ANY, so the index applies)
                     where.append("i.tags @> ARRAY[CAST(:tag AS text)]")
                     params["tag"] = tag
+                if category_id is not None:
+                    # the subtree: ltree <@ (ix_categories_path_gist); an unknown id matches nothing
+                    where.append("c.path <@ (SELECT path FROM categories WHERE id = :cat_id)")
+                    params["cat_id"] = int(category_id)
+                if label_status:
+                    where.append("i.label_status = :label_status")
+                    params["label_status"] = label_status
                 if q:
                     where.append(
                         "(cn.name ILIKE :q OR i.original_url ILIKE :q OR "

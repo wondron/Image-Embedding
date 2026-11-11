@@ -280,12 +280,15 @@ def run_list_images(
     q: Optional[str] = None,
     category: Optional[str] = None,
     tag: Optional[str] = None,
+    category_id: Optional[int] = None,
+    label_status: Optional[str] = None,
     trace_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     trace_id = bind_trace_id(request, trace_id)
     stack = require_retrieval(runtime)
     result = stack.list_uc.execute(
-        scene=scene, page=page, page_size=page_size, q=q, category=category, tag=tag
+        scene=scene, page=page, page_size=page_size, q=q, category=category, tag=tag,
+        category_id=category_id, label_status=label_status,
     )
     return {"ok": True, "trace_id": trace_id, **result}
 

@@ -111,7 +111,10 @@ class MetadataStorePort(ABC):
         q: str | None = None,
         category: str | None = None,
         tag: str | None = None,
+        category_id: int | None = None,
+        label_status: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
+        """category_id filters on the category's subtree; label_status on the exact value."""
         raise NotImplementedError
 
     @abstractmethod

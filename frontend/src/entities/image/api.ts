@@ -1,14 +1,25 @@
-import { requestJson, type ApiLabels } from '../../shared/api'
+import { ApiError, requestJson, requestJsonResult, type ApiLabels, type ImageUpdateRequestWire } from '../../shared/api'
+import { asObject, asText } from '../../shared/lib/parse'
 import { DEFAULT_SCENE, toApiSceneCode } from '../scene'
+import {
+  toImageDetail,
+  toVectorState,
+  toVectorSync,
+  type ImageDetail,
+  type ImageVectorState,
+  type VectorSyncOutcome,
+} from './detail'
 import {
   toIndexResponse,
   toListImagesResponse,
   type IndexResponse,
+  type LabelStatus,
   type ListImagesResponse,
 } from './model'
 
 const LIST_LABELS: ApiLabels = { service: '图库服务', endpoint: '图库接口', action: '图库列表' }
 const INDEX_LABELS: ApiLabels = { service: '入库服务', endpoint: '入库接口', action: '入库' }
+const IMAGE_LABELS: ApiLabels = { service: '图库服务', endpoint: '图片接口', action: '图片操作' }
 
 // -- GET /api/images ----------------------------------------------------------------------
 
@@ -16,7 +27,11 @@ export interface ListImagesOptions {
   page?: number
   pageSize?: number
   q?: string | null
+  /** Legacy: one category by code, name or id (no subtree). */
   category?: string | null
+  /** The category and every category below it. */
+  categoryId?: number | null
+  labelStatus?: LabelStatus | null
   /** Default general (PG v0.1). Do not omit to mean "all scenes". */
   scene?: string
   baseUrl?: string
@@ -30,9 +45,11 @@ export function buildListImagesQuery({
   pageSize = 24,
   q,
   category,
+  categoryId,
+  labelStatus,
   scene = DEFAULT_SCENE,
   traceId,
-}: Pick<ListImagesOptions, 'page' | 'pageSize' | 'q' | 'category' | 'scene' | 'traceId'>): URLSearchParams {
+}: Pick<ListImagesOptions, 'page' | 'pageSize' | 'q' | 'category' | 'categoryId' | 'labelStatus' | 'scene' | 'traceId'>): URLSearchParams {
   const params = new URLSearchParams()
   params.set('page', String(Math.max(1, Math.floor(page) || 1)))
   params.set('page_size', String(pageSize > 0 ? Math.floor(pageSize) : 24))
@@ -41,6 +58,8 @@ export function buildListImagesQuery({
   if (trimmedQ) params.set('q', trimmedQ)
   const trimmedCategory = typeof category === 'string' ? category.trim() : ''
   if (trimmedCategory && trimmedCategory !== '全部类别') params.set('category', trimmedCategory)
+  if (typeof categoryId === 'number' && Number.isSafeInteger(categoryId) && categoryId > 0) params.set('category_id', String(categoryId))
+  if (labelStatus) params.set('label_status', labelStatus)
   if (traceId?.trim()) params.set('trace_id', traceId.trim())
   return params
 }
@@ -155,4 +174,98 @@ export async function indexImage({
     throw new Error('入库接口未返回已索引条目，请检查后端响应。')
   }
   return result
+}
+
+// -- one stored image: GET / PATCH / DELETE /api/images/{id}, POST …/vector-sync ---------
+
+export interface ImageRequestOptions {
+  baseUrl?: string
+  signal?: AbortSignal
+}
+
+export interface ImageDetailResult {
+  image: ImageDetail
+  vector: ImageVectorState
+  traceId: string | null
+}
+
+/** A write the server accepted; vectorSync says how it reached the search index. */
+export interface ImageUpdateResult {
+  image: ImageDetail
+  vectorSync: VectorSyncOutcome | null
+  syncRequired: boolean
+  traceId: string | null
+}
+
+export interface ImageVectorPushResult {
+  imageId: string
+  payloadVersion: number | null
+  vectorSync: VectorSyncOutcome | null
+  syncRequired: boolean
+  traceId: string | null
+}
+
+export interface ImageDeleteResult {
+  imageId: string
+  deletedAt: string | null
+  /** done: the point and the files are gone too; queued: the deletion worker finishes them. */
+  cleanup: 'done' | 'queued'
+  traceId: string | null
+}
+
+/** The fields to change; null clears one (label_status never). Only what changed is sent. */
+export type ImagePatch = ImageUpdateRequestWire
+
+function imagePath(id: string, suffix = ''): string {
+  return `/api/images/${encodeURIComponent(id)}${suffix}`
+}
+
+/** A 2xx whose body is not the contract's: the write may have happened, so the caller reads again. */
+function unreadable(status: number, traceId: string | null): ApiError {
+  return new ApiError('图片接口返回的数据格式不正确，请刷新后核对。', { status, traceId, code: 'IMAGE_PROTOCOL_ERROR' })
+}
+
+/** GET /api/images/{id}: every field of the image and its state in the current collection. */
+export async function getImage(id: string, { baseUrl, signal }: ImageRequestOptions = {}): Promise<ImageDetailResult> {
+  const result = await requestJsonResult(imagePath(id), { baseUrl, signal, labels: IMAGE_LABELS })
+  const body = asObject(result.body)
+  const image = toImageDetail(body?.image)
+  if (body?.ok !== true || !image) throw unreadable(result.status, result.traceId)
+  return { image, vector: toVectorState(body.vector), traceId: result.traceId }
+}
+
+/** PATCH /api/images/{id} with only the fields to change. Does not retry. */
+export async function updateImage(id: string, patch: ImagePatch, { baseUrl, signal }: ImageRequestOptions = {}): Promise<ImageUpdateResult> {
+  const result = await requestJsonResult(imagePath(id), { baseUrl, signal, method: 'PATCH', json: patch, labels: IMAGE_LABELS })
+  const body = asObject(result.body)
+  const image = toImageDetail(body?.image)
+  if (body?.ok !== true || !image) throw unreadable(result.status, result.traceId)
+  return { image, vectorSync: toVectorSync(body.vector_sync), syncRequired: body.sync_required !== false, traceId: result.traceId }
+}
+
+/** POST /api/images/{id}/vector-sync: write the current payload to the current collection again. */
+export async function pushImageVector(id: string, { baseUrl, signal }: ImageRequestOptions = {}): Promise<ImageVectorPushResult> {
+  const result = await requestJsonResult(imagePath(id, '/vector-sync'), { baseUrl, signal, method: 'POST', labels: IMAGE_LABELS })
+  const body = asObject(result.body)
+  if (body?.ok !== true) throw unreadable(result.status, result.traceId)
+  return {
+    imageId: asText(body.image_id) ?? id,
+    payloadVersion: typeof body.payload_version === 'number' ? body.payload_version : null,
+    vectorSync: toVectorSync(body.vector_sync),
+    syncRequired: body.sync_required !== false,
+    traceId: result.traceId,
+  }
+}
+
+/** DELETE /api/images/{id}. Deleting an image still queued for cleanup answers the same. */
+export async function deleteImage(id: string, { baseUrl, signal }: ImageRequestOptions = {}): Promise<ImageDeleteResult> {
+  const result = await requestJsonResult(imagePath(id), { baseUrl, signal, method: 'DELETE', labels: IMAGE_LABELS })
+  const body = asObject(result.body)
+  if (body?.ok !== true) throw unreadable(result.status, result.traceId)
+  return {
+    imageId: asText(body.image_id) ?? id,
+    deletedAt: asText(body.deleted_at),
+    cleanup: body.cleanup === 'done' ? 'done' : 'queued',
+    traceId: result.traceId,
+  }
 }

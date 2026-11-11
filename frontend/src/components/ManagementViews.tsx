@@ -2,15 +2,15 @@ import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEven
 import { ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Circle, Clock3, CloudUpload, FolderOpen, ImagePlus, Images, Info, Layers3, Leaf, ListChecks, LoaderCircle, Pencil, Plus, RotateCcw, Search, Square, Tags, Trash2, X, XCircle } from 'lucide-react'
 import { Dialog } from './Dialog'
 import { categoryLabel, type CategoryTree } from '../entities/category'
-import { indexImage, type LibraryImageItem } from '../entities/image'
+import { indexImage, type ImageDeleteResult, type LabelStatus, type LibraryImageItem } from '../entities/image'
 import { DEFAULT_SCENE, sceneDisplayLabel, toApiSceneCode, sceneError, writeMembership, type VectorSync } from '../entities/scene'
 import { EmptyState, Metric } from '../shared/ui'
 import { EMPTY_COPY } from '../shared/config'
 import { formatLibraryTime } from '../shared/lib'
 import { SceneSelect } from '../features/scene-select'
 import { useLibraryList } from '../features/library-list'
-import { ImageLabelPanel } from '../features/image-label'
-import { useCategoryTree } from '../features/category-picker'
+import { ImageEditPanel } from '../features/image-edit'
+import { CategoryFilter, useCategoryTree } from '../features/category-picker'
 import {
   AnnotationForm,
   emptyAnnotation,
@@ -93,6 +93,15 @@ async function applySceneSteps(base: string, imageId: string, steps: readonly Me
   return { scenes, notes: [...new Set(notes)] }
 }
 
+const LABEL_STATUS_TEXT: Record<LabelStatus, string> = { unlabeled: '未标注', auto: '自动标注', verified: '已核验' }
+
+/** A library card's title: the start of its description, else a short id. */
+function libraryTitle(item: LibraryImageItem): string {
+  const text = Array.from(item.description.trim())
+  if (text.length) return text.length > 24 ? `${text.slice(0, 24).join('')}…` : text.join('')
+  return `#${item.id.slice(0, 8)}`
+}
+
 /** 「牛排」 / 「未设类别」 for a card; the id when the tree does not have the node. */
 function categoryText(tree: CategoryTree | null, categoryId: number | null): string {
   if (categoryId === null) return '未设类别'
@@ -110,7 +119,11 @@ function supportsDirectoryPicker(): boolean {
 
 export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
   const [libraryQuery, setLibraryQuery] = useState('')
-  const [libraryCategory, setLibraryCategory] = useState('全部类别')
+  /** The category filter: that category and its subtree; null: all. */
+  const [libraryCategoryId, setLibraryCategoryId] = useState<number | null>(null)
+  const [libraryLabelStatus, setLibraryLabelStatus] = useState<LabelStatus | ''>('')
+  /** The open editor has unsaved edits: its dialog stays open until they are saved or undone. */
+  const [libraryDirty, setLibraryDirty] = useState(false)
   const [libraryScene, setLibraryScene] = useState<string>(DEFAULT_SCENE)
   const [libraryLayout, setLibraryLayout] = useState<'grid' | 'list'>('grid')
   const [libraryPage, setLibraryPage] = useState(1)
@@ -167,8 +180,8 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
   const sceneCatalog = useSceneCatalog(apiBase)
   const handleLibraryScene = useCallback((code: string) => { setLibraryScene(toApiSceneCode(code)); setLibraryPage(1) }, [])
   const librarySelection = useSceneSelection(libraryScene, handleLibraryScene, apiBase)
-  // Read again each time the import page opens: categories may have been edited meanwhile
-  const categoryTree = useCategoryTree(apiBase, view === 'import')
+  // Read again each time the import or library page opens: categories may have been edited meanwhile
+  const categoryTree = useCategoryTree(apiBase, view === 'import' || view === 'library')
   const sceneView: SceneCatalogView = { active: sceneCatalog.active, loading: sceneCatalog.loading, error: sceneCatalog.error, refresh: sceneCatalog.refresh }
 
   // What keeps 「开始入库」 disabled, worded for the person
@@ -200,7 +213,8 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     page: libraryPage,
     pageSize: 24,
     q: debouncedLibraryQuery || undefined,
-    category: libraryCategory === '全部类别' ? undefined : libraryCategory,
+    categoryId: libraryCategoryId,
+    labelStatus: libraryLabelStatus || null,
     scene: libraryScene,
     reloadKey: libraryReloadKey,
   })
@@ -264,6 +278,28 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     setEditing(null)
     setFileIssues([])
   }
+
+  function openLibraryImage(item: LibraryImageItem) {
+    setLibraryDirty(false)
+    setLibraryPreview(item)
+  }
+
+  function closeLibraryImage() {
+    setLibraryPreview(null)
+    setLibraryDirty(false)
+  }
+
+  const reloadLibrary = useCallback(() => setLibraryReloadKey(key => key + 1), [])
+
+  const libraryImageDeleted = useCallback((result: ImageDeleteResult | null) => {
+    setLibraryPreview(null)
+    setLibraryDirty(false)
+    setNotice(result === null
+      ? '这张图片已经被删除了。'
+      : result.cleanup === 'done'
+        ? '已删除图片，向量和原图、缩略图已清理。'
+        : '已删除图片；向量和图片文件稍后由清理任务删除。')
+  }, [])
 
   /** Open the single-image dialog on the image's own annotation, else a copy of the batch's. */
   function openSingle(job: IndexJob) {
@@ -437,7 +473,13 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     <div className="mg-page-toolbar">
       {view === 'library' && <>
         <label className="mg-search"><Search size={17} /><input aria-label="搜索图库" placeholder="搜索图片名称或食材…" value={libraryQuery} onChange={event => setLibraryQuery(event.target.value)} />{libraryQuery && <button aria-label="清空搜索" onClick={() => setLibraryQuery('')}><X size={15} /></button>}</label>
-        <select className="mg-select" aria-label="图库类别筛选" value={libraryCategory} onChange={event => { setLibraryCategory(event.target.value); setLibraryPage(1) }}><option>全部类别</option>{categories.map(category => <option key={category}>{category}</option>)}</select>
+        <CategoryFilter tree={categoryTree.tree} loading={categoryTree.loading} loadError={categoryTree.error} onRetry={categoryTree.refresh} value={libraryCategoryId} onChange={id => { setLibraryCategoryId(id); setLibraryPage(1) }} />
+        <select className="mg-select" aria-label="标注状态筛选" value={libraryLabelStatus} onChange={event => { setLibraryLabelStatus(event.target.value as LabelStatus | ''); setLibraryPage(1) }}>
+          <option value="">全部标注状态</option>
+          <option value="unlabeled">未标注</option>
+          <option value="auto">自动标注</option>
+          <option value="verified">已核验</option>
+        </select>
           <SceneSelect
             id="library-scene"
             variant="management"
@@ -471,17 +513,18 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     </div>
 
     {view === 'library' && (() => {
-      const hasFilter = Boolean(debouncedLibraryQuery) || libraryCategory !== '全部类别' || libraryScene !== sceneCatalog.defaultScene?.code
+      const hasFilter = Boolean(debouncedLibraryQuery) || libraryCategoryId !== null || libraryLabelStatus !== '' || libraryScene !== sceneCatalog.defaultScene?.code
       const totalPages = Math.max(1, Math.ceil(libraryTotal / 24) || 1)
       const pageLabel = libraryTotal === 0 ? '—' : `${libraryPage} / ${totalPages}`
+      const activeCategories = categoryTree.tree ? [...categoryTree.tree.byId.values()].filter(entry => entry.node.isActive).length : null
       return <>
       <div className="mg-metrics">
         <Metric label="图片总量" value={libraryError ? '—' : String(libraryTotal)} detail={libraryConnected ? '当前筛选合计' : '接入图库后显示'} icon={Images} />
-        <Metric label="食材类别" value="—" detail="后续接入" icon={Layers3} />
+        <Metric label="启用类别" value={activeCategories === null ? '—' : String(activeCategories)} detail={activeCategories === null ? (categoryTree.error ? '类别读取失败' : '读取类别中') : '来自类别配置'} icon={Layers3} />
         <Metric label="待入库任务" value={jobs.length ? String(jobs.filter(j => j.status !== 'success').length) : '—'} detail={jobs.length ? '本会话未完成项' : '接入任务后显示'} icon={ListChecks} />
       </div>
       <section className="mg-panel">
-        {libraryLayout === 'list' && <div className="mg-table-head mg-library-head"><span>图片 / 名称</span><span>类别</span><span>属性</span><span>入库时间</span></div>}
+        {libraryLayout === 'list' && <div className="mg-table-head mg-library-head"><span>图片 / 名称</span><span>类别</span><span>标注 · 标签</span><span>入库时间</span></div>}
         {libraryError && <div className="mg-errors" role="alert"><div><strong>图库加载失败</strong><button type="button" className="mg-text-button" onClick={() => setLibraryReloadKey(key => key + 1)}>重试</button></div><p>{libraryError}</p></div>}
         {!libraryError && libraryLoading && libraryItems.length === 0 && (
           <div className="loading-state" aria-busy="true" aria-live="polite">
@@ -498,7 +541,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
         )}
         {!libraryError && !libraryLoading && libraryTotal === 0 && hasFilter && (
           <EmptyState icon={Images} title={EMPTY_COPY.libraryFilteredEmpty.title} description={EMPTY_COPY.libraryFilteredEmpty.description}>
-            <button className="mg-btn mg-secondary" onClick={() => { setLibraryQuery(''); setLibraryCategory('全部类别'); setLibraryScene(sceneCatalog.defaultScene?.code ?? ''); setLibraryPage(1) }}>清空筛选</button>
+            <button className="mg-btn mg-secondary" onClick={() => { setLibraryQuery(''); setLibraryCategoryId(null); setLibraryLabelStatus(''); setLibraryScene(sceneCatalog.defaultScene?.code ?? ''); setLibraryPage(1) }}>清空筛选</button>
           </EmptyState>
         )}
         {!libraryError && libraryItems.length > 0 && libraryLayout === 'grid' && (
@@ -508,21 +551,22 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
                 <button
                   type="button"
                   className="mg-upload-preview"
-                  disabled={!item.imageUrl}
-                  onClick={() => setLibraryPreview(item)}
-                  aria-label={item.imageUrl ? `预览 ${item.id}` : '暂无预览'}
+                  onClick={() => openLibraryImage(item)}
+                  aria-label={`标注 ${libraryTitle(item)}`}
                 >
                   {item.imageUrl
                     ? <img src={item.imageUrl} alt="" loading="lazy" />
                     : <span className="mg-library-placeholder" aria-hidden="true"><Images size={28} strokeWidth={1.4} /></span>}
-                  <span>{item.imageUrl ? '查看图片' : '暂无预览'}</span>
+                  <span>查看与标注</span>
                 </button>
                 <div>
-                  <strong title={item.id}>未命名图片</strong>
+                  <strong title={item.description || item.id}>{libraryTitle(item)}</strong>
                   <small>
-                    {item.category ? <span className="mg-category-chip">{item.category}</span> : <span>—</span>}
+                    <span className={`mg-category-chip${item.category ? '' : ' is-empty'}`}>{item.category ?? '未标注'}</span>
+                    {item.labelStatus && item.labelStatus !== 'unlabeled' && <span className={`mg-label-status is-${item.labelStatus}`}>{LABEL_STATUS_TEXT[item.labelStatus]}</span>}
                     {item.scenes.map(code => <span className="mg-library-scene" key={code}>{sceneCatalog.data?.scenes.find(s => s.code === code)?.name ?? sceneDisplayLabel(code)}</span>)}
                   </small>
+                  {item.tags.length > 0 && <small className="mg-library-tags">{item.tags.slice(0, 4).map(tag => <span key={tag}>#{tag}</span>)}{item.tags.length > 4 && <span>+{item.tags.length - 4}</span>}</small>}
                 </div>
               </article>
             ))}
@@ -535,16 +579,16 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
                 <button
                   type="button"
                   className="mg-library-name"
-                  disabled={!item.imageUrl}
-                  onClick={() => setLibraryPreview(item)}
+                  onClick={() => openLibraryImage(item)}
+                  aria-label={`标注 ${libraryTitle(item)}`}
                 >
                   {item.imageUrl
                     ? <img src={item.imageUrl} alt="" className="mg-library-thumb" loading="lazy" />
                     : <span className="mg-library-thumb mg-library-placeholder" aria-hidden="true"><Images size={16} /></span>}
-                  <strong title={item.id}>未命名图片</strong>
+                  <strong title={item.description || item.id}>{libraryTitle(item)}</strong>
                 </button>
-                <span>{item.category ? <span className="mg-category-chip">{item.category}</span> : '—'}</span>
-                <span className="mg-attributes">—</span>
+                <span><span className={`mg-category-chip${item.category ? '' : ' is-empty'}`}>{item.category ?? '未标注'}</span></span>
+                <span className="mg-attributes">{item.labelStatus && item.labelStatus !== 'unlabeled' && <span className={`mg-label-status is-${item.labelStatus}`}>{LABEL_STATUS_TEXT[item.labelStatus]}</span>}{item.tags.length ? item.tags.map(tag => `#${tag}`).join(' ') : item.labelStatus === 'unlabeled' ? '' : '—'}</span>
                 <span>{formatLibraryTime(item.createdAt)}</span>
               </div>
             ))}
@@ -560,7 +604,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
           </div>
         </div>
       </section>
-      <div className="mg-info"><Info size={17} /><p>图库列表来自 <code>GET /api/images</code>（默认 scene=general，每页 24）。缩略图认 S3 <code>thumb_url</code>/<code>original_url</code>（禁 path）；本刀不做软删。空库请走「上传与导入」重建。</p></div>
+      <div className="mg-info"><Info size={17} /><p>点击图片查看与标注：可改类别、标注状态、标签、描述和食物标注，保存后同步到检索；向量库里的过滤信息落后时可以重推，也可以删除图片。按类别筛选时包含它的所有下级类别。</p></div>
     </>
     })()}
 
@@ -660,12 +704,16 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
         </div>
       </Dialog>
     })()}
-    {libraryPreview && <Dialog title="图片标注" onClose={() => setLibraryPreview(null)} wide>
-      {(libraryPreview.originalUrl || libraryPreview.imageUrl)
-        ? <img className="mg-dialog-image" src={libraryPreview.originalUrl ?? libraryPreview.imageUrl!} alt="" />
-        : <div className="mg-empty"><p>暂无预览地址</p></div>}
-      <p className="mg-preview-name">{libraryPreview.id}</p>
-      <ImageLabelPanel item={libraryPreview} apiBase={apiBase} onSaved={() => setLibraryReloadKey(key => key + 1)} onManage={() => { setLibraryPreview(null); onNavigate('scenes'); const u = new URL(window.location.href); u.searchParams.set('sceneTab', 'sync'); window.history.replaceState(null, '', u.toString()) }} />
+    {libraryPreview && <Dialog title="图片标注" size="lg" onClose={closeLibraryImage} dismissDisabled={libraryDirty}>
+      <ImageEditPanel
+        item={libraryPreview}
+        apiBase={apiBase}
+        categories={categoryTree}
+        onChanged={reloadLibrary}
+        onDeleted={libraryImageDeleted}
+        onDirtyChange={setLibraryDirty}
+        onManage={() => { closeLibraryImage(); onNavigate('scenes'); const u = new URL(window.location.href); u.searchParams.set('sceneTab', 'sync'); window.history.replaceState(null, '', u.toString()) }}
+      />
     </Dialog>}
     {editor && <Dialog title={ingredients.some(item => item.id === editor.id) ? '编辑食材草稿' : '新建食材草稿'} onClose={() => setEditor(null)}>
       <form className="mg-editor" onSubmit={saveIngredient}>

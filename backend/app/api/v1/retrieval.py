@@ -83,7 +83,8 @@ def mvp_health(request: Request) -> JSONResponse:
     description=(
         "按场景分页查询图库图片，默认场景为 general。"
         "可通过 q 按分类名称、标签、图片 URL 或 ID 进行子串匹配，"
-        "通过 category 按分类代码、名称或 ID 筛选，通过 tag 按单个标签精确筛选。参见 SSOT §3.5。"
+        "通过 category 按分类代码、名称或 ID 筛选，通过 category_id 按类别及其所有下级类别筛选，"
+        "通过 tag 按单个标签精确筛选，通过 label_status 按标注状态筛选。参见 SSOT §3.5。"
     ),
 )
 def list_library_images(
@@ -92,8 +93,12 @@ def list_library_images(
     page: int = Query(1, description="页码，从 1 开始"),
     page_size: int = Query(24, description="每页数量，默认 24，范围 1～100"),
     q: Optional[str] = Query(None, description="可选搜索关键词，按分类名称、标签、图片 URL 或 ID 进行子串匹配"),
-    category: Optional[str] = Query(None, description="可选分类筛选，支持分类代码、名称或 ID"),
+    category: Optional[str] = Query(None, description="可选分类筛选，支持分类代码、名称或 ID（只匹配这一个类别）"),
     tag: Optional[str] = Query(None, description="可选标签筛选：tags 里有这个标签（精确匹配，区分大小写）"),
+    category_id: Optional[int] = Query(
+        None, gt=0, le=2_147_483_647, description="可选类别筛选（categories.id）：这个类别及其所有下级类别；未标注的图片不匹配"
+    ),
+    label_status: Optional[str] = Query(None, description="可选标注状态筛选：unlabeled / auto / verified"),
     trace_id: Optional[str] = Query(None),
 ) -> Any:
     return retrieval_service.run_list_images(
@@ -105,5 +110,7 @@ def list_library_images(
         q=q,
         category=category,
         tag=tag,
+        category_id=category_id,
+        label_status=label_status,
         trace_id=trace_id,
     )

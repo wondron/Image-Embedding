@@ -579,44 +579,6 @@ main { flex: 1; min-height: 0; width: 100%; max-width: none; padding: 14px; marg
   color: var(--muted, #6b7280);
   margin-left: 6px;
 }
-.image-label-panel {
-  margin: 12px 16px 16px; /* lines up with .mg-preview-name in the preview dialog */
-  text-align: left;
-}
-.image-label-heading {
-  margin: 12px 0 8px;
-  font-size: 14px;
-}
-.image-label-scenes {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.image-label-scenes li {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--border, #e5e7eb);
-  border-radius: 8px;
-}
-.image-label-scenes .scene-chip code {
-  font-size: 11px;
-  margin-left: 4px;
-  opacity: 0.7;
-}
-.image-label-scenes .origin-tag {
-  font-size: 12px;
-  color: var(--muted, #6b7280);
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
 .no-results-actions {
   margin-top: 12px;
   display: flex;

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { DEFAULT_SCENE, toApiSceneCode, unknownScene, sceneError } from '../../entities/scene'
 import { refreshSceneCatalog } from '../scene-catalog'
-import { listImages, type LibraryImageItem } from '../../entities/image'
+import { listImages, type LabelStatus, type LibraryImageItem } from '../../entities/image'
 
 export type UseLibraryListOptions = {
   enabled: boolean
@@ -9,7 +9,9 @@ export type UseLibraryListOptions = {
   page: number
   pageSize?: number
   q?: string
-  category?: string | null
+  /** That category and its subtree. */
+  categoryId?: number | null
+  labelStatus?: LabelStatus | null
   scene: string
   /** Bump to refetch the same page (retry). */
   reloadKey?: number
@@ -26,7 +28,8 @@ export function useLibraryList({
   page,
   pageSize = 24,
   q,
-  category,
+  categoryId = null,
+  labelStatus = null,
   scene,
   reloadKey = 0,
 }: UseLibraryListOptions) {
@@ -38,7 +41,7 @@ export function useLibraryList({
 
   const failedRequest = useRef<string | null>(null)
   useEffect(() => {
-    const requestKey = JSON.stringify([apiBase, page, pageSize, q, category, scene, reloadKey])
+    const requestKey = JSON.stringify([apiBase, page, pageSize, q, categoryId, labelStatus, scene, reloadKey])
     if (!enabled) { setLoading(false); return }
     if (failedRequest.current === requestKey) return
     const controller = new AbortController()
@@ -48,7 +51,8 @@ export function useLibraryList({
       page,
       pageSize,
       q: q || undefined,
-      category: category || undefined,
+      categoryId,
+      labelStatus,
       scene: toApiSceneCode(scene, DEFAULT_SCENE),
       baseUrl: apiBase,
       signal: controller.signal,
@@ -67,7 +71,7 @@ export function useLibraryList({
       setLoading(false)
     })
     return () => controller.abort()
-  }, [enabled, page, pageSize, q, category, scene, apiBase, reloadKey])
+  }, [enabled, page, pageSize, q, categoryId, labelStatus, scene, apiBase, reloadKey])
 
   return { items, total, loading, error, connected }
 }

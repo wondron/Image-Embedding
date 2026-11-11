@@ -25,7 +25,26 @@
 .cp-option small { color: #7b8899; font-size: 12px; overflow-wrap: anywhere; }
 .cp-option.is-active { background: #eef4ff; }
 .cp-option.is-selected > span { color: var(--primary); font-weight: 700; }
+.cp-option.is-all { margin-bottom: 3px; border-bottom: 1px solid #eef2f7; border-radius: 6px 6px 0 0; color: #475569; }
 .cp-empty, .cp-more { padding: 8px 10px; color: #7b8899; font-size: 12px; line-height: 1.6; }
+.cp-inactive { align-self: flex-start; padding: 0 6px; border-radius: 999px; background: #fdf0ee; color: #b42318 !important; }
+
+/* Toolbar filter: a select-looking button opening a popover with the search list */
+.cf { position: relative; }
+.cf-trigger { display: inline-flex; align-items: center; gap: 6px; max-width: 220px; padding: 0 10px; text-align: left; cursor: pointer; }
+.cf-trigger > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cf-trigger > svg { flex-shrink: 0; color: #7b8899; }
+.cf-trigger.is-set { border-color: #cfe0ff; background: #f4f8ff; color: var(--primary); }
+.cf-trigger.is-set > svg { color: var(--primary); }
+.cf-popover { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; width: min(340px, calc(100vw - 32px)); padding: 10px; border: 1px solid #d7e0ee; border-radius: 12px; background: #fff; box-shadow: 0 12px 28px rgba(15, 23, 42, .12); }
+.cf-popover .cp-combo { margin-top: 0; }
+.cf-popover .cp-list { max-height: min(320px, 50vh); box-shadow: none; }
+.cf-popover > .cp-error { margin: 0 0 8px; }
+.cf-hint { margin: 8px 2px 0; color: #7b8899; font-size: 12px; line-height: 1.6; }
+@media (max-width: 580px) {
+  .cf { position: static; }
+  .cf-popover { left: 0; right: 0; width: auto; }
+}
 
 .cp-hint { margin: 5px 0 0; color: #7b8899; font-size: 12px; line-height: 1.7; }
 .cp-error { margin: 5px 0 0; color: #b42318; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }

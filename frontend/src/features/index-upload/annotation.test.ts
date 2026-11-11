@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildCategoryTree, type CategoryNode } from '../../entities/category'
-import { emptyAnnotation, filledExtras, parseAmount, toIndexFields, validateAnnotation, type ImportAnnotation } from './annotation'
+import { parseAmount } from '../../entities/image'
+import { emptyAnnotation, filledExtras, toIndexFields, validateAnnotation, type ImportAnnotation } from './annotation'
 
 function node(id: number, code: string, extra: Partial<CategoryNode> = {}): CategoryNode {
   return {

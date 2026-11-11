@@ -7,6 +7,8 @@
 }
 
 .mg-page-toolbar {
+  position: relative;  /* narrow screens: the category filter popover spans the toolbar */
+  z-index: 3;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -430,6 +432,13 @@
   display: inline-flex; align-items: center; padding: 1px 6px;
   border-radius: 999px; background: #eef2ff; color: #4f6fad; font-size: 11px;
 }
+/* Library cards: chips keep their own height and line up from the left */
+.mg-library-card small { justify-content: flex-start; align-items: center; }
+.mg-label-status { display: inline-flex; align-items: center; padding: 0 6px; border-radius: 999px; font-size: 11px; line-height: 18px; }
+.mg-label-status.is-auto { background: #eef2f7; color: #64748b; }
+.mg-label-status.is-verified { background: #eaf5ee; color: #2f7d4a; }
+.mg-library-tags { justify-content: flex-start !important; gap: 4px 8px !important; margin-top: 4px !important; color: #64748b !important; font-size: 11px !important; overflow-wrap: anywhere; }
+.mg-attributes .mg-label-status { margin-right: 6px; }
 .mg-library-list { display: flex; flex-direction: column; }
 .mg-library-row {
   display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; align-items: center;

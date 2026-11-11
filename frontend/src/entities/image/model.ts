@@ -95,6 +95,7 @@ export interface LibraryImageItem {
   sceneMemberships: SceneMembership[]
   labelStatus: LabelStatus | null
   description: string
+  tags: string[]
   /** Sent only for scenes with outputs_heating; null otherwise. */
   foodState: FoodState | null
   /** Sent only for scenes with outputs_heating; null otherwise or when the category has none. */
@@ -130,6 +131,7 @@ export function toLibraryImage(value: unknown): LibraryImageItem | null {
     sceneMemberships: scenes.map(code => ({ code })),
     labelStatus: parseLabelStatus(item.label_status),
     description: parseDescription(item.description),
+    tags: asTextList(item.tags),
     foodState: parseFoodState(item.food_state),
     heatingGroup: parseHeatingGroup(item.heating_group),
     width: asPositiveNumber(item.width),

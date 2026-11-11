@@ -210,6 +210,7 @@ export interface ListImageItemWire {
   scenes: string[] | null
   label_status: LabelStatusWire | null
   description: string
+  tags: string[]
   width: number | null
   height: number | null
   /** Present only when the scene has outputs_heating. */
@@ -334,6 +335,111 @@ export interface PredictDocImageWire {
   alt?: string
   width?: number
   height?: number
+}
+
+// -- one stored image: GET / PATCH / DELETE /api/images/{id}, POST …/vector-sync ----------
+
+/** schemas/images.py ImageEmbeddingRecord. */
+export interface ImageLedgerEntryWire {
+  model_id: number
+  name: string
+  version: string
+  collection: string
+  model_status: string
+  synced_version: number
+  embedded_at: string | null
+}
+
+/** schemas/images.py ImageDetail: the list item's fields plus what only the detail shows. */
+export interface ImageDetailWire {
+  id: string
+  sha256: string
+  original_url: string
+  thumb_url: string
+  width: number
+  height: number
+  category_id: number | null
+  category: string | null
+  category_code: string | null
+  label_status: LabelStatusWire
+  scenes: string[]
+  description: string
+  tags: string[]
+  source_type: string
+  license: string
+  food_state: FoodStateWire | null
+  food_processing: string | null
+  food_count: number | null
+  total_mass_g: number | null
+  water_mass_g: number | null
+  main_ingredient_mass_g: number | null
+  heating_group: HeatingGroupWire | null
+  payload_version: number
+  created_at: string | null
+  updated_at: string | null
+  embeddings: ImageLedgerEntryWire[]
+}
+
+/** schemas/images.py ImageVectorState. */
+export interface ImageVectorStateWire {
+  status: 'synced' | 'stale' | 'missing' | 'unavailable'
+  collection?: string | null
+  embedding_space_id?: string | null
+  exists?: boolean | null
+  payload?: Record<string, unknown> | null
+  expected_payload?: Record<string, unknown> | null
+  payload_matches?: boolean | null
+  payload_version?: number | null
+  synced_version?: number | null
+  embedded_at?: string | null
+  detail?: string | null
+}
+
+export type VectorSyncWire = 'pushed' | 'missing' | 'not_ready' | 'failed'
+
+/** GET /api/images/{id}. */
+export interface ImageDetailResponseWire {
+  ok: true
+  image: ImageDetailWire
+  vector: ImageVectorStateWire
+}
+
+/** PATCH /api/images/{id}: only the fields to change; null clears (label_status never null). */
+export interface ImageUpdateRequestWire {
+  category_id?: number | null
+  label_status?: LabelStatusWire
+  description?: string | null
+  tags?: string[] | null
+  food_state?: string | null
+  food_processing?: string | null
+  food_count?: number | null
+  total_mass_g?: number | null
+  water_mass_g?: number | null
+  main_ingredient_mass_g?: number | null
+}
+
+export interface ImageUpdateResponseWire {
+  ok: true
+  image: ImageDetailWire
+  vector_sync: VectorSyncWire
+  sync_required: boolean
+}
+
+/** POST /api/images/{id}/vector-sync. */
+export interface ImageVectorSyncResponseWire {
+  ok: true
+  image_id: string
+  payload_version: number
+  vector_sync: VectorSyncWire
+  sync_required: boolean
+}
+
+/** DELETE /api/images/{id}. */
+export interface ImageDeleteResponseWire {
+  ok: true
+  image_id: string
+  deleted_at: string | null
+  cleanup: 'done' | 'queued'
 }
 
 // -- GET /api/ping ------------------------------------------------------------------------

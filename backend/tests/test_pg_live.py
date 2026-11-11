@@ -316,6 +316,23 @@ class PgLiveTests(unittest.TestCase):
         refused({"description": "x"}, "IMAGE_NOT_FOUND", image=str(uuid.uuid4()))
         self.assertEqual(store.get_image_detail(iid)["payload_version"], 4)  # nothing half-written
 
+    def test_list_filters_on_a_category_subtree_and_the_label_status(self):
+        cat = self.seed_catalog()  # dish > dish.steak
+        store = self.store()
+        dish = self.insert(store, 1, category_id=cat["dish"], label_status="auto")
+        steak = self.insert(store, 2, category_id=cat["steak"], label_status="verified")
+        plain = self.insert(store, 3)
+
+        def ids(**kw):
+            return sorted(item["id"] for item in store.list_images(scene="general", **kw)[0])
+
+        self.assertEqual(ids(category_id=cat["dish"]), sorted([dish, steak]))  # the category and its subtree
+        self.assertEqual(ids(category_id=cat["steak"]), [steak])
+        self.assertEqual(ids(category_id=999999), [])
+        self.assertEqual(ids(label_status="unlabeled"), [plain])
+        self.assertEqual(ids(category_id=cat["dish"], label_status="verified"), [steak])
+        self.assertEqual(store.list_images(scene="general", category_id=cat["dish"])[1], 2)  # the total honours it
+
     def test_a_deleted_image_stored_again_is_deleted_again(self):
         from app.core.errors import AppError
 

@@ -1,0 +1,60 @@
+/* Gallery image editor (inside the 「图片标注」 dialog). Field styles: features/annotation-fields. */
+.ie { display: flex; flex-direction: column; gap: 12px; padding: 12px 12px 0; }
+.ie-top { display: grid; grid-template-columns: 200px minmax(0, 1fr); align-items: start; gap: 14px; }
+.ie-figure { display: grid; place-items: center; margin: 0; aspect-ratio: 1; overflow: hidden; border: 1px solid #e5e9f0; border-radius: 10px; background: #f2f4f8; }
+.ie-figure img { width: 100%; height: 100%; object-fit: contain; }
+.ie-noimage { color: #94a3b8; font-size: 13px; }
+.ie-facts { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.ie-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px; margin: 0; }
+.ie-meta > div { min-width: 0; }
+.ie-meta dt { color: #7b8899; font-size: 12px; line-height: 1.6; }
+.ie-meta dd { margin: 0; color: #223046; font-size: 13px; font-weight: 600; line-height: 1.6; overflow-wrap: anywhere; }
+.ie-meta .monospace { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; font-weight: 400; }
+.ie-meta-wide { grid-column: 1 / -1; }
+
+.ie-vector { padding: 9px 12px 10px; border: 1px solid #e5eaf2; border-radius: 10px; background: #fcfdff; }
+.ie-vector-head { display: flex; align-items: center; gap: 8px; }
+.ie-vector-head strong { color: #1f2a3a; font-size: 13px; }
+.ie-vector-head .mg-text-button { margin-left: auto; font-size: 12px; }
+.ie-vector-head .mg-text-button:disabled { color: var(--muted); cursor: not-allowed; text-decoration: none; }
+.ie-vector-badge { padding: 0 8px; border-radius: 999px; font-size: 11px; line-height: 18px; }
+.ie-vector.is-synced .ie-vector-badge { background: #eaf5ee; color: #2f7d4a; }
+.ie-vector.is-stale { border-color: #f1dcb8; background: #fffaf2; }
+.ie-vector.is-stale .ie-vector-badge { background: #fff4e5; color: #9a6700; }
+.ie-vector.is-missing { border-color: #f0c2bc; background: #fffafa; }
+.ie-vector.is-missing .ie-vector-badge { background: #fdf0ee; color: #b42318; }
+.ie-vector.is-unavailable .ie-vector-badge { background: #eef2f7; color: #64748b; }
+.ie-vector p { margin: 5px 0 0; color: #475569; font-size: 12px; line-height: 1.7; }
+.ie-vector small { display: block; margin-top: 4px; color: #7b8899; font-size: 11px; overflow-wrap: anywhere; }
+.ie-diff { margin: 5px 0 0; padding-left: 16px; color: #7a5a1f; font-size: 12px; line-height: 1.7; }
+.ie-diff span { margin-right: 6px; font-weight: 700; }
+
+.ie-status { display: flex; align-items: center; gap: 6px; margin: 0; color: #64748b; font-size: 13px; }
+.ie-alert { margin: 0; padding: 8px 10px; border: 1px solid #f0c2bc; border-radius: 8px; background: #fffafa; color: #b42318; font-size: 13px; line-height: 1.6; }
+.ie-alert .mg-text-button { font-size: 13px; }
+.ie-memberships .scene-membership-panel { margin: 0; }
+
+/* Actions stay at the bottom of the dialog while the form scrolls */
+.ie-bar { position: sticky; bottom: 0; z-index: 2; display: flex; flex-direction: column; gap: 8px; margin: 0 -12px; padding: 10px 12px; border-top: 1px solid rgba(148, 163, 184, .22); background: rgba(252, 253, 255, .97); }
+.ie-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ie-changes { flex: 1; min-width: 0; color: #7b8899; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ie-delete { color: #b42318; }
+.ie-delete:disabled { color: var(--muted); cursor: not-allowed; text-decoration: none; }
+.ie-notice { margin: 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.ie-notice.is-ok { color: #2f7d4a; }
+.ie-notice.is-warn { color: #9a6700; }
+.ie-notice.is-error { color: #b42318; }
+.ie-ask { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 8px 10px; border: 1px solid #f0c2bc; border-radius: 8px; background: #fffafa; }
+.ie-ask p { flex: 1 1 260px; margin: 0; color: #7a2e26; font-size: 13px; line-height: 1.6; }
+.ie-ask > div { display: flex; gap: 8px; }
+.ie-danger { color: #fff; background: #c2412f; border-color: #c2412f; }
+.ie-danger:hover:not(:disabled) { background: #a8382a; border-color: #a8382a; }
+
+@media (max-width: 640px) {
+  .ie-top { grid-template-columns: 1fr; }
+  .ie-figure { max-width: 160px; }
+  .ie-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 380px) {
+  .ie-meta { grid-template-columns: 1fr; }
+}

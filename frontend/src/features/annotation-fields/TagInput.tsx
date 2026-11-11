@@ -1,6 +1,7 @@
 import { useRef, useState, type KeyboardEvent } from 'react'
 import { X } from 'lucide-react'
-import { MAX_TAG_LENGTH, MAX_TAGS, charLength } from './annotation'
+import { MAX_TAG_LENGTH, MAX_TAGS, charLength } from '../../entities/image'
+import './annotation-fields.css'
 
 const SEPARATORS = /[,，、;；\n]/
 
