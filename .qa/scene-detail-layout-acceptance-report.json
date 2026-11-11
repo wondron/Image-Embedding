@@ -1,382 +1,295 @@
 {
-  "overall": "PARTIAL: L20–L22 PASS on static diff only; L1–L19 BLOCKED without screenshots or authorized interaction. Visual/layout acceptance is NOT complete and is not claimed.",
-  "reported_at": "2026-11-10T22:38:22.550831-07:00",
+  "overall": "L16 FAIL (dialog focus is not returned to the trigger). L1?L15 and L17?L22 PASS on Playwright/screenshots or static diff. Visual acceptance is NOT complete.",
+  "reported_at": "2026-11-10T22:53:10.720260-07:00",
   "timezone": "America/Denver (MST)",
   "machine": "wondron / fada9197-1d47-44f2-8e45-fdb157d8e181",
   "repo": "C:\\Users\\47202\\PROJECT\\Image-Embedding",
-  "sources_read_in_full": [
-    "/workspace/deliverables/scene-detail-layout-refinement.md",
-    "/workspace/deliverables/scene-detail-layout-implementation.md"
-  ],
-  "handoff_claimed": {
-    "head": "c145e84e167fcf01e8e60218955427edb435b52f",
-    "files": {
-      "frontend/src/features/scene-management/SceneManagement.tsx": {
-        "sha256": "DA1F3FF120110314915E93602984EA39BF4B2BC33081D4C840959FDC8613BAA7",
-        "expected": "DA1F3FF120110314915E93602984EA39BF4B2BC33081D4C840959FDC8613BAA7",
-        "match": true
-      },
-      "frontend/src/features/scene-management/SceneSyncPanel.tsx": {
-        "sha256": "B41373D915060173F66EB6ABB254718EE1F32C9517D7FF79CE26CD21159F98A5",
-        "expected": "B41373D915060173F66EB6ABB254718EE1F32C9517D7FF79CE26CD21159F98A5",
-        "match": true
-      },
-      "frontend/src/features/scene-management/scene-management.css": {
-        "sha256": "79477EB4827B3F29D94611DF161F37D79B34EE073ABC29D4249926F43CC70859",
-        "expected": "79477EB4827B3F29D94611DF161F37D79B34EE073ABC29D4249926F43CC70859",
-        "match": true
-      }
-    },
-    "diffstat": "3 files changed, 167 insertions(+), 41 deletions(-)"
+  "playwright": {
+    "cli": "frontend/node_modules/@playwright/test 1.64.1",
+    "browser": "already-installed Chromium 1248 at %%LOCALAPPDATA%%/ms-playwright/chromium-1248",
+    "config": ".qa/scene-detail-layout-playwright.config.ts",
+    "exit_code": 0,
+    "duration_s": 27.2,
+    "note": "First attempt in this resume failed mid-run because the QA wait accepted a stale data-scene-width; the wait was fixed in the QA spec only and the suite was rerun once, exit 0. No browsers were installed. MCP Playwright was not used."
   },
-  "verified_head_initial": "c145e84e167fcf01e8e60218955427edb435b52f",
-  "verified_head_final": "c145e84e167fcf01e8e60218955427edb435b52f",
-  "head_matches_handoff": true,
-  "workspace_matches_handoff": true,
-  "initial_application_dirty": "Only the three scene-management files were modified relative to HEAD when this acceptance started; hashes matched the implementer SHA256 values.",
-  "final_application_dirty": "Still only those three application files are modified. Additional untracked files are QA/report artifacts under .qa/ plus ignored frontend/dist from the local build.",
-  "final_git_status": " M frontend/src/features/scene-management/SceneManagement.tsx\n M frontend/src/features/scene-management/SceneSyncPanel.tsx\n M frontend/src/features/scene-management/scene-management.css\n?? .qa/scene-detail-layout-frontend-regression.json\n?? .qa/scene-detail-layout-gui-api.log\n?? .qa/scene-detail-layout-gui-cleanup.ps1\n?? .qa/scene-detail-layout-gui-frontend.log\n?? .qa/scene-detail-layout-gui-ready.json\n?? .qa/scene-detail-layout-handoff-hash.json\n?? .qa/scene-detail-layout-static-facts.json\n?? .qa/scene-detail-layout-working.diff\n?? .qa/scene_detail_layout_gui_qa.py\n",
+  "verified_head_final": "de1c1b979f9024c22610f8e7eec88d153242be54",
+  "head_matches_handoff": false,
   "three_file_hashes": {
     "frontend/src/features/scene-management/SceneManagement.tsx": {
-      "sha256": "DA1F3FF120110314915E93602984EA39BF4B2BC33081D4C840959FDC8613BAA7",
-      "expected": "DA1F3FF120110314915E93602984EA39BF4B2BC33081D4C840959FDC8613BAA7",
-      "match": true
+      "sha256_worktree": "DA1F3FF120110314915E93602984EA39BF4B2BC33081D4C840959FDC8613BAA7",
+      "sha256_HEAD": "DA1F3FF120110314915E93602984EA39BF4B2BC33081D4C840959FDC8613BAA7",
+      "expected_handoff": "DA1F3FF120110314915E93602984EA39BF4B2BC33081D4C840959FDC8613BAA7",
+      "worktree_matches_handoff": true,
+      "HEAD_matches_worktree": true
     },
     "frontend/src/features/scene-management/SceneSyncPanel.tsx": {
-      "sha256": "B41373D915060173F66EB6ABB254718EE1F32C9517D7FF79CE26CD21159F98A5",
-      "expected": "B41373D915060173F66EB6ABB254718EE1F32C9517D7FF79CE26CD21159F98A5",
-      "match": true
+      "sha256_worktree": "B41373D915060173F66EB6ABB254718EE1F32C9517D7FF79CE26CD21159F98A5",
+      "sha256_HEAD": "B41373D915060173F66EB6ABB254718EE1F32C9517D7FF79CE26CD21159F98A5",
+      "expected_handoff": "B41373D915060173F66EB6ABB254718EE1F32C9517D7FF79CE26CD21159F98A5",
+      "worktree_matches_handoff": true,
+      "HEAD_matches_worktree": true
     },
     "frontend/src/features/scene-management/scene-management.css": {
-      "sha256": "79477EB4827B3F29D94611DF161F37D79B34EE073ABC29D4249926F43CC70859",
-      "expected": "79477EB4827B3F29D94611DF161F37D79B34EE073ABC29D4249926F43CC70859",
-      "match": true
+      "sha256_worktree": "79477EB4827B3F29D94611DF161F37D79B34EE073ABC29D4249926F43CC70859",
+      "sha256_HEAD": "79477EB4827B3F29D94611DF161F37D79B34EE073ABC29D4249926F43CC70859",
+      "expected_handoff": "79477EB4827B3F29D94611DF161F37D79B34EE073ABC29D4249926F43CC70859",
+      "worktree_matches_handoff": true,
+      "HEAD_matches_worktree": true
     }
   },
-  "static_commands": {
-    "frontend_vitest": {
-      "command": "npm.cmd test -- --reporter=json --outputFile=../.qa/scene-detail-layout-frontend-regression.json",
-      "exit_code": 0,
-      "tests": 131,
-      "passed": 131,
-      "failed": 0,
-      "note": "Full existing frontend unit suite. Not visual layout proof. No SceneManagement component tests were present."
-    },
-    "related_scene_unit": {
-      "passed": 8,
-      "total": 8,
-      "files": [
-        {
-          "file": "C:/Users/47202/PROJECT/Image-Embedding/frontend/src/entities/scene/api.test.ts",
-          "tests": 6,
-          "passed": 6,
-          "failed": 0,
-          "status": "passed"
-        },
-        {
-          "file": "C:/Users/47202/PROJECT/Image-Embedding/frontend/src/features/scene-catalog/scene-catalog.test.ts",
-          "tests": 2,
-          "passed": 2,
-          "failed": 0,
-          "status": "passed"
-        }
-      ],
-      "note": "Subset counted from the same full Vitest run (entities/scene + scene-catalog). No scene-sync or scene-management component tests existed in the suite."
-    },
-    "tsc": {
-      "command": "npx.cmd tsc -b --pretty false",
-      "exit_code": 0
-    },
-    "build": {
-      "command": "npm.cmd run build",
-      "exit_code": 0,
-      "modules": 1663,
-      "note": "Writes ignored frontend/dist; not visual acceptance."
-    }
-  },
+  "final_git_status": " M .qa/scene-detail-layout-acceptance-report.json\n M .qa/scene-detail-layout-acceptance-report.md\n M .qa/scene-detail-layout-evidence.zip\n",
   "items": [
     {
       "id": "L1",
-      "criterion": "右栏内宽 >=720：标题带不出现横向滚动；主操作在前、危险操作在末。",
-      "status": "BLOCKED",
-      "evidence_type": "static/source and isolated fixture preparation only; NO screenshot or authorized browser interaction",
-      "evidence": "源码：标题 flex、删除在 scene-detail-danger-actions、container/data-scene-width=wide 于内宽>=720。无实测内宽、无截图，不能证明无横向滚动或操作顺序的视觉结果。",
-      "blocker": "Executor must not drive a browser via Shell/Playwright/MCP. No screenshot or interaction evidence was obtained. Isolated wondron loopback GUI is handed off for a browser ON wondron; previous peer Playwright against wondron loopback returned net::ERR_CONNECTION_REFUSED and must not be assumed to run on this machine."
+      "status": "PASS",
+      "evidence_type": "Playwright + screenshots + inner-width measure",
+      "evidence": "viewport 1440, right-column inner 798, data-scene-width=wide, header did not overflow, actions ??/??/?? in that order. Screenshots 01-wide-inner800.png and 01-wide-inner800-panel.png."
     },
     {
       "id": "L2",
-      "criterion": "右栏内宽 480–719：名/code/徽标/操作可换行，无裁切、无标题横溢。",
-      "status": "BLOCKED",
-      "evidence_type": "static/source and isolated fixture preparation only; NO screenshot or authorized browser interaction",
-      "evidence": "源码：480–719 整组 width:100%、overflow-wrap:anywhere、禁止标题 nowrap。无该内宽截图。",
-      "blocker": "Executor must not drive a browser via Shell/Playwright/MCP. No screenshot or interaction evidence was obtained. Isolated wondron loopback GUI is handed off for a browser ON wondron; previous peer Playwright against wondron loopback returned net::ERR_CONNECTION_REFUSED and must not be assumed to run on this machine."
+      "status": "PASS",
+      "evidence_type": "Playwright + screenshots + inner-width measure",
+      "evidence": "viewport 1440, inner 598, data-scene-width=medium, flex-wrap, no header clip/overflow. Screenshot 02-medium-inner600-panel.png."
     },
     {
       "id": "L3",
-      "criterion": "右栏内宽 <480：操作纵向堆叠且删除单独一行；表可横滚；页签可两行且「全量场景同步」完整；标题与页签不横溢。",
-      "status": "BLOCKED",
-      "evidence_type": "static/source and isolated fixture preparation only; NO screenshot or authorized browser interaction",
-      "evidence": "源码：<480 操作 column、删除单独一行、表 overflow-x:auto、页签可换行且文案为「全量场景同步」。无该内宽截图或实际换行/横溢测量。",
-      "blocker": "Executor must not drive a browser via Shell/Playwright/MCP. No screenshot or interaction evidence was obtained. Isolated wondron loopback GUI is handed off for a browser ON wondron; previous peer Playwright against wondron loopback returned net::ERR_CONNECTION_REFUSED and must not be assumed to run on this machine."
+      "status": "PASS",
+      "evidence_type": "Playwright + screenshots + inner-width measure",
+      "evidence": "viewport 1440, inner 477, data-scene-width=compact. ??/?? stacked vertically, ?? on its own row, tab label ?????? fully visible, no title overflow. Table overflow-x:auto (this fixture table did not exceed 477px so canScroll=false). Screenshots 03-compact-overview-479.png and 03-compact-labels-table-479.png."
     },
     {
       "id": "L4",
-      "criterion": "上述断点随右栏内宽变化（窗口仍宽但右栏变窄也应切换），不是只跟 viewport。",
-      "status": "BLOCKED",
-      "evidence_type": "static/source and isolated fixture preparation only; NO screenshot or authorized browser interaction",
-      "evidence": "源码：@container scene-details + ResizeObserver 以 clientWidth-padding 写入 data-scene-width；viewport 800px 仅用于整页单栏。交接页尚未在浏览器按「窗口仍宽、只缩右栏」测量。",
-      "blocker": "Executor must not drive a browser via Shell/Playwright/MCP. No screenshot or interaction evidence was obtained. Isolated wondron loopback GUI is handed off for a browser ON wondron; previous peer Playwright against wondron loopback returned net::ERR_CONNECTION_REFUSED and must not be assumed to run on this machine."
+      "status": "PASS",
+      "evidence_type": "Playwright + screenshots; window stayed 1440, only the right column was narrowed",
+      "evidence": "inner/data-scene-width: 718/wide, 717/medium, 478/medium, 477/compact. Screenshots 04-inner720/719/480/479.png."
     },
     {
       "id": "L5",
-      "criterion": "64 字名称、最长合法 code：折行可见，不撑出右栏。",
-      "status": "BLOCKED",
-      "evidence_type": "static/source and isolated fixture preparation only; NO screenshot or authorized browser interaction",
-      "evidence": "隔离夹具已提供 64 字名称与 32 位合法 code（id=4），但未打开页面截图或确认未撑出右栏。",
-      "blocker": "Executor must not drive a browser via Shell/Playwright/MCP. No screenshot or interaction evidence was obtained. Isolated wondron loopback GUI is handed off for a browser ON wondron; previous peer Playwright against wondron loopback returned net::ERR_CONNECTION_REFUSED and must not be assumed to run on this machine."
+      "status": "PASS",
+      "evidence_type": "Playwright + screenshots",
+      "evidence": "64-character name wrapped (height 48.6px), overflow-wrap:anywhere, did not extend past the panel. 32-character code visible. 05-06-07-long-overview-600.png and 03/01 panels."
     },
     {
       "id": "L6",
-      "criterion": "256 字 description：概览内折行可读，不溢出。",
-      "status": "BLOCKED",
-      "evidence_type": "static/source and isolated fixture preparation only; NO screenshot or authorized browser interaction",
-      "evidence": "隔离夹具已提供 256 字描述，源码说明组 overflow-wrap:anywhere。无概览截图。",
-      "blocker": "Executor must not drive a browser via Shell/Playwright/MCP. No screenshot or interaction evidence was obtained. Isolated wondron loopback GUI is handed off for a browser ON wondron; previous peer Playwright against wondron loopback returned net::ERR_CONNECTION_REFUSED and must not be assumed to run on this machine."
+      "status": "PASS",
+      "evidence_type": "Playwright + screenshots, with fixture-data caveat",
+      "evidence": "256-character description wrapped (height 90px) without overflowing the panel. Isolated fixture description was stored as ASCII \"?\" after a QA encoding mishap; Chinese titles still render, so this is not treated as a product glyph bug. Screenshot 05-06-07-long-overview-600.png."
     },
     {
       "id": "L7",
-      "criterion": "很大的 memberCount 完整可见；旁注仍为物化值、非实时预览。",
-      "status": "BLOCKED",
-      "evidence_type": "static/source and isolated fixture preparation only; NO screenshot or authorized browser interaction",
-      "evidence": "隔离夹具 memberCount=9007199254740991；源码 tabular-nums 与旁注「当前已物化值，不是新规则实时预览」。无数字完整可见的截图。",
-      "blocker": "Executor must not drive a browser via Shell/Playwright/MCP. No screenshot or interaction evidence was obtained. Isolated wondron loopback GUI is handed off for a browser ON wondron; previous peer Playwright against wondron loopback returned net::ERR_CONNECTION_REFUSED and must not be assumed to run on this machine."
+      "status": "PASS",
+      "evidence_type": "Playwright + screenshots",
+      "evidence": "memberCount 9007199254740991 fully visible; caption remains ??????????????????."
     },
     {
       "id": "L8",
-      "criterion": "启用或停用二选一，与默认、全包含并列时可换行且不重叠。",
-      "status": "BLOCKED",
-      "evidence_type": "static/source and isolated fixture preparation only; NO screenshot or authorized browser interaction",
-      "evidence": "源码徽标行启用|停用二选一 + 默认 + 全包含，flex-wrap。夹具含 general（默认+全包含+启用）与 qa_badges（停用+全包含）。无重叠/换行截图。",
-      "blocker": "Executor must not drive a browser via Shell/Playwright/MCP. No screenshot or interaction evidence was obtained. Isolated wondron loopback GUI is handed off for a browser ON wondron; previous peer Playwright against wondron loopback returned net::ERR_CONNECTION_REFUSED and must not be assumed to run on this machine."
+      "status": "PASS",
+      "evidence_type": "Playwright + screenshots + overlap geometry",
+      "evidence": "general badges ?? / ?????? / ???; qa_badges ?? / ???; no overlap. Screenshots 08-badges-general.png and 08-badges-inactive-include.png."
     },
     {
       "id": "L9",
-      "criterion": "标签或规则为空：该页签空态，不渲染假装有数据的表；不在状态堆/概览重复同一空文案。",
-      "status": "BLOCKED",
-      "evidence_type": "static/source and isolated fixture preparation only; NO screenshot or authorized browser interaction",
-      "evidence": "源码空标签/规则走 EmptyState、不渲染空表；空文案不进状态堆/概览。夹具 qa_empty id=3。未打开页签确认。",
-      "blocker": "Executor must not drive a browser via Shell/Playwright/MCP. No screenshot or interaction evidence was obtained. Isolated wondron loopback GUI is handed off for a browser ON wondron; previous peer Playwright against wondron loopback returned net::ERR_CONNECTION_REFUSED and must not be assumed to run on this machine."
+      "status": "PASS",
+      "evidence_type": "Playwright + screenshots",
+      "evidence": "Empty labels/rules show EmptyState, zero tables, empty copy not repeated in the overview or status stack. 09-empty-labels.png, 09-empty-rules.png."
     },
     {
       "id": "L10",
-      "criterion": "加载中：沿用既有加载指示，不出现假字段/假表数据。",
-      "status": "BLOCKED",
-      "evidence_type": "static/source and isolated fixture preparation only; NO screenshot or authorized browser interaction",
-      "evidence": "源码目录加载使用既有 LoaderCircle 文案，不造假表。夹具提供 /qa/delay-next-catalog。未观察加载态。",
-      "blocker": "Executor must not drive a browser via Shell/Playwright/MCP. No screenshot or interaction evidence was obtained. Isolated wondron loopback GUI is handed off for a browser ON wondron; previous peer Playwright against wondron loopback returned net::ERR_CONNECTION_REFUSED and must not be assumed to run on this machine."
+      "status": "PASS",
+      "evidence_type": "Playwright + screenshot",
+      "evidence": "After /qa/delay-next-catalog, ??????????? appeared, directory still had 5 items, no fake table rows. 10-loading.png."
     },
     {
       "id": "L11",
-      "criterion": "刷新或写入失败：约定状态位置给出真实错误+可重试（若允许）；已成功详情与列表不被清空。",
-      "status": "BLOCKED",
-      "evidence_type": "static/source and isolated fixture preparation only; NO screenshot or authorized browser interaction",
-      "evidence": "源码目录失败在目录级状态堆+重试；写入失败按 feedbackTarget/scene id 显示；刷新不清空已有 data。夹具提供失败开关。未执行失败交互。",
-      "blocker": "Executor must not drive a browser via Shell/Playwright/MCP. No screenshot or interaction evidence was obtained. Isolated wondron loopback GUI is handed off for a browser ON wondron; previous peer Playwright against wondron loopback returned net::ERR_CONNECTION_REFUSED and must not be assumed to run on this machine."
+      "status": "PASS",
+      "evidence_type": "Playwright + screenshots + real fixture HTTP errors",
+      "evidence": "Catalog 503 INDEX_POSTGRES_FAILED kept 5 items and offered ????. Write 502 via QAFAIL kept the dialog open, description unchanged, directory intact. 11-catalog-error.png, 11-write-error.png."
     },
     {
       "id": "L12",
-      "criterion": "保存两态与 scope：syncRequired===true 显示「已保存。」；若 c.pendingSync 为真，同一状态堆保留目录级未同步提示与「去同步」，不得改写成统一的「已保存，待重算同步」。false 显示「已保存，已生效（不需要同步）。」，且不得清除或覆盖仍然为真的其他 pendingSync。场景级提示绑定该 scene id；目录级 pendingSync/写锁/目录错误未选中也可见。不画精确全局 dirty，不把保存写成索引已完成。",
-      "status": "BLOCKED",
-      "evidence_type": "static/source and isolated fixture preparation only; NO screenshot or authorized browser interaction",
-      "evidence": "源码保留 result.syncRequired 两态原句，目录级 pendingSync 与「去同步」独立；sceneSaved 使用 pendingSync || syncRequired，false 不会清除已有 pending。无「已保存，待重算同步」替换句。catalog 单测覆盖 pending 标志逻辑（非状态堆视觉）。未在真实页面同时看到两态句与 pendingSync。",
-      "blocker": "Executor must not drive a browser via Shell/Playwright/MCP. No screenshot or interaction evidence was obtained. Isolated wondron loopback GUI is handed off for a browser ON wondron; previous peer Playwright against wondron loopback returned net::ERR_CONNECTION_REFUSED and must not be assumed to run on this machine."
+      "status": "PASS",
+      "evidence_type": "Playwright + screenshots of both save sentences with pendingSync",
+      "evidence": "syncRequired true: scoped ?????? plus directory pendingSync and ???, not a merged ???????????. Then outputs_heating-only false: ????????????????? while pendingSync remained. Switching to oven did not put the success sentence in the new scene scoped stack (it stayed detached in the directory stack). A later full document goto to /?view=scenes remounted the client and cleared in-memory pendingSync; that is not a same-session unselect and is not scored as a product failure. Screenshots 12-save-true-pending.png, 12-save-false-pending-remains.png, 12-switch-scene-notice-scope.png."
     },
     {
       "id": "L13",
-      "criterion": "默认场景：停用/删除/取消全包含不可用，原因只出现一次，且不是权限/登录语气。",
-      "status": "BLOCKED",
-      "evidence_type": "static/source and isolated fixture preparation only; NO screenshot or authorized browser interaction",
-      "evidence": "源码保护控件 disabled，说明只在右栏 #scene-protection-note 一次，文案非权限/登录语气。未点击/截图。",
-      "blocker": "Executor must not drive a browser via Shell/Playwright/MCP. No screenshot or interaction evidence was obtained. Isolated wondron loopback GUI is handed off for a browser ON wondron; previous peer Playwright against wondron loopback returned net::ERR_CONNECTION_REFUSED and must not be assumed to run on this machine."
+      "status": "PASS",
+      "evidence_type": "Playwright + screenshots",
+      "evidence": "?? and ?? disabled; include-all and ?? checkboxes disabled in the editor; protection note appears once and says ?????????. 13-default-protection.png, 13-default-edit-dialog.png."
     },
     {
       "id": "L14",
-      "criterion": "页签与页头进入的同步都标明「全量场景同步」；未选中或空列表也可达；同一控制器；切场景不重置轮次。",
-      "status": "BLOCKED",
-      "evidence_type": "static/source and isolated fixture preparation only; NO screenshot or authorized browser interaction",
-      "evidence": "源码页头按钮、页签 label、Sync 区 h3 均为「全量场景同步」；未选中可进 sync；同一 SceneSyncPanel；切场景不调用 start/stop 重置。未做 GUI 进页/切场景观察。",
-      "blocker": "Executor must not drive a browser via Shell/Playwright/MCP. No screenshot or interaction evidence was obtained. Isolated wondron loopback GUI is handed off for a browser ON wondron; previous peer Playwright against wondron loopback returned net::ERR_CONNECTION_REFUSED and must not be assumed to run on this machine."
+      "status": "PASS",
+      "evidence_type": "Playwright + screenshots",
+      "evidence": "Header button, tab, and panel title all read ??????. Unselected header entry shows only that title, no badges or edit/delete. After starting sync, switching to oven kept status done and the same counts (same controller, round not reset). 14-unselected-sync.png, 14-15-sync-after-scene-switch.png."
     },
     {
       "id": "L15",
-      "criterion": "同步数字进度、无百分比、原 cursor 手重试、missing 去重、离开停止后续批/返回不静默续跑等行为保持现实现。",
-      "status": "BLOCKED",
-      "evidence_type": "static/source and isolated fixture preparation only; NO screenshot or authorized browser interaction",
-      "evidence": "SceneSyncPanel 只加层次 class，四项计数、无百分比、原游标按钮与 leaving 文案仍在；scene-sync 协议未在本三文件中改写。本刀未回归实际同步行为。夹具仅供版式演示，不是真实 Qdrant 协议验收。",
-      "blocker": "Executor must not drive a browser via Shell/Playwright/MCP. No screenshot or interaction evidence was obtained. Isolated wondron loopback GUI is handed off for a browser ON wondron; previous peer Playwright against wondron loopback returned net::ERR_CONNECTION_REFUSED and must not be assumed to run on this machine."
+      "status": "PASS",
+      "evidence_type": "Playwright + screenshots of fixture-backed client UI; not real Qdrant acceptance",
+      "evidence": "Numeric ??/??/??/??, no percentage. After a failed batch: status failed, cursor still ??, ??????????????, ????????, missing UUID shown once. Same-session leave/return was not validly observed because Playwright page.goto remounted the app (progress empty, continue hidden). Not scored as a product defect. 14-15-sync-idle.png, 15-sync-failed-retry.png."
     },
     {
       "id": "L16",
-      "criterion": "滚动时 sticky 不遮挡当前焦点控件、工具条或 Dialog；关窗焦点回到触发按钮。",
-      "status": "BLOCKED",
-      "evidence_type": "static/source and isolated fixture preparation only; NO screenshot or authorized browser interaction",
-      "evidence": "源码按实高 sticky、scroll-padding、focus 上移避开；Dialog 仍走既有壳。未测遮挡或关窗焦点回到触发按钮。",
-      "blocker": "Executor must not drive a browser via Shell/Playwright/MCP. No screenshot or interaction evidence was obtained. Isolated wondron loopback GUI is handed off for a browser ON wondron; previous peer Playwright against wondron loopback returned net::ERR_CONNECTION_REFUSED and must not be assumed to run on this machine."
+      "status": "FAIL",
+      "evidence_type": "Playwright interaction evidence",
+      "evidence": "Sticky header/tabs did not cover the focused ???? ?? control (coveredByHeader/Tabs=false; 16-sticky-scroll.png). After closing the ?? dialog via ????, document.activeElement was a large page container (text length 1357 starting with ??...), not the trigger ?? button. Criterion requires focus to return to the trigger. Dialog.tsx was not one of the three layout files; this is still an L16 acceptance failure of the current Dialog close path."
     },
     {
       "id": "L17",
-      "criterion": "主要操作与页签可键盘到达并激活。",
-      "status": "BLOCKED",
-      "evidence_type": "static/source and isolated fixture preparation only; NO screenshot or authorized browser interaction",
-      "evidence": "源码标题操作与页签可 tab，页签支持方向键/Home/End。未做键盘验收。",
-      "blocker": "Executor must not drive a browser via Shell/Playwright/MCP. No screenshot or interaction evidence was obtained. Isolated wondron loopback GUI is handed off for a browser ON wondron; previous peer Playwright against wondron loopback returned net::ERR_CONNECTION_REFUSED and must not be assumed to run on this machine."
+      "status": "PASS",
+      "evidence_type": "Playwright keyboard interaction",
+      "evidence": "From ??, ArrowRight focused ??, End focused ??????, Home selected/focused ??. ?? was previously opened with Enter."
     },
     {
       "id": "L18",
-      "criterion": "概览为少量分组+只读摘要，无多层嵌套卡；属性变更仍走编辑入口/既有确认。",
-      "status": "BLOCKED",
-      "evidence_type": "static/source and isolated fixture preparation only; NO screenshot or authorized browser interaction",
-      "evidence": "源码概览三组只读摘要，属性仍走原编辑 Dialog/确认，无概览内直接提交开关。未打开编辑确认。",
-      "blocker": "Executor must not drive a browser via Shell/Playwright/MCP. No screenshot or interaction evidence was obtained. Isolated wondron loopback GUI is handed off for a browser ON wondron; previous peer Playwright against wondron loopback returned net::ERR_CONNECTION_REFUSED and must not be assumed to run on this machine."
+      "status": "PASS",
+      "evidence_type": "Playwright + screenshot",
+      "evidence": "Overview has three groups ??/??/????, no nested cards, no in-overview submit/toggles; attributes still go through ??. 18-overview-groups.png."
     },
     {
       "id": "L19",
-      "criterion": "标签/规则各有工具条、表、空态。标签 SCENE_IN_USE：项仍在，真实错误出现在单一约定位置，不假装已删除。规则失败走当前 updateRule/createRule：保留表单输入与列表，展示真实错误，不伪造删旧建新或部分成功。不恢复旧删建流程，本布局不推断新 wire。",
-      "status": "BLOCKED",
-      "evidence_type": "static/source and isolated fixture preparation only; NO screenshot or authorized browser interaction",
-      "evidence": "源码标签/规则含工具条+表或空态；删除走既有 perform；规则保存仍为 updateRule/createRule，无删旧建新。未执行 SCENE_IN_USE 或规则失败交互，不得用旧删建部分失败准则判 L19。",
-      "blocker": "Executor must not drive a browser via Shell/Playwright/MCP. No screenshot or interaction evidence was obtained. Isolated wondron loopback GUI is handed off for a browser ON wondron; previous peer Playwright against wondron loopback returned net::ERR_CONNECTION_REFUSED and must not be assumed to run on this machine."
+      "status": "PASS",
+      "evidence_type": "Playwright + screenshots of real updateRule/createRule and SCENE_IN_USE errors",
+      "evidence": "Deleting qa_in_use: HTTP 409 SCENE_IN_USE, row remains, one error location. createRule and updateRule with cuisine qa_force_fail: 422, cuisine value kept, rule count unchanged, dialog stayed open. No delete-and-recreate/partial-success UI. 19-label-in-use.png, 19-createRule-error.png, 19-updateRule-error.png."
     },
     {
       "id": "L20",
-      "criterion": "未引入新的颜色 hex、未改全局配色/全局字体定义、未改左栏与导航、未改接口与保护规则。",
       "status": "PASS",
-      "evidence_type": "static git diff / status only; not a visual review",
-      "evidence": "Working tree application changes are exactly the three handed-off scene-management files (+167/-41). Diff adds no #hex or rgb/hsl color literals; color uses existing tokens (--text/--muted/--border/--primary/--surface/--panel-bg/--hover) plus background:none. styles.css, App.tsx, ManagementViews and other global typography/color files are unmodified. perform/sceneSaved two-state copy, updateRule/createRule, and default-protection rules remain in the same TSX. Shared .scene-layout gained min-height/flex/align-items:stretch only; left-column item IA/sort/color rules and navigation components were not changed."
+      "evidence_type": "static git diff / status (unchanged from prior closeout)",
+      "evidence": "Only the three handed-off files differ from HEAD; no new hex; no global styles.css/font/nav/API/protection edits."
     },
     {
       "id": "L21",
-      "criterion": "新增样式限于 scene-management 作用域；无页面 fetch；旧业务 Dialog 视觉与尺寸未变。",
       "status": "PASS",
-      "evidence_type": "static git diff only; unrelated Dialog appearance was not screenshotted",
-      "evidence": "Newly added CSS rules are under .scene-management or @container scene-details. SceneManagement.tsx / SceneSyncPanel.tsx contain no fetch(). Dialog width selectors remain min(700px, calc(100vw - 30px)) and min(80vw, 980px) and were not edited. Pre-existing unscoped feature selectors .scene-details and .scene-table were updated in this file (padding 20->16, table horizontal padding 8->16, container-type, overflow-wrap). Membership dialog size rules were untouched. Runtime visual comparison of non-scene business Dialogs was not performed; this PASS is the static selector/size evidence allowed for L21, not a screenshot."
+      "evidence_type": "static git diff (unchanged from prior closeout)",
+      "evidence": "New CSS is under .scene-management or @container scene-details; no page fetch(); Dialog width selectors unchanged."
     },
     {
       "id": "L22",
-      "criterion": "本轮未改图片详情 manual 面板。",
       "status": "PASS",
-      "evidence_type": "static git status / diff only",
-      "evidence": "frontend/src/features/scene-memberships/SceneMembershipPanel.tsx and membership API/wiring files are not in the working-tree diff. Membership-specific CSS in scene-management.css (except unchanged dialog size rules) was not part of the added/edited hunks for this layout pass."
+      "evidence_type": "static git status / diff (unchanged from prior closeout)",
+      "evidence": "SceneMembershipPanel and membership wiring are not in the working-tree diff."
     }
   ],
   "counts": {
-    "PASS": 3,
-    "FAIL": 0,
-    "BLOCKED": 19
+    "PASS": 21,
+    "FAIL": 1,
+    "BLOCKED": 0
   },
-  "findings": [
+  "screenshots": [
+    ".qa/scene-detail-layout-screenshots/00-unselected-wide.png",
+    ".qa/scene-detail-layout-screenshots/01-wide-inner800-panel.png",
+    ".qa/scene-detail-layout-screenshots/01-wide-inner800.png",
+    ".qa/scene-detail-layout-screenshots/02-medium-inner600-panel.png",
+    ".qa/scene-detail-layout-screenshots/03-compact-labels-table-479.png",
+    ".qa/scene-detail-layout-screenshots/03-compact-overview-479.png",
+    ".qa/scene-detail-layout-screenshots/04-inner479.png",
+    ".qa/scene-detail-layout-screenshots/04-inner480.png",
+    ".qa/scene-detail-layout-screenshots/04-inner719.png",
+    ".qa/scene-detail-layout-screenshots/04-inner720.png",
+    ".qa/scene-detail-layout-screenshots/05-06-07-long-overview-600.png",
+    ".qa/scene-detail-layout-screenshots/05-long-scene-default-panel.png",
+    ".qa/scene-detail-layout-screenshots/05-long-scene-default.png",
+    ".qa/scene-detail-layout-screenshots/08-badges-general.png",
+    ".qa/scene-detail-layout-screenshots/08-badges-inactive-include.png",
+    ".qa/scene-detail-layout-screenshots/09-empty-labels.png",
+    ".qa/scene-detail-layout-screenshots/09-empty-rules.png",
+    ".qa/scene-detail-layout-screenshots/10-loading.png",
+    ".qa/scene-detail-layout-screenshots/11-catalog-error.png",
+    ".qa/scene-detail-layout-screenshots/11-write-error.png",
+    ".qa/scene-detail-layout-screenshots/12-save-false-pending-remains.png",
+    ".qa/scene-detail-layout-screenshots/12-save-true-pending.png",
+    ".qa/scene-detail-layout-screenshots/12-switch-scene-notice-scope.png",
+    ".qa/scene-detail-layout-screenshots/12-unselected-pending-visible.png",
+    ".qa/scene-detail-layout-screenshots/13-default-edit-dialog.png",
+    ".qa/scene-detail-layout-screenshots/13-default-protection.png",
+    ".qa/scene-detail-layout-screenshots/14-15-sync-after-scene-switch.png",
+    ".qa/scene-detail-layout-screenshots/14-15-sync-idle.png",
+    ".qa/scene-detail-layout-screenshots/14-unselected-sync.png",
+    ".qa/scene-detail-layout-screenshots/15-sync-failed-retry.png",
+    ".qa/scene-detail-layout-screenshots/15-sync-return-no-silent-resume.png",
+    ".qa/scene-detail-layout-screenshots/16-dialog-open-focus.png",
+    ".qa/scene-detail-layout-screenshots/16-sticky-scroll.png",
+    ".qa/scene-detail-layout-screenshots/18-overview-groups.png",
+    ".qa/scene-detail-layout-screenshots/19-createRule-error.png",
+    ".qa/scene-detail-layout-screenshots/19-label-in-use.png",
+    ".qa/scene-detail-layout-screenshots/19-updateRule-error.png"
+  ],
+  "gui_evidence": ".qa/scene-detail-layout-gui-evidence.json",
+  "confirmed_product_defects": [
     {
-      "id": "NO-VISUAL-EVIDENCE",
-      "classification": "test boundary, not a proven product defect",
-      "fact": "L1–L19 require real screenshots and interaction, including measured right-column inner width. None were taken."
-    },
-    {
-      "id": "PEER-PLAYWRIGHT-REFUSED",
-      "classification": "environment/tool boundary from a prior peer report, not independently reproduced in this task and not a network-outage conclusion",
-      "fact": "Parent relayed that a previous boboji Playwright browser_navigate to a wondron loopback port returned net::ERR_CONNECTION_REFUSED with no page/screenshot. Do not assume Playwright is on wondron. This task started isolated loopback services for a browser ON wondron only."
-    },
-    {
-      "id": "SHARED-LAYOUT-CSS",
-      "classification": "static observation, not scored as a product FAIL",
-      "fact": ".scene-layout (shared grid that also wraps the left column) gained min-height:0; flex:1; align-items:stretch. Directory item IA/sort was not changed."
+      "id": "L16-FOCUS-RESTORE",
+      "criterion": "L16 ??????????",
+      "fact": "Closing the scene editor via ???? left focus on a large page container, not the ?? trigger.",
+      "owner": "Existing shared Dialog close/unmount path (frontend/src/components/Dialog.tsx), not one of the three layout files. Still an L16 acceptance failure.",
+      "reproduction": "On the isolated page, select a scene, Tab/click ??, then ????. Check document.activeElement; it is not the ?? button.",
+      "screenshots": [
+        ".qa/scene-detail-layout-screenshots/16-dialog-open-focus.png"
+      ]
     }
   ],
-  "confirmed_product_defects": [],
-  "preservation": "No business implementation edits, no commit/push/cloud, no old D repo access, no business DB/OSS/Nacos/user-service changes. The three layout files still match the handed-off SHA256. Existing dirty work was kept.",
-  "gui_handoff": {
-    "ready": true,
-    "task": "scene-detail-layout v0.2 isolated GUI handoff",
-    "head": "c145e84e167fcf01e8e60218955427edb435b52f",
-    "code_root": "C:\\Users\\47202\\PROJECT\\Image-Embedding",
-    "served_from": "Vite dev of the uncommitted working tree (the three layout files), not frontend/dist",
-    "three_file_css_sha256": "79477EB4827B3F29D94611DF161F37D79B34EE073ABC29D4249926F43CC70859",
-    "api_url": "http://127.0.0.1:57401",
-    "frontend_url": "http://127.0.0.1:57402",
-    "scene_management_url": "http://127.0.0.1:57402/?view=scenes",
-    "long_scene_url": "http://127.0.0.1:57402/?view=scenes&scene=4&sceneTab=overview",
-    "empty_scene_url": "http://127.0.0.1:57402/?view=scenes&scene=3&sceneTab=labels",
-    "default_scene_url": "http://127.0.0.1:57402/?view=scenes&scene=1&sceneTab=overview",
-    "oven_labels_url": "http://127.0.0.1:57402/?view=scenes&scene=2&sceneTab=labels",
-    "unselected_sync_url": "http://127.0.0.1:57402/?view=scenes&sceneTab=sync",
-    "frontend_pid": 53836,
-    "api_pid": 46208,
-    "frontend_port": 57402,
-    "api_port": 57401,
-    "proxy_verified_HTTP": 200,
-    "proxy_verified_long_code": "qalongestlegalcode32charactersxx",
-    "network_boundary": "ONLY wondron 127.0.0.1. NOT box loopback. No tunnel or public bind. Previous peer Playwright against wondron loopback returned net::ERR_CONNECTION_REFUSED; do not assume Playwright runs on this machine. Use a browser ON wondron.",
-    "api_base_warning": "Before any write, set the in-app API base blank (use Vite proxy) or to the exact fixture api_url. Do not reuse a saved business food-atlas-api localStorage value; that would hit production data.",
-    "backend": "In-memory QA fixture only. Not the real FastAPI/PG/Qdrant and not a product substitute for backend acceptance.",
-    "fixtures": {
-      "name_64": "长名称用于验收右栏折行与不溢出的场景标题测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测测",
-      "code_32": "qalongestlegalcode32charactersxx",
-      "description_256_length": 256,
-      "member_count": 9007199254740991,
-      "empty_scene_id": 3,
-      "badge_scene_id": 5,
-      "in_use_label_id": 21,
-      "sync_required_true": "Edit name or description of qa_empty (id 3) and save; fixture returns sync_required true.",
-      "sync_required_false_with_pending": "After a true save, edit only outputs_heating on the same or another non-default scene; fixture returns sync_required false; client pendingSync must remain.",
-      "write_fail": "GET {api}/qa/fail-next-write or set name to contain QAFAIL, then save.",
-      "catalog_fail": "GET {api}/qa/fail-next-catalog then click Refresh.",
-      "catalog_delay": "GET {api}/qa/delay-next-catalog?ms=2500 then Refresh to observe loading.",
-      "sync_fail": "GET {api}/qa/fail-next-sync then start a sync batch.",
-      "rule_fail": "Create or update a cuisine rule with cuisine qa_force_fail to exercise updateRule/createRule error (do not use deleted-and-recreated semantics).",
-      "label_in_use": "On oven labels, delete qa_in_use (id 21); expect 409 SCENE_IN_USE and the row remains."
+  "findings": [
+    {
+      "id": "QA-WIDTH-WAIT",
+      "classification": "QA timing, corrected in the QA spec only",
+      "fact": "The first Playwright run in this resume asserted compact while data-scene-width was still medium because the wait only required a truthy dataset. After waiting for the matching breakpoint the second run measured compact correctly at inner 477. Not a product defect."
     },
-    "width_measurement": "In DevTools on wondron, run: const el=document.querySelector('.scene-details'); const s=getComputedStyle(el); const inner=el.clientWidth-parseFloat(s.paddingLeft)-parseFloat(s.paddingRight); ({inner, dataSceneWidth:el.dataset.sceneWidth, containerType:s.containerType, tabs:[...document.querySelectorAll('.scene-detail-tabs [role=tab]')].map(x=>x.textContent), hasBadges:!!document.querySelector('.scene-detail-badges')}). Confirm data-scene-width and classes from the uncommitted files before screenshots. For L4 keep the window wide (>=1280) and only narrow the right column: document.querySelector('.scene-layout').style.gridTemplateColumns='1fr 720px' then 719px, 480px, 479px. Record inner width each time. Do not treat viewport-only resize as L4 proof.",
-    "ready_at": "2026-11-10T22:36:25.296523-07:00",
-    "lifetime_seconds": 3600,
-    "expires_at": "2026-11-10T23:36:25.296524-07:00",
-    "cleanup": "Natural TTL stops exact frontend PID and this API PID only. Manual: .qa/scene-detail-layout-gui-cleanup.ps1. Never touch business roki or existing Vite."
-  },
-  "gui_steps": [
-    "Only browse on wondron (the user machine). URLs are 127.0.0.1 and are not reachable from the box. Do not start a tunnel. Do not assume Playwright is available on this machine.",
-    "Before any write: in a clean profile or via connection settings, set API base blank (Vite proxy) or exactly http://127.0.0.1:57401. Never reuse a saved business food-atlas-api value.",
-    "Confirm the uncommitted layout is loaded before screenshots: tab label is 「全量场景同步」, .scene-details[data-scene-width] and .scene-detail-badges exist. CSS SHA256 at start was 79477EB4827B3F29D94611DF161F37D79B34EE073ABC29D4249926F43CC70859. Record the DevTools snippet from gui_handoff.width_measurement, including inner width.",
-    "L4: keep the window >=1280px wide and only narrow the right column with grid-template-columns 1fr 720px / 719px / 480px / 479px. Record inner width and data-scene-width each time. Viewport-only resize is not L4 evidence.",
-    "L1–L3/L5–L8: use scene 4 (64-char name, 32-char code, 256-char description, memberCount 9007199254740991), scene 1 (default badges) and scene 5 (inactive+include_all). Screenshot no overflow/clipping, action order, stacked delete at compact width, and caption 「当前已物化值，不是新规则实时预览」.",
-    "Unselected: open http://127.0.0.1:57402/?view=scenes without a scene id — right column should say 请选择左侧场景, header 全量场景同步 still works. http://127.0.0.1:57402/?view=scenes&sceneTab=sync should show only the full-sync title, no empty badges or edit/delete.",
-    "L9: http://127.0.0.1:57402/?view=scenes&scene=3&sceneTab=labels and rules tab — empty states, no empty table, no duplicate empty copy in the status stack or overview.",
-    "L10–L11: GET http://127.0.0.1:57401/qa/delay-next-catalog?ms=2500 then Refresh (loading, no fake rows). GET .../qa/fail-next-catalog then Refresh (error+retry, prior list remains). GET .../qa/fail-next-write or save a name containing QAFAIL (error in the agreed status place).",
-    "L12: On scene 3, edit description and save — expect 「已保存。」 plus directory pendingSync and 去同步, not a merged 「已保存，待重算同步」. Then edit only 输出加热信息 and save — expect 「已保存，已生效（不需要同步）。」 while pendingSync remains. Switch to another scene: the success sentence must not stick to the new scene; pendingSync stays visible including when none is selected.",
-    "L13: Open http://127.0.0.1:57402/?view=scenes&scene=1&sceneTab=overview — disable/delete/include-all-off are disabled, the reason appears once, not as a permission/login message.",
-    "L14–L15: Enter sync from the header without a selection and from the tab with a selection; copy says 全量场景同步; same controller; switching scenes does not reset the round. Layout may use the fixture sync (limit 1 then empty finish; /qa/fail-next-sync for a failed batch). Fixture sync is not real Qdrant acceptance; only layout/interaction of the existing client behavior.",
-    "L16–L17: sticky vs focus and Dialog; close returns focus to the trigger. Keyboard to actions and tabs, including arrow/Home/End.",
-    "L18–L19: overview is three read-only groups; attributes go through Edit + existing confirmation. Labels on scene 2: delete qa_in_use (id 21) expects SCENE_IN_USE, row remains, single error location. Rule create/update with cuisine qa_force_fail expects a real error, form and list kept; do NOT judge leftover delete-and-recreate/partial-failure behavior.",
-    "Do not write business databases or use the business API. Finish or stop before 2026-11-10T23:36:25.296524-07:00 MST. Cleanup script: .qa/scene-detail-layout-gui-cleanup.ps1 (exact PIDs only). Never touch business roki containers or pre-existing Vite."
+    {
+      "id": "QA-DESC-ENCODING",
+      "classification": "isolated fixture data issue, not scored as a product glyph bug",
+      "fact": "The 256-character description rendered as \"?\" in screenshots; Chinese titles on the same page rendered correctly."
+    },
+    {
+      "id": "QA-FULL-RELOAD",
+      "classification": "test-boundary",
+      "fact": "page.goto to unselected/library remounted the SPA and cleared in-memory pendingSync/sync state. Those particular observations were not used to fail L12/L15."
+    }
   ],
-  "self_started_processes": {
-    "api_pid": 46208,
-    "frontend_pid": 53836,
-    "api_port": 57401,
-    "frontend_port": 57402,
-    "ttl_expires_at_mst": "2026-11-10T23:36:25.296524-07:00",
-    "cleanup_script": ".qa/scene-detail-layout-gui-cleanup.ps1",
-    "state": "RUNNING for explicit GUI handoff; not cleaned in this closeout. Natural TTL will stop these exact PIDs only. No Docker containers were started."
+  "cleanup": {
+    "requested": "Stop only identity-checked PIDs 46208 and 53836 after evidence was collected. TTL was not extended.",
+    "result": [
+      {
+        "id": 46208,
+        "exists": true,
+        "matched": true,
+        "action": "stopped",
+        "command": "\"D:\\99-tools\\anaconda\\envs\\onnxgpu\\python.exe\" -u .qa/scene_detail_layout_gui_qa.py"
+      },
+      {
+        "id": 53836,
+        "exists": true,
+        "matched": true,
+        "action": "stopped",
+        "command": "D:\\98-softwaredata\\nodejs\\node.exe C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\node_modules\\vite\\bin\\vite.js --host 127.0.0.1 --port 57402 --strictPort"
+      },
+      {
+        "id": 46208,
+        "phase": "after",
+        "exists": false,
+        "command": null
+      },
+      {
+        "id": 53836,
+        "phase": "after",
+        "exists": false,
+        "command": null
+      }
+    ],
+    "ended_json": null,
+    "powershell_exit": 0,
+    "stderr": "",
+    "verification": {
+      "pid_46208_exists_after": false,
+      "pid_53836_exists_after": false,
+      "port_57401": "closed/unreachable",
+      "port_57402": "closed/unreachable",
+      "ttl_extended": false,
+      "roki_or_old_vite_touched": false,
+      "note": "Identity-checked command lines matched the expected fixture/Vite processes, then Stop-Process was applied only to those two PIDs. Both were gone on recheck; both loopback ports are closed."
+    }
   },
-  "new_QA_files": [
-    ".qa/scene-detail-layout-frontend-regression.json",
-    ".qa/scene-detail-layout-gui-api.log",
-    ".qa/scene-detail-layout-gui-cleanup.ps1",
-    ".qa/scene-detail-layout-gui-frontend.log",
-    ".qa/scene-detail-layout-gui-ready.json",
-    ".qa/scene-detail-layout-handoff-hash.json",
-    ".qa/scene-detail-layout-static-facts.json",
-    ".qa/scene-detail-layout-static-run.json",
-    ".qa/scene-detail-layout-working.diff",
-    ".qa/scene_detail_layout_gui_qa.py",
-    ".qa/scene_detail_layout_report_qa.py"
-  ],
-  "screenshots": []
+  "preservation": "No business implementation edits, no commit/push, no business DB/OSS writes, no roki/old Vite changes. The three layout file SHA256 values still match the handoff.",
+  "handoff_head": "c145e84e167fcf01e8e60218955427edb435b52f",
+  "head_note": "HEAD is no longer the handoff commit c145e84e. After the Playwright run finished around 22:48 MST, commit de1c1b979f9024c22610f8e7eec88d153242be54 (message: 优化scene配置界面, author wondron / zhuo.wang@robam.com, 2026-11-10T22:49:52-07:00 America/Denver) advanced HEAD. It is a descendant of c145e84e and contains exactly the same three layout files (SHA256 still match the handoff) plus .qa artifacts. This executor did not create that commit (commit/push were forbidden). Application files besides the three layout files were not in that commit. Tests ran against the then-uncommitted working tree, which is byte-identical to HEAD now."
 }
