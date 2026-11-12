@@ -1,0 +1,343 @@
+{
+  "title": "上传与导入页布局优化 · 独立验收（I1–I9）",
+  "contract": "/workspace/deliverables/import-upload-layout-refinement.md",
+  "implementation_handoff": "/workspace/deliverables/import-upload-layout-implementation.md",
+  "repo": "C:\\Users\\47202\\PROJECT\\Image-Embedding",
+  "machineId": "fada9197-1d47-44f2-8e45-fdb157d8e181",
+  "timezone": "America/Denver (MST, UTC-7)",
+  "recorded_at": "2026-11-12T01:48:21-07:00",
+  "overall": "ACCEPTED",
+  "summary": {
+    "pass": 9,
+    "fail": 0,
+    "skip": 0,
+    "points": {
+      "I1": "PASS",
+      "I2": "PASS",
+      "I3": "PASS",
+      "I4": "PASS",
+      "I5": "PASS",
+      "I6": "PASS",
+      "I7": "PASS",
+      "I8": "PASS",
+      "I9": "PASS"
+    },
+    "note": "All nine items were judged from headed Chromium real-window measurements and screenshots on wondron, not from implementer source mapping. I4 and I8 have documented evidence boundaries (no business backend ingest)."
+  },
+  "git": {
+    "head": "18f3d652ddad846b6815cd478c1206a31574ca85",
+    "head_matches_claimed": true,
+    "head_subject": "修改云端上传配置",
+    "head_author": "wondron zhuo.wang@robam.com",
+    "head_committed_at": "2026-11-12T01:16:48-07:00",
+    "knife_uncommitted": true,
+    "not_committed_by_acceptor": true
+  },
+  "knife_files_sha256_closeout": {
+    "frontend/src/App.tsx": "86F4062D822C00B5FA1CAD1F24A12A9692A592A5CE276A5FC8CC2078DEAEFFC4",
+    "frontend/src/components/ManagementViews.css": "A26CAD0BE1B5265A62145BC8F32FF0165DD02B1BD8C72FF7F3021791EC4639AB",
+    "frontend/src/components/ManagementViews.tsx": "E40AC93D24419E732DC5B71BBC8C36798C3D78EC88EF018C6DA433167B0BE2D0",
+    "frontend/src/styles.css": "6ADDFCC7F958F4F287F1EC983A8922F02B59D58FC57AD643F0249CC79774348B"
+  },
+  "knife_hashes_match_claimed": true,
+  "protection": {
+    "parallel_backend_and_dialog_untouched_by_this_acceptance": true,
+    "closeout_sha256": {
+      "backend/app/repositories/embeddings.py": "BCD530E350C0D6E69E9F1559A1DA31E003B968B22B84FB9B1E05C1E30360BB3A",
+      "backend/app/repositories/images.py": "8F90218FD931B5DF927068ABE32EE4290F9CACFF97BA7C85E91F227CD9D82B62",
+      "backend/app/repositories/ports.py": "7456FA7FC36A05A0C078829A0B5E2FECB80C285213D4402F184CE71001D56A1F",
+      "backend/app/services/retrieval/index_image.py": "C704357DAC077CDB942A4C3E4E3BA30059D352A789AEB7215265D60A83B7F264",
+      "backend/tests/test_index_image_identity.py": "8580F59C4D9A674C35574FA94666AD6A109C2568A3742514EEFBB3A36E0FC3F1",
+      "frontend/src/components/Dialog.tsx": "573B1350EBCCD2E6858B29BC0BD2129D6F517F724ED7EE20C64EB51AD3FB6154",
+      "backend/tests/test_index_concurrency.py": "FB13F249662EB9024A68743D92074DE3FA3E434977FDAE5130A1EA7726175077",
+      "backend/tests/test_index_pg_concurrency.py": "F3F320618D382AB71C9A088C23AE189796A9CA0859AE96772737E938F5292494",
+      "backend/tests/test_index_repository.py": "CB2074F62FB3811BB79D270FA80165A47388CFD6D85EDDDCE4D8E705FF8200EF"
+    },
+    "parallel_drift_already_present_at_start": {
+      "backend/tests/test_index_repository.py": {
+        "implementer_handoff_sha256": "E707C7F72EB7C316D039493597D5D8EB3B11722EAEFB0951D43A003FDFDF361D",
+        "observed_at_start_and_closeout": "CB2074F62FB3811BB79D270FA80165A47388CFD6D85EDDDCE4D8E705FF8200EF",
+        "note": "Already different from the implementer handoff when this acceptance started. Not rolled back. Unchanged during this acceptance."
+      }
+    },
+    "existing_qa_reports_not_modified": true,
+    "acceptor_added": [
+      ".qa\\import-upload-layout\\\\"
+    ]
+  },
+  "commands": {
+    "isolated_preview": {
+      "cwd": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend",
+      "command": "npx vite --host 127.0.0.1 --port 57521 --strictPort",
+      "env": {
+        "VITE_API_PROXY_TARGET": "http://127.0.0.1:57522"
+      },
+      "note": "Did not use or switch the user's already-running Vite on :5173 (PID 11904, --host 0.0.0.0). Proxy target pointed at a closed port so accidental /api calls would not hit a business service. Did not change vite.config.ts, config.yaml, Nacos, or production baseUrl.",
+      "pids": {
+        "wrapper_StartProcess": 36720,
+        "npx": 40848,
+        "vite": 31188
+      },
+      "http": "GET http://127.0.0.1:57521/ -> 200"
+    },
+    "playwright_final": {
+      "cwd": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\import-upload-layout",
+      "command": "frontend\\node_modules\\.bin\\playwright.cmd test --config playwright.config.ts",
+      "playwright": "1.64.1",
+      "browser": "headed Chromium (Playwright 1.64.1 / chromium-1248)",
+      "exit_code": 0,
+      "result": "9 passed (17.6s)",
+      "log": ".qa\\import-upload-layout\\playwright-run-3.log",
+      "earlier_runs": "Run 1: I2 timed out because ?view=import is ignored by App.initialView() (only enums/categories/scenes). Fixed by clicking the sidebar. Run 2: I6 failed because at 580px the sidebar is off-canvas; gotoImport now widens, clicks, then restores the target viewport. Run 3 is the formal suite."
+    },
+    "supplemental": {
+      "command": "playwright.cmd test --config .\\remeasure.config.ts",
+      "exit_code": 0,
+      "result": "1 passed (2.2s)",
+      "purpose": "I5 occupancy at left-column scrollTop=0 (7.5rem check) and I6 wrap at 400px."
+    }
+  },
+  "viewports": {
+    "I1_I2_I3_I4_I8_I9": {
+      "w": 1440,
+      "h": 1000
+    },
+    "I5": {
+      "w": 860,
+      "h": 1000
+    },
+    "I6_primary": {
+      "w": 580,
+      "h": 900
+    },
+    "I6_wrap_supplemental": {
+      "w": 400,
+      "h": 800
+    },
+    "I7": {
+      "w": 1440,
+      "h": 600
+    }
+  },
+  "points": [
+    {
+      "id": "I1",
+      "title": "宽屏空队列同一行",
+      "verdict": "PASS",
+      "classification": "product",
+      "viewport": {
+        "w": 1440,
+        "h": 1000
+      },
+      "evidence": "选择图片 and 选择目录 are on one row with 把图片拖到这里 to their right (chooser tops 131.7, dropzone 123.5–177.8, stretch-aligned). Format hint and 自建入库已接入 sit in .mg-import-meta above the pickup row (meta bottom 100.8, pickup top 123.5). Dropzone hint is “或使用左侧「选择图片」/「选择目录」添加文件” (no “顶部的”). Directory picker is available in this Chromium.",
+      "screenshot": ".qa\\import-upload-layout\\screenshots\\I1-wide-empty.png"
+    },
+    {
+      "id": "I2",
+      "title": "宽屏加长队列只滚左列",
+      "verdict": "PASS",
+      "classification": "product",
+      "viewport": {
+        "w": 1440,
+        "h": 1000
+      },
+      "evidence": "40 local PNGs made the left column overflow (scrollHeight 5540 / clientHeight 874). After scrolling the left column to the bottom (scrollTop 4666), main stayed overflow:hidden with scrollTop 0, window scrollY 0. Aside remained fully in main (sticky, max-height 916px = 100dvh-56-28), 批量标注 title and 开始入库 were fully visible and hit-tested at the button. After injecting a temporary 1400px form min-height via page.addStyleTag (removed after the test, not written to the worktree), only .mg-import-settings-body scrolled and 开始入库 did not move.",
+      "screenshots": [
+        ".qa\\import-upload-layout\\screenshots\\I2-wide-left-scrolled.png",
+        ".qa\\import-upload-layout\\screenshots\\I2-form-scrolled.png"
+      ]
+    },
+    {
+      "id": "I3",
+      "title": "人为让 main 成为滚动容器",
+      "verdict": "PASS",
+      "classification": "product",
+      "viewport": {
+        "w": 1440,
+        "h": 1000
+      },
+      "evidence": "Temporary page.addStyleTag forced main.import-page { overflow:auto } and relaxed .mg-page-import / left-column height so the left column could stretch. After scrolling main (scrollTop 4666, scrollHeight 5610, clientHeight 944), window still did not scroll. Aside stayed position:sticky; top:0; max-height:916px (not 100%). 批量标注 title and 开始入库 remained fully inside main and hit-testable. The style tag was removed from the page; leftover=false. Worktree CSS was not modified.",
+      "screenshot": ".qa\\import-upload-layout\\screenshots\\I3-main-forced-scroll.png"
+    },
+    {
+      "id": "I4",
+      "title": "入库进行中状态与拖拽禁用",
+      "verdict": "PASS",
+      "classification": "product",
+      "evidence_boundary": "No isolated backend and no POST /api/index. indexing was toggled on the live page via React fiber setState (useState index 8) plus indexingRef. This checks meta copy, placement, and dropzone disabled styling, not a full ingest integration.",
+      "viewport": {
+        "w": 1440,
+        "h": 1000
+      },
+      "evidence": "After injection, .mg-import-meta .mg-status read “入库进行中” and stayed in meta (not in the pickup row). Dropzone class included is-disabled, pointer-events was none, and 选择图片 was disabled. State was reverted before later tests.",
+      "screenshot": ".qa\\import-upload-layout\\screenshots\\I4-indexing-injected.png"
+    },
+    {
+      "id": "I5",
+      "title": "≤860px 底栏批量标注",
+      "verdict": "PASS",
+      "classification": "product",
+      "viewport": {
+        "w": 860,
+        "h": 1000
+      },
+      "rem_7_5": {
+        "root_font_size_px": 15,
+        "estimate_7_5rem_px": 112.5,
+        "measured_at_left_scrollTop_0": {
+          "metaH": 30.83,
+          "pickupH": 56,
+          "gap_meta_to_pickup": 22.67,
+          "from_page_top_to_pickup_bottom_px": 109.5,
+          "aside_top": 466,
+          "aside_height": 520,
+          "aside_maxHeight": "520px",
+          "aside_position": "sticky",
+          "overlap_with_pickup_px": -286.5,
+          "covers_pickup": false,
+          "gap_pickup_to_aside_px": 286.5
+        },
+        "note": "7.5rem (112.5px) is 3px above the measured meta+gap+pickup occupancy (109.5px). 52dvh at 1000px viewport is 520px and was the binding max-height (tighter than 100dvh-topbar-28-7.5rem). The first-suite rem check was taken after scrolling the left column, so pickup was off-screen; the formal 7.5rem occupancy numbers above come from the supplemental headed remasurement at scrollTop=0. The bottom panel did not cover pickup and 开始入库 stayed at the panel bottom while the form body scrolled."
+      },
+      "evidence": "At 860×1000 with a 40-item queue, after scrolling the left column, the 批量标注 panel stayed in the visible main (aside height 520, sticky bottom), 开始入库 was fully visible and hit-testable, and the form body scrolled without moving the run bar. No new Dialog or drawer. Pickup was not covered at rest (see rem_7_5).",
+      "screenshots": [
+        ".qa\\import-upload-layout\\screenshots\\I5-860-left-scrolled.png",
+        ".qa\\import-upload-layout\\screenshots\\I5-860-form-scrolled.png",
+        ".qa\\import-upload-layout\\screenshots\\I5-860-scrolltop0.png"
+      ]
+    },
+    {
+      "id": "I6",
+      "title": "极窄折行",
+      "verdict": "PASS",
+      "classification": "product",
+      "viewports": [
+        {
+          "w": 580,
+          "h": 900
+        },
+        {
+          "w": 400,
+          "h": 800
+        }
+      ],
+      "evidence": "At 580×900 the off-canvas sidebar leaves ~523px for the pickup row, which is still enough for two buttons + ~200px dropzone (need ≈438px), so the dropzone stayed on the same row as the two chooser buttons. Status stayed in meta. Because the spec also requires checking the “cannot fit two buttons + ~200px dropzone” case, a supplemental 400×800 remasurement was done: the two chooser buttons remained side by side, the dropzone wrapped to the next line, and the status chip stayed in meta / not in the pickup row.",
+      "screenshots": [
+        ".qa\\import-upload-layout\\screenshots\\I6-580.png",
+        ".qa\\import-upload-layout\\screenshots\\I6-400.png"
+      ]
+    },
+    {
+      "id": "I7",
+      "title": "窄高",
+      "verdict": "PASS",
+      "classification": "product",
+      "viewport": {
+        "w": 1440,
+        "h": 600
+      },
+      "evidence": "Viewport height 600 < 644px CSS breakpoint. Remaining main height 544px (< 560). Form visible clientHeight 45px (< 160). Form scrollHeight 1540, overflow auto. 开始入库 fully inside main and hit-testable; dropzone subtitle hidden as specified. html overflow hidden, window not scrollable (maxY 0). Aside sticky with max-height 516px (= 600-56-28). No dual window/main scrollbar carried the rail out of view.",
+      "screenshot": ".qa\\import-upload-layout\\screenshots\\I7-short-600.png"
+    },
+    {
+      "id": "I8",
+      "title": "业务回归（本地队列，无真实入库）",
+      "verdict": "PASS",
+      "classification": "product",
+      "evidence_boundary": "Did not POST /api/index or write a business DB/OSS. Local temp PNGs only. Start/cancel/retry checked as visible entry points; 取消入库 was clicked after frontend indexing-state injection, not after a live run.",
+      "viewport": {
+        "w": 1440,
+        "h": 1000
+      },
+      "evidence": "File input and 选择目录 are present (directory picker available). A drag-and-drop of one PNG enqueued 1 item; adding three more via the hidden file input brought the queue to 4. 单独标注 was clicked; a role=dialog was not detected (Dialog.tsx is out of this knife; a larger screenshot was still captured). 开始入库 was visible and enabled (no annotation blockers in this session). After injecting indexing=true, 取消入库 appeared, clicking it returned meta text to “自建入库已接入”. 查看任务中心 jumped to title 入库任务. Focus restore of Dialog was observed only in passing and is not a knife fail.",
+      "screenshots": [
+        ".qa\\import-upload-layout\\screenshots\\I8-single-annotate.png",
+        ".qa\\import-upload-layout\\screenshots\\I8-tasks-center.png"
+      ]
+    },
+    {
+      "id": "I9",
+      "title": "导航、品牌色与其它页未被 import-page 误伤",
+      "verdict": "PASS",
+      "classification": "product",
+      "viewport": {
+        "w": 1440,
+        "h": 1000
+      },
+      "evidence": "import uses management-page import-page + mg-page-import. library uses library-page / mg-page-library without import-page. tasks uses management-page / mg-page without import-page (main overflow remains auto, as before). search uses search-page, overflow hidden. --primary stayed #2c56a0 and sidebar width 200px on all four views. Nav items 图搜图 / 图片数据 / 上传与导入 / 入库任务 unchanged.",
+      "screenshots": [
+        ".qa\\import-upload-layout\\screenshots\\I9-import.png",
+        ".qa\\import-upload-layout\\screenshots\\I9-library.png",
+        ".qa\\import-upload-layout\\screenshots\\I9-tasks.png",
+        ".qa\\import-upload-layout\\screenshots\\I9-search.png"
+      ]
+    }
+  ],
+  "cleanup": {
+    "attempted": true,
+    "completed_and_verified": true,
+    "error": "Error: Command failed to spawn: Your computer \"wondron\" is temporarily unreachable. Retry the request in a moment.",
+    "when": "After hashes were verified and before the isolated Vite processes could be stopped. Per standing rules, this was recorded and not retried or polled.",
+    "self_started_may_still_be_running": {
+      "host": "127.0.0.1:57521",
+      "pids": {
+        "wrapper_StartProcess": 36720,
+        "npx": 40848,
+        "vite": 31188
+      },
+      "do_not_kill": {
+        "user_vite_5173_pid": 11904,
+        "note": "User's existing Vite --host 0.0.0.0 on :5173 was never switched and must not be killed."
+      },
+      "status": "later_stopped_and_verified"
+    },
+    "self_started_containers": [],
+    "worktree": "No business source or live config was changed. Temporary Playwright styles were page-only and removed. QA files live only under .qa/import-upload-layout/.",
+    "c_repo_report_sync": "Final box reports were copied to C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\import-upload-layout\\ at 2026-11-12 01:52:56 America/Denver after late cleanup.",
+    "first_attempt": {
+      "result": "machine_unreachable",
+      "error": "Error: Command failed to spawn: Your computer \"wondron\" is temporarily unreachable. Retry the request in a moment.",
+      "did_not_poll": true
+    },
+    "late_cleanup": {
+      "time_america_denver": "2026-11-12 01:52:56 America/Denver",
+      "inspected_alive": [
+        {
+          "pid": 36720,
+          "name": "cmd.exe",
+          "cmd": "cmd.exe /c npx.cmd vite --host 127.0.0.1 --port 57521 --strictPort"
+        },
+        {
+          "pid": 40848,
+          "name": "node.exe",
+          "cmd": "npx-cli.js vite --host 127.0.0.1 --port 57521 --strictPort"
+        },
+        {
+          "pid": 31188,
+          "name": "node.exe",
+          "cmd": "vite.js --host 127.0.0.1 --port 57521 --strictPort"
+        }
+      ],
+      "killed": [
+        36720,
+        40848,
+        31188
+      ],
+      "confirmed_gone": [
+        36720,
+        40848,
+        31188
+      ],
+      "port_57521_listening_after": false,
+      "user_vite_5173_pid_11904_untouched": true,
+      "user_vite_5173_still_listening": true
+    },
+    "cleanup_complete": true,
+    "leftover_processes_possible": false
+  },
+  "report_paths": {
+    "box_json": "/workspace/deliverables/import-upload-layout-acceptance-report.json",
+    "box_md": "/workspace/deliverables/import-upload-layout-acceptance-report.md",
+    "c_repo_dir": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\import-upload-layout\\\\"
+  }
+}

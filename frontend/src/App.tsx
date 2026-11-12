@@ -320,7 +320,7 @@ export default function App() {
     </aside>
 
     <div className="main-shell"><header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" aria-label="展开导航" onClick={() => setMobileNav(true)}><Menu size={20} /></button><div className="topbar-title"><h1>{pageInfo.name}</h1><span>食材图像管理 / {pageInfo.description}</span></div></div><div className="topbar-actions"><button className="icon-button" title="使用说明" aria-label="使用说明" onClick={() => setHelpOpen(true)}><CircleHelp size={17} /></button><button className="icon-button" title="连接设置" aria-label="连接设置" disabled={batchRunning} onClick={() => { setApiDraft(apiBase); setSettingsOpen(true) }}><Settings2 size={17} /></button></div></header>
-    <main className={view === 'search' ? 'search-page' : view === 'library' ? 'management-page library-page' : 'management-page'}>
+    <main className={view === 'search' ? 'search-page' : view === 'library' ? 'management-page library-page' : view === 'import' ? 'management-page import-page' : 'management-page'}>
       {view !== 'search' && view !== 'enums' && view !== 'categories' && view !== 'scenes' && <ManagementViews view={view} onNavigate={navigate} apiBase={apiBase} />}
       {view === 'enums' && <EnumConfigPage apiBase={apiBase} />}
       {view === 'categories' && <CategoryConfigPage apiBase={apiBase} />}

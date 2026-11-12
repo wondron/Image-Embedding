@@ -1,0 +1,113 @@
+{
+  "config": {
+    "argv": [
+      "D:\\98-softwaredata\\nodejs\\node.exe",
+      "C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "remasure-i5-i6.ts",
+      "--config",
+      "playwright.config.ts",
+      "--timeout",
+      "60000"
+    ],
+    "configFile": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\import-upload-layout\\playwright.config.ts",
+    "rootDir": "C:/Users/47202/PROJECT/Image-Embedding/.qa/import-upload-layout",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {},
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "C:/Users/47202/PROJECT/Image-Embedding/.qa/import-upload-layout/playwright-output",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {},
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "C:/Users/47202/PROJECT/Image-Embedding/.qa/import-upload-layout",
+        "testIgnore": [],
+        "testMatch": [
+          "import-upload-layout.spec.ts"
+        ],
+        "timeout": 60000
+      }
+    ],
+    "filteredProjects": [
+      {
+        "grep": {},
+        "grepInvert": null,
+        "outputDir": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\import-upload-layout\\playwright-output",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {},
+        "name": "chromium",
+        "testDir": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\import-upload-layout",
+        "snapshotDir": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\import-upload-layout",
+        "testIgnore": [],
+        "testMatch": "import-upload-layout.spec.ts",
+        "timeout": 60000,
+        "use": {
+          "baseURL": "http://127.0.0.1:57521",
+          "locale": "zh-CN",
+          "timezoneId": "America/Denver",
+          "colorScheme": "light",
+          "screenshot": "off",
+          "video": "off",
+          "trace": "off",
+          "actionTimeout": 12000,
+          "headless": false,
+          "browserName": "chromium"
+        },
+        "dependencies": [],
+        "ignoreSnapshots": false,
+        "__projectId": "chromium"
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "playwright-results.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "default",
+    "updateSourceMethod": "patch",
+    "version": "1.64.1",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [],
+  "errors": [
+    {
+      "message": "Error: No tests found.\nMake sure that arguments are regular expressions matching test files.\nYou may need to escape symbols like \"$\" or \"*\" and quote the arguments.",
+      "stack": "Error: No tests found.\nMake sure that arguments are regular expressions matching test files.\nYou may need to escape symbols like \"$\" or \"*\" and quote the arguments."
+    }
+  ],
+  "stats": {
+    "startTime": "2026-11-12T08:49:09.227Z",
+    "duration": 10.25,
+    "expected": 0,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

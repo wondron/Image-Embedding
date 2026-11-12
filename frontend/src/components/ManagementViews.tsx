@@ -361,15 +361,9 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     return true
   })
 
-  return <div className={`mg-page${view === 'library' ? ' mg-page-library' : ''}`}>
-    {view === 'import' && <div className="mg-page-toolbar">
-      <button className="mg-btn mg-primary" disabled={indexing} onClick={() => fileInput.current?.click()}><FolderOpen size={17} />选择图片</button>
-      {dirSupported
-        ? <button className="mg-btn mg-secondary" disabled={indexing} onClick={() => dirInput.current?.click()}><FolderOpen size={17} />选择目录</button>
-        : <span className="mg-toolbar-summary" title="当前浏览器不支持目录选择">目录选择不可用</span>}
+  return <div className={`mg-page${view === 'library' ? ' mg-page-library' : view === 'import' ? ' mg-page-import' : ''}`}>
+    {view === 'import' && <div className="mg-import-meta">
       <span className="mg-toolbar-summary">JPG、PNG、WebP · 每张最大 15 MB · 最多 100 张</span>
-      <input ref={fileInput} type="file" className="mg-hidden" aria-label="选择待入库图片" accept="image/jpeg,image/png,image/webp" multiple onChange={event => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />
-      {dirSupported && <input ref={dirInput} type="file" className="mg-hidden" aria-label="选择待入库目录" accept="image/jpeg,image/png,image/webp" multiple {...({ webkitdirectory: '', directory: '' } as object)} onChange={event => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />}
       <span className="mg-status"><span />{indexing ? '入库进行中' : '自建入库已接入'}</span>
     </div>}
 
@@ -386,8 +380,16 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     />}
 
     {view === 'import' && <div className="mg-import-layout"><section className="mg-panel mg-import-main">
-      <div className={`mg-dropzone ${dragging ? 'is-dragging' : ''} ${indexing ? 'is-disabled' : ''}`} onDragOver={event => { event.preventDefault(); if (!indexing) setDragging(true) }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false) }} onDrop={dropFiles}>
-        <span className="mg-drop-icon"><CloudUpload size={28} strokeWidth={1.5} /></span><div><h3>把图片拖到这里</h3><p>或使用顶部的「选择图片」{dirSupported ? ' / 「选择目录」' : ''}添加文件</p></div>
+      <div className="mg-pickup-row">
+        <button className="mg-btn mg-primary" disabled={indexing} onClick={() => fileInput.current?.click()}><FolderOpen size={17} />选择图片</button>
+        {dirSupported
+          ? <button className="mg-btn mg-secondary" disabled={indexing} onClick={() => dirInput.current?.click()}><FolderOpen size={17} />选择目录</button>
+          : <span className="mg-toolbar-summary" title="当前浏览器不支持目录选择">目录选择不可用</span>}
+        <div className={`mg-dropzone ${dragging ? 'is-dragging' : ''} ${indexing ? 'is-disabled' : ''}`} onDragOver={event => { event.preventDefault(); if (!indexing) setDragging(true) }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false) }} onDrop={dropFiles}>
+          <span className="mg-drop-icon"><CloudUpload size={28} strokeWidth={1.5} /></span><div><h3>把图片拖到这里</h3><p>或使用左侧{dirSupported ? '「选择图片」/「选择目录」' : '按钮'}添加文件</p></div>
+        </div>
+        <input ref={fileInput} type="file" className="mg-hidden" aria-label="选择待入库图片" accept="image/jpeg,image/png,image/webp" multiple onChange={event => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />
+        {dirSupported && <input ref={dirInput} type="file" className="mg-hidden" aria-label="选择待入库目录" accept="image/jpeg,image/png,image/webp" multiple {...({ webkitdirectory: '', directory: '' } as object)} onChange={event => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />}
       </div>
       <div className="mg-queue-heading"><h3>待入库队列 <span>{jobs.length}</span></h3>{jobs.length > 0 && <button className="mg-text-button" disabled={indexing} onClick={clearQueue}>清空列表</button>}</div>
       {jobs.length === 0 ? <div className="mg-queue-empty"><Images size={22} /><p>选好的图片会在这里显示</p></div> : <div className="mg-upload-grid">{jobs.map(item => {
@@ -412,10 +414,11 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
             {item.elapsed !== undefined && (item.status === 'success' || item.status === 'error') && <small className="mg-job-elapsed">{item.elapsed.toFixed(1)} 秒</small>}
           </div></article>
       })}</div>}
-    </section><aside className="mg-import-aside"><section className="mg-panel mg-import-settings"><h2>批量标注</h2><p>对本批没有「单独标注」的图片统一生效，入库时一起写入。</p>
+    </section><aside className="mg-import-aside"><section className="mg-panel mg-import-settings"><div className="mg-import-settings-head"><h2>批量标注</h2><p>对本批没有「单独标注」的图片统一生效，入库时一起写入。</p></div>
+      <div className="mg-import-settings-body">
       <AnnotationForm value={batchAnnotation} onChange={setBatchAnnotation} errors={batchErrors} categories={categoryTree} scenes={sceneView} disabled={indexing} />
       <p className="mg-help">逐张调用 <code>POST /api/index</code>；有场景调整的图片入库后再写人工纳入 / 排除。字节完全相同的图片只入库一次，再次上传沿用原有标注。进行中不可清空队列；切换到入库任务仍保留本会话队列，整页刷新或离开数据管理宿主后不保留。停止等待不保证服务端未成功。</p>
-      {/* Stays at the bottom of the screen while the form scrolls */}
+      </div>
       <div className="mg-import-run">
       <p className="mg-import-tally"><span>已选 <strong>{jobs.length}</strong> 张 · {(totalBytes / 1024 / 1024).toFixed(2)} MB</span>{jobs.some(job => job.annotation) && <span>单独标注 <strong>{jobs.filter(job => job.annotation).length}</strong> 张</span>}</p>
       {jobs.length > 0 && <div className="mg-index-progress" aria-live="polite">

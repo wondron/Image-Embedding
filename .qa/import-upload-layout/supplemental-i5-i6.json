@@ -1,0 +1,85 @@
+{
+  "i5_at_top": {
+    "rem": 15,
+    "estimate75": 112.5,
+    "metaH": 30.83333396911621,
+    "pickupH": 56,
+    "gap": 22.66666603088379,
+    "usedAbove": 30.83333396911621,
+    "fromPageTopToPickupBottom": 109.5,
+    "fromMainTopToPickupBottom": 123.5,
+    "pickup": {
+      "top": 123.5,
+      "bottom": 179.5,
+      "h": 56
+    },
+    "aside": {
+      "top": 466,
+      "bottom": 986,
+      "h": 520,
+      "maxHeight": "520px",
+      "position": "sticky"
+    },
+    "main": {
+      "top": 56,
+      "bottom": 1000,
+      "h": 944
+    },
+    "overlapPx": -286.5,
+    "coversPickup": false,
+    "leftoverBelowPickup": 286.5
+  },
+  "i6_at_400": {
+    "viewport": {
+      "w": 400,
+      "h": 800
+    },
+    "buttonsSameRow": true,
+    "dropSameRowAsButtons": false,
+    "dropWrapped": true,
+    "statusInPickup": false,
+    "statusInMeta": true,
+    "boxes": {
+      "bc": {
+        "top": 145.1979217529297,
+        "bottom": 179.1979217529297,
+        "left": 28.666667938232422,
+        "right": 137.56250381469727,
+        "w": 108.89583587646484,
+        "h": 34
+      },
+      "bs": {
+        "top": 145.1979217529297,
+        "bottom": 179.1979217529297,
+        "left": 147.5625,
+        "right": 256.45833587646484,
+        "w": 108.89583587646484,
+        "h": 34
+      },
+      "bd": {
+        "top": 189.1979217529297,
+        "bottom": 245.1979217529297,
+        "left": 28.666667938232422,
+        "right": 356.0000114440918,
+        "w": 327.3333435058594,
+        "h": 56
+      },
+      "bst": {
+        "top": 97.19792175292969,
+        "bottom": 124.5312557220459,
+        "left": 14,
+        "right": 123.33333587646484,
+        "w": 109.33333587646484,
+        "h": 27.33333396911621
+      },
+      "bp": {
+        "top": 145.1979217529297,
+        "bottom": 245.1979217529297,
+        "left": 28.666667938232422,
+        "right": 356.0000114440918,
+        "w": 327.3333435058594,
+        "h": 100
+      }
+    }
+  }
+}

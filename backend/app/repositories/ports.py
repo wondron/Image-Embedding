@@ -15,11 +15,20 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
 
 VECTOR_DIM = 1024
+
+
+@dataclass(frozen=True)
+class ImageIndexResult:
+    """The stored image snapshot held by one indexing transaction."""
+
+    image: dict[str, Any]
+    created: bool
 
 
 @runtime_checkable
@@ -83,6 +92,18 @@ class MetadataStorePort(ABC):
 
     @abstractmethod
     def insert_image(self, row: dict[str, Any]) -> UUID | str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def index_image(
+        self, row: dict[str, Any], *, model_id: int
+    ) -> AbstractContextManager[ImageIndexResult]:
+        """Insert or lock an image, recompute its scenes and yield one stored snapshot.
+
+        The image row and catalog stay locked while the caller writes the vector.
+        Normal exit records that snapshot's version and commits; an exception rolls
+        back the transaction, including a newly inserted image.
+        """
         raise NotImplementedError
 
     @abstractmethod

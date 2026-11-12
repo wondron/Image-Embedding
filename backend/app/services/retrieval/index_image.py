@@ -1,9 +1,10 @@
 """Index-image use case (PG v0.1).
 
 Flow: bytes → sha256/uuid → validate labels → embed (no side effects yet) →
-S3 original+thumb → insert images → recompute image_scenes → Qdrant upsert with
-payload {category_id, scenes, food_state, label_status} into the active model's
-collection → image_embeddings ledger records the payload_version just pushed.
+S3 original+thumb → one PostgreSQL write transaction: insert images, recompute
+image_scenes, read a consistent payload snapshot, stage its embedding ledger,
+upsert Qdrant, then commit. Failed writes roll back without deleting another
+request's image.
 
 Path-based local disk store is legacy MVP; when storage is present we prefer
 put_original_and_thumb and DB https URLs (no path column in PG).
@@ -21,7 +22,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, Sequence
 from uuid import UUID
 
 from app.core.enums import (
@@ -167,7 +168,6 @@ class IndexImageUseCase:
                 ("main_ingredient_mass_g", main_ingredient_mass_g),
             )
         }
-        food = food_fields["food_state"]  # the only one in the Qdrant payload
         desc = normalize_description(description)
         tag_list = normalize_tags(tags)  # PG only, like description: not in the Qdrant payload
 
@@ -228,10 +228,6 @@ class IndexImageUseCase:
             except OSError:
                 pass
 
-        # Same bytes -> same id. If the image is already stored, the first
-        # upload's columns win and a failed upsert must not delete it.
-        already_stored = self._metadata.get_by_id(image_id) is not None
-
         row = {
             "id": image_id,
             "sha256": sha,
@@ -247,68 +243,44 @@ class IndexImageUseCase:
             "tags": tag_list,
             **food_fields,
         }
-        inserted_id = self._metadata.insert_image(row)
-        image_id = inserted_id if isinstance(inserted_id, UUID) else UUID(str(inserted_id))
-
-        # Write-time materialize effective scenes → image_scenes + payload_version
-        membership = self._metadata.recompute_image_scenes(image_id, bump_version=False)
-        scene_codes = list(membership.get("scene_codes") or [])
-
-        # Qdrant payload mirrors the stored row (differs from the request on re-upload)
-        stored = self._metadata.get_by_id(image_id) or {}
-        if stored:
-            resolved_category_id = stored.get("category_id")
-            food = stored.get("food_state")
-            label = stored.get("label_status") or label
-        payload_version = stored.get("payload_version") or membership.get("payload_version")
-
-        payload = build_qdrant_payload(
-            category_id=resolved_category_id,
-            scene_codes=scene_codes,
-            food_state=food,
-            label_status=label,
-        )
-        try:
-            self._vectors.upsert(image_id, vector, payload)
-        except Exception as exc:
-            if not already_stored:
-                try:
-                    self._metadata.mark_deleted(image_id)
-                except Exception:
-                    logger.exception("rollback mark_deleted failed id=%s", image_id)
-            if isinstance(exc, err.AppError):
+        # The row lock stays held through the vector write and ledger commit.
+        # Concurrent uploads use the INSERT outcome, never a separate existence check.
+        with self._metadata.index_image(row, model_id=self._model.id) as indexed:
+            stored = indexed.image
+            image_id = UUID(str(stored["id"]))
+            scene_codes = list(stored["scenes"])
+            payload_version = int(stored["payload_version"])
+            payload = build_qdrant_payload(
+                category_id=stored.get("category_id"),
+                scene_codes=scene_codes,
+                food_state=stored.get("food_state"),
+                label_status=stored["label_status"],
+            )
+            try:
+                self._vectors.upsert(image_id, vector, payload)
+            except err.AppError:
                 raise
-            raise err.index_qdrant_failed(f"{type(exc).__name__}: {exc}") from exc
+            except Exception as exc:
+                raise err.index_qdrant_failed(f"{type(exc).__name__}: {exc}") from exc
 
-        # Ledger: which payload_version is now in this model's collection. A missing
-        # row only means "not synced" (re-push later), so no rollback on failure.
-        self._metadata.upsert_image_embedding(
-            model_id=self._model.id,
-            image_id=image_id,
-            synced_version=int(payload_version) if payload_version is not None else None,
-        )
-
-        created = stored or {}
         return {
             "id": str(image_id),
             "filename": title,
-            "original_url": created.get("original_url") or original_url,
-            "thumb_url": created.get("thumb_url") or thumb_url,
-            "category_id": created.get("category_id")
-            if created.get("category_id") is not None
-            else resolved_category_id,
-            "scenes": created.get("scenes") or scene_codes,
+            "original_url": stored["original_url"],
+            "thumb_url": stored["thumb_url"],
+            "category_id": stored.get("category_id"),
+            "scenes": scene_codes,
             # the stored row wins: on re-upload the first upload's values are kept
-            **{key: created[key] if key in created else value for key, value in food_fields.items()},
-            "label_status": str(created.get("label_status") or label),
-            "width": created.get("width") or width,
-            "height": created.get("height") or height,
-            "description": created.get("description", desc),
-            "tags": created.get("tags", tag_list),
+            **{key: stored.get(key) for key in FOOD_FIELDS},
+            "label_status": str(stored["label_status"]),
+            "width": stored["width"],
+            "height": stored["height"],
+            "description": stored.get("description", ""),
+            "tags": stored.get("tags", []),
             "payload_version": payload_version,
-            "created_at": created.get("created_at"),
+            "created_at": stored.get("created_at"),
             # false: the same bytes were stored before; their row (labels included) was kept
-            "created": not already_stored,
+            "created": indexed.created,
         }
 
     def execute_batch(

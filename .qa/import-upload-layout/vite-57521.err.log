@@ -1,0 +1,402 @@
+01:45:13 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:45:13 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:45:13 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:45:27 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:45:27 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:45:27 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:45:29 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:45:29 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:45:31 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:45:31 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:45:31 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:17 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:17 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:17 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:17 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:17 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:18 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:18 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:18 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:18 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:18 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:20 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:20 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:20 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:20 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:20 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:22 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:22 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:22 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:22 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:22 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:24 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:24 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:24 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:24 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:24 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:26 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:26 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:26 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:39 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:39 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:39 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:39 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:39 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:40 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:40 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:40 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:41 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:41 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:42 [vite] http proxy error: /api/index-tasks?page=1&page_size=20
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:42 [vite] http proxy error: /api/index-tasks?page=1&page_size=20
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:43 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:43 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:43 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:43 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:43 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:44 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:44 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:44 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:44 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:44 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:44 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:44 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:44 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:45 [vite] http proxy error: /api/index-tasks?page=1&page_size=20
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:45 [vite] http proxy error: /api/index-tasks?page=1&page_size=20
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:45 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:45 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:47:45 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:05 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:05 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:05 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:05 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:05 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:06 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:06 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:06 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:06 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:06 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:08 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:08 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:08 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:08 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:08 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:10 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:10 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:10 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:10 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:10 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:11 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:11 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:11 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:12 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:12 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:13 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:13 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:13 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:14 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:14 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:14 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:14 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:14 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:15 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:15 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:16 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:16 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:16 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:16 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:16 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:18 [vite] http proxy error: /api/index-tasks?page=1&page_size=20
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:18 [vite] http proxy error: /api/index-tasks?page=1&page_size=20
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:19 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:19 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:19 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:19 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:19 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:20 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:20 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:20 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:20 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:20 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:20 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:20 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:20 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:20 [vite] http proxy error: /api/index-tasks?page=1&page_size=20
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:20 [vite] http proxy error: /api/index-tasks?page=1&page_size=20
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:21 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:21 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:48:21 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:50:06 [vite] http proxy error: /api/scenes
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:50:06 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:50:06 [vite] http proxy error: /api/ping
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:50:06 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)
+01:50:06 [vite] http proxy error: /api/categories
+Error: connect ECONNREFUSED 127.0.0.1:57522
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2083:16)

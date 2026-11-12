@@ -4,8 +4,41 @@ from typing import Any
 from uuid import UUID
 
 from app.core.enums import Distance, ModelStatus
-from app.db.common import _as_uuid, _row_to_dict, logger
+from app.db.common import _as_uuid, _row_to_dict
 from app.core import errors as err
+
+
+def _upsert_image_embedding(
+    conn: Any,
+    *,
+    model_id: int,
+    image_id: UUID | str,
+    synced_version: int | None = None,
+) -> None:
+    """Record one embedding on the caller's connection and transaction."""
+    from sqlalchemy import text
+
+    uid = _as_uuid(image_id)
+    version = synced_version
+    if version is None:
+        prow = conn.execute(
+            text("SELECT payload_version FROM images WHERE id = CAST(:id AS uuid)"),
+            {"id": str(uid)},
+        ).fetchone()
+        if prow is None:
+            raise err.index_postgres_failed(f"upsert_image_embedding: image {uid} not found")
+        version = int(prow[0])
+    conn.execute(
+        text(
+            "INSERT INTO image_embeddings "
+            "(model_id, image_id, synced_version, embedded_at) "
+            "VALUES (:mid, CAST(:iid AS uuid), :ver, now()) "
+            "ON CONFLICT (model_id, image_id) DO UPDATE SET "
+            "synced_version = EXCLUDED.synced_version, "
+            "embedded_at = EXCLUDED.embedded_at"
+        ),
+        {"mid": int(model_id), "iid": str(uid), "ver": int(version)},
+    )
 
 
 class PgEmbeddingsMixin:
@@ -59,36 +92,11 @@ class PgEmbeddingsMixin:
         If synced_version is None, read images.payload_version for image_id.
         """
         self.ensure_schema()
-        from sqlalchemy import text
-
-        uid = _as_uuid(image_id)
         engine = self._get_engine()
         try:
             with engine.begin() as conn:
-                version = synced_version
-                if version is None:
-                    prow = conn.execute(
-                        text(
-                            "SELECT payload_version FROM images "
-                            "WHERE id = CAST(:id AS uuid)"
-                        ),
-                        {"id": str(uid)},
-                    ).fetchone()
-                    if prow is None:
-                        raise err.index_postgres_failed(
-                            f"upsert_image_embedding: image {uid} not found"
-                        )
-                    version = int(prow[0])
-                conn.execute(
-                    text(
-                        "INSERT INTO image_embeddings "
-                        "(model_id, image_id, synced_version, embedded_at) "
-                        "VALUES (:mid, CAST(:iid AS uuid), :ver, now()) "
-                        "ON CONFLICT (model_id, image_id) DO UPDATE SET "
-                        "synced_version = EXCLUDED.synced_version, "
-                        "embedded_at = EXCLUDED.embedded_at"
-                    ),
-                    {"mid": int(model_id), "iid": str(uid), "ver": int(version)},
+                _upsert_image_embedding(
+                    conn, model_id=model_id, image_id=image_id, synced_version=synced_version
                 )
         except err.AppError:
             raise
@@ -109,15 +117,17 @@ class PgEmbeddingsMixin:
         engine = self._get_engine()
         try:
             with engine.connect() as conn:
-                rows = conn.execute(
-                    text(
-                        "SELECT i.id::text AS id, i.payload_version, i.category_id, i.label_status, f.food_state "
-                        "FROM images i LEFT JOIN image_foods f ON f.image_id = i.id "
-                        "WHERE i.id = ANY(:ids) ORDER BY i.id"
-                    ),
-                    {"ids": ids},
-                ).mappings().fetchall()
-                codes = self._scene_codes_by_image(conn, [r["id"] for r in rows])
+                conn.execution_options(isolation_level="REPEATABLE READ")
+                with conn.begin():
+                    rows = conn.execute(
+                        text(
+                            "SELECT i.id::text AS id, i.payload_version, i.category_id, i.label_status, f.food_state "
+                            "FROM images i LEFT JOIN image_foods f ON f.image_id = i.id "
+                            "WHERE i.id = ANY(:ids) ORDER BY i.id"
+                        ),
+                        {"ids": ids},
+                    ).mappings().fetchall()
+                    codes = self._scene_codes_by_image(conn, [r["id"] for r in rows])
             return [{**dict(r), "scenes": codes.get(r["id"], [])} for r in rows]
         except err.AppError:
             raise

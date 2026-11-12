@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 from uuid import UUID
 
@@ -17,11 +19,14 @@ from app.db.common import (
     _as_uuid,
     _row_to_dict,
     _uuid_in_clause,
+    logger,
 )
 from app.core import errors as err
 from app.repositories.catalog_lock import lock_catalog_for_read
 from app.repositories.foods import FOOD_JOIN, FOOD_SELECT, write_image_food
-from app.repositories.scenes import _recompute
+from app.repositories.embeddings import _upsert_image_embedding
+from app.repositories.ports import ImageIndexResult
+from app.repositories.scenes import _lock_image, _recompute
 from app.services.retrieval.enum_fields import coerce_enum
 from app.services.retrieval.food_fields import FOOD_FIELDS, coerce_food_field
 from app.services.retrieval.image_fields import resolve_label_status
@@ -99,6 +104,79 @@ def _decorate(row: Any, codes_by: dict[str, list[str]]) -> dict[str, Any]:
     return d
 
 
+def _prepare_image_insert(row: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Normalize the shared insert fields before opening a transaction."""
+    sha = row.get("sha256")
+    if isinstance(sha, str):
+        sha = bytes.fromhex(sha)
+    if not isinstance(sha, (bytes, bytearray)) or len(sha) != 32:
+        raise err.validation_error("insert_image requires 32-byte sha256")
+    sha = bytes(sha)
+    uid = str(_as_uuid(row.get("id") or uuid_from_sha256(sha)))
+    original_url = str(row.get("original_url") or "").strip()
+    thumb_url = str(row.get("thumb_url") or "").strip()
+    if not original_url or not thumb_url:
+        raise err.validation_error("original_url and thumb_url required")
+    width = _positive_int(row.get("width"), "width")
+    height = _positive_int(row.get("height"), "height")
+    source_type = coerce_enum(
+        SOURCE_TYPE, row.get("source_type"), field="source_type", default=DEFAULT_SOURCE_TYPE
+    )
+    license_v = coerce_enum(LICENSE, row.get("license"), field="license", default=DEFAULT_LICENSE)
+    label_status = coerce_enum(
+        LabelStatus, row.get("label_status"), field="label_status", default=LabelStatus.UNLABELED
+    )
+    food = {key: coerce_food_field(key, row.get(key)) for key in FOOD_FIELDS}
+    category_id = row.get("category_id")
+    _check_label_matches_category(label_status, category_id)
+    return {
+        "id": uid,
+        "sha": sha,
+        "ou": original_url,
+        "tu": thumb_url,
+        "w": width,
+        "h": height,
+        "st": source_type,
+        "lic": license_v,
+        "cid": category_id,
+        "ls": label_status.value,
+        "desc": normalize_description(row.get("description")),
+        "tags": normalize_tags(row.get("tags")),
+    }, food
+
+
+def _insert_image(
+    conn: Any, values: dict[str, Any], food: dict[str, Any]
+) -> tuple[UUID, bool]:
+    """Insert on this connection and return the id with its atomic created flag."""
+    from sqlalchemy import text
+
+    inserted = conn.execute(
+        text(
+            "INSERT INTO images ("
+            "id, sha256, original_url, thumb_url, width, height, "
+            "source_type, license, category_id, label_status, description, tags"
+            ") VALUES ("
+            "CAST(:id AS uuid), :sha, :ou, :tu, :w, :h, "
+            ":st, :lic, :cid, :ls, :desc, CAST(:tags AS text[])"
+            ") ON CONFLICT DO NOTHING RETURNING id"
+        ),
+        values,
+    ).fetchone()
+    if inserted is not None:
+        if any(value is not None for value in food.values()):
+            write_image_food(conn, values["id"], food)
+        return _as_uuid(inserted[0]), True
+    existing = conn.execute(
+        text("SELECT id FROM images WHERE sha256 = :sha LIMIT 1"), {"sha": values["sha"]}
+    ).fetchone()
+    if existing is None:
+        raise err.index_postgres_failed(
+            f"insert_image: conflict on id={values['id']} but no row with this sha256"
+        )
+    return _as_uuid(existing[0]), False
+
+
 class PgImagesMixin:
     """images table CRUD / list / hydrate helpers."""
 
@@ -109,82 +187,84 @@ class PgImagesMixin:
         and the first upload's columns (food annotation included) are kept.
         """
         self.ensure_schema()
-        from sqlalchemy import text
-
-        sha = row.get("sha256")
-        if isinstance(sha, str):
-            sha = bytes.fromhex(sha)
-        if not isinstance(sha, (bytes, bytearray)) or len(sha) != 32:
-            raise err.validation_error("insert_image requires 32-byte sha256")
-        sha = bytes(sha)
-        image_id = row.get("id") or uuid_from_sha256(sha)
-        uid = str(_as_uuid(image_id))
-        original_url = str(row.get("original_url") or "").strip()
-        thumb_url = str(row.get("thumb_url") or "").strip()
-        if not original_url or not thumb_url:
-            raise err.validation_error("original_url and thumb_url required")
-        width = _positive_int(row.get("width"), "width")
-        height = _positive_int(row.get("height"), "height")
-        source_type = coerce_enum(
-            SOURCE_TYPE, row.get("source_type"), field="source_type", default=DEFAULT_SOURCE_TYPE
-        )
-        license_v = coerce_enum(LICENSE, row.get("license"), field="license", default=DEFAULT_LICENSE)
-        label_status = coerce_enum(
-            LabelStatus, row.get("label_status"), field="label_status", default=LabelStatus.UNLABELED
-        )
-        food = {key: coerce_food_field(key, row.get(key)) for key in FOOD_FIELDS}
-        category_id = row.get("category_id")
-        _check_label_matches_category(label_status, category_id)
-        description = normalize_description(row.get("description"))
-        tags = normalize_tags(row.get("tags"))
-
+        values, food = _prepare_image_insert(row)
         engine = self._get_engine()
         try:
             with engine.begin() as conn:
-                inserted = conn.execute(
-                    text(
-                        "INSERT INTO images ("
-                        "id, sha256, original_url, thumb_url, width, height, "
-                        "source_type, license, category_id, label_status, description, tags"
-                        ") VALUES ("
-                        "CAST(:id AS uuid), :sha, :ou, :tu, :w, :h, "
-                        ":st, :lic, :cid, :ls, :desc, CAST(:tags AS text[])"
-                        ") ON CONFLICT DO NOTHING RETURNING id"
-                    ),
-                    {
-                        "id": uid,
-                        "sha": sha,
-                        "ou": original_url,
-                        "tu": thumb_url,
-                        "w": width,
-                        "h": height,
-                        "st": source_type,
-                        "lic": license_v,
-                        "cid": category_id,
-                        "ls": label_status.value,
-                        "desc": description,
-                        "tags": tags,
-                    },
-                ).fetchone()
-                if inserted is not None:
-                    if any(value is not None for value in food.values()):  # optional: no row when unknown
-                        write_image_food(conn, uid, food)
-                    return _as_uuid(inserted[0])
-                existing = conn.execute(
-                    text("SELECT id FROM images WHERE sha256 = :sha LIMIT 1"),
-                    {"sha": sha},
-                ).fetchone()
-            if existing is None:
-                raise err.index_postgres_failed(
-                    f"insert_image: conflict on id={uid} but no row with this sha256"
-                )
-            return _as_uuid(existing[0])
+                image_id, _created = _insert_image(conn, values, food)
+            return image_id
         except err.AppError:
             raise
         except Exception as exc:
             raise err.index_postgres_failed(
                 f"insert_image: {type(exc).__name__}: {exc}"
             ) from exc
+
+    @contextmanager
+    def index_image(
+        self, row: dict[str, Any], *, model_id: int
+    ) -> Iterator[ImageIndexResult]:
+        """Hold one image's write transaction until its vector write finishes.
+
+        Insert conflicts and the image row lock serialize uploads of identical
+        bytes across processes. The catalog lock keeps effective scene flags
+        stable too. Ledger SQL runs before yielding, but becomes visible only
+        when the caller completes successfully and this transaction commits.
+        """
+        self.ensure_schema()
+        values, food = _prepare_image_insert(row)
+        consumer_failed = False
+        yielded = False
+        image_id: UUID | None = None
+        try:
+            with self._get_engine().begin() as conn:
+                lock_catalog_for_read(conn)
+                image_id, created = _insert_image(conn, values, food)
+                uid = str(image_id)
+                image = _lock_image(conn, uid)
+                # New images start at version 1. Re-uploads must advance it if
+                # current rules change an existing image's effective scenes.
+                _recompute(conn, [image], bump=not created)
+                snapshot = self._image_detail(conn, uid)
+                if snapshot is None:
+                    raise err.index_postgres_failed(f"index_image: image {uid} not found")
+                _upsert_image_embedding(
+                    conn,
+                    model_id=model_id,
+                    image_id=image_id,
+                    synced_version=int(snapshot["payload_version"]),
+                )
+                try:
+                    yielded = True
+                    yield ImageIndexResult(image=snapshot, created=created)
+                except BaseException:
+                    consumer_failed = True
+                    raise
+        except BaseException as exc:
+            # A timed-out vector write or a failed PG commit may have changed
+            # the external point. A surviving image must therefore be checked
+            # again, even if another request has since committed its version.
+            if yielded and image_id is not None:
+                self._mark_index_embedding_stale(model_id=model_id, image_id=image_id)
+            if isinstance(exc, err.AppError) or consumer_failed or not isinstance(exc, Exception):
+                raise
+            raise err.index_postgres_failed(f"index_image: {type(exc).__name__}: {exc}") from exc
+
+    def _mark_index_embedding_stale(self, *, model_id: int, image_id: UUID) -> None:
+        """Best effort after an uncertain external write; preserve every image."""
+        from sqlalchemy import text
+
+        try:
+            with self._get_engine().begin() as conn:
+                conn.execute(
+                    text(
+                        "UPDATE image_embeddings SET synced_version = 0 "
+                        "WHERE model_id = :mid AND image_id = CAST(:iid AS uuid)"
+                    ),
+                    {"mid": int(model_id), "iid": str(image_id)},
+                )
+        except Exception:
+            logger.exception("index_image: could not mark uncertain embedding stale id=%s", image_id)
 
     def update_image(self, image_id: UUID | str, fields: dict[str, Any]) -> None:
         """Patch allowed image columns and food fields (image_foods, created on first use).

@@ -278,6 +278,7 @@ main { flex: 1; min-height: 0; width: 100%; max-width: none; padding: 14px; marg
 .active-query-name>svg { flex-shrink: 0; }
 .active-query-name span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .management-page { overscroll-behavior: contain; }
+.import-page { display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
 .query-panel { align-self: start; max-height: 100%; overflow: auto; overscroll-behavior: contain; }
 .results-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .results-content { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }

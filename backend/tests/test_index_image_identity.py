@@ -3,12 +3,15 @@
 import hashlib
 import io
 import tempfile
+import threading
 import unittest
 import uuid
+from contextlib import contextmanager
+from copy import deepcopy
 
 from PIL import Image as PILImage
 
-from app.repositories.ports import VECTOR_DIM
+from app.repositories.ports import ImageIndexResult, VECTOR_DIM
 from app.services.retrieval.active_model import ActiveModel
 from app.core.errors import AppError
 from app.services.retrieval.food_fields import FOOD_FIELDS
@@ -59,6 +62,31 @@ class FakeMetadata:
         self.categories = categories or {}
         self.tasks = []  # index_tasks rows, in write order
         self.tasks_fail = False
+        self._write_lock = threading.RLock()
+
+    @contextmanager
+    def index_image(self, row, *, model_id):
+        with self._write_lock:
+            previous_rows, previous_ledger = deepcopy(self.rows), dict(self.ledger)
+            iid = uuid.UUID(str(row["id"]))
+            created = iid not in self.rows
+            attempted_vector = False
+            try:
+                self.insert_image(row)
+                self.recompute_image_scenes(iid, bump_version=not created)
+                snapshot = self.get_by_id(iid)
+                self.upsert_image_embedding(
+                    model_id=model_id, image_id=iid,
+                    synced_version=snapshot["payload_version"],
+                )
+                attempted_vector = True
+                yield ImageIndexResult(image=snapshot, created=created)
+            except Exception:
+                self.rows, self.ledger = previous_rows, previous_ledger
+                key = (model_id, str(iid))
+                if attempted_vector and key in self.ledger:
+                    self.ledger[key] = 0
+                raise
 
     def record_index_tasks(self, rows):
         if self.tasks_fail:
@@ -149,10 +177,10 @@ class IndexImageIdentityTests(unittest.TestCase):
         self.assertEqual(self.meta.deleted, [])
         self.assertEqual(len(self.meta.rows), 1)
 
-    def test_failed_upsert_on_new_image_rolls_back(self):
+    def test_failed_upsert_on_new_image_rolls_back_without_compensation(self):
         with self.assertRaises(AppError):
             self.use_case(FakeVectors(fail=True)).execute_one(image_bytes=_png((1, 2, 3)))
-        self.assertEqual(len(self.meta.deleted), 1)
+        self.assertEqual(self.meta.deleted, [])
         self.assertEqual(self.meta.rows, {})
 
     def test_bad_enum_value_is_a_validation_error_before_any_write(self):
@@ -171,13 +199,14 @@ class IndexImageIdentityTests(unittest.TestCase):
         out = self.use_case().execute_one(image_bytes=_png())
         self.assertEqual(self.meta.ledger, {(MODEL.id, out["id"]): 1})
 
-    def test_ledger_failure_reports_db_error_and_keeps_the_indexed_image(self):
+    def test_ledger_failure_rolls_back_before_the_vector_write(self):
         self.meta.ledger_fails = True
         with self.assertRaises(AppError) as ctx:
             self.use_case().execute_one(image_bytes=_png())
         self.assertEqual(ctx.exception.code, "INDEX_POSTGRES_FAILED")
-        self.assertEqual(self.meta.deleted, [])  # point + row stay; ledger re-sync later
-        self.assertEqual(len(self.vectors.upserts), 1)
+        self.assertEqual(self.meta.deleted, [])
+        self.assertEqual(self.meta.rows, {})
+        self.assertEqual(self.vectors.upserts, [])
 
     def test_vector_of_wrong_dim_for_the_active_model_is_rejected(self):
         small = ActiveModel(id=4, name="m", version="v", collection="c", dim=8, distance="cosine")
