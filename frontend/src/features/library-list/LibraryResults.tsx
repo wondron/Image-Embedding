@@ -37,6 +37,17 @@ export interface LibraryResultsProps {
   onOpen: (item: LibraryImageItem) => void
   onCategory: (id: number) => void
   onTag: (tag: string) => void
+  /** Ids of the images picked for a batch action. */
+  selected: ReadonlySet<string>
+  /** Pick or unpick one; range: with Shift, everything from the last one picked on this page. */
+  onToggle: (item: LibraryImageItem, range: boolean) => void
+}
+
+/** The checkbox of one image (Space and Shift+click work too). */
+function SelectBox({ item, title, selected, onToggle, className }: { item: LibraryImageItem; title: string; selected: boolean; onToggle: LibraryResultsProps['onToggle']; className: string }) {
+  return <label className={className} title={selected ? '取消选择' : '选择（按住 Shift 可连选）'}>
+    <input type="checkbox" aria-label={`选择 ${title}`} checked={selected} onChange={() => undefined} onClick={event => onToggle(item, event.shiftKey)} />
+  </label>
 }
 
 type ChipProps = Pick<LibraryResultsProps, 'categoryPath' | 'activeCategoryId' | 'onCategory'> & { item: LibraryImageItem }
@@ -61,17 +72,18 @@ function TagChips({ tags, limit, activeTag, onTag }: { tags: string[]; limit: nu
 }
 
 /** One library page as cards (large or small) or as rows. */
-export function LibraryResults({ items, layout, loading, categoryPath, sceneName, activeCategoryId, activeTag, onOpen, onCategory, onTag }: LibraryResultsProps) {
+export function LibraryResults({ items, layout, loading, categoryPath, sceneName, activeCategoryId, activeTag, onOpen, onCategory, onTag, selected, onToggle }: LibraryResultsProps) {
   const chip = { categoryPath, activeCategoryId, onCategory }
   if (layout === 'list') {
     return <div className={`mg-library-list${loading ? ' is-loading' : ''}`} aria-busy={loading}>
-      <div className="mg-table-head mg-library-head" aria-hidden="true"><span>图片 / 名称</span><span>类别</span><span>标注 · 标签</span><span>入库时间</span></div>
+      <div className="mg-table-head mg-library-head" aria-hidden="true"><span /><span>图片 / 名称</span><span>类别</span><span>标注 · 标签</span><span>入库时间</span></div>
       <div role="list">
         {items.map(item => {
           const title = libraryTitle(item)
           const path = item.categoryId !== null ? categoryPath(item.categoryId) : null
           const parents = path?.includes(' / ') ? path.slice(0, path.lastIndexOf(' / ')) : null
-          return <div className="mg-library-row mg-table-row" role="listitem" key={item.id}>
+          return <div className={`mg-library-row mg-table-row${selected.has(item.id) ? ' is-selected' : ''}`} role="listitem" key={item.id}>
+            <SelectBox item={item} title={title} selected={selected.has(item.id)} onToggle={onToggle} className="lib-row-check" />
             <button type="button" className="mg-library-name" onClick={() => onOpen(item)} aria-label={`标注 ${title}`}>
               {item.imageUrl
                 ? <img src={item.imageUrl} alt="" className="mg-library-thumb" loading="lazy" />
@@ -95,7 +107,8 @@ export function LibraryResults({ items, layout, loading, categoryPath, sceneName
   return <div className={`mg-library-grid lib-grid is-${layout}${loading ? ' is-loading' : ''}`} aria-busy={loading}>
     {items.map(item => {
       const title = libraryTitle(item)
-      return <article className="mg-upload-card mg-library-card" key={item.id}>
+      return <article className={`mg-upload-card mg-library-card${selected.has(item.id) ? ' is-selected' : ''}`} key={item.id}>
+        <SelectBox item={item} title={title} selected={selected.has(item.id)} onToggle={onToggle} className="lib-card-check" />
         <button type="button" className="mg-upload-preview" onClick={() => onOpen(item)} aria-label={`标注 ${title}`}>
           {item.imageUrl
             ? <img src={item.imageUrl} alt="" loading="lazy" />

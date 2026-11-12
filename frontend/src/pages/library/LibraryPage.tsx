@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
-import { ArrowRight, Grid2x2, Grid3x3, ImagePlus, Images, Layers3, List, LoaderCircle, Plus, X, type LucideIcon } from 'lucide-react'
+import { ArrowRight, Grid2x2, Grid3x3, ImagePlus, Images, Layers3, List, LoaderCircle, PencilLine, Plus, Trash2, X, type LucideIcon } from 'lucide-react'
 import { Dialog } from '../../components/Dialog'
-import type { ImageDeleteResult, LabelStatus, LibraryImageItem } from '../../entities/image'
+import { listImages, type ImageDeleteResult, type LabelStatus, type LibraryImageItem } from '../../entities/image'
 import { sceneDisplayLabel, toApiSceneCode } from '../../entities/scene'
 import { EMPTY_COPY } from '../../shared/config'
 import { oneOf, usePreference } from '../../shared/lib'
@@ -26,7 +26,12 @@ import {
 } from '../../features/library-filters'
 import { LIBRARY_LAYOUTS, LibraryPagination, LibraryResults, useLibraryList, type LibraryLayout } from '../../features/library-list'
 import { useSceneSelection } from '../../features/scene-catalog'
+import { BatchDeleteDialog, BatchEditDialog, useLibrarySelection, type BatchOutcome } from '../../features/library-batch'
 import './library-page.css'
+
+/** 「选择全部筛选结果」 reads them page by page; beyond this many the person narrows the filters first. */
+const SELECT_ALL_LIMIT = 1000
+const SELECT_ALL_PAGE = 100
 
 const LAYOUT_BUTTONS: ReadonlyArray<{ layout: LibraryLayout; label: string; icon: LucideIcon }> = [
   { layout: 'large', label: '大图展示', icon: Grid2x2 },
@@ -67,6 +72,10 @@ export function LibraryPage({ apiBase, filters, setFilters, page, setPage, categ
   /** The open editor wrote something: category counts may have moved. */
   const wrote = useRef(false)
   const content = useRef<HTMLDivElement>(null)
+  /** The open batch dialog, with the images it was opened for (they do not change while it runs). */
+  const [batch, setBatch] = useState<{ kind: 'edit' | 'delete'; items: LibraryImageItem[] } | null>(null)
+  const [selectingAll, setSelectingAll] = useState(false)
+  const selectAllRun = useRef<AbortController | null>(null)
 
   const handleScene = useCallback((code: string) => {
     const scene = toApiSceneCode(code)
@@ -98,6 +107,11 @@ export function LibraryPage({ apiBase, filters, setFilters, page, setPage, categ
   })
   const items = list.items
   const totalPages = pageCount(list.total, pageSize)
+  /** The result set the picks belong to: other filters drop them. */
+  const filterKey = JSON.stringify([apiBase, requestedQuery, filters.categoryId, filters.labelStatus, filters.outOfSync, tag, filters.scene])
+  const selection = useLibrarySelection(items, filterKey)
+  // Reading every result for 「选择全部」 stops when the filters change
+  useEffect(() => () => selectAllRun.current?.abort(), [filterKey])
   useEffect(() => {
     // The list shrank under the page (deletes elsewhere): go to the last page there is
     if (list.total > 0 && items.length === 0 && page > totalPages) setPage(totalPages)
@@ -182,6 +196,45 @@ export function LibraryPage({ apiBase, filters, setFilters, page, setPage, categ
     else notify.success(result.cleanup === 'done' ? '已删除图片，向量和原图、缩略图已清理。' : '已删除图片；向量和图片文件稍后由清理任务删除。')
   }, [refreshCategories])
 
+  /** Pick every image the filters match, read page by page (up to SELECT_ALL_LIMIT). */
+  async function selectAllResults() {
+    if (list.total > SELECT_ALL_LIMIT) {
+      notify.warn(`当前筛选结果有 ${list.total.toLocaleString('zh-CN')} 张，一次最多选择 ${SELECT_ALL_LIMIT} 张。请先缩小筛选范围，或分几批处理。`, { title: '图片太多' })
+      return
+    }
+    selectAllRun.current?.abort()
+    const controller = new AbortController()
+    selectAllRun.current = controller
+    setSelectingAll(true)
+    try {
+      const found: LibraryImageItem[] = []
+      for (let next = 1; next <= Math.ceil(SELECT_ALL_LIMIT / SELECT_ALL_PAGE); next += 1) {
+        const result = await listImages({
+          page: next, pageSize: SELECT_ALL_PAGE, q: requestedQuery || undefined, categoryId: filters.categoryId,
+          labelStatus: filters.labelStatus, outOfSync: filters.outOfSync, tag: tag || undefined, scene: filters.scene,
+          baseUrl: apiBase, signal: controller.signal,
+        })
+        found.push(...result.items)
+        if (result.items.length < SELECT_ALL_PAGE || found.length >= result.total) break
+      }
+      if (!controller.signal.aborted) selection.add(found)
+    } catch (error) {
+      if (!controller.signal.aborted) notify.error(error instanceof Error ? error.message : '读取筛选结果失败，请重试。', { title: '没能选择全部' })
+    } finally {
+      if (selectAllRun.current === controller) {
+        selectAllRun.current = null
+        setSelectingAll(false)
+      }
+    }
+  }
+
+  /** After a batch run: the list and the category counts read again; deleted images leave the picks. */
+  function batchFinished(kind: 'edit' | 'delete', outcomes: ReadonlyMap<string, BatchOutcome>) {
+    setReloadKey(key => key + 1)
+    categories.refresh()
+    if (kind === 'delete') selection.remove([...outcomes].filter(([, outcome]) => outcome.status === 'done').map(([id]) => id))
+  }
+
   const vectorUnreadable = items.length > 0 && items.every(item => item.vectorStatus === 'unavailable')
   const staleOnPage = items.filter(item => item.vectorStatus === 'stale').length
   const missingOnPage = items.filter(item => item.vectorStatus === 'missing').length
@@ -247,6 +300,28 @@ export function LibraryPage({ apiBase, filters, setFilters, page, setPage, categ
         <button type="button" className="mg-text-button" onClick={resetFilters}>清空筛选</button>
       </div>}
 
+      {!list.error && items.length > 0 && <div className="lib-selection" role="toolbar" aria-label="批量操作">
+        <label className="lib-select-page">
+          <input
+            type="checkbox"
+            aria-label="选择本页"
+            checked={selection.pageAll}
+            ref={element => { if (element) element.indeterminate = selection.pageSome && !selection.pageAll }}
+            onChange={() => selection.setPage(!selection.pageAll)}
+          />
+          本页
+        </label>
+        {list.total > items.length && <button type="button" className="mg-text-button" disabled={selectingAll} onClick={() => void selectAllResults()}>
+          {selectingAll ? <><LoaderCircle size={13} className="spin" />正在选择…</> : `选择全部 ${list.total.toLocaleString('zh-CN')} 张`}
+        </button>}
+        <span className="lib-selected-count" role="status">{selection.selected.size ? `已选 ${selection.selected.size.toLocaleString('zh-CN')} 张` : '可勾选图片后批量操作'}</span>
+        {selection.selected.size > 0 && <button type="button" className="mg-text-button" onClick={selection.clear}>清空选择</button>}
+        <span className="lib-selection-actions">
+          <button type="button" className="mg-btn mg-secondary" disabled={!selection.selected.size} onClick={() => setBatch({ kind: 'edit', items: [...selection.selected.values()] })}><PencilLine size={15} />批量修改</button>
+          <button type="button" className="mg-btn lb-danger" disabled={!selection.selected.size} onClick={() => setBatch({ kind: 'delete', items: [...selection.selected.values()] })}><Trash2 size={15} />批量删除</button>
+        </span>
+      </div>}
+
       <div className={`lib-content${layout === 'list' ? ' is-list' : ''}`} ref={content}>
         {list.error && <div className="mg-errors" role="alert"><div><strong>图库加载失败</strong><button type="button" className="mg-text-button" onClick={() => setReloadKey(key => key + 1)}>重试</button></div><p>{list.error}</p></div>}
         {waitingForScene && !scenes.loading && (scenes.error || scenes.configurationError)
@@ -277,6 +352,8 @@ export function LibraryPage({ apiBase, filters, setFilters, page, setPage, categ
                 onOpen={openImage}
                 onCategory={changeCategory}
                 onTag={changeTag}
+                selected={selection.ids}
+                onToggle={selection.toggle}
               />}
       </div>
 
@@ -304,5 +381,19 @@ export function LibraryPage({ apiBase, filters, setFilters, page, setPage, categ
         onUpload={dirty ? undefined : () => { closeImage(); onImport() }}
       />
     </Dialog>}
+
+    {batch?.kind === 'edit' && <BatchEditDialog
+      items={batch.items}
+      apiBase={apiBase}
+      categories={categories}
+      onClose={() => setBatch(null)}
+      onFinished={outcomes => batchFinished('edit', outcomes)}
+    />}
+    {batch?.kind === 'delete' && <BatchDeleteDialog
+      items={batch.items}
+      apiBase={apiBase}
+      onClose={() => setBatch(null)}
+      onFinished={outcomes => batchFinished('delete', outcomes)}
+    />}
   </div>
 }
