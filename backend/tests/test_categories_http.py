@@ -14,7 +14,7 @@ from app.bootstrap.state import ApplicationState
 from app.core import errors as err
 from app.core.exceptions import register_exception_handlers
 from app.core.middleware import TraceIdMiddleware
-from app.services.retrieval.category_fields import display_name, normalize_category_fields
+from app.core.rules.category_fields import display_name, normalize_category_fields
 from app.services.retrieval.manage_categories import ManageCategoriesUseCase
 from app.services.retrieval.sync_scenes import PushResult
 

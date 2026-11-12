@@ -33,7 +33,7 @@ from app.core.category_rules import (
     CATEGORY_SORT_ORDER_MIN,
 )
 from app.core.enums import CategoryDomain, NameKind
-from app.services.retrieval.enum_fields import coerce_enum
+from app.core.rules.enum_fields import coerce_enum
 
 # The columns a request may set, in the order they are checked
 CATEGORY_WRITE_FIELDS = (

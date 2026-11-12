@@ -16,9 +16,9 @@ from uuid import UUID
 from app.core import errors as err
 from app.core.enums import LabelStatus
 from app.repositories.ports import MetadataStorePort
-from app.services.retrieval.category_fields import normalize_category_id
-from app.services.retrieval.enum_fields import coerce_enum
-from app.services.retrieval.food_fields import FOOD_FIELDS
+from app.core.rules.category_fields import normalize_category_id
+from app.core.rules.enum_fields import coerce_enum
+from app.core.rules.food_fields import FOOD_FIELDS
 from app.services.retrieval.scenes import lookup_scene, requested_scene_code
 from app.services.retrieval.vector_status import expected_payload
 

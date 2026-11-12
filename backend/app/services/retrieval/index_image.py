@@ -34,9 +34,9 @@ from app.core.enums import (
     LabelStatus,
 )
 from app.services.retrieval.active_model import ActiveModel
-from app.services.retrieval.enum_fields import coerce_enum
-from app.services.retrieval.food_fields import FOOD_FIELDS, coerce_food_field
-from app.services.retrieval.image_ids import uuid_from_sha256
+from app.core.rules.enum_fields import coerce_enum
+from app.core.rules.food_fields import FOOD_FIELDS, coerce_food_field
+from app.core.rules.image_ids import uuid_from_sha256
 from app.core import errors as err
 from app.services.retrieval.embedding_validate import validate_embedding
 from app.repositories.ports import (
@@ -45,11 +45,11 @@ from app.repositories.ports import (
     ImageStoragePort,
     VectorStorePort,
 )
-from app.services.retrieval.scene_membership import build_qdrant_payload
+from app.core.rules.scene_membership import build_qdrant_payload
 from app.services.retrieval.scenes import resolve_index_scenes
-from app.services.retrieval.storage_keys import guess_ext_from_bytes_header
+from app.utils.storage_keys import guess_ext_from_bytes_header
 from app.services.retrieval.storage_upload import put_original_and_thumb
-from app.services.retrieval.text_fields import normalize_description, normalize_tags
+from app.core.rules.text_fields import normalize_description, normalize_tags
 
 logger = logging.getLogger("retrieval.index")
 
@@ -156,7 +156,7 @@ class IndexImageUseCase:
 
         src = coerce_enum(SOURCE_TYPE, source_type, field="source_type", default=DEFAULT_SOURCE_TYPE)
         lic = coerce_enum(LICENSE, license, field="license", default=DEFAULT_LICENSE)
-        # optional food annotation, stored in image_foods (app.services.retrieval.food_fields)
+        # optional food annotation, stored in image_foods (app.core.rules.food_fields)
         food_fields = {
             key: coerce_food_field(key, value)
             for key, value in (

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from app.core.config.enum_store import EnumStore, set_enum_store
 from app.core.enums import DEFAULT_SOURCE_TYPE, FOOD_STATE, SOURCE_TYPE, LabelStatus
-from app.services.retrieval.enum_fields import coerce_enum, coerce_optional_enum
+from app.core.rules.enum_fields import coerce_enum, coerce_optional_enum
 from app.core.errors import AppError
 
 SHIPPED = Path(__file__).resolve().parents[1] / "config" / "param" / "enums.yaml"

@@ -151,7 +151,7 @@ class PgLiveTests(unittest.TestCase):
         return {"dish": dish, "steak": steak, "label": label}
 
     def insert(self, store, n, **extra):
-        from app.services.retrieval.image_ids import uuid_from_sha256
+        from app.core.rules.image_ids import uuid_from_sha256
 
         sha = _sha(n)
         row = {
@@ -214,22 +214,35 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual((row["source_type"], row["license"]), ("user_upload", "unknown"))
         self.assertEqual(self.sql("SELECT count(*) FROM images").scalar_one(), 1)
 
-    def test_update_image_validates_and_maps_constraint_errors(self):
+    def test_image_patch_validates_and_resolves_the_category_label(self):
         from app.core.errors import AppError
 
         cat = self.seed_catalog()
         store = self.store()
         iid = self.insert(store, 1)
-        with self.assertRaises(AppError) as ctx:
-            store.update_image(iid, {"food_state": "boiled"})
-        self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
-        with self.assertRaises(AppError) as ctx:
-            store.update_image(iid, {"category_id": cat["steak"]})  # still unlabeled
-        self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
-        store.update_image(iid, {"category_id": cat["steak"], "label_status": "verified"})
+        for fields in (
+            {"food_state": "boiled"},
+            {"food_count": True},
+            {"label_status": None},
+            {"original_url": "https://other.example/replacement.png"},
+            {"width": 100},
+            {"source_type": "crawled"},
+            {"license": "commercial"},
+            {"payload_version": 999},
+            {},
+        ):
+            with self.subTest(fields=fields), self.assertRaises(AppError) as ctx:
+                store.patch_image(iid, fields)
+            self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
+        self.assertEqual(store.get_by_id(iid)["payload_version"], 1)
+        # The single update entry applies the same category/label rule as gallery edits.
+        store.patch_image(iid, {"category_id": cat["steak"]})
         row = store.get_by_id(iid)
         self.assertEqual((row["label_status"], row["payload_version"]), ("verified", 2))
         self.assertEqual(row["scenes"], ["general", "oven"])
+        # Sending the stored payload values again is a no-op for synchronization.
+        out = store.patch_image(iid, {"category_id": cat["steak"], "label_status": "verified"})
+        self.assertEqual(out["payload_version"], 2)
 
     def test_deletion_queue_and_current_model(self):
         store = self.store()
@@ -587,7 +600,7 @@ class PgLiveTests(unittest.TestCase):
         from sqlalchemy.exc import IntegrityError
 
         from app.core.errors import AppError
-        from app.services.retrieval.food_fields import FOOD_FIELDS
+        from app.core.rules.food_fields import FOOD_FIELDS
 
         store = self.store()
         bare = self.insert(store, 1)  # 非必填: nothing annotated -> no image_foods row
@@ -602,13 +615,13 @@ class PgLiveTests(unittest.TestCase):
         before = row["payload_version"]
 
         # a patch changes only the given columns; these are not in the Qdrant payload: no bump
-        store.update_image(iid, {"total_mass_g": "1200", "food_count": None})
+        store.patch_image(iid, {"total_mass_g": "1200", "food_count": None})
         row = store.get_image_by_uuid(iid)
         self.assertEqual((row["total_mass_g"], row["food_count"], row["water_mass_g"], row["payload_version"]),
                          (1200, None, 0, before))
-        store.update_image(iid, {"food_state": "cooked"})  # food_state is in the payload
+        store.patch_image(iid, {"food_state": "cooked"})  # food_state is in the payload
         self.assertEqual(store.get_image_by_uuid(iid)["payload_version"], before + 1)
-        store.update_image(bare, {"water_mass_g": 80})  # first annotation of an image creates its row
+        store.patch_image(bare, {"water_mass_g": 80})  # first annotation of an image creates its row
         self.assertEqual(store.get_image_by_uuid(bare)["water_mass_g"], 80)
 
         items, _ = store.list_images(scene="general")  # list / search hydrate through the same join
@@ -616,7 +629,7 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual(store.get_active_by_ids([iid])[iid]["main_ingredient_mass_g"], 300)
 
         with self.assertRaises(AppError) as ctx:
-            store.update_image(iid, {"main_ingredient_mass_g": 0})
+            store.patch_image(iid, {"main_ingredient_mass_g": 0})
         self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
         # the database holds the same rule for writers that skip the repository
         with self.assertRaisesRegex(IntegrityError, "ck_image_foods_total_mass_positive"):
@@ -653,7 +666,7 @@ class PgLiveTests(unittest.TestCase):
         iid = self.insert(store, 2, description="  酱色红烧肉 ")
         self.assertEqual(store.get_image_by_uuid(iid)["description"], "酱色红烧肉")
         before = store.get_image_by_uuid(iid)["payload_version"]
-        store.update_image(iid, {"description": "改过的描述"})
+        store.patch_image(iid, {"description": "改过的描述"})
         row = store.get_image_by_uuid(iid)
         self.assertEqual((row["description"], row["payload_version"]), ("改过的描述", before))
         items, _ = store.list_images(scene="general")
@@ -675,13 +688,13 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual(store.list_images(scene="general", tag="带皮")[1], 1)  # total honours the filter
 
         before = store.get_image_by_uuid(iid)["payload_version"]
-        store.update_image(iid, {"tags": ["清蒸", " "]})
+        store.patch_image(iid, {"tags": ["清蒸", " "]})
         row = store.get_image_by_uuid(iid)
         self.assertEqual((row["tags"], row["payload_version"]), (["清蒸"], before))
         self.assertEqual((ids(tag="红薯叶"), ids(tag="清蒸")), ([], [iid]))
         self.assertEqual(store.get_active_by_ids([iid], scene="general")[iid]["tags"], ["清蒸"])  # search hydrate
 
-        store.update_image(iid, {"tags": []})
+        store.patch_image(iid, {"tags": []})
         self.assertEqual(store.get_image_by_uuid(iid)["tags"], [])
 
     # ---- category tree admin (app.repositories.categories) ---------------

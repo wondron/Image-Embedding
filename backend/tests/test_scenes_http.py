@@ -22,7 +22,7 @@ from app.core.exceptions import register_exception_handlers
 from app.core.middleware import TraceIdMiddleware
 from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.manage_scenes import ManageScenesUseCase
-from app.services.retrieval.scene_fields import (
+from app.core.rules.scene_fields import (
     check_rule_label,
     normalize_rule_fields,
     rule_write_needs_sync,

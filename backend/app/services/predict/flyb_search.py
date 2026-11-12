@@ -49,7 +49,7 @@ class FlyBSearch:
             return None
     
     
-    def detect(self, image_data, query = None, roi = None, urls = None):
+    def detect(self, image_data, search_num = None, query = None, roi = None, urls = None):
         is_url = True
         use_data = None
         if urls == None:
@@ -59,7 +59,7 @@ class FlyBSearch:
         if image_data is None and urls is None:
             return ""
         logger.info('启用 FLYB 检测')
-        result = self.get_result(use_data, is_url, query, roi)
+        result = self.get_result(use_data, search_num, is_url, query, roi)
         return result
 
 
@@ -77,7 +77,7 @@ class FlyBSearch:
         return image_query
     
 
-    def get_result(self, image_data=None, is_url=False, query=None, roi=None):
+    def get_result(self, image_data=None, search_num=None, is_url=False, query=None, roi=None):
         if image_data is None:
             raise ValueError("search global 输入图像数据为空！")
         
@@ -85,7 +85,7 @@ class FlyBSearch:
         payload = {
             "SearchType": "visual",
             "ImageQuery": image_query,
-            "DocCount": self.doc_num,
+            "DocCount": search_num if search_num is not None else self.doc_num,
             "MaxSnippetLength": self.max_lenth,
             "EnableWaiting": self.enable
         }

@@ -12,7 +12,7 @@ from app.api.v1 import retrieval as routes
 from app.core.exceptions import register_exception_handlers
 from app.bootstrap.state import ApplicationState
 from app.services.retrieval.active_model import ActiveModel
-from app.services.retrieval.food_fields import FOOD_FIELDS
+from app.core.rules.food_fields import FOOD_FIELDS
 from app.core.errors import AppError
 
 MODEL = ActiveModel(id=1, name="dino", version="v1", collection="c1", dim=1024, distance="cosine")

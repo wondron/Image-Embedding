@@ -169,7 +169,7 @@ id = uuid_from_bytes(sha256(original_bytes)[0:16])  # RFC 4122 变体/版本位�
 | `main_ingredient_mass_g` | `integer` | YES | CHECK `> 0` | 主食材质量（克） |
 | `updated_at` | `timestamptz` | NO | 默认 `now()` | |
 
-除 `food_state` 外不进 Qdrant payload，修改不 bump `payload_version`。规则见 `backend/app/services/retrieval/food_fields.py`。
+除 `food_state` 外不进 Qdrant payload，修改不 bump `payload_version`。共用规则见 `backend/app/core/rules/food_fields.py`。
 
 ---
 
@@ -785,7 +785,7 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 
 ## 6.3 图片单图管理（2026-11-11 · 本地实现，待独立测试验收）
 
-> 图库对单张图片的读、改、删和重推 payload。无新增表/迁移。PostgreSQL 部分走 catalog（只依赖 PG：检索栈未就绪时也能改、能删）；向量库部分在检索栈可用时跟上，失败不影响已提交的 PG 修改。实现：`backend/app/api/v1/images.py`、`backend/app/schemas/images.py`、`backend/app/services/retrieval/{manage_images,image_fields,vector_status}.py`。
+> 图库对单张图片的读、改、删和重推 payload。无新增表/迁移。PostgreSQL 部分走 catalog（只依赖 PG：检索栈未就绪时也能改、能删）；向量库部分在检索栈可用时跟上，失败不影响已提交的 PG 修改。实现：`backend/app/api/v1/images.py`、`backend/app/schemas/images.py`、`backend/app/services/retrieval/{manage_images,vector_status}.py`；共用字段规则为 `backend/app/core/rules/image_fields.py`。元数据编辑统一经仓储 `patch_image()`，直接调用该入口也会执行字段规范化及事务内状态校验。
 
 | method + path | 请求 | 成功 |
 |---|---|---|

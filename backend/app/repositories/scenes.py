@@ -13,7 +13,7 @@ Rule rows are rewritten from the current rules whenever images are recomputed:
 - _recompute_subtree: the images below one category, inside the transaction that moves it or
   changes its cuisines (app.repositories.categories.update_category).
 
-Both plan with the pure rules in app.services.retrieval.scene_membership, bump
+Both plan with the pure rules in app.core.rules.scene_membership, bump
 images.payload_version only for images whose effective scene set changed, and read the catalog
 under its shared lock (app.repositories.catalog_lock), so an admin write never lands halfway
 through a plan.
@@ -33,8 +33,8 @@ from app.core import errors as err
 from app.core.enums import SceneOrigin
 from app.db.common import _as_uuid, _row_to_dict, _uuid_in_clause
 from app.repositories.catalog_lock import lock_catalog_for_read
-from app.services.retrieval.scene_fields import normalize_row_id
-from app.services.retrieval.scene_membership import (
+from app.core.rules.scene_fields import normalize_row_id
+from app.core.rules.scene_membership import (
     apply_manual_overrides,
     compute_rule_member_scene_ids,
     effective_cuisines,

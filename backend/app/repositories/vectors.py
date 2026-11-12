@@ -3,7 +3,7 @@
 Retrieval rules for the vector index live here: point id == images.id (uuid),
 which payload fields are filterable (and indexed), the scene filter, and the
 Qdrant error codes. Payload content comes from
-services.retrieval.scene_membership.build_qdrant_payload; the score threshold
+core.rules.scene_membership.build_qdrant_payload; the score threshold
 is decided in services.retrieval.score_threshold (None here = no threshold).
 """
 

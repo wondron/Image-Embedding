@@ -22,7 +22,7 @@ from typing import Any
 
 from app.repositories.ports import VectorStorePort
 from app.services.retrieval.active_model import ActiveModel
-from app.services.retrieval.scene_membership import build_qdrant_payload
+from app.core.rules.scene_membership import build_qdrant_payload
 
 
 def expected_payload(image: Mapping[str, Any]) -> dict[str, Any]:

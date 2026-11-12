@@ -1,6 +1,8 @@
 # Image-Embedding
 图像检索
 
+后端共用字段校验与场景成员规则位于 `backend/app/core/rules/`，服务和仓储直接引用该层；对象键工具位于 `backend/app/utils/storage_keys.py`。图片元数据编辑统一经仓储 `patch_image()`，先校验字段，再在同一事务内完成标注状态联动、场景重算与版本更新。
+
 ## 前端工作台
 
 在 PowerShell 中启动：

@@ -8,7 +8,7 @@
   label / description；改取值要同时改代码和迁移。
 - 可编辑枚举（登记在 EDITABLE_ENUMS）：取值以文件为准，可以手工改文件，也可以调接口
   POST /api/enums/{name}/values 追加。数据库只存 VARCHAR(32)、不建 CHECK，写入前由
-  app.services.retrieval.enum_fields 按文件校验。代码只直接用到少数几个取值（如默认值），
+  app.core.rules.enum_fields 按文件校验。代码只直接用到少数几个取值（如默认值），
   它们必须一直留在文件里。
 """
 

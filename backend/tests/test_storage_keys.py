@@ -12,7 +12,7 @@ from app.clients.image_storage import (
 )
 from app.core.config.key_prefix import KEY_PREFIX_MAX_LEN, normalize_key_prefix
 from app.core.config.settings import ImageStorageSettings
-from app.services.retrieval.storage_keys import (
+from app.utils.storage_keys import (
     apply_key_prefix,
     original_key,
     public_url,

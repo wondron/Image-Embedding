@@ -37,7 +37,7 @@ from app.core import errors as err
 from app.core.scene_rules import SCENE_SYNC_BATCH_DEFAULT, SCENE_SYNC_BATCH_MAX
 from app.repositories.ports import MetadataStorePort, VectorStorePort
 from app.services.retrieval.active_model import ActiveModel
-from app.services.retrieval.scene_membership import build_qdrant_payload
+from app.core.rules.scene_membership import build_qdrant_payload
 
 logger = logging.getLogger("retrieval.sync_scenes")
 

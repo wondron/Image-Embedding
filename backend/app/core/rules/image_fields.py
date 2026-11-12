@@ -27,10 +27,10 @@ from typing import Any
 
 from app.core import errors as err
 from app.core.enums import LabelStatus
-from app.services.retrieval.category_fields import normalize_category_id
-from app.services.retrieval.enum_fields import coerce_enum
-from app.services.retrieval.food_fields import FOOD_FIELDS, coerce_food_field
-from app.services.retrieval.text_fields import normalize_description, normalize_tags
+from app.core.rules.category_fields import normalize_category_id
+from app.core.rules.enum_fields import coerce_enum
+from app.core.rules.food_fields import FOOD_FIELDS, coerce_food_field
+from app.core.rules.text_fields import normalize_description, normalize_tags
 
 # The fields a patch may carry, in the order they are checked
 IMAGE_PATCH_FIELDS = ("category_id", "label_status", "description", "tags", *FOOD_FIELDS)

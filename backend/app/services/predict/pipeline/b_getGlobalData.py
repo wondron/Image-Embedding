@@ -5,6 +5,6 @@ class GetGlobalData:
     def __init__(self, config):
         self.searchTool = FlyBSearch(config)
 
-    def detect(self, image_data):
+    def detect(self, image_data, search_num=None, query=None, roi=None, urls=None):
         """返回上游搜索结果；图片下载和可用性验证由使用方按需执行。"""
-        return self.searchTool.detect(image_data, None, None, None)
+        return self.searchTool.detect(image_data, search_num, query, roi, urls)

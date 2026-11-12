@@ -36,6 +36,6 @@ def editable_enum() -> String:
     """可编辑枚举：只存 VARCHAR，不建 CHECK。
 
     取值在 config/param/enums.yaml，运行中可以追加，所以库里不列取值；写入前由
-    app.services.retrieval.enum_fields 按文件校验。
+    app.core.rules.enum_fields 按文件校验。
     """
     return String(ENUM_VALUE_MAX_LEN)

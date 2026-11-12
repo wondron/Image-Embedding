@@ -13,7 +13,6 @@ from app.core.enums import (
     LabelStatus,
     ModelStatus,
     NameKind,
-    StrEnum,
 )
 from app.db.common import (
     _as_uuid,
@@ -27,11 +26,11 @@ from app.repositories.foods import FOOD_JOIN, FOOD_SELECT, write_image_food
 from app.repositories.embeddings import _upsert_image_embedding
 from app.repositories.ports import ImageIndexResult
 from app.repositories.scenes import _lock_image, _recompute
-from app.services.retrieval.enum_fields import coerce_enum
-from app.services.retrieval.food_fields import FOOD_FIELDS, coerce_food_field
-from app.services.retrieval.image_fields import resolve_label_status
-from app.services.retrieval.image_ids import uuid_from_sha256
-from app.services.retrieval.text_fields import normalize_description, normalize_tags
+from app.core.rules.enum_fields import coerce_enum
+from app.core.rules.food_fields import FOOD_FIELDS, coerce_food_field
+from app.core.rules.image_fields import normalize_image_patch, resolve_label_status
+from app.core.rules.image_ids import uuid_from_sha256
+from app.core.rules.text_fields import normalize_description, normalize_tags
 
 # Category display name (zh primary) + nearest ancestor's heating group.
 # Expects aliases i (images) and c (categories); binds :primary_kind.
@@ -61,13 +60,6 @@ _LEDGER_SQL = (
     "FROM image_embeddings e JOIN embedding_models m ON m.id = e.model_id "
     "WHERE e.image_id = CAST(:id AS uuid) ORDER BY e.model_id"
 )
-
-# Required enum columns -> system enum class (also has a CHECK) or editable enum name (only this check)
-_ENUM_COLUMNS: dict[str, type[StrEnum] | str] = {
-    "source_type": SOURCE_TYPE,
-    "license": LICENSE,
-    "label_status": LabelStatus,
-}
 
 
 def _check_label_matches_category(label: LabelStatus, category_id: Any) -> None:
@@ -265,88 +257,6 @@ class PgImagesMixin:
                 )
         except Exception:
             logger.exception("index_image: could not mark uncertain embedding stale id=%s", image_id)
-
-    def update_image(self, image_id: UUID | str, fields: dict[str, Any]) -> None:
-        """Patch allowed image columns and food fields (image_foods, created on first use).
-
-        Bumps payload_version on Qdrant-payload fields; food fields touch only their own
-        columns and the image's updated_at.
-        """
-        self.ensure_schema()
-        from sqlalchemy import text
-        from sqlalchemy.exc import IntegrityError
-
-        allowed = {
-            "original_url",
-            "thumb_url",
-            "width",
-            "height",
-            "category_id",
-            "label_status",
-            "source_type",
-            "license",
-            "description",
-            "tags",
-            *FOOD_FIELDS,
-        }
-        # The Qdrant payload holds only these; description, tags and the other food fields are
-        # not in it, so they do not bump payload_version
-        bump_keys = {"category_id", "food_state", "label_status"}
-        sets: list[str] = []
-        params: dict[str, Any] = {"id": str(_as_uuid(image_id))}
-        food: dict[str, Any] = {}  # -> image_foods
-        bump = False
-        for key, val in (fields or {}).items():
-            if key not in allowed:
-                continue
-            if key in bump_keys:
-                bump = True
-            if key in FOOD_FIELDS:
-                food[key] = coerce_food_field(key, val)
-                continue
-            if key in _ENUM_COLUMNS:
-                val = str(coerce_enum(_ENUM_COLUMNS[key], val, field=key))
-            elif key in ("width", "height"):
-                val = _positive_int(val, key)
-            elif key == "description":
-                val = normalize_description(val)
-            elif key == "tags":
-                val = normalize_tags(val)
-            placeholder = f"CAST(:{key} AS text[])" if key == "tags" else f":{key}"
-            sets.append(f"{key} = {placeholder}")
-            params[key] = val
-        if not sets and not food:
-            return
-        if "label_status" in params and "category_id" in params:
-            _check_label_matches_category(LabelStatus(params["label_status"]), params["category_id"])
-        sets.append("updated_at = now()")
-        if bump:
-            sets.append("payload_version = payload_version + 1")
-        sql = (
-            "UPDATE images SET "
-            + ", ".join(sets)
-            + " WHERE id = CAST(:id AS uuid)"
-        )
-        engine = self._get_engine()
-        try:
-            with engine.begin() as conn:
-                matched = conn.execute(text(sql), params).rowcount
-                if matched and food:  # same transaction; a missing image gets no food row
-                    write_image_food(conn, params["id"], food)
-            if bump:
-                self.recompute_image_scenes(image_id, bump_version=False)
-        except err.AppError:
-            raise
-        except IntegrityError as exc:
-            # e.g. only one of label_status / category_id patched and the pair
-            # no longer satisfies ck_images_label_matches_category
-            raise err.validation_error(
-                f"update_image violates a constraint: {exc.orig}"
-            ) from exc
-        except Exception as exc:
-            raise err.index_postgres_failed(
-                f"update_image: {type(exc).__name__}: {exc}"
-            ) from exc
 
     def mark_deleted(self, image_id: UUID | str) -> None:
         """Port alias: enqueue hard-delete into image_deletions (§2.5)."""
@@ -628,8 +538,7 @@ class PgImagesMixin:
             raise err.search_postgres_failed(f"get_image_detail: {type(exc).__name__}: {exc}") from exc
 
     def patch_image(self, image_id: UUID | str, fields: dict[str, Any]) -> dict[str, Any]:
-        """Apply a gallery patch (normalized by services.retrieval.image_fields) in one
-        transaction; returns the image detail as committed.
+        """Validate and apply a gallery patch in one transaction; return its committed detail.
 
         Takes the catalog read lock, then the image row lock (the order of every image writer),
         so the category checked here cannot be deleted or disabled before the commit. Settles
@@ -638,6 +547,7 @@ class PgImagesMixin:
         image's rule memberships when the category changes. The vector store is not touched:
         the HTTP layer pushes the payload after the commit.
         """
+        fields = normalize_image_patch(fields)
         self.ensure_schema()
         from sqlalchemy import text
 

@@ -18,7 +18,7 @@ from uuid import UUID
 from app.core import errors as err
 from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.embedding_validate import validate_embedding
-from app.services.retrieval.food_fields import FOOD_FIELDS
+from app.core.rules.food_fields import FOOD_FIELDS
 from app.repositories.ports import (
     EmbeddingPort,
     MetadataStorePort,

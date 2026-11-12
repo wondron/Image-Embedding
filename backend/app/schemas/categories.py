@@ -2,7 +2,7 @@
 
 The category tree (categories + category_names) as the admin page reads and edits it. Success
 bodies carry no trace_id (it is in the X-Trace-Id header, as for /api/enums). The request
-limits are app.core.category_rules; app.services.retrieval.category_fields checks them again
+limits are app.core.category_rules; app.core.rules.category_fields checks them again
 together with the rules a schema cannot say (the zh primary name, one primary per language).
 """
 

@@ -1,4 +1,4 @@
-"""类别树的写入规则：接口（app.schemas.categories）和校验（app.services.retrieval.category_fields）共用。
+"""类别树的写入规则：接口（app.schemas.categories）和校验（app.core.rules.category_fields）共用。
 
 库里这些列是不限长的 text / text[]，下面是接口这一侧的上限和写法。
 """

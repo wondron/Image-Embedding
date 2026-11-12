@@ -23,7 +23,7 @@ from typing import Any
 
 from app.core import errors as err
 from app.core.enums import FOOD_PROCESSING, FOOD_STATE
-from app.services.retrieval.enum_fields import coerce_optional_enum
+from app.core.rules.enum_fields import coerce_optional_enum
 
 FOOD_FIELDS = (
     "food_state",

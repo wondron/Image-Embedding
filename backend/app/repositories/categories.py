@@ -32,7 +32,7 @@ from app.core.enums import NameKind
 from app.db.common import _row_to_dict
 from app.repositories.catalog_lock import lock_catalog_for_write
 from app.repositories.scenes import _recompute_subtree
-from app.services.retrieval.category_fields import (
+from app.core.rules.category_fields import (
     check_root_code,
     display_name,
     normalize_category_fields,

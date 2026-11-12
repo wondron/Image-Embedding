@@ -1,4 +1,4 @@
-"""场景配置的规则和默认值：接口（app.schemas.scenes）、校验（app.services.retrieval.scene_fields）
+"""场景配置的规则和默认值：接口（app.schemas.scenes）、校验（app.core.rules.scene_fields）
 和按场景检索（app.services.retrieval.scenes）共用。
 
 场景本身是 scenes 表里的行，经 /api/scenes 配置；这里只放代码这一侧的约定。

@@ -3,7 +3,7 @@
 import unittest
 
 from app.core.enums import LabelStatus
-from app.services.retrieval.scene_membership import (
+from app.core.rules.scene_membership import (
     apply_manual_overrides,
     build_qdrant_payload,
     compute_rule_member_scene_ids,

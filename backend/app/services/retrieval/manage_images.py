@@ -1,7 +1,7 @@
 """Gallery admin of one stored image: read, patch, delete (/api/images/{image_id}).
 
 Needs PostgreSQL only (built by app.bootstrap.catalog, like the scene admin), so edits and
-deletions work while the encoder or Qdrant are down. Field rules: services.retrieval.image_fields;
+deletions work while the encoder or Qdrant are down. Field rules: core.rules.image_fields;
 the checks against the stored row and the write are one transaction in the catalog store
 (repositories.images.patch_image, repositories.deletions.enqueue_image_deletion).
 
@@ -19,8 +19,8 @@ from uuid import UUID
 
 from app.core import errors as err
 from app.repositories.ports import CatalogStorePort
-from app.services.retrieval.food_fields import FOOD_FIELDS
-from app.services.retrieval.image_fields import normalize_image_patch
+from app.core.rules.food_fields import FOOD_FIELDS
+from app.core.rules.image_fields import normalize_image_patch
 
 
 def _ledger_item(row: Mapping[str, Any]) -> dict[str, Any]:

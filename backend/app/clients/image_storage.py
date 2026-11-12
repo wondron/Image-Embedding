@@ -17,7 +17,7 @@ from uuid import UUID
 from app.core.config.settings import ImageStorageSettings
 from app.core import errors as err
 from app.repositories.ports import ImageStoragePort
-from app.services.retrieval.storage_keys import (
+from app.utils.storage_keys import (
     original_key,
     public_url,
     staging_key,

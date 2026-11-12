@@ -26,22 +26,15 @@ from app.api.uploads import form_upload, read_upload
 from app.bootstrap.state import ApplicationState
 from app.clients.image_fetch import read_url_bytes
 from app.core.middleware import bind_trace_id
+from app.core.rules.food_fields import FOOD_FIELDS
 from app.schemas.retrieval import IndexJsonRequest, SearchJsonRequest
 from app.core import errors as err
 
 logger = logging.getLogger("svc.retrieval")
 
 MAX_INDEX_FILES = 100
-# Optional food annotation an index request may carry; the use case validates it. Same names
-# as app.services.retrieval.food_fields.FOOD_FIELDS (not imported: use cases load with the stack)
-FOOD_KEYS = (
-    "food_state",
-    "food_processing",
-    "food_count",
-    "total_mass_g",
-    "water_mass_g",
-    "main_ingredient_mass_g",
-)
+# Optional food annotation an index request may carry; the use case validates it.
+FOOD_KEYS = FOOD_FIELDS
 # Labelling an index request may set; omitted: label_status follows the category, source_type
 # user_upload, license unknown (app.services.retrieval.index_image)
 LABEL_KEYS = ("label_status", "source_type", "license")

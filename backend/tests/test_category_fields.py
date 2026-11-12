@@ -1,11 +1,11 @@
-"""Category tree write rules (app.services.retrieval.category_fields): no database needed."""
+"""Category tree write rules (app.core.rules.category_fields): no database needed."""
 
 import unittest
 
 from app.core.category_rules import CATEGORY_CODE_MAX_LEN, CATEGORY_MAX_CUISINES, CATEGORY_MAX_NAMES
 from app.core.enums import CategoryDomain, NameKind
 from app.core.errors import AppError
-from app.services.retrieval.category_fields import (
+from app.core.rules.category_fields import (
     ROOT_CODES,
     check_root_code,
     display_name,

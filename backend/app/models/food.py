@@ -20,7 +20,7 @@ class ImageFood(UpdatedAtMixin, Base):
 
     一张图最多一行（主键就是 image_id），图片删除时一起删。整行和每个字段都是非必填：
     没有标注的图没有这一行，读的时候按空处理。只有 food_state 进 Qdrant payload。
-    取值规则见 app.services.retrieval.food_fields。
+    取值规则见 app.core.rules.food_fields。
     """
 
     __tablename__ = "image_foods"

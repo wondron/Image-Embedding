@@ -67,7 +67,7 @@ def _empty_display(value: str | None) -> str:
     return value if value else '""'
 
 def public_url(public_base_url: str, key: str) -> str:
-    """Same join as app.services.retrieval.storage_keys.public_url."""
+    """Same join as app.utils.storage_keys.public_url."""
     base = (public_base_url or "").rstrip("/")
     k = (key or "").lstrip("/")
     if not base:

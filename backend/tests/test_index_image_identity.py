@@ -14,7 +14,7 @@ from PIL import Image as PILImage
 from app.repositories.ports import ImageIndexResult, VECTOR_DIM
 from app.services.retrieval.active_model import ActiveModel
 from app.core.errors import AppError
-from app.services.retrieval.food_fields import FOOD_FIELDS
+from app.core.rules.food_fields import FOOD_FIELDS
 from app.services.retrieval.index_image import IndexImageUseCase
 
 MODEL = ActiveModel(id=3, name="dino", version="v1", collection="c_dino_v1", dim=VECTOR_DIM, distance="cosine")

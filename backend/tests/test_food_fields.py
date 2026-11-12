@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from app.core.errors import AppError
 from app.services.retrieval import search_image
-from app.services.retrieval.food_fields import (
+from app.core.rules.food_fields import (
     FOOD_FIELDS,
     PG_INT_MAX,
     coerce_food_field,

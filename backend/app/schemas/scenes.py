@@ -17,7 +17,7 @@ when the change reaches stored images only through POST /api/scenes/sync (rules,
 is_active / include_all), false when it already shows (labels, names, descriptions,
 outputs_heating). Success bodies carry no trace_id (it is in the X-Trace-Id header, as for
 /api/enums and /api/categories). Request limits are app.core.scene_rules;
-app.services.retrieval.scene_fields checks them again together with the rules a schema cannot say.
+app.core.rules.scene_fields checks them again together with the rules a schema cannot say.
 """
 
 from pydantic import BaseModel, ConfigDict, Field

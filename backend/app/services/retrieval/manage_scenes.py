@@ -1,6 +1,6 @@
 """Scene configuration admin use case: scenes, their labels and their rules.
 
-Field rules live in app.services.retrieval.scene_fields; the checks against the stored
+Field rules live in app.core.rules.scene_fields; the checks against the stored
 configuration and the writes are one transaction each in the catalog store
 (app.repositories.scene_config). Needs PostgreSQL only (app.bootstrap.catalog).
 
@@ -22,7 +22,7 @@ from uuid import UUID
 from app.core import errors as err
 from app.core.scene_rules import DEFAULT_SCENE
 from app.repositories.ports import CatalogStorePort
-from app.services.retrieval.scene_fields import normalize_row_id
+from app.core.rules.scene_fields import normalize_row_id
 
 
 def _scene_write(result: dict[str, Any]) -> dict[str, Any]:

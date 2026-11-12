@@ -17,7 +17,7 @@ from typing import Any
 from app.core import errors as err
 from app.core.enums import IndexTaskStatus
 from app.repositories.ports import CatalogStorePort
-from app.services.retrieval.enum_fields import coerce_enum, coerce_optional_enum
+from app.core.rules.enum_fields import coerce_enum, coerce_optional_enum
 
 MAX_PAGE_SIZE = 100
 MAX_DELETIONS = 200

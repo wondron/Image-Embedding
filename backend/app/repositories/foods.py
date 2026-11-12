@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.services.retrieval.food_fields import FOOD_FIELDS
+from app.core.rules.food_fields import FOOD_FIELDS
 
 # For image queries that alias images as i: extra SELECT columns and the join that feeds them
 FOOD_SELECT = ", ".join(f"f.{key}" for key in FOOD_FIELDS)

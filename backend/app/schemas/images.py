@@ -3,7 +3,7 @@
 GET / PATCH / DELETE /api/images/{image_id}, POST /api/images/{image_id}/vector-sync. The image
 carries the list item's fields (§6.1.2, same names) plus what only the detail shows; food fields
 and heating_group are always present. Success bodies carry no trace_id (it is in the X-Trace-Id
-header), as for the scene memberships. Field rules: app.services.retrieval.image_fields.
+header), as for the scene memberships. Field rules: app.core.rules.image_fields.
 """
 
 from typing import Any, Literal
@@ -142,7 +142,7 @@ class ImageDeleteResponse(BaseModel):
 # -- requests ---------------------------------------------------------------------------
 
 class ImageUpdateRequest(BaseModel):
-    """Only the fields sent are changed; see app.services.retrieval.image_fields for what null means."""
+    """Only the fields sent are changed; see app.core.rules.image_fields for what null means."""
 
     model_config = ConfigDict(extra="forbid")
 

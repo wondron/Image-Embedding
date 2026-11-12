@@ -30,7 +30,7 @@ class IndexJsonRequest(BaseModel):
     source_type: str | None = Field(default=None, description="来源，取值见 GET /api/enums/source_type；默认 user_upload")
     license: str | None = Field(default=None, description="许可，取值见 GET /api/enums/license；默认 unknown")
     # optional food annotation (stored in image_foods); the use case checks it
-    # (app.services.retrieval.food_fields). Strict ints: JSON true must not count as 1
+    # (app.core.rules.food_fields). Strict ints: JSON true must not count as 1
     food_state: str | None = Field(default=None, description="食物状态，取值见 GET /api/enums/food_state")
     food_processing: str | None = Field(
         default=None, description="加工状态，取值见 GET /api/enums/food_processing"

@@ -1,6 +1,6 @@
 """Category tree admin use case: read the tree, create / patch / delete one node.
 
-Field rules live in app.services.retrieval.category_fields; the checks against the stored tree
+Field rules live in app.core.rules.category_fields; the checks against the stored tree
 and the writes are one transaction each in the catalog store (app.repositories.categories).
 Needs PostgreSQL only (app.bootstrap.catalog).
 
@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.repositories.ports import CatalogStorePort
-from app.services.retrieval.category_fields import ROOT_CODES
+from app.core.rules.category_fields import ROOT_CODES
 
 
 class ManageCategoriesUseCase:

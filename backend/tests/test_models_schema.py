@@ -96,7 +96,7 @@ class ModelsSchemaTests(unittest.TestCase):
         self.assertFalse({"food_state", "food_processing", "food_count"} & set(self.tables["images"].c.keys()))
 
     def test_image_foods_is_an_optional_one_row_child_of_images(self):
-        from app.services.retrieval.food_fields import FOOD_FIELDS
+        from app.core.rules.food_fields import FOOD_FIELDS
 
         foods = self.tables["image_foods"]
         self.assertEqual([c.name for c in foods.primary_key.columns], ["image_id"])  # at most one row per image

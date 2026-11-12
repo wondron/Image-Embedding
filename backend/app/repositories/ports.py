@@ -107,10 +107,6 @@ class MetadataStorePort(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def update_image(self, image_id: UUID | str, fields: dict[str, Any]) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
     def mark_deleted(self, image_id: UUID | str) -> None:
         raise NotImplementedError
 
@@ -328,7 +324,7 @@ class CatalogStorePort(ABC):
 
     @abstractmethod
     def patch_image(self, image_id: UUID | str, fields: dict[str, Any]) -> dict[str, Any]:
-        """Apply a normalized patch (services.retrieval.image_fields) in one transaction and
+        """Validate a patch with app.core.rules.image_fields and apply it in one transaction;
         return the detail as committed; IMAGE_NOT_FOUND when there is no such image."""
         raise NotImplementedError
 

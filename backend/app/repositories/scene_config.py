@@ -9,7 +9,7 @@ What a write does not do: recompute which scenes stored images belong to. Rules,
 is_active / include_all and the category tree all feed membership; the change reaches stored
 images and their vector payloads through POST /api/scenes/sync (services.retrieval.sync_scenes).
 Each write says whether it needs that (sync_required, decided in
-services.retrieval.scene_fields): labels, names, descriptions and outputs_heating are read at
+core.rules.scene_fields): labels, names, descriptions and outputs_heating are read at
 request time, so changing them shows at once.
 
 Deleting a scene takes its labels, rules and image_scenes rows with it (ON DELETE CASCADE); the
@@ -30,7 +30,7 @@ from app.core.enums import NameKind
 from app.core.scene_rules import DEFAULT_SCENE
 from app.db.common import _row_to_dict
 from app.repositories.catalog_lock import lock_catalog_for_write
-from app.services.retrieval.scene_fields import (
+from app.core.rules.scene_fields import (
     check_default_scene_change,
     check_rule_label,
     normalize_label_fields,

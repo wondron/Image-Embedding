@@ -23,7 +23,7 @@ from app.core.exceptions import register_exception_handlers
 from app.core.middleware import TraceIdMiddleware
 from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.delete_image import DeletionWorker
-from app.services.retrieval.image_fields import normalize_image_patch, resolve_label_status
+from app.core.rules.image_fields import normalize_image_patch, resolve_label_status
 from app.services.retrieval.list_images import ListImagesUseCase
 from app.services.retrieval.manage_images import ManageImagesUseCase
 from app.services.retrieval.sync_scenes import PushResult
