@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 
 from fastapi import UploadFile
+from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import require_food_service
 from app.schemas.tools import EmbeddingResponse, SegmentResponse
@@ -29,6 +31,57 @@ async def _read_tool_image(file: UploadFile, runtime: ApplicationState) -> bytes
     )
 
 
+def _segment_response(
+    segmentor: Any,
+    image_bytes: bytes,
+    filename: str,
+    *,
+    output_vis: bool,
+    started: float,
+) -> SegmentResponse:
+    """Run inference and image encoding together in a worker thread."""
+    mask, visual, original = segmentor.detect(image_bytes, output_vis=output_vis)
+    original = None
+    if original is None or getattr(original, "ndim", 0) < 2:
+        raise ValueError("segmentor returned an invalid original image")
+
+    height, width = original.shape[:2]
+    return SegmentResponse(
+        ok=True,
+        filename=filename,
+        width=int(width),
+        height=int(height),
+        latency_ms=round((time.perf_counter() - started) * 1000.0, 2),
+        mask_png_base64=encode_png_base64(mask),
+        visual_png_base64=(
+            encode_png_base64(visual, bgr=True) if output_vis else None
+        ),
+    )
+
+
+def _embedding_response(
+    embedding_model: Any,
+    image_bytes: bytes,
+    filename: str,
+    *,
+    started: float,
+) -> EmbeddingResponse:
+    """Keep inference, vector conversion and validation off the event loop."""
+    vector = embedding_model.detect(image_bytes)
+    if getattr(vector, "ndim", 0) != 1:
+        raise ValueError(
+            f"embedding model returned an invalid shape: {getattr(vector, 'shape', None)}"
+        )
+
+    return EmbeddingResponse(
+        ok=True,
+        filename=filename,
+        embedding_dim=int(vector.shape[0]),
+        latency_ms=round((time.perf_counter() - started) * 1000.0, 2),
+        embedding=vector.tolist(),
+    )
+
+
 async def segment(
     runtime: ApplicationState,
     file: UploadFile,
@@ -44,22 +97,13 @@ async def segment(
 
     started = time.perf_counter()
     try:
-        mask, visual, original = segmentor.detect(image_bytes, output_vis=output_vis)
-        original = None
-        if original is None or getattr(original, "ndim", 0) < 2:
-            raise ValueError("segmentor returned an invalid original image")
-
-        height, width = original.shape[:2]
-        response = SegmentResponse(
-            ok=True,
-            filename=file.filename or "upload",
-            width=int(width),
-            height=int(height),
-            latency_ms=round((time.perf_counter() - started) * 1000.0, 2),
-            mask_png_base64=encode_png_base64(mask),
-            visual_png_base64=(
-                encode_png_base64(visual, bgr=True) if output_vis else None
-            ),
+        response = await run_in_threadpool(
+            _segment_response,
+            segmentor,
+            image_bytes,
+            file.filename or "upload",
+            output_vis=output_vis,
+            started=started,
         )
     except ValueError as exc:
         raise AppError("INVALID_IMAGE", str(exc), http_status=422) from exc
@@ -91,18 +135,12 @@ async def embedding(runtime: ApplicationState, file: UploadFile) -> EmbeddingRes
 
     started = time.perf_counter()
     try:
-        vector = embedding_model.detect(image_bytes)
-        if getattr(vector, "ndim", 0) != 1:
-            raise ValueError(
-                f"embedding model returned an invalid shape: {getattr(vector, 'shape', None)}"
-            )
-
-        response = EmbeddingResponse(
-            ok=True,
-            filename=file.filename or "upload",
-            embedding_dim=int(vector.shape[0]),
-            latency_ms=round((time.perf_counter() - started) * 1000.0, 2),
-            embedding=vector.tolist(),
+        response = await run_in_threadpool(
+            _embedding_response,
+            embedding_model,
+            image_bytes,
+            file.filename or "upload",
+            started=started,
         )
     except ValueError as exc:
         raise AppError("INVALID_IMAGE", str(exc), http_status=422) from exc

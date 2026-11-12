@@ -11,6 +11,7 @@ from typing import Any
 from uuid import uuid4
 
 import requests
+from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import require_food_service
 from app.bootstrap.state import ApplicationState
@@ -38,7 +39,9 @@ async def run_predict(
         raise errors.empty_file("Image bytes is empty.")
 
     try:
-        result = svc.detect(
+        # FoodService includes blocking upstream requests and model inference.
+        result = await run_in_threadpool(
+            svc.detect,
             img_bytes,
             machine_info=machine_info,
             trace_id=trace_id,

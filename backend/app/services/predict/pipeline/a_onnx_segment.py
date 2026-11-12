@@ -1,4 +1,5 @@
 import os
+import threading
 import cv2
 import time, logging
 import numpy as np
@@ -11,6 +12,7 @@ logger = logging.getLogger("segment")
 
 class OnnxSegmentPy:
     def __init__( self, config ):
+        self._io_binding_lock = threading.Lock()
         self.load_config(config)
         self.load_model(self.model_path)
         logger.info("模型初始化完成！")
@@ -168,25 +170,27 @@ class OnnxSegmentPy:
         if use_iob:
             x_ov = ort.OrtValue.ortvalue_from_numpy(x, "cuda", self.device_id)
 
-            need_rebind = True
-            if self._cached_io is not None and self._cached_shape == tuple(x.shape):
-                try:
-                    io = self._cached_io
+            # Cached bindings and their outputs belong to one inference at a time.
+            with self._io_binding_lock:
+                need_rebind = True
+                if self._cached_io is not None and self._cached_shape == tuple(x.shape):
+                    try:
+                        io = self._cached_io
+                        io.bind_ortvalue_input(self.input_name, x_ov)
+                        need_rebind = False
+                    except Exception:
+                        need_rebind = True
+
+                if need_rebind:
+                    io = self.sess.io_binding()
                     io.bind_ortvalue_input(self.input_name, x_ov)
-                    need_rebind = False
-                except Exception:
-                    need_rebind = True
+                    for o in self.sess.get_outputs():
+                        io.bind_output(o.name, "cuda", self.device_id)   # 统一绑定到 CUDA
+                    self._cached_io = io
+                    self._cached_shape = tuple(x.shape)
 
-            if need_rebind:
-                io = self.sess.io_binding()
-                io.bind_ortvalue_input(self.input_name, x_ov)
-                for o in self.sess.get_outputs():
-                    io.bind_output(o.name, "cuda", self.device_id)   # 统一绑定到 CUDA
-                self._cached_io = io
-                self._cached_shape = tuple(x.shape)
-
-            self.sess.run_with_iobinding(self._cached_io)
-            outs = self._cached_io.copy_outputs_to_cpu()  # 末尾一次性回拷到 CPU
+                self.sess.run_with_iobinding(self._cached_io)
+                outs = self._cached_io.copy_outputs_to_cpu()  # 末尾一次性回拷到 CPU
             name2arr = {o.name: arr for o, arr in zip(self.sess.get_outputs(), outs)}
             return name2arr.get(self.output_name, outs[0])
 
