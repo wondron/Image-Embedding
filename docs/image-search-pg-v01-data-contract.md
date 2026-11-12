@@ -417,14 +417,20 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 
 数据库只存 **完整 https**；对象键 **不** 含场景/类别（改标签不搬文件）。
 
-| 对象键 | 内容 | 落库字段 |
+下表是相对键（无对象键前缀时的完整对象键；有前缀时为后缀）。扩展名、id 规则不因前缀改变。
+
+| 对象键（相对） | 内容 | 落库字段 |
 |---|---|---|
 | `original/{image_id}.{ext}` | 原图 | `images.original_url` |
 | `thumb/{image_id}.webp` | 缩略图，长边 512 | `images.thumb_url` |
 | `staging/{candidate_id}.{ext}` | 外部候选暂存 | `external_candidates.staged_url` |
 
+**可选对象键前缀 `key_prefix`**（本刀实施规范 · 本地已实现，待独立验收，非「总裁已拍」细字）：`IMAGE_STORAGE_CONFIG` 顶层可选字符串，与 `bucket` / `public_base_url` 同层。省略、`null`、空串或规范化后为空则不上前缀，键即上表，行为与现网一致。非空时去首尾空白与斜杠、把反斜杠/全角斜杠换成 `/` 并压缩重复斜杠，作为所有 `original` / `thumb` / `staging` 键的前缀，例如 `ImageEmbedding/original/{image_id}.jpg`。规范化拒绝 `.` / `..` 段、段名恰好为 `original`/`thumb`/`staging`、中间空白与非法字符、以及过长值（实施默认 128，报错不裁剪）；允许多级目录；以 `/` 开头只去掉首斜杠，不当文件系统绝对路径。大小写保持原样。不要把桶名、账号或密钥写进默认值。
+
 **ASSUMPTION A8**：bucket/CDN 前缀由部署配置拼进完整 URL；契约不绑死域名。  
-真传 OSS/S3 SDK、凭证与生命周期 **另刀**（本契约只定键与字段）。
+此处「bucket/CDN 前缀」指 `public_base_url`（桶或 CDN 的 URL 根），**不是**对象键前缀。公开 URL 为 `public_base_url.rstrip("/") + "/" + key.lstrip("/")`，其中 `key` 已是可能带 `key_prefix` 的对象键。同一前缀不要既写进 `public_base_url` 又写进 `key_prefix`，否则 URL 路径会加倍。真传 OSS/S3 SDK、凭证与生命周期 **另刀**（本契约只定键与字段）。
+
+已落盘对象与已入库的 `original_url` / `thumb_url` / `staged_url` **不迁移**；`key_prefix` 只影响新写入键。读取、删除、reembed 走存库 URL（或已记录的键），不得用当前前缀回推旧键。前端只消费接口已有完整 URL，本轮不改 FE，不加签名 URL。
 
 ---
 
@@ -917,6 +923,8 @@ PATCH 字段（不传 = 不变）：
 
 | 日期 | 说明 |
 |---|---|
+| 2026-11-11 | **可选 OSS 对象键前缀 `key_prefix` 本地实现（America/Denver）**：按共享规格落地 `IMAGE_STORAGE_CONFIG.key_prefix`；空则键与现网一致，非空规范化后前缀于相对键。启动期非法值 `ValueError`。S3 与 mock 共用 `storage_keys`。已落盘 URL/对象不迁移；读删/reembed 走存库 URL。不改 FE、不加签名 URL、不改业务 DB、不迁移。`config.yaml` 仅补注释式示例，未把本地调试配置改为生产 OSS。实现核对单测不是验收；独立测试按共享规格 §8。未 commit。 |
+| 2026-11-11 | **可选 OSS 对象键前缀 `key_prefix`（America/Denver）**：§5 / A8 增补实施规范（待开发）：`IMAGE_STORAGE_CONFIG` 顶层可选字符串；空则键不变，非空规范化后前缀于 original/thumb/staging（如 `ImageEmbedding/original/{id}.jpg`）。`public_base_url` 仍为桶/CDN URL 根，不与 `key_prefix` 重复书写。已落盘 URL 与对象不迁移；读写删走存库 URL。不改 FE、不加签名 URL、不改运行配置。细字见共享规格，本刀只改文档、未测试、未 commit。 |
 | 2026-11-11 | **入库结果历史最小契约 §6.4（America/Denver）**：按本轮 HEAD 54547ad 及未提交任务链核现有 GET /api/index-tasks 的 wire/分页/全历史 counts/列表内明细；明确逐文件同步终态、best-effort 缺行、当前图片投影及本地上传队列边界。FE 只读历史/刷新/分页/明细待接线，无新增 BE API，不纳清记录/删除清理/异步 job/重试。0008 及并行源码存在不证明已合并/迁移/验收。本刀只改文档、未测试、未 commit。 |
 | 2026-11-04 | **M1 草案**：按《图搜图数据结构设计 v0.1》落 12 表字典、Qdrant/S3/API 差量、作废旧 §9/双轨；ASSUMPTION A1–A8 |
 | 2026-11-04 | **M0 总裁已拍**：空库重建（无迁移脚本）；FlyB 本轮 OUT OF SCOPE；`scene_labels` 纳入冻结；ASSUMPTION A2–A4 改写 |

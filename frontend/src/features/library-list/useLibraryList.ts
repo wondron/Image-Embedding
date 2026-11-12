@@ -14,6 +14,8 @@ export type UseLibraryListOptions = {
   labelStatus?: LabelStatus | null
   /** Only images that need a sync or a vector. */
   outOfSync?: boolean
+  /** One exact tag; blank: no tag filter. */
+  tag?: string
   scene: string
   /** Bump to refetch the same page (retry). */
   reloadKey?: number
@@ -33,6 +35,7 @@ export function useLibraryList({
   categoryId = null,
   labelStatus = null,
   outOfSync = false,
+  tag = '',
   scene,
   reloadKey = 0,
 }: UseLibraryListOptions) {
@@ -44,7 +47,7 @@ export function useLibraryList({
 
   const failedRequest = useRef<string | null>(null)
   useEffect(() => {
-    const requestKey = JSON.stringify([apiBase, page, pageSize, q, categoryId, labelStatus, outOfSync, scene, reloadKey])
+    const requestKey = JSON.stringify([apiBase, page, pageSize, q, categoryId, labelStatus, outOfSync, tag, scene, reloadKey])
     if (!enabled) { setLoading(false); return }
     if (failedRequest.current === requestKey) return
     const controller = new AbortController()
@@ -57,6 +60,7 @@ export function useLibraryList({
       categoryId,
       labelStatus,
       outOfSync,
+      tag: tag || undefined,
       scene: toApiSceneCode(scene, DEFAULT_SCENE),
       baseUrl: apiBase,
       signal: controller.signal,
@@ -75,7 +79,7 @@ export function useLibraryList({
       setLoading(false)
     })
     return () => controller.abort()
-  }, [enabled, page, pageSize, q, categoryId, labelStatus, outOfSync, scene, apiBase, reloadKey])
+  }, [enabled, page, pageSize, q, categoryId, labelStatus, outOfSync, tag, scene, apiBase, reloadKey])
 
   return { items, total, loading, error, connected }
 }

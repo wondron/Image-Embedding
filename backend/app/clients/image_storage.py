@@ -50,6 +50,35 @@ def _readable_key(url_or_key: str, public_base_url: str) -> str:
         raise err.image_file_unavailable(f"not a stored object: {exc.detail}") from exc
 
 
+
+def s3_client_config(*, endpoint_url: str = "") -> Any:
+    """botocore Config for S3-compatible stores, including Aliyun OSS.
+
+    Newer boto3/botocore defaults request checksums to when_supported, which
+    sends a STREAMING-UNSIGNED-PAYLOAD-TRAILER (aws-chunked) body. Aliyun OSS
+    rejects that encoding with NotImplemented. when_required keeps optional
+    checksums off, so PutObject uses a regular payload.
+
+    Older botocore that does not accept these Config fields falls back to
+    addressing only; those versions never emit the trailer either.
+    """
+    from botocore.client import Config
+
+    kwargs: dict[str, Any] = {
+        "request_checksum_calculation": "when_required",
+        "response_checksum_validation": "when_required",
+    }
+    if endpoint_url:
+        kwargs["s3"] = {"addressing_style": "path"}
+    try:
+        return Config(**kwargs)
+    except TypeError:
+        fallback: dict[str, Any] = {}
+        if endpoint_url:
+            fallback["s3"] = {"addressing_style": "path"}
+        return Config(**fallback)
+
+
 class MockImageStorage(ImageStoragePort):
     """In-process mock: records puts; optional mirror dir for local bytes."""
 
@@ -82,7 +111,7 @@ class MockImageStorage(ImageStoragePort):
         ext: str,
         content_type: str | None = None,
     ) -> str:
-        return self._put(original_key(image_id, ext), data)
+        return self._put(original_key(image_id, ext, key_prefix=self.settings.key_prefix), data)
 
     def put_thumb(
         self,
@@ -91,7 +120,7 @@ class MockImageStorage(ImageStoragePort):
         *,
         content_type: str | None = "image/webp",
     ) -> str:
-        return self._put(thumb_key(image_id), data)
+        return self._put(thumb_key(image_id, key_prefix=self.settings.key_prefix), data)
 
     def put_staging(
         self,
@@ -101,7 +130,7 @@ class MockImageStorage(ImageStoragePort):
         ext: str,
         content_type: str | None = None,
     ) -> str:
-        return self._put(staging_key(candidate_id, ext), data)
+        return self._put(staging_key(candidate_id, ext, key_prefix=self.settings.key_prefix), data)
 
     def read_by_url_or_key(self, url_or_key: str) -> bytes:
         """From memory, else from the mirror dir: what survives a restart is what was mirrored."""
@@ -134,12 +163,17 @@ class MockImageStorage(ImageStoragePort):
             "driver": "mock",
             "bucket": self.bucket,
             "public_base_url": self.public_base_url,
+            "key_prefix": self.settings.key_prefix,
             "objects": len(self._objects),
         }
 
 
 class S3ImageStorage(ImageStoragePort):
-    """Real S3 via boto3 when IMAGE_STORAGE_CONFIG.use_boto3 is true."""
+    """Real S3 via boto3 when IMAGE_STORAGE_CONFIG.use_boto3 is true.
+
+    Client Config disables optional request/response checksums (when_required)
+    so Aliyun OSS and similar stores do not see AWS flexible-checksum trailers.
+    """
 
     def __init__(self, settings: ImageStorageSettings) -> None:
         self.settings = settings
@@ -147,7 +181,6 @@ class S3ImageStorage(ImageStoragePort):
         self.bucket = settings.bucket
         try:
             import boto3
-            from botocore.client import Config
         except ImportError as exc:
             raise err.not_ready(
                 "boto3 not installed; pip install boto3 or set IMAGE_STORAGE_CONFIG.use_boto3: false"
@@ -162,10 +195,10 @@ class S3ImageStorage(ImageStoragePort):
             "aws_access_key_id": access,
             "aws_secret_access_key": secret,
             "region_name": settings.region,
+            "config": s3_client_config(endpoint_url=settings.endpoint_url),
         }
         if settings.endpoint_url:
             kwargs["endpoint_url"] = settings.endpoint_url
-            kwargs["config"] = Config(s3={"addressing_style": "path"})
         self._client = boto3.client(**kwargs)
 
     def _put(self, key: str, data: bytes, content_type: str | None) -> str:
@@ -183,7 +216,7 @@ class S3ImageStorage(ImageStoragePort):
         ext: str,
         content_type: str | None = None,
     ) -> str:
-        return self._put(original_key(image_id, ext), data, content_type)
+        return self._put(original_key(image_id, ext, key_prefix=self.settings.key_prefix), data, content_type)
 
     def put_thumb(
         self,
@@ -192,7 +225,7 @@ class S3ImageStorage(ImageStoragePort):
         *,
         content_type: str | None = "image/webp",
     ) -> str:
-        return self._put(thumb_key(image_id), data, content_type)
+        return self._put(thumb_key(image_id, key_prefix=self.settings.key_prefix), data, content_type)
 
     def put_staging(
         self,
@@ -202,7 +235,7 @@ class S3ImageStorage(ImageStoragePort):
         ext: str,
         content_type: str | None = None,
     ) -> str:
-        return self._put(staging_key(candidate_id, ext), data, content_type)
+        return self._put(staging_key(candidate_id, ext, key_prefix=self.settings.key_prefix), data, content_type)
 
     def read_by_url_or_key(self, url_or_key: str) -> bytes:
         key = _readable_key(url_or_key, self.public_base_url)
@@ -223,6 +256,7 @@ class S3ImageStorage(ImageStoragePort):
                 "driver": "boto3",
                 "bucket": self.bucket,
                 "public_base_url": self.public_base_url,
+                "key_prefix": self.settings.key_prefix,
             }
         except Exception as exc:
             return {

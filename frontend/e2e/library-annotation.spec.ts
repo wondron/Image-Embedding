@@ -50,10 +50,15 @@ const listItem = (image: Image, vectorStatus: string) => ({
 /**
  * legacyWrites: answer PATCH / vector-sync like a server from before writes carried `vector`.
  * vector: the steak image's state in the vector store; reembed: how POST .../reembed answers.
+ * categories: the category tree; listTotal: the total the list reports; fillPage: answer every
+ * list request with a full page of plain images.
  */
-async function mockApi(page: Page, { legacyWrites = false, vector = 'stale' as 'stale' | 'missing', reembed = 'ok' as 'ok' | 'unreadable' } = {}) {
+async function mockApi(page: Page, {
+  legacyWrites = false, vector = 'stale' as 'stale' | 'missing', reembed = 'ok' as 'ok' | 'unreadable',
+  categories = CATEGORIES as unknown[], listTotal = null as number | null, fillPage = false,
+} = {}) {
   const state = { image: steakImage(), vector: vector as 'stale' | 'synced' | 'missing', deleted: false }
-  const calls = { list: [] as Array<Record<string, string>>, patches: [] as unknown[], pushes: 0, reembeds: 0, deletes: [] as string[], details: 0 }
+  const calls = { list: [] as Array<Record<string, string>>, patches: [] as unknown[], pushes: 0, reembeds: 0, deletes: [] as string[], details: 0, categoryReads: 0 }
   // The vector state as the server reports it: before a push the point still has the old scenes
   const vectorWire = () => {
     const expected_payload = { category_id: state.image.category_id, scenes: state.image.scenes, food_state: state.image.food_state, label_status: state.image.label_status }
@@ -79,12 +84,18 @@ async function mockApi(page: Page, { legacyWrites = false, vector = 'stale' as '
     const method = request.method()
     if (path === '/api/ping') return route.fulfill({ json: { ok: true, max_image_bytes: 15 * 1024 * 1024 } })
     if (path === '/api/enums') return route.fulfill({ json: { ok: true, enums: ENUMS } })
-    if (path === '/api/categories') return route.fulfill({ json: { ok: true, categories: CATEGORIES, heating_groups: [], root_codes: ['dish'] } })
+    if (path === '/api/categories') {
+      calls.categoryReads++
+      return route.fulfill({ json: { ok: true, categories, heating_groups: [], root_codes: ['dish'] } })
+    }
     if (path === '/api/scenes') return route.fulfill({ json: { ok: true, scenes: SCENES, default_scene: 'general' } })
     if (path === '/api/images' && method === 'GET') {
       calls.list.push(Object.fromEntries(url.searchParams))
-      const items = state.deleted ? [listItem(plain, 'synced')] : [listItem(state.image, state.vector), listItem(plain, 'synced')]
-      return route.fulfill({ json: { ok: true, trace_id: 't', scene: 'general', page: 1, page_size: 24, total: items.length, items } })
+      const pageSize = Number(url.searchParams.get('page_size'))
+      const items = fillPage
+        ? Array.from({ length: pageSize }, (_, index) => listItem({ ...plain, id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, description: `图片${index + 1}` }, 'synced'))
+        : state.deleted ? [listItem(plain, 'synced')] : [listItem(state.image, state.vector), listItem(plain, 'synced')]
+      return route.fulfill({ json: { ok: true, trace_id: 't', scene: 'general', page: Number(url.searchParams.get('page')), page_size: pageSize, total: listTotal ?? items.length, items } })
     }
     if (path.endsWith('/scene-memberships') && method === 'GET') {
       return route.fulfill({ json: { ok: true, image_id: STEAK_IMAGE, payload_version: state.image.payload_version, scenes: state.image.scenes, memberships: [
@@ -162,17 +173,18 @@ test('图库：类别与标注状态筛选取自数据库；单张图片可查�
   await expect(steakCard).toContainText('#带骨')
   await expect(page.locator('.mg-library-card').nth(1)).toContainText('未标注')
 
-  // Category filter: active categories from GET /api/categories; a category means its subtree
-  await page.getByRole('button', { name: '类别筛选：全部类别' }).click()
-  const popover = page.getByRole('dialog', { name: '按类别筛选' })
-  await popover.getByRole('combobox').fill('停用')
-  await expect(popover.getByText('没有匹配的启用类别')).toBeVisible()
-  await popover.getByRole('combobox').fill('肉')
+  // Category filter: the tree from GET /api/categories, disabled ones left out; a category means its subtree
+  const filters = page.getByRole('complementary', { name: '图片筛选' })
+  const categorySearch = filters.getByRole('searchbox', { name: '搜索类别' })
+  await categorySearch.fill('停用')
+  await expect(filters.getByText('没有匹配的类别')).toBeVisible()
+  await expect(filters).toContainText('另有 1 个被上面的选项隐藏')
+  await categorySearch.fill('肉')
   await screenshot(page, info, 'library-filter')
-  await popover.getByRole('option', { name: /^肉类/ }).click()
-  await expect(page.getByRole('button', { name: '类别筛选：肉类' })).toBeVisible()
+  await filters.getByRole('tree', { name: '类别' }).getByRole('treeitem', { name: /^肉类/ }).click()
   await expect.poll(() => calls.list.at(-1)?.category_id).toBe('2')
-  await page.getByLabel('标注状态筛选').selectOption('auto')
+  await expect(page.getByRole('group', { name: '生效的筛选' })).toContainText('菜品 / 肉类')
+  await filters.getByRole('radiogroup', { name: '标注状态' }).getByRole('radio', { name: '自动标注' }).check()
   await expect.poll(() => calls.list.at(-1)).toMatchObject({ category_id: '2', label_status: 'auto' })
 
   // The card says the image lags the vector store; the footer counts the page
@@ -290,21 +302,190 @@ test('图库：可以只看待同步或没有向量的图片', async ({ page }) 
   const calls = await mockApi(page)
   await openLibrary(page)
   await expect(page.locator('.mg-library-card')).toHaveCount(2)
-  await page.getByLabel('向量库状态筛选').selectOption({ label: '待同步或没有向量' })
+  const vector = page.getByRole('radiogroup', { name: '向量库状态' })
+  await vector.getByRole('radio', { name: '待同步或没有向量' }).check()
   await expect.poll(() => calls.list.at(-1)?.out_of_sync).toBe('true')
-  await page.getByLabel('向量库状态筛选').selectOption({ label: '全部向量状态' })
+  await vector.getByRole('radio', { name: '全部' }).check()
   await expect.poll(() => calls.list.at(-1)).not.toHaveProperty('out_of_sync')
 })
 
-test('窄屏：筛选弹层和编辑弹窗不产生横向滚动', async ({ page }, info) => {
+test('图库：点卡片上的类别、标签直接筛选；「未标注」和类别互斥；生效的筛选可以逐个清除', async ({ page }, info) => {
+  const calls = await mockApi(page)
+  await openLibrary(page)
+  const steakCard = page.locator('.mg-library-card').first()
+  const filters = page.getByRole('complementary', { name: '图片筛选' })
+  const active = page.getByRole('group', { name: '生效的筛选' })
+
+  await steakCard.getByRole('button', { name: '按类别筛选：牛排' }).click()
+  await expect.poll(() => calls.list.at(-1)?.category_id).toBe('3')
+  await expect(active).toContainText('菜品 / 肉类 / 牛排')
+  // The tree opens down to the category picked elsewhere and marks it
+  await expect(filters.getByRole('treeitem', { name: /^牛排/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(steakCard.getByRole('button', { name: '按类别筛选：牛排' })).toHaveCount(0)  // the current one is not offered again
+
+  await steakCard.getByRole('button', { name: '按标签筛选：带骨' }).click()
+  await expect.poll(() => calls.list.at(-1)).toMatchObject({ category_id: '3', tag: '带骨' })
+  await screenshot(page, info, 'library-active-filters')
+
+  // 「未标注」 has no category: picking it drops the category, and says so
+  await filters.getByRole('radiogroup', { name: '标注状态' }).getByRole('radio', { name: '未标注' }).check()
+  await expect.poll(() => calls.list.at(-1)).toMatchObject({ label_status: 'unlabeled', tag: '带骨' })
+  expect(calls.list.at(-1)).not.toHaveProperty('category_id')
+  await expect(page.getByText('已清除类别筛选：「未标注」的图片没有类别。')).toBeVisible()
+
+  await active.getByRole('button', { name: '清除标签筛选' }).click()
+  await expect.poll(() => calls.list.at(-1)).not.toHaveProperty('tag')
+  // A typed tag: the 「#」 copied from a card is not part of it
+  const tag = filters.getByLabel('标签', { exact: true })
+  await tag.fill('#红烧')
+  await tag.press('Enter')
+  await expect.poll(() => calls.list.at(-1)?.tag).toBe('红烧')
+  await expect(filters.getByRole('button', { name: '清除标签筛选：红烧' })).toBeVisible()
+
+  await filters.getByRole('searchbox', { name: '关键词' }).fill('牛')
+  await expect.poll(() => calls.list.at(-1)?.q).toBe('牛')
+  await active.getByRole('button', { name: '清空筛选' }).click()
+  await expect.poll(() => calls.list.at(-1)).toEqual({ page: '1', page_size: '24', scene: 'general' })
+  await expect(active).toHaveCount(0)
+})
+
+test('图库：上千个类别时树只渲染看得见的行，搜索直接找到深层类别，键盘可以浏览', async ({ page }, info) => {
+  const many = [category(1, 'dish', null, '菜品')]
+  for (let group = 0; group < 40; group += 1) {
+    many.push(category(100 + group, `dish.g${group}`, 1, `大类${group}`))
+    for (let leaf = 0; leaf < 50; leaf += 1) many.push({ ...category(10_000 + group * 100 + leaf, `dish.g${group}.c${leaf}`, 100 + group, `菜${group}-${leaf}`), image_count: leaf % 4 })
+  }
+  const calls = await mockApi(page, { categories: many })
+  await openLibrary(page)
+  const filters = page.getByRole('complementary', { name: '图片筛选' })
+  const tree = filters.getByRole('tree', { name: '类别' })
+  await expect(filters).toContainText('2041 个启用')
+  // Counts add up the subtree: 40 groups × (0+1+…+49 taken mod 4 = 73)
+  await expect(tree.getByRole('treeitem', { name: '菜品，2920 张' })).toBeVisible()
+
+  const search = filters.getByRole('searchbox', { name: '搜索类别' })
+  await search.fill('菜3')
+  await expect(filters).toContainText('找到 550 个')
+  expect(await tree.getByRole('treeitem').count()).toBeLessThan(80)  // a virtual list, not 600 rows
+  await search.fill('菜37-42')
+  await tree.getByRole('treeitem', { name: /^菜37-42，/ }).click()
+  await expect.poll(() => calls.list.at(-1)?.category_id).toBe('13742')
+  await expect(filters.locator('.lf-current')).toContainText('菜品 / 大类37')
+
+  // Back to the whole tree: the selection is shown in place, the keyboard moves and picks
+  await search.fill('')
+  await expect(tree.getByRole('treeitem', { name: /^菜37-42，/ })).toBeInViewport()
+  await tree.focus()
+  await page.keyboard.press('Home')
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+  await expect.poll(() => calls.list.at(-1)?.category_id).toBe('100')
+  await expect(tree.getByRole('treeitem', { name: /^大类0，/ })).toHaveAttribute('aria-expanded', 'true')
+  await screenshot(page, info, 'library-many-categories')
+
+  // Leave out what has no image: 菜x-0 (image_count 0) disappears from the search
+  await filters.getByRole('checkbox', { name: '隐藏没有图片的' }).check()
+  await search.fill('菜5-0')
+  await expect(filters).toContainText('找到 0 个，另有 1 个被上面的选项隐藏')
+  await filters.getByRole('button', { name: '全部显示' }).click()
+  await expect(tree.getByRole('treeitem', { name: /^菜5-0，/ })).toBeVisible()
+})
+
+test('图库：每页数量、跳页与展示方式；展示偏好在浏览器里记住', async ({ page }) => {
+  const calls = await mockApi(page, { listTotal: 200, fillPage: true })
+  await openLibrary(page)
+  await expect(page.locator('.mg-library-card')).toHaveCount(24)
+  const pager = page.getByRole('navigation', { name: '翻页' })
+  await expect(page.locator('.mg-pagination')).toContainText('共 200 张 · 第 1–24 张')
+  await pager.getByRole('button', { name: '最后一页' }).click()
+  await expect.poll(() => calls.list.at(-1)?.page).toBe('9')
+  await pager.getByRole('spinbutton', { name: '页码' }).fill('3')
+  await pager.getByRole('spinbutton', { name: '页码' }).press('Enter')
+  await expect.poll(() => calls.list.at(-1)?.page).toBe('3')
+  await expect(page.locator('.mg-pagination')).toContainText('第 49–72 张')
+
+  await page.getByLabel('每页数量').selectOption('48')
+  await expect.poll(() => calls.list.at(-1)).toMatchObject({ page: '1', page_size: '48' })
+  await expect(page.locator('.mg-library-card')).toHaveCount(48)
+  await page.getByRole('button', { name: '列表展示' }).click()
+  await expect(page.locator('.mg-library-row')).toHaveCount(48)
+
+  await openLibrary(page)  // a new visit
+  await expect.poll(() => calls.list.at(-1)?.page_size).toBe('48')
+  await expect(page.locator('.mg-library-row')).toHaveCount(48)
+  await expect(page.getByRole('button', { name: '列表展示' })).toHaveAttribute('aria-pressed', 'true')
+})
+
+test('桌面：左侧筛选窄、右侧图片宽，图片区单独滚动，页头和翻页留在视口里', async ({ page }, info) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockApi(page, { listTotal: 240, fillPage: true })
+  await openLibrary(page)
+  await expect(page.locator('.mg-library-card')).toHaveCount(24)
+  const tools = page.getByRole('complementary', { name: '图片筛选' })
+  const images = page.getByRole('region', { name: '图片', exact: true })
+  const toolBox = (await tools.boundingBox())!
+  const imageBox = (await images.boundingBox())!
+  expect(toolBox.width).toBeLessThan(imageBox.width / 2)
+  expect(toolBox.x + toolBox.width).toBeLessThanOrEqual(imageBox.x)
+  expect(Math.abs(toolBox.y - imageBox.y)).toBeLessThanOrEqual(1)
+  // The category tree takes the rest of the column, which fits the screen without scrolling
+  expect((await tools.getByRole('tree', { name: '类别' }).boundingBox())!.height).toBeGreaterThanOrEqual(320)
+  expect(await tools.evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1)
+
+  const content = page.locator('.lib-content')
+  const head = page.locator('.lib-head')
+  const pager = page.locator('.lib-pagination')
+  const before = { head: await head.boundingBox(), pager: await pager.boundingBox(), tools: await tools.boundingBox() }
+  await content.hover()
+  await page.mouse.wheel(0, 1500)
+  await expect.poll(() => content.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+  expect(await head.boundingBox()).toEqual(before.head)
+  expect(await pager.boundingBox()).toEqual(before.pager)
+  expect(await tools.boundingBox()).toEqual(before.tools)
+  await expect(pager).toBeInViewport()
+  expect(await page.evaluate(() => ({ document: document.documentElement.scrollTop, body: document.body.scrollTop }))).toEqual({ document: 0, body: 0 })
+  await screenshot(page, info, 'library-desktop')
+
+  // Another page starts at the top of the image area
+  await page.getByRole('button', { name: '下一页' }).click()
+  await expect.poll(() => content.evaluate(element => element.scrollTop)).toBe(0)
+})
+
+test('窄屏：筛选收起时在卡片上点类别，展开后树停在这个类别上', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 })
+  // 牛排 sits below 40 other groups, so the tree has to scroll to show it
+  const many = [category(1, 'dish', null, '菜品')]
+  for (let group = 0; group < 40; group += 1) {
+    many.push(category(100 + group, `dish.g${group}`, 1, `大类${group}`))
+    for (let leaf = 0; leaf < 50; leaf += 1) many.push(category(10_000 + group * 100 + leaf, `dish.g${group}.c${leaf}`, 100 + group, `菜${group}-${leaf}`))
+  }
+  many.push(category(2, 'dish.meat', 1, '肉类'), category(3, 'dish.meat.steak', 2, '牛排'), category(4, 'dish.meat.pork', 2, '红烧肉'))
+  const calls = await mockApi(page, { categories: many })
+  await openLibrary(page)
+  await page.locator('.mg-library-card').first().getByRole('button', { name: '按类别筛选：牛排' }).click()
+  await expect.poll(() => calls.list.at(-1)?.category_id).toBe('3')
+  const filters = page.getByRole('complementary', { name: '图片筛选' })
+  await filters.getByRole('button', { name: '展开筛选' }).click()
+  const steak = filters.getByRole('tree', { name: '类别' }).getByRole('treeitem', { name: /^牛排/ })
+  await expect(steak).toHaveAttribute('aria-selected', 'true')
+  await expect(steak).toBeInViewport()
+})
+
+test('窄屏：筛选收在页头里，展开后和编辑弹窗都不产生横向滚动', async ({ page }, info) => {
   await page.setViewportSize({ width: 390, height: 900 })
   await mockApi(page)
   await openLibrary(page)
-  await page.getByRole('button', { name: '类别筛选：全部类别' }).click()
-  await expect(page.getByRole('dialog', { name: '按类别筛选' })).toBeVisible()
+  const filters = page.getByRole('complementary', { name: '图片筛选' })
   const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  await expect(filters.getByRole('searchbox', { name: '搜索类别' })).toBeHidden()
+  await expect(page.locator('.mg-library-card')).toHaveCount(2)
   expect(await overflow()).toBeLessThanOrEqual(0)
-  await page.keyboard.press('Escape')
+  await screenshot(page, info, 'library-narrow')
+  await filters.getByRole('button', { name: '展开筛选' }).click()
+  await expect(filters.getByRole('tree', { name: '类别' })).toBeVisible()
+  expect(await overflow()).toBeLessThanOrEqual(0)
+  await screenshot(page, info, 'library-narrow-filters')
+  await filters.getByRole('button', { name: '收起筛选' }).click()
   await page.getByRole('button', { name: '标注 煎牛排' }).click()
   await expect(page.getByRole('dialog', { name: '图片标注' }).locator('.ie-vector')).toBeVisible()
   expect(await overflow()).toBeLessThanOrEqual(0)

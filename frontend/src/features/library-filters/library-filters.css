@@ -1,0 +1,286 @@
+/*
+ * 图片数据 · the tool column: compact filter rows on top, the category tree below taking the rest
+ * of the column's height (it is the control that has to carry thousands of categories).
+ */
+.lf-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #d5dde8 transparent;
+  background: #fff;
+  border: 1px solid rgba(148, 163, 184, .25);
+  border-radius: 12px;
+}
+
+.lf-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 7px;
+  min-height: 46px;
+  padding: 0 12px 0 14px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, .97);
+  color: #64748b;
+}
+.lf-head h2 { font-size: 14px; font-weight: 700; color: #334155; }
+.lf-badge {
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.lf-help-toggle { margin-left: auto; }
+.lf-help-toggle[aria-expanded="true"] { color: var(--primary); background: #eff4fb; }
+.lf-reset { margin-left: 2px; }
+.lf-head > .lf-badge + .lf-reset, .lf-head > h2 + .lf-reset { margin-left: auto; }
+.lf-reset:disabled { color: #a5afbd; cursor: default; text-decoration: none; }
+.lf-toggle { display: none; }
+
+.lf-body { display: flex; flex: 1 0 auto; flex-direction: column; }
+
+.lf-help { padding: 10px 14px 12px; border-bottom: 1px solid #eef1f6; background: #f8faff; color: #64748b; font-size: 12px; line-height: 1.75; }
+.lf-help p { margin: 0; }
+.lf-help p + p { margin-top: 6px; }
+
+/* Compact rows: a short label beside its control */
+.lf-filters { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-bottom: 1px solid #eef1f6; }
+.lf-row { display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 6px 8px; min-width: 0; }
+.lf-row-label { color: #64748b; font-size: 12px; font-weight: 600; white-space: nowrap; }
+
+.lf-input {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  min-width: 0;
+  margin: 0;
+  padding: 0 6px 0 10px;
+  border: 1px solid #d7e0ee;
+  border-radius: 9px;
+  background: #fff;
+  color: #7b8899;
+}
+.lf-input:focus-within { border-color: #9ab4dc; box-shadow: 0 0 0 3px rgba(59, 130, 246, .1); }
+.lf-input input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #223046;
+  font: inherit;
+  font-size: 14px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.lf-input input::placeholder { color: #94a3b8; }
+.lf-input input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+.lf-input input:disabled { cursor: not-allowed; }
+.mg-page .lf-input input:focus-visible { outline: 0; }
+.lf-clear { display: grid; place-items: center; flex-shrink: 0; width: 24px; height: 24px; border-radius: 6px; color: #94a3b8; }
+.lf-clear:hover { color: #475569; background: #f1f5f9; }
+
+/* One-of choices, styled like the search page's segmented control; native radios inside */
+.lf-segment { display: flex; min-width: 0; padding: 2px; border: 1px solid #e1e6ee; border-radius: 8px; background: #f7f8fa; }
+.lf-segment label { position: relative; display: flex; flex: 1 1 auto; min-width: 0; cursor: pointer; }
+.lf-segment input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.lf-segment span {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 4px;
+  border-radius: 6px;
+  color: #6b7280;
+  font-size: 13px;
+  white-space: nowrap;
+  transition: background .12s, color .12s, box-shadow .12s;
+}
+.lf-segment label:hover input:not(:checked) + span { color: #334155; }
+.lf-segment input:checked + span { background: #fff; color: var(--primary); font-weight: 600; box-shadow: 0 0 0 1px #e1e7f1, 0 1px 2px rgba(15, 23, 42, .05); }
+.lf-segment input:focus-visible + span { outline: 2px solid #85a8e2; outline-offset: 1px; }
+.mg-page .lf-segment input:focus-visible { outline: 0; }
+
+/* The shared scene select as one row: label, select, refresh icon */
+.scene-select.lf-scene { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 6px 8px; min-width: 0; }
+.lf-scene .scene-select-label { gap: 0; color: #64748b; font-size: 12px; font-weight: 600; }
+.lf-scene .scene-select-label svg { display: none; }
+.lf-scene .mg-select { width: 100%; min-width: 0; height: 36px; }
+.lf-scene > p { grid-column: 1 / -1; margin: 0 !important; }
+.scene-select-refresh { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; color: #94a3b8; }
+.scene-select-refresh:hover:not(:disabled) { color: var(--primary); background: #eff4fb; }
+
+.lf-applied-chip {
+  display: inline-flex;
+  grid-column: 2;
+  justify-self: start;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+  height: 26px;
+  padding: 0 3px 0 10px;
+  border: 1px solid #cfe0ff;
+  border-radius: 999px;
+  background: #f4f8ff;
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+.lf-applied-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lf-applied-chip button { display: grid; place-items: center; flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; color: #5b7bb5; }
+.lf-applied-chip button:hover { color: #b42318; background: #fdf0ee; }
+
+.lf-icon-button { display: grid; place-items: center; flex-shrink: 0; width: 26px; height: 26px; border-radius: 7px; color: #94a3b8; }
+.lf-icon-button:hover { color: var(--primary); background: #eff4fb; }
+
+/* Category: fills what is left of the column; the tree takes the rest of it */
+.lf-category { display: flex; flex: 1 0 auto; flex-direction: column; min-height: 320px; padding: 12px 12px 10px; }
+.lf-category-head { display: flex; align-items: center; gap: 6px; min-height: 26px; margin-bottom: 6px; }
+.lf-label { margin: 0; color: #64748b; font-size: 12px; font-weight: 600; letter-spacing: .02em; }
+.lf-category-head small { color: #94a3b8; font-size: 12px; font-variant-numeric: tabular-nums; }
+.lf-category-head .lf-icon-button { margin-left: auto; }
+.lf-category-busy { margin: 0 6px 0 auto; color: #94a3b8; }
+
+.lf-current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  margin-bottom: 8px;
+  padding: 4px 5px 4px 10px;
+  border: 1px solid #cfe0ff;
+  border-radius: 9px;
+  background: #f4f8ff;
+  color: var(--primary);
+}
+.lf-current > svg { flex-shrink: 0; }
+.lf-current-text { display: flex; flex: 1; flex-direction: column; min-width: 0; line-height: 1.4; }
+.lf-current-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 700; }
+.lf-current-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #7b8899; font-size: 12px; }
+
+.lf-recent { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-bottom: 8px; color: #a3afbf; }
+.lf-recent-chip {
+  max-width: 124px;
+  height: 24px;
+  padding: 0 9px;
+  overflow: hidden;
+  border: 1px solid #e3e8f0;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lf-recent-chip:hover { border-color: #c4d3ea; background: #f4f8ff; color: var(--primary); }
+
+.lf-tree-options { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; color: #64748b; font-size: 12px; }
+.lf-tree-options label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.lf-tree-options input { width: 14px; height: 14px; margin: 0; accent-color: var(--primary); }
+
+/* The virtual tree: rows are absolutely placed in a box as tall as all of them */
+.lf-tree {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 200px;
+  margin-top: 8px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid #e6ebf2;
+  border-radius: 9px;
+  background: #fcfdff;
+  scrollbar-width: thin;
+  scrollbar-color: #d5dde8 transparent;
+}
+.mg-page .lf-tree:focus-visible { outline: 2px solid #85a8e2; outline-offset: 1px; }
+.lf-tree-inner { position: relative; }
+.lf-node {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 30px;
+  padding-right: 8px;
+  color: #223046;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.lf-node:hover { background: #f2f6fc; }
+.lf-node[aria-selected="true"] { background: #e6effd; color: var(--primary); font-weight: 600; }
+.lf-node[aria-selected="true"]::before { content: ''; position: absolute; left: 0; top: 5px; bottom: 5px; width: 3px; border-radius: 0 3px 3px 0; background: var(--primary); }
+.lf-tree:focus-visible .lf-node.is-active { box-shadow: inset 0 0 0 2px #9ab4dc; }
+.lf-node.is-context .lf-node-label { color: #8a96a8; }
+.lf-twisty { display: grid; place-items: center; flex-shrink: 0; width: 20px; height: 22px; border-radius: 5px; color: #94a3b8; }
+.lf-twisty svg { transition: transform .12s; }
+.lf-twisty.is-open svg { transform: rotate(90deg); }
+.lf-twisty.is-toggle:hover { color: #334155; background: rgba(15, 23, 42, .06); }
+.lf-node-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.lf-node-label mark { padding: 0 1px; border-radius: 3px; background: #fff0b3; color: inherit; }
+.lf-off { flex-shrink: 0; padding: 0 5px; border-radius: 999px; background: #f1f3f6; color: #94a3b8; font-size: 11px; font-weight: 400; line-height: 17px; }
+.lf-node-count { flex-shrink: 0; min-width: 22px; color: #7b8899; font-size: 12px; font-weight: 400; text-align: right; font-variant-numeric: tabular-nums; }
+.lf-node-count.is-zero { color: #c3ccd8; }
+
+.lf-tree-status {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 120px;
+  margin: 8px 0 0;
+  padding: 16px;
+  border: 1px dashed #e1e7ef;
+  border-radius: 9px;
+  color: #7b8899;
+  font-size: 13px;
+  line-height: 1.7;
+  text-align: center;
+}
+.lf-tree-foot { margin: 7px 0 0; color: #94a3b8; font-size: 12px; line-height: 1.6; }
+.lf-tree-foot .mg-text-button, .lf-error .mg-text-button { padding: 0; font-size: 12px; }
+.lf-error { margin: 8px 0 0; color: #b42318; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+
+/* Narrow screens: the column sits above the images and folds away behind its header */
+@media (max-width: 900px) {
+  .lf-panel { overflow: visible; }
+  .lf-head { position: static; border-radius: 12px 12px 0 0; }
+  .lf-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin-left: 2px;
+    padding: 4px 8px;
+    border: 1px solid #dfe5ee;
+    border-radius: 8px;
+    background: #fff;
+    color: #475569;
+    font-size: 13px;
+  }
+  .lf-toggle svg { transition: transform .15s; }
+  .lf-panel.is-open .lf-toggle svg { transform: rotate(180deg); }
+  .lf-panel:not(.is-open) .lf-body { display: none; }
+  .lf-panel:not(.is-open) .lf-head { border-bottom: 0; }
+  .lf-category { min-height: 0; }
+  .lf-tree { flex: none; height: clamp(62px, var(--lf-rows-height, 320px), 320px); min-height: 0; }
+}

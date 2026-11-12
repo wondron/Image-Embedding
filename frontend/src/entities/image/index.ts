@@ -9,6 +9,7 @@ export {
   type IndexFailure,
   type IndexResponse,
   FOOD_STATE_ENUM,
+  LABEL_STATUS_TEXT,
   parseFoodState,
   parseLabelStatus,
   parseHeatingGroup,

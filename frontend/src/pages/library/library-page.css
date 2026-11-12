@@ -1,0 +1,178 @@
+/*
+ * 图片数据: tools on the left (narrow), images on the right (wide). On wide screens each side
+ * scrolls on its own and the images' header and pager stay in view; narrow screens stack them.
+ */
+.library-page { display: flex; flex-direction: column; overflow: hidden; }
+.mg-page.mg-page-library { display: flex; flex: 1; flex-direction: column; min-height: 0; padding: 0; }
+.lib-layout { display: grid; flex: 1; min-height: 0; grid-template-columns: 300px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 12px; }
+
+.lib-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid rgba(148, 163, 184, .25);
+  border-radius: 12px;
+}
+
+.lib-head {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  min-height: 46px;
+  padding: 5px 10px 5px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.lib-head-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.lib-head-title h2 { font-size: 14px; font-weight: 700; color: #334155; white-space: nowrap; }
+.lib-count { padding: 1px 7px; border-radius: 4px; background: #eef3fa; color: #5f7ba5; font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.lib-busy { flex-shrink: 0; color: #94a3b8; }
+.mg-status.lib-status { margin-left: 4px; padding: 3px 8px; font-size: 12px; }
+.lib-status.is-error > span { background: #c5a16b; }
+.lib-head-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-left: auto; }
+.lib-page-size { display: inline-flex; align-items: center; gap: 6px; color: #64748b; font-size: 13px; white-space: nowrap; }
+.lib-page-size .mg-select { min-width: 0; height: 34px; padding-right: 24px; }
+.lib-head-tools .mg-view-toggle button { width: 32px; height: 30px; }
+.lib-head-tools .mg-btn { height: 34px; }
+
+/* What narrows the list, each removable */
+.lib-chips { display: flex; flex-shrink: 0; flex-wrap: wrap; align-items: center; gap: 6px; padding: 7px 14px; border-bottom: 1px solid var(--border); background: #f8faff; }
+.lib-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  height: 26px;
+  padding: 0 3px 0 9px;
+  border: 1px solid #d6e3fa;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 12px;
+}
+.lib-chip > small { flex-shrink: 0; color: #7b8899; font-size: 12px; }
+.lib-chip-value { min-width: 0; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--primary); font-weight: 600; }
+.lib-chip > button { display: grid; place-items: center; flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; color: #7b8899; }
+.lib-chip > button:hover { color: #b42318; background: #fdf0ee; }
+.lib-chips > .mg-text-button { margin-left: 4px; font-size: 12px; }
+
+.lib-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 14px 0;
+  padding: 7px 8px 7px 12px;
+  border: 1px solid #dcebe4;
+  border-radius: 8px;
+  background: #f5faf8;
+  color: #4f7d6c;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.lib-notice > span { flex: 1; min-width: 0; }
+.lib-notice > button { display: grid; place-items: center; flex-shrink: 0; width: 24px; height: 24px; border-radius: 6px; color: inherit; }
+.lib-notice > button:hover { background: rgba(15, 23, 42, .05); }
+
+.lib-content { position: relative; flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.lib-content > .mg-errors { margin-top: 14px; }
+.lib-content > .mg-empty { justify-content: center; min-height: 100%; }
+
+/* Cards: large shows scenes and tags, small only the image, title and state */
+.mg-library-grid.lib-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr));
+  gap: 12px;
+  padding: 14px;
+}
+.mg-library-grid.lib-grid.is-small { grid-template-columns: repeat(auto-fill, minmax(min(100%, 130px), 1fr)); gap: 10px; }
+.lib-grid.is-small .mg-upload-card > div { padding: 7px 8px 8px; }
+.lib-grid.is-small .mg-upload-card strong { font-size: 12px; }
+.lib-grid.is-small .mg-upload-card small { gap: 3px; margin-top: 5px; }
+.lib-grid.is-small .mg-category-chip { padding: 1px 6px; font-size: 12px; }
+.lib-grid.is-small .mg-upload-preview > span { display: none; }
+
+/* A card's category and tags filter by themselves */
+.mg-category-chip.lib-filter-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; transition: border-color .12s, background .12s, color .12s; }
+.mg-category-chip.lib-filter-chip:hover { border-color: #b7cdf3; background: #f4f8ff; color: var(--primary); }
+.mg-category-chip.is-current { max-width: 100%; overflow: hidden; border-color: #b7cdf3; background: #edf3fc; color: var(--primary); text-overflow: ellipsis; white-space: nowrap; }
+.lib-tag { padding: 0; color: #64748b; font-size: 11px; cursor: pointer; }
+.lib-tag:hover { color: var(--primary); text-decoration: underline; }
+.lib-tag.is-current { color: var(--primary); font-weight: 600; cursor: default; text-decoration: none; }
+.lib-tag-more { color: #94a3b8; cursor: help; }
+.mg-attributes .lib-tag, .mg-attributes .lib-tag-more { margin-right: 6px; font-size: 13px; }
+.lib-none { color: #94a3b8; }
+
+/* Rows: the head stays on top of the scrolled list */
+.lib-content .mg-library-head { position: sticky; top: 0; z-index: 1; border-top: 0; }
+.lib-row-category { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+.lib-row-category small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #94a3b8; font-size: 12px; }
+.lib-row-time { color: #64748b; font-variant-numeric: tabular-nums; }
+
+.lib-loading > p { display: flex; align-items: center; justify-content: center; gap: 7px; margin: 16px 0 0; color: #7b8899; font-size: 13px; }
+.lib-skeleton > span {
+  display: block;
+  aspect-ratio: 1 / 1.22;
+  border-radius: 10px;
+  background: linear-gradient(110deg, #f2f5f9 30%, #fafcfe 50%, #f2f5f9 70%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+.mg-pagination.lib-pagination { flex-shrink: 0; flex-wrap: wrap; gap: 8px 12px; padding: 8px 12px 8px 14px; }
+.lib-page-summary { min-width: 0; font-variant-numeric: tabular-nums; }
+.lib-pager { display: flex; align-items: center; gap: 6px; }
+.lib-pager button { width: 28px; height: 28px; }
+.lib-pager button:not(:disabled):hover { border-color: #c4d3ea; color: var(--primary); }
+.lib-page-jump { display: inline-flex; align-items: center; gap: 5px; color: #64748b; font-size: 13px; white-space: nowrap; }
+.lib-page-jump input {
+  width: 56px;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid #d7e0ee;
+  border-radius: 6px;
+  background: #fff;
+  color: #223046;
+  font: inherit;
+  font-size: 13px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.lib-page-jump input::-webkit-inner-spin-button,
+.lib-page-jump input::-webkit-outer-spin-button { margin: 0; -webkit-appearance: none; appearance: none; }
+
+@media (min-width: 1500px) {
+  .lib-layout { grid-template-columns: 320px minmax(0, 1fr); }
+}
+
+@media (max-width: 1100px) {
+  .lib-layout { grid-template-columns: 270px minmax(0, 1fr); gap: 10px; }
+  .mg-status.lib-status { display: none; }
+}
+
+@media (max-width: 900px) {
+  .library-page { overflow: auto; }
+  .mg-page.mg-page-library { display: block; flex: none; }
+  .lib-layout { display: flex; flex-direction: column; gap: 10px; }
+  .lib-main { overflow: visible; }
+  .lib-content { flex: none; overflow: visible; }
+  .lib-content > .mg-empty { min-height: 0; }
+}
+
+@media (max-width: 580px) {
+  .lib-head { padding: 6px 10px; }
+  .lib-head-tools { justify-content: space-between; width: 100%; }
+  .lib-page-size > span { display: none; }
+  .mg-library-grid.lib-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); gap: 10px; padding: 10px; }
+  .mg-library-grid.lib-grid.is-small { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .lib-chips { padding: 7px 10px; }
+  .lib-chip-value { max-width: 180px; }
+  .lib-notice { margin-inline: 10px; }
+  .mg-pagination.lib-pagination { justify-content: center; padding: 8px 10px; }
+  .lib-page-summary { width: 100%; text-align: center; }
+}

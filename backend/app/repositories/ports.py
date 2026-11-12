@@ -395,7 +395,7 @@ class ImageStoragePort(ABC):
         ext: str,
         content_type: str | None = None,
     ) -> str:
-        """Upload original/{image_id}.{ext}; return full https original_url."""
+        """Upload original/{image_id}.{ext} (optional key_prefix); return full https original_url."""
         raise NotImplementedError
 
     @abstractmethod
@@ -406,7 +406,7 @@ class ImageStoragePort(ABC):
         *,
         content_type: str | None = "image/webp",
     ) -> str:
-        """Upload thumb/{image_id}.webp; return full https thumb_url."""
+        """Upload thumb/{image_id}.webp (optional key_prefix); return full https thumb_url."""
         raise NotImplementedError
 
     @abstractmethod
@@ -418,7 +418,7 @@ class ImageStoragePort(ABC):
         ext: str,
         content_type: str | None = None,
     ) -> str:
-        """Upload staging/{candidate_id}.{ext}; return full https staged_url."""
+        """Upload staging/{candidate_id}.{ext} (optional key_prefix); return full https staged_url."""
         raise NotImplementedError
 
     @abstractmethod

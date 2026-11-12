@@ -104,6 +104,24 @@ class ImageStorageSettingsTests(unittest.TestCase):
         self.assertIn("IMAGE_STORAGE_CONFIG.access_key_id", ctx.exception.detail)
         storage = S3ImageStorage(ImageStorageSettings(use_boto3=True, access_key_id="ak", secret_access_key="sk"))
         self.assertEqual(storage.bucket, "image-embedding")
+        cfg = storage._client.meta.config
+        if hasattr(cfg, "request_checksum_calculation"):
+            self.assertEqual(cfg.request_checksum_calculation, "when_required")
+            self.assertEqual(cfg.response_checksum_validation, "when_required")
+
+        with_endpoint = S3ImageStorage(
+            ImageStorageSettings(
+                use_boto3=True,
+                access_key_id="ak",
+                secret_access_key="sk",
+                endpoint_url="https://oss-cn-hangzhou.aliyuncs.com",
+            )
+        )
+        endpoint_cfg = with_endpoint._client.meta.config
+        self.assertEqual(endpoint_cfg.s3.get("addressing_style"), "path")
+        if hasattr(endpoint_cfg, "request_checksum_calculation"):
+            self.assertEqual(endpoint_cfg.request_checksum_calculation, "when_required")
+            self.assertEqual(endpoint_cfg.response_checksum_validation, "when_required")
 
 
 class ImageDownloadSettingsTests(unittest.TestCase):

@@ -21,6 +21,12 @@ describe('listImages (GET /api/images)', () => {
     expect(buildListImagesQuery({ categoryId: 0, labelStatus: null }).toString()).toBe('page=1&page_size=24&scene=general')
   })
 
+  it('sends one trimmed tag for the exact tag filter and omits a blank one', () => {
+    expect(buildListImagesQuery({ tag: ' 带骨 ' }).toString()).toBe('page=1&page_size=24&scene=general&tag=%E5%B8%A6%E9%AA%A8')
+    expect(buildListImagesQuery({ tag: '   ' }).toString()).toBe('page=1&page_size=24&scene=general')
+    expect(buildListImagesQuery({ tag: null, pageSize: 48 }).toString()).toBe('page=1&page_size=48&scene=general')
+  })
+
   it('asks for the images that need a sync or a vector only when the filter is on', () => {
     expect(buildListImagesQuery({ outOfSync: true }).toString()).toBe('page=1&page_size=24&scene=general&out_of_sync=true')
     expect(buildListImagesQuery({ outOfSync: false }).toString()).toBe('page=1&page_size=24&scene=general')

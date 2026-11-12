@@ -21,6 +21,6 @@ export const EMPTY_COPY = {
   },
   libraryFilteredEmpty: {
     title: '没有匹配的图片',
-    description: '当前搜索、类别或场景下没有结果，试试清空筛选或切回「通用」。',
+    description: '当前筛选条件下没有图片，试试放宽或清空筛选，或切回「通用」场景。',
   },
 } as const

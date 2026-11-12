@@ -46,6 +46,7 @@ from app.core.config.constant import (
     VERSION,
     NacosProfile,
 )
+from app.core.config.key_prefix import normalize_key_prefix
 
 _T = TypeVar("_T")
 _TRUE = {"1", "true", "yes", "y", "on"}
@@ -269,7 +270,11 @@ class ImageStorageSettings:
     missing from the section fall back to the IMAGE_STORAGE_DEFAULT_* constants.
 
     ASSUMPTION A8: public_base_url is the CDN/bucket HTTPS prefix baked into
-    original_url / thumb_url / staged_url. Keys never include scene/category.
+    original_url / thumb_url / staged_url, not the object-key prefix. Optional
+    key_prefix (same layer as bucket / public_base_url) is prepended to new
+    original / thumb / staging keys when non-empty after normalization; omit,
+    null, empty, or a value that normalizes to empty is stored as "".
+    ImageEmbedding is not a code default. Keys never include scene/category.
     """
 
     use_boto3: bool = False
@@ -280,11 +285,18 @@ class ImageStorageSettings:
     access_key_id: str = field(default="", repr=False)
     secret_access_key: str = field(default="", repr=False)
     mock_mirror_dir: str = ""  # mock 驱动另存一份字节的目录；空表示只在内存里
+    key_prefix: str = ""  # optional object-key prefix; "" = current-production keys
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "key_prefix", normalize_key_prefix(self.key_prefix))
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> ImageStorageSettings:
         name = "IMAGE_STORAGE_CONFIG"
         section = _section(config, name)
+        raw_prefix = section.get("key_prefix") if "key_prefix" in section else None
+        if raw_prefix is not None and not isinstance(raw_prefix, str):
+            raise ValueError(f"{name}.key_prefix 必须是字符串，实际类型为 {type(raw_prefix).__name__}")
         return cls(
             use_boto3=_flag(section, name, "use_boto3", False),
             endpoint_url=_text(section, "endpoint_url"),
@@ -294,6 +306,7 @@ class ImageStorageSettings:
             access_key_id=_text(section, "access_key_id"),
             secret_access_key=_text(section, "secret_access_key"),
             mock_mirror_dir=_text(section, "mock_mirror_dir"),
+            key_prefix="" if raw_prefix is None else raw_prefix,
         )
 
 

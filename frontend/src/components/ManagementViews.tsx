@@ -1,17 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
-import { ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Circle, Clock3, CloudUpload, FolderOpen, ImagePlus, Images, Info, Layers3, ListChecks, LoaderCircle, Pencil, Plus, RotateCcw, Search, Square, X, XCircle } from 'lucide-react'
+import { ArrowRight, Check, CheckCircle2, Circle, Clock3, CloudUpload, FolderOpen, Images, Info, ListChecks, LoaderCircle, Pencil, Plus, RotateCcw, Square, X, XCircle } from 'lucide-react'
 import { Dialog } from './Dialog'
 import { TasksPage } from '../pages/tasks'
+import { LibraryPage } from '../pages/library'
 import { categoryLabel, type CategoryTree } from '../entities/category'
-import { indexImage, type ImageDeleteResult, type LabelStatus, type LibraryImageItem, type VectorStatus } from '../entities/image'
-import { DEFAULT_SCENE, sceneDisplayLabel, toApiSceneCode, sceneError, writeMembership, type VectorSync } from '../entities/scene'
+import { indexImage } from '../entities/image'
+import { sceneDisplayLabel, sceneError, writeMembership, type VectorSync } from '../entities/scene'
 import { EmptyState, Metric } from '../shared/ui'
-import { EMPTY_COPY } from '../shared/config'
-import { formatLibraryTime } from '../shared/lib'
-import { SceneSelect } from '../features/scene-select'
-import { useLibraryList } from '../features/library-list'
-import { ImageEditPanel } from '../features/image-edit'
-import { CategoryFilter, useCategoryTree } from '../features/category-picker'
+import { useCategoryTree } from '../features/category-picker'
+import { INITIAL_LIBRARY_FILTERS, type LibraryFilters } from '../features/library-filters'
 import {
   AnnotationForm,
   emptyAnnotation,
@@ -24,7 +21,7 @@ import {
   type MembershipStep,
   type SceneCatalogView,
 } from '../features/index-upload'
-import { markScenePending, useSceneCatalog, useSceneSelection } from '../features/scene-catalog'
+import { markScenePending, useSceneCatalog } from '../features/scene-catalog'
 import { beginSceneWrite, endSceneWrite } from '../features/scene-sync'
 import './ManagementViews.css'
 
@@ -92,26 +89,6 @@ async function applySceneSteps(base: string, imageId: string, steps: readonly Me
   return { scenes, notes: [...new Set(notes)] }
 }
 
-const LABEL_STATUS_TEXT: Record<LabelStatus, string> = { unlabeled: '未标注', auto: '自动标注', verified: '已核验' }
-
-/** Only what needs attention gets a flag: an image in step with the vector store stays quiet. */
-const VECTOR_FLAG: Partial<Record<VectorStatus, { text: string; title: string }>> = {
-  stale: { text: '待同步', title: '向量库里的过滤信息落后于数据库，检索可能按旧标注命中它；打开图片可以同步' },
-  missing: { text: '没有向量', title: '向量库里没有这张图，检索查不到它；重新上传同一张图片即可补上' },
-}
-
-function VectorFlag({ status }: { status: VectorStatus | null }) {
-  const flag = status ? VECTOR_FLAG[status] : undefined
-  return flag ? <span className={`mg-vector-flag is-${status}`} title={flag.title}>{flag.text}</span> : null
-}
-
-/** A library card's title: the start of its description, else a short id. */
-function libraryTitle(item: LibraryImageItem): string {
-  const text = Array.from(item.description.trim())
-  if (text.length) return text.length > 24 ? `${text.slice(0, 24).join('')}…` : text.join('')
-  return `#${item.id.slice(0, 8)}`
-}
-
 /** 「牛排」 / 「未设类别」 for a card; the id when the tree does not have the node. */
 function categoryText(tree: CategoryTree | null, categoryId: number | null): string {
   if (categoryId === null) return '未设类别'
@@ -128,20 +105,9 @@ function supportsDirectoryPicker(): boolean {
 }
 
 export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
-  const [libraryQuery, setLibraryQuery] = useState('')
-  /** The category filter: that category and its subtree; null: all. */
-  const [libraryCategoryId, setLibraryCategoryId] = useState<number | null>(null)
-  const [libraryLabelStatus, setLibraryLabelStatus] = useState<LabelStatus | ''>('')
-  /** Only images whose vector store side needs attention (by the server's ledger). */
-  const [libraryOutOfSync, setLibraryOutOfSync] = useState(false)
-  /** The open editor has unsaved edits: its dialog stays open until they are saved or undone. */
-  const [libraryDirty, setLibraryDirty] = useState(false)
-  const [libraryScene, setLibraryScene] = useState<string>(DEFAULT_SCENE)
-  const [libraryLayout, setLibraryLayout] = useState<'grid' | 'list'>('grid')
+  // The library's filters and page live here, so they survive a visit to 上传与导入 or 入库任务
+  const [libraryFilters, setLibraryFilters] = useState<LibraryFilters>(INITIAL_LIBRARY_FILTERS)
   const [libraryPage, setLibraryPage] = useState(1)
-  const [debouncedLibraryQuery, setDebouncedLibraryQuery] = useState('')
-  const [libraryPreview, setLibraryPreview] = useState<LibraryImageItem | null>(null)
-  const [libraryReloadKey, setLibraryReloadKey] = useState(0)
   const [taskStatus, setTaskStatus] = useState('全部任务')
   const [jobs, setJobs] = useState<IndexJob[]>([])
   const jobsRef = useRef(jobs)
@@ -185,8 +151,6 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
   }, [apiBase])
 
   const sceneCatalog = useSceneCatalog(apiBase)
-  const handleLibraryScene = useCallback((code: string) => { setLibraryScene(toApiSceneCode(code)); setLibraryPage(1) }, [])
-  const librarySelection = useSceneSelection(libraryScene, handleLibraryScene, apiBase)
   // Read again each time the import or library page opens: categories may have been edited meanwhile
   const categoryTree = useCategoryTree(apiBase, view === 'import' || view === 'library')
   const sceneView: SceneCatalogView = { active: sceneCatalog.active, loading: sceneCatalog.loading, error: sceneCatalog.error, refresh: sceneCatalog.refresh }
@@ -205,47 +169,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
   ].filter((text): text is string => text !== null)
   const importReady = blockers.length === 0
 
-  // Debounce search box → q (~300ms); empty trim omits q on request.
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setDebouncedLibraryQuery(libraryQuery.trim())
-      setLibraryPage(1)
-    }, 300)
-    return () => window.clearTimeout(timer)
-  }, [libraryQuery])
-
-  const libraryList = useLibraryList({
-    enabled: view === 'library' && librarySelection.selectionValid,
-    apiBase,
-    page: libraryPage,
-    pageSize: 24,
-    q: debouncedLibraryQuery || undefined,
-    categoryId: libraryCategoryId,
-    labelStatus: libraryLabelStatus || null,
-    outOfSync: libraryOutOfSync,
-    scene: libraryScene,
-    reloadKey: libraryReloadKey,
-  })
-  useEffect(() => {
-    if (view !== 'library') return
-    // Clamp page when total shrinks
-    const maxPage = Math.max(1, Math.ceil(libraryList.total / 24) || 1)
-    if (libraryList.total > 0 && libraryList.items.length === 0 && libraryPage > maxPage) {
-      setLibraryPage(maxPage)
-    }
-  }, [view, libraryList.total, libraryList.items.length, libraryPage])
-  const libraryItems = libraryList.items
-  // Each item says how it stands in the vector store; a page where none could be read means the store is down
-  const vectorUnreadable = libraryItems.length > 0 && libraryItems.every(item => item.vectorStatus === 'unavailable')
-  const staleOnPage = libraryItems.filter(item => item.vectorStatus === 'stale').length
-  const missingOnPage = libraryItems.filter(item => item.vectorStatus === 'missing').length
-  const vectorTally = [staleOnPage ? `${staleOnPage} 张待同步` : '', missingOnPage ? `${missingOnPage} 张没有向量` : ''].filter(Boolean).join('、')
-  const libraryTotal = libraryList.total
-  const libraryLoading = libraryList.loading
-  const libraryError = libraryList.error
-  const libraryConnected = libraryList.connected
-
-    const commitJobs = useCallback((next: IndexJob[]) => {
+  const commitJobs = useCallback((next: IndexJob[]) => {
     jobsRef.current = next
     setJobs(next)
   }, [])
@@ -292,27 +216,12 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     setFileIssues([])
   }
 
-  function openLibraryImage(item: LibraryImageItem) {
-    setLibraryDirty(false)
-    setLibraryPreview(item)
-  }
-
-  function closeLibraryImage() {
-    setLibraryPreview(null)
-    setLibraryDirty(false)
-  }
-
-  const reloadLibrary = useCallback(() => setLibraryReloadKey(key => key + 1), [])
-
-  const libraryImageDeleted = useCallback((result: ImageDeleteResult | null) => {
-    setLibraryPreview(null)
-    setLibraryDirty(false)
-    setNotice(result === null
-      ? '这张图片已经被删除了。'
-      : result.cleanup === 'done'
-        ? '已删除图片，向量和原图、缩略图已清理。'
-        : '已删除图片；向量和图片文件稍后由清理任务删除。')
-  }, [])
+  const openSceneSync = useCallback(() => {
+    onNavigate('scenes')
+    const url = new URL(window.location.href)
+    url.searchParams.set('sceneTab', 'sync')
+    window.history.replaceState(null, '', url.toString())
+  }, [onNavigate])
 
   /** Open the single-image dialog on the image's own annotation, else a copy of the batch's. */
   function openSingle(job: IndexJob) {
@@ -457,139 +366,29 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     return true
   })
 
-  return <div className="mg-page">
-    {view !== 'tasks' && <div className="mg-page-toolbar">
-      {view === 'library' && <>
-        <label className="mg-search"><Search size={17} /><input aria-label="搜索图库" placeholder="搜索图片名称或食材…" value={libraryQuery} onChange={event => setLibraryQuery(event.target.value)} />{libraryQuery && <button aria-label="清空搜索" onClick={() => setLibraryQuery('')}><X size={15} /></button>}</label>
-        <CategoryFilter tree={categoryTree.tree} loading={categoryTree.loading} loadError={categoryTree.error} onRetry={categoryTree.refresh} value={libraryCategoryId} onChange={id => { setLibraryCategoryId(id); setLibraryPage(1) }} />
-        <select className="mg-select" aria-label="标注状态筛选" value={libraryLabelStatus} onChange={event => { setLibraryLabelStatus(event.target.value as LabelStatus | ''); setLibraryPage(1) }}>
-          <option value="">全部标注状态</option>
-          <option value="unlabeled">未标注</option>
-          <option value="auto">自动标注</option>
-          <option value="verified">已核验</option>
-        </select>
-        <select className={`mg-select${libraryOutOfSync ? ' is-set' : ''}`} aria-label="向量库状态筛选" title="按写入记录：向量库里的过滤信息落后于数据库，或当前模型还没有这张图的向量" value={libraryOutOfSync ? 'out' : ''} onChange={event => { setLibraryOutOfSync(event.target.value === 'out'); setLibraryPage(1) }}>
-          <option value="">全部向量状态</option>
-          <option value="out">待同步或没有向量</option>
-        </select>
-          <SceneSelect
-            id="library-scene"
-            variant="management"
-            value={libraryScene}
-            disabled={libraryLoading}
-            onChange={handleLibraryScene}
-          />
-        <div className="mg-view-toggle" aria-label="图片展示方式"><button className={libraryLayout === 'grid' ? 'active' : ''} aria-label="网格展示" aria-pressed={libraryLayout === 'grid'} onClick={() => setLibraryLayout('grid')}><Images size={17} /></button><button className={libraryLayout === 'list' ? 'active' : ''} aria-label="列表展示" aria-pressed={libraryLayout === 'list'} onClick={() => setLibraryLayout('list')}><ListChecks size={17} /></button></div>
-        <button className="mg-btn mg-primary" onClick={() => onNavigate('import')}><Plus size={17} />导入图片</button>
-      </>}
-      {view === 'import' && <>
-        <button className="mg-btn mg-primary" disabled={indexing} onClick={() => fileInput.current?.click()}><FolderOpen size={17} />选择图片</button>
-        {dirSupported
-          ? <button className="mg-btn mg-secondary" disabled={indexing} onClick={() => dirInput.current?.click()}><FolderOpen size={17} />选择目录</button>
-          : <span className="mg-toolbar-summary" title="当前浏览器不支持目录选择">目录选择不可用</span>}
-        <span className="mg-toolbar-summary">JPG、PNG、WebP · 每张最大 15 MB · 最多 100 张</span>
-        <input ref={fileInput} type="file" className="mg-hidden" aria-label="选择待入库图片" accept="image/jpeg,image/png,image/webp" multiple onChange={event => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />
-        {dirSupported && <input ref={dirInput} type="file" className="mg-hidden" aria-label="选择待入库目录" accept="image/jpeg,image/png,image/webp" multiple {...({ webkitdirectory: '', directory: '' } as object)} onChange={event => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />}
-      </>}
-      <span className="mg-status"><span />{view === 'import' ? (indexing ? '入库进行中' : '自建入库已接入') : libraryLoading ? '图库加载中…' : libraryError ? '图库加载失败' : libraryConnected ? (vectorUnreadable ? '图库已接入 · 向量库状态读不到' : '图库已接入') : '图库未连接'}</span>
+  return <div className={`mg-page${view === 'library' ? ' mg-page-library' : ''}`}>
+    {view === 'import' && <div className="mg-page-toolbar">
+      <button className="mg-btn mg-primary" disabled={indexing} onClick={() => fileInput.current?.click()}><FolderOpen size={17} />选择图片</button>
+      {dirSupported
+        ? <button className="mg-btn mg-secondary" disabled={indexing} onClick={() => dirInput.current?.click()}><FolderOpen size={17} />选择目录</button>
+        : <span className="mg-toolbar-summary" title="当前浏览器不支持目录选择">目录选择不可用</span>}
+      <span className="mg-toolbar-summary">JPG、PNG、WebP · 每张最大 15 MB · 最多 100 张</span>
+      <input ref={fileInput} type="file" className="mg-hidden" aria-label="选择待入库图片" accept="image/jpeg,image/png,image/webp" multiple onChange={event => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />
+      {dirSupported && <input ref={dirInput} type="file" className="mg-hidden" aria-label="选择待入库目录" accept="image/jpeg,image/png,image/webp" multiple {...({ webkitdirectory: '', directory: '' } as object)} onChange={event => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />}
+      <span className="mg-status"><span />{indexing ? '入库进行中' : '自建入库已接入'}</span>
     </div>}
 
-    {view === 'library' && (() => {
-      const hasFilter = Boolean(debouncedLibraryQuery) || libraryCategoryId !== null || libraryLabelStatus !== '' || libraryOutOfSync || libraryScene !== sceneCatalog.defaultScene?.code
-      const totalPages = Math.max(1, Math.ceil(libraryTotal / 24) || 1)
-      const pageLabel = libraryTotal === 0 ? '—' : `${libraryPage} / ${totalPages}`
-      const activeCategories = categoryTree.tree ? [...categoryTree.tree.byId.values()].filter(entry => entry.node.isActive).length : null
-      return <>
-      <div className="mg-metrics">
-        <Metric label="图片总量" value={libraryError ? '—' : String(libraryTotal)} detail={libraryConnected ? '当前筛选合计' : '接入图库后显示'} icon={Images} />
-        <Metric label="启用类别" value={activeCategories === null ? '—' : String(activeCategories)} detail={activeCategories === null ? (categoryTree.error ? '类别读取失败' : '读取类别中') : '来自食材管理'} icon={Layers3} />
-        <Metric label="待入库任务" value={jobs.length ? String(jobs.filter(j => j.status !== 'success').length) : '—'} detail={jobs.length ? '本会话未完成项' : '接入任务后显示'} icon={ListChecks} />
-      </div>
-      <section className="mg-panel">
-        {libraryLayout === 'list' && <div className="mg-table-head mg-library-head"><span>图片 / 名称</span><span>类别</span><span>标注 · 标签</span><span>入库时间</span></div>}
-        {libraryError && <div className="mg-errors" role="alert"><div><strong>图库加载失败</strong><button type="button" className="mg-text-button" onClick={() => setLibraryReloadKey(key => key + 1)}>重试</button></div><p>{libraryError}</p></div>}
-        {!libraryError && libraryLoading && libraryItems.length === 0 && (
-          <div className="loading-state" aria-busy="true" aria-live="polite">
-            <LoaderCircle size={22} className="spin" />
-            <h3>正在加载图库…</h3>
-            <p>请求 GET /api/images（每页 24 张）</p>
-            <div className="skeleton-row" aria-hidden="true"><div className="skeleton-card" /><div className="skeleton-card" /><div className="skeleton-card" /></div>
-          </div>
-        )}
-        {!libraryError && !libraryLoading && libraryTotal === 0 && !hasFilter && (
-          <EmptyState icon={Images} title={EMPTY_COPY.libraryEmpty.title} description={EMPTY_COPY.libraryEmpty.description}>
-            <button className="mg-btn mg-secondary" onClick={() => onNavigate('import')}><ImagePlus size={17} />准备第一批图片<ArrowRight size={16} /></button>
-          </EmptyState>
-        )}
-        {!libraryError && !libraryLoading && libraryTotal === 0 && hasFilter && (
-          <EmptyState icon={Images} title={EMPTY_COPY.libraryFilteredEmpty.title} description={EMPTY_COPY.libraryFilteredEmpty.description}>
-            <button className="mg-btn mg-secondary" onClick={() => { setLibraryQuery(''); setLibraryCategoryId(null); setLibraryLabelStatus(''); setLibraryOutOfSync(false); setLibraryScene(sceneCatalog.defaultScene?.code ?? ''); setLibraryPage(1) }}>清空筛选</button>
-          </EmptyState>
-        )}
-        {!libraryError && libraryItems.length > 0 && libraryLayout === 'grid' && (
-          <div className={`mg-upload-grid mg-library-grid${libraryLoading ? ' is-loading' : ''}`} aria-busy={libraryLoading}>
-            {libraryItems.map(item => (
-              <article className="mg-upload-card mg-library-card" key={item.id}>
-                <button
-                  type="button"
-                  className="mg-upload-preview"
-                  onClick={() => openLibraryImage(item)}
-                  aria-label={`标注 ${libraryTitle(item)}`}
-                >
-                  {item.imageUrl
-                    ? <img src={item.imageUrl} alt="" loading="lazy" />
-                    : <span className="mg-library-placeholder" aria-hidden="true"><Images size={28} strokeWidth={1.4} /></span>}
-                  <span>查看与标注</span>
-                </button>
-                <div>
-                  <strong title={item.description || item.id}>{libraryTitle(item)}</strong>
-                  <small>
-                    <span className={`mg-category-chip${item.category ? '' : ' is-empty'}`}>{item.category ?? '未标注'}</span>
-                    {item.labelStatus && item.labelStatus !== 'unlabeled' && <span className={`mg-label-status is-${item.labelStatus}`}>{LABEL_STATUS_TEXT[item.labelStatus]}</span>}
-                    <VectorFlag status={item.vectorStatus} />
-                    {item.scenes.map(code => <span className="mg-library-scene" key={code}>{sceneCatalog.data?.scenes.find(s => s.code === code)?.name ?? sceneDisplayLabel(code)}</span>)}
-                  </small>
-                  {item.tags.length > 0 && <small className="mg-library-tags">{item.tags.slice(0, 4).map(tag => <span key={tag}>#{tag}</span>)}{item.tags.length > 4 && <span>+{item.tags.length - 4}</span>}</small>}
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-        {!libraryError && libraryItems.length > 0 && libraryLayout === 'list' && (
-          <div className={`mg-library-list${libraryLoading ? ' is-loading' : ''}`} role="list" aria-busy={libraryLoading}>
-            {libraryItems.map(item => (
-              <div className="mg-library-row mg-table-row" role="listitem" key={item.id}>
-                <button
-                  type="button"
-                  className="mg-library-name"
-                  onClick={() => openLibraryImage(item)}
-                  aria-label={`标注 ${libraryTitle(item)}`}
-                >
-                  {item.imageUrl
-                    ? <img src={item.imageUrl} alt="" className="mg-library-thumb" loading="lazy" />
-                    : <span className="mg-library-thumb mg-library-placeholder" aria-hidden="true"><Images size={16} /></span>}
-                  <strong title={item.description || item.id}>{libraryTitle(item)}</strong>
-                </button>
-                <span><span className={`mg-category-chip${item.category ? '' : ' is-empty'}`}>{item.category ?? '未标注'}</span></span>
-                <span className="mg-attributes">{item.labelStatus && item.labelStatus !== 'unlabeled' && <span className={`mg-label-status is-${item.labelStatus}`}>{LABEL_STATUS_TEXT[item.labelStatus]}</span>}<VectorFlag status={item.vectorStatus} />{item.tags.length ? item.tags.map(tag => `#${tag}`).join(' ') : item.labelStatus === 'unlabeled' ? '' : '—'}</span>
-                <span>{formatLibraryTime(item.createdAt)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="mg-pagination">
-          <span>{libraryError ? '加载失败' : libraryLoading && libraryItems.length === 0 ? '加载中…' : libraryTotal === 0 ? '暂无已入库图片' : `共 ${libraryTotal} 张`}{!libraryError && vectorTally && <span className="mg-vector-tally"> · 本页 {vectorTally}</span>}</span>
-          <div>
-            <span>每页 24 张</span>
-            <button aria-label="上一页" disabled={libraryLoading || libraryPage <= 1 || libraryTotal === 0} onClick={() => setLibraryPage(page => Math.max(1, page - 1))}><ChevronLeft size={16} /></button>
-            <span>{pageLabel}</span>
-            <button aria-label="下一页" disabled={libraryLoading || libraryPage >= totalPages || libraryTotal === 0} onClick={() => setLibraryPage(page => page + 1)}><ChevronRight size={16} /></button>
-          </div>
-        </div>
-      </section>
-      <div className="mg-info"><Info size={17} /><p>点击图片查看与标注：可改类别、标注状态、标签、描述和食物标注，保存后自动同步到向量库；也可以删除图片。标着「待同步」的图片，向量库里的过滤信息落后于数据库，打开后可一键同步（批量同步在「场景管理」）；「没有向量」的检索查不到，打开后可用存储里的原图重新生成。用「待同步或没有向量」筛选可以一次找出它们。按类别筛选时包含它的所有下级类别。</p></div>
-    </>
-    })()}
+    {view === 'library' && <LibraryPage
+      apiBase={apiBase}
+      filters={libraryFilters}
+      setFilters={setLibraryFilters}
+      page={libraryPage}
+      setPage={setLibraryPage}
+      categories={categoryTree}
+      pendingImports={jobs.filter(job => job.status !== 'success').length}
+      onImport={() => onNavigate('import')}
+      onOpenSceneSync={openSceneSync}
+    />}
 
     {view === 'import' && <div className="mg-import-layout"><section className="mg-panel mg-import-main">
       <div className={`mg-dropzone ${dragging ? 'is-dragging' : ''} ${indexing ? 'is-disabled' : ''}`} onDragOver={event => { event.preventDefault(); if (!indexing) setDragging(true) }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false) }} onDrop={dropFiles}>
@@ -685,18 +484,6 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
         </div>
       </Dialog>
     })()}
-    {libraryPreview && <Dialog title="图片标注" size="lg" onClose={closeLibraryImage} dismissDisabled={libraryDirty}>
-      <ImageEditPanel
-        item={libraryPreview}
-        apiBase={apiBase}
-        categories={categoryTree}
-        onChanged={reloadLibrary}
-        onDeleted={libraryImageDeleted}
-        onDirtyChange={setLibraryDirty}
-        onManage={() => { closeLibraryImage(); onNavigate('scenes'); const u = new URL(window.location.href); u.searchParams.set('sceneTab', 'sync'); window.history.replaceState(null, '', u.toString()) }}
-        onUpload={libraryDirty ? undefined : () => { closeLibraryImage(); onNavigate('import') }}
-      />
-    </Dialog>}
   </div>
 }
 

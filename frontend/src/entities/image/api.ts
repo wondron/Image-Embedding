@@ -34,6 +34,8 @@ export interface ListImagesOptions {
   labelStatus?: LabelStatus | null
   /** Only images whose vector store side needs attention (stale payload or no vector), by the server's ledger. */
   outOfSync?: boolean
+  /** One tag, matched exactly (case-sensitive) against the image's tags; blank: no filter. */
+  tag?: string | null
   /** Default general (PG v0.1). Do not omit to mean "all scenes". */
   scene?: string
   baseUrl?: string
@@ -41,7 +43,7 @@ export interface ListImagesOptions {
   traceId?: string | null
 }
 
-/** Build query: omit empty q / 「全部类别」; page_size defaults to 24; scene defaults to general. */
+/** Build query: omit empty q / tag / 「全部类别」; page_size defaults to 24; scene defaults to general. */
 export function buildListImagesQuery({
   page = 1,
   pageSize = 24,
@@ -50,9 +52,10 @@ export function buildListImagesQuery({
   categoryId,
   labelStatus,
   outOfSync,
+  tag,
   scene = DEFAULT_SCENE,
   traceId,
-}: Pick<ListImagesOptions, 'page' | 'pageSize' | 'q' | 'category' | 'categoryId' | 'labelStatus' | 'outOfSync' | 'scene' | 'traceId'>): URLSearchParams {
+}: Pick<ListImagesOptions, 'page' | 'pageSize' | 'q' | 'category' | 'categoryId' | 'labelStatus' | 'outOfSync' | 'tag' | 'scene' | 'traceId'>): URLSearchParams {
   const params = new URLSearchParams()
   params.set('page', String(Math.max(1, Math.floor(page) || 1)))
   params.set('page_size', String(pageSize > 0 ? Math.floor(pageSize) : 24))
@@ -64,6 +67,8 @@ export function buildListImagesQuery({
   if (typeof categoryId === 'number' && Number.isSafeInteger(categoryId) && categoryId > 0) params.set('category_id', String(categoryId))
   if (labelStatus) params.set('label_status', labelStatus)
   if (outOfSync) params.set('out_of_sync', 'true')
+  const trimmedTag = typeof tag === 'string' ? tag.trim() : ''
+  if (trimmedTag) params.set('tag', trimmedTag)
   if (traceId?.trim()) params.set('trace_id', traceId.trim())
   return params
 }

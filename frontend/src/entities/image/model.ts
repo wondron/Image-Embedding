@@ -29,6 +29,9 @@ import type { VectorStatus } from './detail'
 export type FoodState = string
 export type LabelStatus = 'unlabeled' | 'auto' | 'verified'
 
+/** How the pages name a label status. 「未标注」 means no category (the database enforces it). */
+export const LABEL_STATUS_TEXT: Readonly<Record<LabelStatus, string>> = { unlabeled: '未标注', auto: '自动标注', verified: '已核验' }
+
 /** Name of the food_state enum in GET /api/enums. */
 export const FOOD_STATE_ENUM = 'food_state'
 

@@ -57,7 +57,7 @@ def put_original_and_thumb(
 ) -> dict[str, Any]:
     """Upload original + thumb; return {original_url, thumb_url, ext, thumb_bytes}.
 
-    Keys: original/{id}.{ext}, thumb/{id}.webp — no scene/category in key.
+    Keys: original/{id}.{ext}, thumb/{id}.webp — no scene/category in key; an optional IMAGE_STORAGE_CONFIG.key_prefix is applied by the storage port via storage_keys.
     """
     if not image_bytes:
         raise err.index_bad_image("empty image bytes")
