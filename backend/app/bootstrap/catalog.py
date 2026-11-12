@@ -63,7 +63,7 @@ def build_catalog(config: Mapping[str, Any]) -> CatalogServices:
     except BaseException:
         store.close()
         raise
-    logger.info("catalog ready | postgres=%s/%s", store.host, store.database)
+    logger.info("Catalog 已就绪 | postgres=%s/%s", store.host, store.database)
     return CatalogServices(
         store=store,
         categories_uc=ManageCategoriesUseCase(store),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from datetime import datetime
@@ -16,6 +17,32 @@ def _align(text: str, width: int, align: str) -> str:
     if align == "right":
         return f"{text:>{width}}"
     return f"{text:^{width}}"
+
+
+# Exact uvicorn 0.30.6 templates on uvicorn / uvicorn.error only. Applied to a
+# LogRecord copy so the original record.msg / args / exc_info stay unchanged
+# for any other handler. Access logs and other uvicorn messages are left as-is.
+_UVICORN_LOGGERS = frozenset({"uvicorn", "uvicorn.error"})
+_UVICORN_MSG_TEMPLATES = {
+    "Started server process [%d]": "已启动服务器进程 [%d]",
+    "Finished server process [%d]": "服务器进程已结束 [%d]",
+    "Waiting for application startup.": "正在等待应用启动。",
+    "Application startup failed. Exiting.": "应用启动失败，正在退出。",
+    "Application startup complete.": "应用启动完成。",
+    "Waiting for application shutdown.": "正在等待应用关闭。",
+    "Application shutdown failed. Exiting.": "应用关闭失败，正在退出。",
+    "Application shutdown complete.": "应用关闭完成。",
+    "Uvicorn running on socket %s (Press CTRL+C to quit)": "Uvicorn 运行于 socket %s（按 CTRL+C 退出）",
+    "Uvicorn running on unix socket %s (Press CTRL+C to quit)": "Uvicorn 运行于 unix socket %s（按 CTRL+C 退出）",
+    "Uvicorn running on %s://%s:%d (Press CTRL+C to quit)": "Uvicorn 运行于 %s://%s:%d（按 CTRL+C 退出）",
+    "Uvicorn running on %s://[%s]:%d (Press CTRL+C to quit)": "Uvicorn 运行于 %s://[%s]:%d（按 CTRL+C 退出）",
+    "Shutting down": "正在关闭",
+}
+# Reloader parent uses already-interpolated f-strings; match getMessage() only.
+_UVICORN_RENDERED_PATTERNS = (
+    (re.compile(r"^Started reloader process \[(\d+)\] using (.+)$"), r"已启动 reloader 进程 [\1]，使用 \2"),
+    (re.compile(r"^Stopping reloader process \[(\d+)\]$"), r"正在停止 reloader 进程 [\1]"),
+)
 
 
 class CustomFormatter(logging.Formatter):
@@ -36,7 +63,20 @@ class CustomFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         record.levelname = record.levelname[:4]
         record.name_fmt = _align(record.name, self.name_width, "center")
-        return super().format(record)
+        target = record
+        if record.name in _UVICORN_LOGGERS:
+            target = logging.makeLogRecord(record.__dict__)
+            if isinstance(target.msg, str) and target.msg in _UVICORN_MSG_TEMPLATES:
+                target.msg = _UVICORN_MSG_TEMPLATES[target.msg]
+            else:
+                rendered = target.getMessage()
+                for pat, repl in _UVICORN_RENDERED_PATTERNS:
+                    new, n = pat.subn(repl, rendered, count=1)
+                    if n:
+                        target.msg = new
+                        target.args = None
+                        break
+        return super().format(target)
 
 
 def setup_logger(

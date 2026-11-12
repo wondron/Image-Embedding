@@ -33,6 +33,7 @@ import {
   clampScoreThreshold,
 } from './features/score-threshold'
 import { HeatingFields, SearchNeverEmpty, SearchNoMatch, SearchFilteredEmpty } from './features/search'
+import { SearchNumControl, SEARCH_NUM_DEFAULT } from './features/search-num'
 
 type View = 'search' | ManagementView
 const navigation = [
@@ -136,6 +137,8 @@ export default function App() {
   const [scoreThreshold, setScoreThreshold] = useState(SCORE_DEFAULT)
   const [rejectOff, setRejectOff] = useState(false)
   const [scoreBeforeOff, setScoreBeforeOff] = useState(SCORE_DEFAULT)
+  /** 现网 Global (single and batch): how many results to ask for. */
+  const [searchNum, setSearchNum] = useState(SEARCH_NUM_DEFAULT)
   const [scene, setScene] = useState<string>(DEFAULT_SCENE)
   const [batchRunning, setBatchRunning] = useState(false)
   const [activeQueryName, setActiveQueryName] = useState('')
@@ -229,7 +232,7 @@ export default function App() {
       const common = { file: mode === 'file' ? file! : undefined, url: mode === 'url' ? url.trim() : undefined, baseUrl: apiBase, signal: controller.signal }
       const result = searchTarget === 'local'
         ? await searchLocalImages({ ...common, scoreThreshold: rejectOff ? 0 : clampScoreThreshold(scoreThreshold), scene })
-        : await searchGlobalImages(common)
+        : await searchGlobalImages({ ...common, searchNum })
       if (activeRequest.current !== controller) return
       setResponse(result); setSearched(true); setElapsed((performance.now() - started) / 1000)
       if (result.message) notify.info(result.message, { title: '搜索提示' })
@@ -339,6 +342,7 @@ export default function App() {
               <button type="button" className={searchTarget === 'global' ? 'selected' : ''} aria-pressed={searchTarget === 'global'} disabled={busy} onClick={() => { if (searchTarget !== 'global') { resetResults(); setSearchTarget('global') } }}>现网 Global</button>
             </div>}
             {queryKind === 'batch' && <p className="search-target-batch-note">批量搜索当前仅走现网 Global；自建批量检索不在本轮范围。</p>}
+            {queryKind === 'batch' && <div className="query-scene-score"><SearchNumControl value={searchNum} disabled={batchRunning} onChange={setSearchNum} /></div>}
             <div hidden={queryKind !== 'single'}>
             <div className="query-body"><div className="query-source"><div className="segmented" aria-label="查询方式"><button className={mode === 'file' ? 'selected' : ''} aria-pressed={mode === 'file'} onClick={() => { if (mode !== 'file') { resetResults(); setMode('file') } }}><Upload size={14} />本地上传</button><button className={mode === 'url' ? 'selected' : ''} aria-pressed={mode === 'url'} onClick={() => { if (mode !== 'url') { resetResults(); setMode('url') } }}><Link2 size={14} />图片链接</button></div>
               {mode === 'file' ? <div className={`upload-area ${dragging ? 'is-dragging' : ''} ${file ? 'has-image' : ''}`} onDragOver={event => { event.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); selectFile(event.dataTransfer.files[0]) }}>
@@ -354,6 +358,7 @@ export default function App() {
                   onChange={setScene}
                 />
               )}
+              {searchTarget === 'global' && <SearchNumControl value={searchNum} disabled={busy} onChange={setSearchNum} />}
               <ScoreThresholdControl
                 scoreThreshold={scoreThreshold}
                 rejectOff={rejectOff}
@@ -379,7 +384,7 @@ export default function App() {
             </div>
             </div>
             </div>
-            <div hidden={queryKind !== 'batch'}><BatchSearchPanel active={queryKind === 'batch'} baseUrl={apiBase} onResult={handleBatchResult} onClearResult={resetResults} onRunningChange={handleBatchRunningChange} /></div>
+            <div hidden={queryKind !== 'batch'}><BatchSearchPanel active={queryKind === 'batch'} baseUrl={apiBase} searchNum={searchNum} onResult={handleBatchResult} onClearResult={resetResults} onRunningChange={handleBatchRunningChange} /></div>
           </section>
 
           <section className="results-panel panel" aria-labelledby="results-heading">
@@ -445,7 +450,7 @@ export default function App() {
     </Dialog>}
     {downloadItems && <DownloadDialog items={downloadItems} apiBase={apiBase} onClose={() => setDownloadItems(null)} />}
     {settingsOpen && <Dialog title="搜索服务连接" onClose={() => setSettingsOpen(false)}><div className="settings-content"><p>连接现有的图像搜索服务。留空时使用当前站点的接口。</p><label htmlFor="api-base">服务地址</label><input className="input" id="api-base" type="url" placeholder="默认使用站点 /api" value={apiDraft} onChange={event => setApiDraft(event.target.value)} /><small>例如 http://127.0.0.1:8320，不包含 /api 路径。跨域连接需服务端允许访问。</small>{apiDraft.trim() && !safeHttpUrl(apiDraft.trim()) && <p className="inline-error">请输入 HTTP 或 HTTPS 地址。</p>}<div className="connection-info"><span className={`status-dot ${connection}`} />{connection === 'online' ? '接口可连接' : connection === 'checking' ? '正在检查连接…' : '当前未连接，请检查服务地址与后端运行状态'}<button className="text-button" onClick={() => void checkConnection()}>重新检查</button></div><div className="dialog-actions"><button className="btn btn-secondary" onClick={() => setSettingsOpen(false)}>取消</button><button className="btn btn-primary" disabled={Boolean(apiDraft.trim() && !safeHttpUrl(apiDraft.trim()))} onClick={saveSettings}><Check size={16} />保存连接</button></div></div></Dialog>}
-    {helpOpen && <Dialog title="开始使用食图" onClose={() => setHelpOpen(false)}><div className="help-content"><div><Search size={21} /><section><h3>以图搜图</h3><p>上传图片或输入可公开访问的图片直链，在自建库中检索。默认场景为「通用」（general）；可切换场景与拒识阈值后点「开始搜索」。空库时请先去「上传与导入」入库（PG + S3），不以 FlyB 外搜兜底为完成标准。</p></section></div><div><ArrowDownToLine size={21} /><section><h3>查看与下载</h3><p>点击结果打开详情，勾选图片后可「批量下载」。一体机场景下结果会展示加热组与食物状态（缺字段显示「—」）。</p></section></div><div><FolderOpen size={21} /><section><h3>图库与入库</h3><p>图库按场景筛选（默认 general），缩略图使用 S3 https 地址。入库时可设置类别（取自「食材管理」的类别树）、标签、描述、食物标注、来源与许可；场景按所选类别的规则预览，和规则不同的勾选入库后写成人工纳入 / 排除。单张图片可单独标注。</p></section></div><div className="help-note">相似度仅在服务返回分数时展示；类别优先展示 scene_label，否则回落通用类别。</div></div></Dialog>}
+    {helpOpen && <Dialog title="开始使用食图" onClose={() => setHelpOpen(false)}><div className="help-content"><div><Search size={21} /><section><h3>以图搜图</h3><p>上传图片或输入可公开访问的图片直链，在自建库中检索。默认场景为「通用」（general）；可切换场景与拒识阈值后点「开始搜索」。切到「现网 Global」或批量搜索时，可设置返回数量（1–20 条）。空库时请先去「上传与导入」入库（PG + S3），不以 FlyB 外搜兜底为完成标准。</p></section></div><div><ArrowDownToLine size={21} /><section><h3>查看与下载</h3><p>点击结果打开详情，勾选图片后可「批量下载」。一体机场景下结果会展示加热组与食物状态（缺字段显示「—」）。</p></section></div><div><FolderOpen size={21} /><section><h3>图库与入库</h3><p>图库按场景筛选（默认 general），缩略图使用 S3 https 地址。入库时可设置类别（取自「食材管理」的类别树）、标签、描述、食物标注、来源与许可；场景按所选类别的规则预览，和规则不同的勾选入库后写成人工纳入 / 排除。单张图片可单独标注。</p></section></div><div className="help-note">相似度仅在服务返回分数时展示；类别优先展示 scene_label，否则回落通用类别。</div></div></Dialog>}
     {/* The one popup every page signals through notify() */}
     <StatusOverlay />
   </div></EnumCatalogProvider></SceneApiContext.Provider>

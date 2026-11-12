@@ -278,10 +278,10 @@ class S3ImageStorage(ImageStoragePort):
 
 def build_image_storage(settings: ImageStorageSettings) -> ImageStoragePort:
     if settings.use_boto3:
-        logger.info("object storage: boto3 driver bucket=%s", settings.bucket)
+        logger.info("对象存储：boto3 驱动 | bucket=%s", settings.bucket)
         return S3ImageStorage(settings)
     logger.info(
-        "object storage: mock driver base=%s bucket=%s",
+        "对象存储：mock 驱动 | base=%s | bucket=%s",
         settings.public_base_url,
         settings.bucket,
     )

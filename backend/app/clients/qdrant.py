@@ -154,7 +154,7 @@ class QdrantStore:
             if not recreate:
                 self._verify_existing()
                 self._create_payload_indexes(payload_indexes)
-                logger.info("qdrant collection ready: %s", self.collection)
+                logger.info("Qdrant collection 已就绪：%s", self.collection)
                 return
             client.delete_collection(self.collection)
 
@@ -166,7 +166,7 @@ class QdrantStore:
         )
         self._create_payload_indexes(payload_indexes)
         logger.info(
-            "created qdrant collection=%s named_vector=%s size=%d distance=%s",
+            "已创建 Qdrant collection=%s | named_vector=%s | size=%d | distance=%s",
             self.collection,
             NAMED_VECTOR,
             self.vector_dim,
@@ -212,7 +212,7 @@ class QdrantStore:
                     wait=True,
                 )
             except Exception as exc:  # index is an optimization; filtering still works
-                logger.warning("create_payload_index %s on %s failed: %s", field_name, self.collection, exc)
+                logger.warning("create_payload_index %s（collection=%s）失败：%s", field_name, self.collection, exc)
 
     # -- points ----------------------------------------------------------------
 

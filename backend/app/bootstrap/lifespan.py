@@ -60,7 +60,7 @@ def create_food_service(config: dict, embedder):
 
 
 def warmup_embedder(embedder, app_settings: Settings = settings) -> None:
-    logger.info("Warmup enabled: %s", app_settings.warmup.enabled)
+    logger.info("预热开关：%s", app_settings.warmup.enabled)
     if not app_settings.warmup.enabled:
         return
     times = app_settings.warmup.embedding_runs
@@ -75,13 +75,13 @@ def initialize_embedder(runtime: ApplicationState):
         embedder = create_embedder(runtime.config)
     except Exception as exc:
         runtime.initialization_error = f"{type(exc).__name__}: {exc}"
-        logger.exception("Embedding model initialization failed: %s", exc)
+        logger.exception("Embedding 模型初始化失败：%s", exc)
         return None
     try:
         warmup_embedder(embedder, runtime.settings)
     except Exception as exc:
         runtime.warmup_error = f"{type(exc).__name__}: {exc}"
-        logger.exception("Warmup failed: %s", exc)
+        logger.exception("预热失败：%s", exc)
     return embedder
 
 
@@ -109,11 +109,11 @@ def apply_download_policy(config: dict) -> None:
     try:
         trusted = ImageDownloadSettings.from_config(config).trusted_networks
     except ValueError as exc:
-        logger.error("IMAGE_DOWNLOAD_CONFIG ignored, downloads stay public-only: %s", exc)
+        logger.error("IMAGE_DOWNLOAD_CONFIG 已忽略，下载仍仅允许公网地址：%s", exc)
         trusted = ()
     public_image.set_trusted_networks(trusted)
     if trusted:
-        logger.warning("image downloads also trust %s (IMAGE_DOWNLOAD_CONFIG.trusted_networks)",
+        logger.warning("图像下载同时信任 %s（IMAGE_DOWNLOAD_CONFIG.trusted_networks）",
                        ", ".join(str(network) for network in trusted))
 
 
@@ -154,10 +154,10 @@ def _is_infra_unreachable(exc: BaseException) -> bool:
 
 def _retrieval_local_debug_hint() -> str:
     return (
-        "host-side debug: compose service names (postgres/qdrant) only resolve inside docker; "
-        "point POSTGRES_CONFIG.host / QDRANT_CONFIG.url at localhost in Nacos or the local YAML "
-        "(and `docker compose up -d postgres qdrant`), "
-        "or set TOTAL_CONFIG.retrieval_enabled: false for predict-only"
+        "本机调试提示：compose 服务名（postgres/qdrant）仅在 docker 内可解析；"
+        "请在 Nacos 或本地 YAML 中将 POSTGRES_CONFIG.host / QDRANT_CONFIG.url 指向 localhost"
+        "（并执行 `docker compose up -d postgres qdrant`），"
+        "或将 TOTAL_CONFIG.retrieval_enabled: false 以仅启动 predict"
     )
 
 
@@ -179,9 +179,9 @@ def initialize_catalog(runtime: ApplicationState) -> None:
         else:
             runtime.catalog_error = f"{type(exc).__name__}: {exc}"
         if _is_infra_unreachable(exc):
-            logger.warning("Catalog unavailable (infra) | %s: %s | %s", type(exc).__name__, exc, _retrieval_local_debug_hint())
+            logger.warning("Catalog 不可用（基础设施） | %s: %s | %s", type(exc).__name__, exc, _retrieval_local_debug_hint())
         else:
-            logger.exception("Catalog initialization failed: %s", exc)
+            logger.exception("Catalog 初始化失败：%s", exc)
 
 
 def initialize_retrieval(runtime: ApplicationState, embedder) -> None:
@@ -197,17 +197,17 @@ def initialize_retrieval(runtime: ApplicationState, embedder) -> None:
     except ValueError as exc:  # a bad switch value degrades retrieval only, like any other retrieval error
         runtime.retrieval_error = f"{type(exc).__name__}: {exc}"
         runtime.retrieval_error_code = "NOT_READY"
-        logger.warning("Retrieval stack skipped | %s", runtime.retrieval_error)
+        logger.warning("Retrieval 栈已跳过 | %s", runtime.retrieval_error)
         return
     if not enabled:
         runtime.retrieval_error = "TOTAL_CONFIG.retrieval_enabled is false"
         runtime.retrieval_error_code = "RETRIEVAL_DISABLED"
-        logger.info("Retrieval stack skipped | TOTAL_CONFIG.retrieval_enabled is false")
+        logger.info("Retrieval 栈已跳过 | TOTAL_CONFIG.retrieval_enabled is false")
         return
     if embedder is None:
         runtime.retrieval_error = f"embedding model unavailable: {runtime.initialization_error}"
         runtime.retrieval_error_code = "NOT_READY"
-        logger.warning("Retrieval stack skipped | %s", runtime.retrieval_error)
+        logger.warning("Retrieval 栈已跳过 | %s", runtime.retrieval_error)
         return
 
     from app.bootstrap.retrieval_stack import build_retrieval_stack
@@ -228,13 +228,13 @@ def initialize_retrieval(runtime: ApplicationState, embedder) -> None:
         else:
             runtime.retrieval_error = f"{type(exc).__name__}: {exc}"
         if _is_infra_unreachable(exc):
-            logger.warning("Retrieval stack unavailable (infra) | %s: %s | %s", type(exc).__name__, exc, _retrieval_local_debug_hint())
+            logger.warning("Retrieval 栈不可用（基础设施） | %s: %s | %s", type(exc).__name__, exc, _retrieval_local_debug_hint())
         else:
-            logger.exception("Retrieval stack initialization failed: %s", exc)
+            logger.exception("Retrieval 栈初始化失败：%s", exc)
         return
 
     model = runtime.retrieval.model  # endpoints are logged by build_retrieval_infra
-    logger.info("Retrieval stack ready  collection=%s  model=%s", model.collection, model.space_id)
+    logger.info("Retrieval 栈已就绪 | collection=%s | model=%s", model.collection, model.space_id)
 
 
 def initialize_food_service(runtime: ApplicationState, embedder) -> None:
@@ -244,7 +244,7 @@ def initialize_food_service(runtime: ApplicationState, embedder) -> None:
         runtime.food_service = create_food_service(runtime.config, embedder)
     except Exception as exc:
         runtime.initialization_error = f"{type(exc).__name__}: {exc}"
-        logger.exception("Food service initialization failed: %s", exc)
+        logger.exception("Food service 初始化失败：%s", exc)
 
 
 def apply_nacos_config_update(runtime: ApplicationState, provider: NacosConfigProvider, snapshot: NacosConfigSnapshot,) -> bool:
@@ -295,7 +295,7 @@ async def lifespan(app: FastAPI):
         config_provider=config_provider,
     )
     app.state.runtime = runtime
-    logger.info("App starting ENV=%s cfg=%s", runtime.settings.application.env, runtime.config_info,)
+    logger.info("应用正在启动 | ENV=%s | cfg=%s", runtime.settings.application.env, runtime.config_info,)
     apply_download_policy(config)
     load_enum_file()
     embedder = initialize_embedder(runtime)  # one ONNX session for predict + retrieval
@@ -310,5 +310,5 @@ async def lifespan(app: FastAPI):
         try:
             await runtime.close()
         except Exception as exc:
-            logger.exception("Application resource cleanup failed: %s", exc)
-        logger.info("App shutting down")
+            logger.exception("应用资源清理失败：%s", exc)
+        logger.info("应用正在关闭")

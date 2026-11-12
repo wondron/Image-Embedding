@@ -47,6 +47,27 @@ describe('searchGlobalImages (现网 predict)', () => {
     await expect(searchGlobalImages({ url: 'https://example.com/a.png' })).rejects.toBe(abort)
   })
 
+  it('sends search_num in the JSON body for links and in the query for files', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => json({ ok: true, trace_id: 't', result: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+    await searchGlobalImages({ url: 'https://example.com/a.png', searchNum: 7 })
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/predict/searchImage_url')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ img_url: 'https://example.com/a.png', search_num: 7 })
+    // The file route reads search_num from the query only
+    await searchGlobalImages({ file: new File(['image-data'], 'photo.png', { type: 'image/png' }), baseUrl: 'https://api.example', searchNum: 20 })
+    expect(fetchMock.mock.calls[1][0]).toBe('https://api.example/api/predict/searchImage_file?search_num=20')
+    expect([...(fetchMock.mock.calls[1][1].body as FormData).keys()]).toEqual(['file'])
+  })
+
+  it('rejects a search_num outside 1–20 or not whole without making requests', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    for (const searchNum of [0, 21, 2.5, Number.NaN]) {
+      await expect(searchGlobalImages({ url: 'https://example.com/a.png', searchNum })).rejects.toThrow('返回数量需为 1–20 的整数')
+    }
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('rejects invalid inputs without making requests', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)

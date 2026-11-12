@@ -455,7 +455,9 @@ main { flex: 1; min-height: 0; width: 100%; max-width: none; padding: 14px; marg
   margin-right: 10px;
 }
 
-.score-threshold-control {
+/* Query setting cards: 拒识阈值 (自建) and 返回数量 (现网 Global) share one look */
+.score-threshold-control,
+.search-num-control {
   margin: 0 0 4px;
   padding: 10px 12px;
   border: 1px solid #e1e6ee;
@@ -465,34 +467,40 @@ main { flex: 1; min-height: 0; width: 100%; max-width: none; padding: 14px; marg
   flex-direction: column;
   gap: 8px;
 }
-.score-threshold-header {
+.score-threshold-header,
+.search-num-header {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
   color: #6b7280;
 }
-.score-threshold-title {
+.score-threshold-title,
+.search-num-title {
   font-size: 13px;
   font-weight: 600;
   color: #334155;
 }
-.score-threshold-hint {
+.score-threshold-hint,
+.search-num-hint {
   font-size: 12px;
   color: var(--muted);
 }
-.score-threshold-row {
+.score-threshold-row,
+.search-num-row {
   display: flex;
   align-items: center;
   gap: 10px;
 }
-.score-threshold-slider {
+.score-threshold-slider,
+.search-num-slider {
   flex: 1;
   min-width: 0;
   accent-color: var(--primary);
   height: 28px;
 }
-.score-threshold-number {
+.score-threshold-number,
+.search-num-number {
   width: 76px;
   flex-shrink: 0;
   padding: 6px 8px;
@@ -500,7 +508,9 @@ main { flex: 1; min-height: 0; width: 100%; max-width: none; padding: 14px; marg
   font-variant-numeric: tabular-nums;
 }
 .score-threshold-number:disabled,
-.score-threshold-slider:disabled {
+.score-threshold-slider:disabled,
+.search-num-number:disabled,
+.search-num-slider:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }

@@ -323,9 +323,14 @@ export interface IndexResponseWire {
 
 // -- POST /api/predict/searchImage_* (现网 Global · FlyB; hits are §6.1.1 cards) ----------
 
-/** schemas/predict.py PredictUrlBody (searchImage_url JSON body). */
+/**
+ * schemas/predict.py PredictUrlBody (searchImage_url JSON body). searchImage_file takes the same
+ * search_num / machine_info / trace_id / save_res as query parameters only.
+ */
 export interface PredictUrlBodyWire {
   img_url: string
+  /** How many results FlyB returns (DocCount, 1–20); omitted = FLAB_CONFIG.DOC_COUNT. */
+  search_num?: number | null
   machine_info?: string | null
   trace_id?: string | null
   save_res?: boolean | null

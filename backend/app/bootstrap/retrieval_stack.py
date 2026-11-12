@@ -70,7 +70,7 @@ class RetrievalInfra:
             try:
                 closer()
             except Exception:
-                logger.exception("closing %s failed", name)
+                logger.exception("关闭 %s 失败", name)
 
 
 @dataclass
@@ -143,7 +143,7 @@ def build_retrieval_infra(
         raise
 
     logger.info(
-        "retrieval infra ready | postgres=%s/%s qdrant=%s | model=%s id=%s collection=%s dim=%s distance=%s",
+        "Retrieval 基础设施已就绪 | postgres=%s/%s | qdrant=%s | model=%s | id=%s | collection=%s | dim=%s | distance=%s",
         metadata.host,
         metadata.database,
         connection.url,

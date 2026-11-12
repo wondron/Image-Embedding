@@ -8,11 +8,23 @@ import type { SearchResponse } from './model'
 const GLOBAL_LABELS: ApiLabels = { service: '搜索服务', endpoint: '搜索接口', action: '搜索' }
 const LOCAL_LABELS: ApiLabels = { service: '自建检索服务', endpoint: '自建检索接口', action: '搜索' }
 
+/**
+ * 现网 Global result count (`search_num` → FlyB DocCount). FlyB takes 1–20 (the server checks its
+ * FLAB_CONFIG.DOC_COUNT default against the same range, but not a request's search_num); the
+ * default here is that configured DOC_COUNT. Results can be fewer: FlyB may find less, and the
+ * similarity filter (GLOBAL_FILTER) drops some when it is on.
+ */
+export const SEARCH_NUM_MIN = 1
+export const SEARCH_NUM_MAX = 20
+export const SEARCH_NUM_DEFAULT = 20
+
 export interface SearchOptions {
   file?: File
   url?: string
   baseUrl?: string
   signal?: AbortSignal
+  /** Global only: SEARCH_NUM_MIN..SEARCH_NUM_MAX; omitted = the server's DOC_COUNT. */
+  searchNum?: number
   /** 自建 only: 1..50, server default 10. */
   topK?: number
   /** 自建 only: null/undefined = server default 0.55; 0 = reject off. */
@@ -38,16 +50,23 @@ function searchQuery({ file, url }: Pick<SearchOptions, 'file' | 'url'>): Search
   return { kind: 'url', url: imageUrl }
 }
 
-/** 现网 Global: POST /api/predict/searchImage_file (multipart `file`) or searchImage_url (JSON `{ img_url }`). */
-export async function searchGlobalImages({ file, url, baseUrl, signal }: SearchOptions): Promise<SearchResponse> {
+/**
+ * 现网 Global: POST /api/predict/searchImage_file (multipart `file`, `search_num` in the query: the
+ * file route reads it only there) or searchImage_url (JSON `{ img_url, search_num }`).
+ */
+export async function searchGlobalImages({ file, url, baseUrl, signal, searchNum }: SearchOptions): Promise<SearchResponse> {
   const query = searchQuery({ file, url })
+  if (searchNum !== undefined && !(Number.isInteger(searchNum) && searchNum >= SEARCH_NUM_MIN && searchNum <= SEARCH_NUM_MAX)) {
+    throw new Error(`返回数量需为 ${SEARCH_NUM_MIN}–${SEARCH_NUM_MAX} 的整数。`)
+  }
   let payload: unknown
   if (query.kind === 'file') {
     const form = new FormData()
     form.append('file', query.file)
-    payload = await requestJson('/api/predict/searchImage_file', { baseUrl, method: 'POST', form, signal, labels: GLOBAL_LABELS })
+    const params = searchNum !== undefined ? new URLSearchParams({ search_num: String(searchNum) }) : undefined
+    payload = await requestJson('/api/predict/searchImage_file', { baseUrl, method: 'POST', query: params, form, signal, labels: GLOBAL_LABELS })
   } else {
-    const body: PredictUrlBodyWire = { img_url: query.url }
+    const body: PredictUrlBodyWire = { img_url: query.url, ...(searchNum !== undefined ? { search_num: searchNum } : {}) }
     payload = await requestJson('/api/predict/searchImage_url', { baseUrl, method: 'POST', json: body, signal, labels: GLOBAL_LABELS })
   }
   return fromPredictResponse(payload)

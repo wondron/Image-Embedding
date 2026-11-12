@@ -26,6 +26,8 @@ export interface BatchSearchResult {
 
 interface BatchSearchPanelProps {
   baseUrl: string
+  /** 现网 Global result count for every query of a run (read when the run starts); omitted = server default. */
+  searchNum?: number
   active?: boolean
   onResult: (payload: BatchSearchResult) => void
   onClearResult?: () => void
@@ -37,7 +39,7 @@ const statusText: Record<JobStatus, string> = {
 }
 
 /** Keep mounted (hide its wrapper) when switching query modes to preserve queued and cached results. */
-export function BatchSearchPanel({ baseUrl, active: isActive = true, onResult, onClearResult, onRunningChange }: BatchSearchPanelProps) {
+export function BatchSearchPanel({ baseUrl, searchNum, active: isActive = true, onResult, onClearResult, onRunningChange }: BatchSearchPanelProps) {
   const [jobs, setJobs] = useState<SearchJob[]>([])
   const [running, setRunning] = useState(false)
   const [dragging, setDragging] = useState(false)
@@ -53,10 +55,12 @@ export function BatchSearchPanel({ baseUrl, active: isActive = true, onResult, o
   const isRunning = useRef(false)
   const nextId = useRef(0)
   const baseRef = useRef(baseUrl)
+  const searchNumRef = useRef(searchNum)
   const previousBase = useRef(baseUrl)
   const callbacks = useRef({ onResult, onClearResult, onRunningChange })
   activeMode.current = isActive
   baseRef.current = baseUrl
+  searchNumRef.current = searchNum
   callbacks.current = { onResult, onClearResult, onRunningChange }
 
   const commit = useCallback((next: SearchJob[]) => {
@@ -188,6 +192,7 @@ export function BatchSearchPanel({ baseUrl, active: isActive = true, onResult, o
     if (!targets.length) return
     const token = ++runId.current
     const requestBase = baseRef.current
+    const requestSearchNum = searchNumRef.current
     let autoShown = false
     isRunning.current = true
     setRunning(true)
@@ -206,7 +211,7 @@ export function BatchSearchPanel({ baseUrl, active: isActive = true, onResult, o
         const started = performance.now()
         let completed: SearchJob | null = null
         try {
-          const response = await searchGlobalImages({ file: target.file, baseUrl: requestBase, signal: controller.signal })
+          const response = await searchGlobalImages({ file: target.file, baseUrl: requestBase, signal: controller.signal, searchNum: requestSearchNum })
           if (!currentRun()) break
           if (controller.signal.aborted) throw new Error('搜索超时')
           completed = { ...target, status: 'success', response, elapsed: (performance.now() - started) / 1000, error: undefined }

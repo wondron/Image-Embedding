@@ -133,6 +133,31 @@ test('自建库图片的存储地址打不开：列表用后端读出的缩略�
   expect(mock.files.filter(file => file.endsWith(':original'))).toEqual([`${imageId(1)}:original`])
 })
 
+test('现网 Global 可设置返回数量：单张链接放在 JSON 里，批量文件放在 query 里；自建库不显示', async ({ page }) => {
+  await mockApi(page, { predict: { trace_id: 't', result: [] } })
+  await page.goto('/')
+  const control = page.getByRole('group', { name: '返回数量' })
+  await expect(control).toHaveCount(0)  // 自建库: top_k / score_threshold only
+
+  await page.getByRole('button', { name: '现网 Global', exact: true }).click()
+  await expect(control.getByLabel('返回数量数值')).toHaveValue('20')  // the server's DOC_COUNT
+  await control.getByLabel('返回数量数值').fill('5')
+  await page.getByRole('button', { name: '图片链接', exact: true }).click()
+  await page.getByLabel('图片地址').fill('https://cdn.test/query.png')
+  const single = page.waitForRequest('**/api/predict/searchImage_url')
+  await page.getByRole('button', { name: '开始搜索', exact: true }).click()
+  expect((await single).postDataJSON()).toEqual({ img_url: 'https://cdn.test/query.png', search_num: 5 })
+
+  await page.getByRole('button', { name: '批量搜索', exact: true }).click()
+  await expect(control.getByLabel('返回数量数值')).toHaveValue('5')  // one setting for both
+  await control.getByLabel('返回数量数值').fill('99')
+  await expect(control.getByLabel('返回数量数值')).toHaveValue('20')
+  await page.getByLabel('选择批量查询图片').setInputFiles({ name: 'q1.png', mimeType: 'image/png', buffer: png })
+  const batch = page.waitForRequest(request => new URL(request.url()).pathname === '/api/predict/searchImage_file')
+  await page.getByRole('button', { name: '开始批量搜索', exact: true }).click()
+  expect(new URL((await batch).url()).searchParams.get('search_num')).toBe('20')
+})
+
 test('两个通道的结果卡一样：详情里都显示标签和描述，结果内筛选也能按标签找', async ({ page }) => {
   const self = { ...hit(1), tags: '红薯叶、带皮', description: '清炒前的红薯叶' }
   await mockApi(page, {

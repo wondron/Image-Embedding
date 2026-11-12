@@ -40,7 +40,7 @@ class BackgroundReconciler:
         self._thread = threading.Thread(target=self._loop, name="reconciler", daemon=True)
         self._thread.start()
         logger.info(
-            "background reconciler started | every %ss (first in %ss), at most %d payloads and %d deletions a round",
+            "后台 reconciler 已启动 | 每 %s 秒一次（首次在 %s 秒后），每轮最多 %d 条 payload、%d 条 deletion",
             self._settings.interval_seconds, self._settings.initial_delay_seconds,
             self._settings.max_payloads, self._settings.max_deletions,
         )
@@ -52,9 +52,9 @@ class BackgroundReconciler:
         if thread is not None:
             thread.join(timeout)
             if thread.is_alive():
-                logger.warning("background reconciler still running after %ss; leaving it (daemon thread)", timeout)
+                logger.warning("后台 reconciler 在 %s 秒后仍在运行；已将其保留（daemon thread）", timeout)
             else:
-                logger.info("background reconciler stopped")
+                logger.info("后台 reconciler 已停止")
 
     def _stopping(self) -> bool:
         return self._stop.is_set() or self._runtime.stopping
@@ -100,13 +100,13 @@ def start_reconciler(runtime: "ApplicationState") -> BackgroundReconciler | None
     try:
         settings = ReconcileSettings.from_config(runtime.config)
     except ValueError as exc:
-        logger.error("RECONCILE_CONFIG ignored, the background reconciler stays off: %s", exc)
+        logger.error("RECONCILE_CONFIG 已忽略，后台 reconciler 保持关闭：%s", exc)
         return None
     if not settings.enabled:
-        logger.info("background reconciler off (RECONCILE_CONFIG.enabled is false)")
+        logger.info("后台 reconciler 未开启（RECONCILE_CONFIG.enabled is false）")
         return None
     if runtime.retrieval is None:
-        logger.info("background reconciler not started: the retrieval stack is unavailable")
+        logger.info("后台 reconciler 未启动：retrieval 栈不可用")
         return None
     reconciler = BackgroundReconciler(runtime, settings)
     reconciler.start()

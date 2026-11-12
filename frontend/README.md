@@ -87,11 +87,13 @@ notify.success('已保存。', { action: { label: '去同步', onClick } })     
 
 | 方法与路径 | 请求 |
 | --- | --- |
-| `POST /api/predict/searchImage_file` | `multipart/form-data`，文件字段为 `file` |
-| `POST /api/predict/searchImage_url` | JSON：`{"img_url":"https://example.com/image.jpg"}` |
+| `POST /api/predict/searchImage_file` | `multipart/form-data`，文件字段为 `file`；返回数量走 Query：`?search_num=10` |
+| `POST /api/predict/searchImage_url` | JSON：`{"img_url":"https://example.com/image.jpg","search_num":10}` |
 | `GET /api/images/download` | Query：`url`，返回经验证的图片字节和实际图片 MIME 类型 |
 
 响应为 `{ "result": [...], "trace_id": "..." }`，上游没有结果时 `result` 为包含 `results` 数组的对象（`status=upstream_empty_response`）。`result[]` 的每一项和自建检索 `POST /api/search` 的 `items[]` 是同一张结果卡：顶层 `tags`（FlyB 为结果标题）、`description`、`original_url`、`similarity`（缺失时不显示虚构分数），其余在 `details` 里（缩略图在 `details.images[]`，来源网页、站点在 `details.page_url` / `details.site`），见契约 §6.1.1。Global 搜索返回的候选结果不等同于已入库图片。
+
+`search_num` 是 FlyB 最多返回的条数（1–20），不传时用后端 `FLAB_CONFIG.DOC_COUNT`（当前 20）。前端在「现网 Global」单张搜索和批量搜索里用「返回数量」控件设置（默认 20，两种搜索共用一个设置）；后端不校验这个范围，所以前端只发 1–20 的整数。
 
 ## 验证与部署
 

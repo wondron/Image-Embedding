@@ -380,7 +380,7 @@ class EnumStore:
                 return
             first = self._catalog is None
             self._catalog, self._stamp, self._error = catalog, stamp, None
-        logger.info("enums %s | file=%s | enums=%d", "loaded" if first else "reloaded", self.where, len(catalog.enums))
+        logger.info("枚举文件%s | file=%s | enums=%d", "已加载" if first else "已重载", self.where, len(catalog.enums))
 
     def _remember_error(self, stamp: object, message: str) -> None:
         """Called under the lock; logs once per file version."""
@@ -388,9 +388,9 @@ class EnumStore:
             return
         self._stamp, self._error = stamp, message
         if self._catalog is None:
-            logger.error("enum file unusable: %s", message)
+            logger.error("枚举文件不可用：%s", message)
         else:
-            logger.error("enum file changed but cannot be used; keeping the previous version: %s", message)
+            logger.error("枚举文件已变更但无法使用，仍保留上一版本：%s", message)
 
     def _file_stamp(self) -> tuple[int, int] | None:
         try:
