@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 from uuid import UUID
 
 from app.core.config.settings import ImageStorageSettings
@@ -59,24 +60,32 @@ def s3_client_config(*, endpoint_url: str = "") -> Any:
     rejects that encoding with NotImplemented. when_required keeps optional
     checksums off, so PutObject uses a regular payload.
 
-    Older botocore that does not accept these Config fields falls back to
-    addressing only; those versions never emit the trailer either.
+    Aliyun OSS endpoints use virtual-hosted addressing and V2 signatures.
+    Other custom endpoints retain path-style addressing. Older botocore that
+    does not accept checksum fields retains the same addressing and signature.
     """
     from botocore.client import Config
+
+    host = (urlparse(endpoint_url).hostname or "").lower()
+    is_aliyun_oss = host.endswith(".aliyuncs.com") and (
+        host.startswith("oss-") or host.startswith("s3.oss-")
+    )
 
     kwargs: dict[str, Any] = {
         "request_checksum_calculation": "when_required",
         "response_checksum_validation": "when_required",
     }
-    if endpoint_url:
+    if is_aliyun_oss:
+        kwargs["signature_version"] = "s3"
+        kwargs["s3"] = {"addressing_style": "virtual"}
+    elif endpoint_url:
         kwargs["s3"] = {"addressing_style": "path"}
     try:
         return Config(**kwargs)
     except TypeError:
-        fallback: dict[str, Any] = {}
-        if endpoint_url:
-            fallback["s3"] = {"addressing_style": "path"}
-        return Config(**fallback)
+        kwargs.pop("request_checksum_calculation", None)
+        kwargs.pop("response_checksum_validation", None)
+        return Config(**kwargs)
 
 
 class MockImageStorage(ImageStoragePort):

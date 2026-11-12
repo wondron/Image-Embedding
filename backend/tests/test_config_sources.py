@@ -10,6 +10,7 @@ import os
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 from sqlalchemy.engine import make_url
 
@@ -118,10 +119,76 @@ class ImageStorageSettingsTests(unittest.TestCase):
             )
         )
         endpoint_cfg = with_endpoint._client.meta.config
-        self.assertEqual(endpoint_cfg.s3.get("addressing_style"), "path")
+        self.assertEqual(endpoint_cfg.s3.get("addressing_style"), "virtual")
+        self.assertEqual(endpoint_cfg.signature_version, "s3")
         if hasattr(endpoint_cfg, "request_checksum_calculation"):
             self.assertEqual(endpoint_cfg.request_checksum_calculation, "when_required")
             self.assertEqual(endpoint_cfg.response_checksum_validation, "when_required")
+
+
+@unittest.skipUnless(importlib.util.find_spec("boto3"), "boto3 not installed")
+class S3ClientConfigTests(unittest.TestCase):
+    def test_oss_presigned_urls_use_bucket_hosts_and_v2_signatures(self):
+        from app.clients.image_storage import S3ImageStorage
+
+        for endpoint in (
+            "https://oss-cn-hangzhou.aliyuncs.com",
+            "https://s3.oss-cn-hangzhou.aliyuncs.com",
+        ):
+            with self.subTest(endpoint=endpoint):
+                storage = S3ImageStorage(ImageStorageSettings(
+                    use_boto3=True, endpoint_url=endpoint, bucket="test-images",
+                    access_key_id="test-key", secret_access_key="test-secret",
+                ))
+                self.addCleanup(storage._client.close)
+                url = storage._client.generate_presigned_url(
+                    "get_object", Params={"Bucket": storage.bucket, "Key": "original/image.jpg"},
+                    ExpiresIn=60,
+                )
+                parsed = urlparse(url)
+                self.assertEqual(parsed.hostname, f"test-images.{urlparse(endpoint).hostname}")
+                self.assertEqual(parsed.path, "/original/image.jpg")
+                query = parse_qs(parsed.query)
+                self.assertEqual(query["AWSAccessKeyId"], ["test-key"])
+                self.assertTrue(query["Signature"][0])
+                self.assertIn("Expires", query)
+                self.assertNotIn("X-Amz-Algorithm", query)
+
+    def test_minio_keeps_path_addressing_and_aws_keeps_sdk_defaults(self):
+        from app.clients.image_storage import S3ImageStorage, s3_client_config
+
+        defaults = s3_client_config()
+        self.assertIsNone(defaults.s3)
+        self.assertIsNone(defaults.signature_version)
+        storage = S3ImageStorage(ImageStorageSettings(
+            use_boto3=True, endpoint_url="https://minio.example", bucket="test-images",
+            access_key_id="test-key", secret_access_key="test-secret",
+        ))
+        self.addCleanup(storage._client.close)
+        self.assertEqual(storage._client.meta.config.s3["addressing_style"], "path")
+        self.assertIsNone(s3_client_config(endpoint_url="https://minio.example").signature_version)
+        url = storage._client.generate_presigned_url(
+            "get_object", Params={"Bucket": storage.bucket, "Key": "original/image.jpg"},
+            ExpiresIn=60,
+        )
+        parsed = urlparse(url)
+        self.assertEqual(parsed.hostname, "minio.example")
+        self.assertEqual(parsed.path, "/test-images/original/image.jpg")
+
+    def test_legacy_botocore_retains_oss_addressing_and_signature(self):
+        from botocore.client import Config
+        from app.clients.image_storage import s3_client_config
+
+        def legacy_config(**kwargs):
+            if "request_checksum_calculation" in kwargs or "response_checksum_validation" in kwargs:
+                raise TypeError("unsupported checksum option")
+            return Config(**kwargs)
+
+        with patch("botocore.client.Config", side_effect=legacy_config) as constructor:
+            config = s3_client_config(endpoint_url="https://oss-cn-hangzhou.aliyuncs.com")
+        self.assertEqual(constructor.call_count, 2)
+        self.assertEqual(config.signature_version, "s3")
+        self.assertEqual(config.s3["addressing_style"], "virtual")
 
 
 class ImageDownloadSettingsTests(unittest.TestCase):

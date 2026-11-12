@@ -286,31 +286,30 @@ class NacosConfigProvider:
         }
 
     def load(self, yaml_path: str) -> tuple[dict, dict]:
-        """Effective startup config: YAML base + Nacos, or YAML alone if Nacos is unusable."""
         local_error: Exception | None = None
         try:
             self._base = load_yaml(yaml_path)
         except Exception as exc:
             self._base, local_error = None, exc
-            _log(logging.WARNING, f"Local YAML unavailable | path={yaml_path} | error={type(exc).__name__}: {exc}",
+            _log(logging.WARNING, f"yaml不可用 path={yaml_path} | error={type(exc).__name__}: {exc}",
                  yaml_path=yaml_path)
 
         profile = self._selected_profile()
         if self.settings.enabled and profile is None:
-            _log(logging.WARNING, f"Nacos profile not configured | profile={self.settings.profile}")
+            _log(logging.WARNING, f"Nacos 没有配置 | profile={self.settings.profile}")
         if self.settings.enabled and profile is not None:
             try:
                 snapshot = self._fetch(profile)
             except Exception as exc:
                 _log(logging.WARNING,
-                     f"Nacos profile unavailable, using local YAML | profile={profile['profile']} | "
+                     f"Nacos 不可用，使用 YAML profile={profile['profile']} | "
                      f"error={type(exc).__name__}: {exc}",
                      profile=profile["profile"], data_ids=list(profile["data_id_list"]))
             else:
                 with self._lock:
                     self._active = snapshot
                 _log(logging.INFO,
-                     f"Nacos configuration loaded | profile={profile['profile']} | "
+                     f"Nacos 配置加载成功 | profile={profile['profile']} | "
                      f"data_ids={profile['data_id_list']} | yaml_base={self._base is not None}",
                      profile=profile["profile"], data_ids=list(profile["data_id_list"]))
                 return snapshot.config, self.source_info(snapshot)
@@ -319,7 +318,7 @@ class NacosConfigProvider:
             raise local_error  # type: ignore[misc]  # neither source is usable
         status = "fallback" if self.settings.enabled else "disabled"
         _log(logging.INFO,
-             f"Local YAML configuration loaded | path={yaml_path} | "
+             f"YAML 配置加载成功 | path={yaml_path} | "
              f"nacos_profile={self.settings.profile} | nacos_status={status}",
              profile=self.settings.profile, yaml_path=yaml_path)
         return prepare_config(self._base), {
@@ -393,7 +392,7 @@ class NacosConfigProvider:
             try:
                 client.close()
             except Exception:
-                logger.exception("Failed to close Nacos client")
+                logger.exception("关闭 Nacos 失败")
 
     def close(self) -> None:
         self._stop_event.set()
