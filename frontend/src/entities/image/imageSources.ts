@@ -11,6 +11,11 @@ export function storedImageUrl(apiBase: string, id: string, variant: StoredImage
   return `${apiRoot(apiBase)}/api/images/${encodeURIComponent(id)}/file?variant=${variant}`
 }
 
+/** Whether a URL is the API's copy (storedImageUrl) rather than an image's own URL. */
+export function isStoredImageUrl(url: string): boolean {
+  return /\/api\/images\/[^/?#]+\/file\?variant=(thumb|original)$/.test(url)
+}
+
 /**
  * Hosts whose image URLs failed while the API's copy of the same image loaded: the URLs are what
  * is wrong there, so later images go to the API first instead of waiting for each to fail. For

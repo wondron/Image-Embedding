@@ -117,7 +117,8 @@ test('使用图片时逐级回退到 medium，成功后不请求 small', async (
   const image = page.locator('.result-card').getByRole('img', { name: '逐级回退图片', exact: true })
   await expect(image).toHaveAttribute('src', 'https://images.test/fallback-medium.png')
   await expect.poll(() => image.evaluate(element => (element as HTMLImageElement).naturalWidth)).toBe(1)
-  expect(requested).toEqual(['/fallback-original.png', '/fallback-large.png', '/fallback-medium.png'])
+  // The grid loads thumbnails only (largest first); the original waits for the detail view
+  expect(requested).toEqual(['/fallback-large.png', '/fallback-medium.png'])
 })
 
 test('查询文件以 multipart file 字段提交', async ({ page }) => {

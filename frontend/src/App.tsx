@@ -14,13 +14,13 @@ import { DownloadDialog } from './components/DownloadDialog'
 import { ImageFilePicker } from './components/ImageFilePicker'
 import { downloadImage } from './lib/downloads'
 import { EnumCatalogProvider } from './entities/enum'
-import { markHostBroken, storedImageSources } from './entities/image'
+import { ProgressiveImage, storedImageSources, useImageCascade } from './entities/image'
 import { DEFAULT_SCENE, unknownScene, sceneError } from './entities/scene'
 import { SceneApiContext, useSceneSelection } from './features/scene-catalog'
 import { SceneConfigPage } from './pages/scenes/SceneConfigPage'
 import { SceneMembershipPanel } from './features/scene-memberships/SceneMembershipPanel'
 import {
-  SourceBadge, displayCategoryLabel, getImageSources, searchGlobalImages, searchLocalImages,
+  SourceBadge, displayCategoryLabel, getThumbnailSources, searchGlobalImages, searchLocalImages,
   type SearchImage, type SearchResponse,
 } from './entities/search-result'
 import { pingApi, useApiBase } from './shared/api'
@@ -55,18 +55,34 @@ function loadBaseUrl() {
   catch { return import.meta.env.VITE_API_BASE_URL ?? '' }
 }
 
-function ResultImage({ item, className = '' }: { item: SearchImage; className?: string }) {
+function ImageUnavailable({ className = '' }: { className?: string }) {
+  return <div className={`image-unavailable ${className}`}><ImageIcon size={32} strokeWidth={1.3} /><span>图片暂不可用</span></div>
+}
+
+/**
+ * A result in the grid or the table: its thumbnail only (a self-built hit's 512 px WebP, read back
+ * through the API when its URL cannot be loaded). The original is loaded when the detail opens.
+ */
+function ResultThumbnail({ item, className = '' }: { item: SearchImage; className?: string }) {
   const apiBase = useApiBase()
-  // A hit from our own library can also be read back through the API (GET /api/images/{id}/file)
-  const direct = getImageSources(item)
-  const sources = item.source === 'self' ? storedImageSources(direct, item.id, 'original', apiBase) : direct
-  const sourceKey = sources.join('\n')
-  const [index, setIndex] = useState(0)
-  useEffect(() => setIndex(0), [item.id, sourceKey])
-  return sources[index]
-    ? <img className={className} src={sources[index]} alt={item.title} loading="lazy" referrerPolicy="no-referrer" onError={() => setIndex(i => i + 1)}
-      onLoad={() => { if (item.source === 'self' && index > 0 && index === sources.length - 1) direct.forEach(markHostBroken) }} />
-    : <div className={`image-unavailable ${className}`}><ImageIcon size={32} strokeWidth={1.3} /><span>图片暂不可用</span></div>
+  const image = useImageCascade(item.source === 'self'
+    ? storedImageSources([item.thumbnailUrl], item.id, 'thumb', apiBase)
+    : getThumbnailSources(item))
+  return image.src
+    ? <img key={image.src} className={className} src={image.src} alt={item.title} loading="lazy" decoding="async" referrerPolicy="no-referrer" onLoad={image.onLoad} onError={image.onError} />
+    : <ImageUnavailable className={className} />
+}
+
+/** The detail's image: the thumbnail the list already loaded at once, the original over it once loaded. */
+function ResultPreview({ item }: { item: SearchImage }) {
+  const apiBase = useApiBase()
+  const self = item.source === 'self'
+  return <ProgressiveImage
+    previewSources={self ? storedImageSources([item.thumbnailUrl], item.id, 'thumb', apiBase) : getThumbnailSources(item)}
+    fullSources={self ? storedImageSources([item.imageUrl], item.id, 'original', apiBase) : item.imageUrl ? [item.imageUrl] : []}
+    alt={item.title}
+    placeholder={<ImageUnavailable />}
+  />
 }
 
 function QueryPreview({ src }: { src: string }) {
@@ -94,7 +110,7 @@ function ResultTable({ items, onDetail, onDownload, downloading, selected, onTog
     <thead><tr><th>选择</th><th>图片</th><th>图片名称</th><th>相似度</th><th>类别</th><th>来源</th><th>通道</th><th>操作</th></tr></thead>
     <tbody>{items.map(item => <tr key={item.id} className={selected.has(item.id) ? 'result-row-selected' : ''}>
       <td><input type="checkbox" className="result-checkbox" aria-label={`选择图片：${item.title}`} checked={selected.has(item.id)} onChange={() => onToggle(item.id)} /></td>
-      <td><button className="table-image" onClick={() => onDetail(item)} aria-label={`查看图片详情：${item.title}`}><ResultImage item={item} /></button></td>
+      <td><button className="table-image" onClick={() => onDetail(item)} aria-label={`查看图片详情：${item.title}`}><ResultThumbnail item={item} /></button></td>
       <th scope="row"><button className="table-title" onClick={() => onDetail(item)}>{item.title}</button></th>
       <td><Score value={item.similarity} /></td><td>{displayCategoryLabel(item) ?? '—'}{(item.outputsHeating || outputsHeating) ? <> · <HeatingFields show compact heatingGroup={item.heatingGroup} foodState={item.foodState} /></> : null}</td><td>{item.siteName ?? '—'}</td><td><SourceBadge source={item.source} /></td>
       <td><div className="table-actions"><button className="btn btn-secondary" onClick={() => onDetail(item)}>详情</button><button className="btn btn-secondary" disabled={Boolean(downloading)} aria-label={`下载图片：${item.title}`} onClick={() => onDownload(item)}>{downloading === item.id ? <LoaderCircle size={13} className="spin" /> : <ArrowDownToLine size={13} />}下载</button></div></td>
@@ -401,7 +417,7 @@ export default function App() {
                     onGoImport={() => navigate('import')}
                   />)
               : resultLayout === 'list' ? <ResultTable items={visible} outputsHeating={response?.outputsHeating} onDetail={setDetail} onDownload={item => void saveImage(item)} downloading={downloading} selected={selected} onToggle={toggleSelected} />
-              : <div className="result-grid">{visible.map(item => <article className={`result-card ${selected.has(item.id) ? 'result-selected' : ''}`} key={item.id}><label className="image-select"><input className="result-checkbox" type="checkbox" aria-label={`选择图片：${item.title}`} checked={selected.has(item.id)} onChange={() => toggleSelected(item.id)} /></label><button className="result-image-button" onClick={() => setDetail(item)} aria-label={`查看图片详情：${item.title}`}><ResultImage item={item} /><Score value={item.similarity} /><SourceBadge source={item.source} /><span className="image-hover-hint"><Search size={15} />查看详情</span></button><div className="result-card-body"><h3><button onClick={() => setDetail(item)}>{item.title}</button></h3><div className="result-card-meta"><span>{displayCategoryLabel(item) ?? '—'}</span>{(item.outputsHeating || response?.outputsHeating) && <HeatingFields show compact heatingGroup={item.heatingGroup} foodState={item.foodState} />}<button className="icon-button download-button" title="下载图片" aria-label={`下载图片：${item.title}`} disabled={Boolean(downloading)} onClick={() => void saveImage(item)}>{downloading === item.id ? <LoaderCircle size={16} className="spin" /> : <ArrowDownToLine size={16} />}</button></div></div></article>)}</div>}
+              : <div className="result-grid">{visible.map(item => <article className={`result-card ${selected.has(item.id) ? 'result-selected' : ''}`} key={item.id}><label className="image-select"><input className="result-checkbox" type="checkbox" aria-label={`选择图片：${item.title}`} checked={selected.has(item.id)} onChange={() => toggleSelected(item.id)} /></label><button className="result-image-button" onClick={() => setDetail(item)} aria-label={`查看图片详情：${item.title}`}><ResultThumbnail item={item} /><Score value={item.similarity} /><SourceBadge source={item.source} /><span className="image-hover-hint"><Search size={15} />查看详情</span></button><div className="result-card-body"><h3><button onClick={() => setDetail(item)}>{item.title}</button></h3><div className="result-card-meta"><span>{displayCategoryLabel(item) ?? '—'}</span>{(item.outputsHeating || response?.outputsHeating) && <HeatingFields show compact heatingGroup={item.heatingGroup} foodState={item.foodState} />}<button className="icon-button download-button" title="下载图片" aria-label={`下载图片：${item.title}`} disabled={Boolean(downloading)} onClick={() => void saveImage(item)}>{downloading === item.id ? <LoaderCircle size={16} className="spin" /> : <ArrowDownToLine size={16} />}</button></div></div></article>)}</div>}
             </div>
             <div className="results-footer"><span>{searched ? `共 ${items.length} 张图片${filtered.length !== items.length ? ` · 筛选后 ${filtered.length} 张` : ''}` : '搜索结果将在这里展示'}{items.length > 0 && !categories.length && <small> · 暂无类别数据</small>}</span><div className="pagination"><button className="icon-button" aria-label="上一页" disabled={currentPage <= 1 || !items.length} onClick={() => setPage(currentPage - 1)}><ArrowLeft size={15} /></button><span>{currentPage} <small>/ {pages}</small></span><button className="icon-button" aria-label="下一页" disabled={currentPage >= pages || !items.length} onClick={() => setPage(currentPage + 1)}><ArrowRight size={15} /></button></div></div>
           </section>
@@ -419,7 +435,7 @@ export default function App() {
             <div className="detail-heating"><dt>加热信息</dt><dd><HeatingFields show heatingGroup={detail.heatingGroup} foodState={detail.foodState} /></dd></div>
           )}<div><dt>图片尺寸</dt><dd>{detail.width && detail.height ? `${detail.width} × ${detail.height} px` : '未提供'}</dd></div><div><dt>图片来源</dt><dd>{detail.siteName ?? '未提供'}</dd></div><div><dt>检索通道</dt><dd>{detail.source === 'self' ? '自建' : detail.source === 'empty' ? '无结果' : detail.source === 'flyb' ? 'FlyB 兜底' : '未提供'}</dd></div><div><dt>结果编号</dt><dd className="monospace">{detail.id}</dd></div></dl>
         </section>
-        <section className="detail-section"><h3>图片预览</h3><div className="detail-image"><ResultImage item={detail} /></div></section>
+        <section className="detail-section"><h3>图片预览</h3><div className="detail-image"><ResultPreview key={detail.id} item={detail} /></div></section>
         <section className="detail-section"><h3>来源信息</h3><dl className="detail-links"><div><dt>来源网页</dt><dd>{detail.pageUrl ? <a href={detail.pageUrl} target="_blank" rel="noreferrer">{detail.pageUrl}<ArrowUpRight size={12} /></a> : '—'}</dd></div><div><dt>图片地址</dt><dd>{(detail.imageUrl || detail.thumbnailUrl) ? <a className="original-link" href={detail.imageUrl ?? detail.thumbnailUrl!} target="_blank" rel="noreferrer">打开原图 / 另存为 <ArrowUpRight size={12} /></a> : '—'}</dd></div></dl>
           {detail.snippets.length > 0 && <div className="detail-description"><span>来源描述</span><div>{detail.snippets.map((text, i) => <p key={i}>{text}</p>)}</div></div>}
         </section>

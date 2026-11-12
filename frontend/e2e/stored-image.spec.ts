@@ -13,8 +13,9 @@ const SCENES = [{ id: 1, code: 'general', name: '通用', description: null, inc
  * Images stored by the mock storage: their URLs name a placeholder host the browser cannot reach
  * (cdn.example.local), but the API can read the files back (GET /api/images/{id}/file).
  */
-async function mockApi(page: Page, count = 3) {
-  const calls = { direct: [] as string[], files: [] as string[] }
+async function mockApi(page: Page, count = 3, { holdOriginals = false } = {}) {
+  const calls = { direct: [] as string[], files: [] as string[], releaseOriginals: () => {} }
+  const released = new Promise<void>(resolve => { calls.releaseOriginals = resolve })
   const item = (n: number) => ({
     id: imageId(n), original_url: `https://cdn.example.local/image-embedding/original/${n}.png`,
     thumb_url: `https://cdn.example.local/image-embedding/thumb/${n}.webp`, category_id: 1, category: '牛排', scenes: ['general'],
@@ -39,6 +40,7 @@ async function mockApi(page: Page, count = 3) {
     const file = /^\/api\/images\/([^/]+)\/file$/.exec(path)
     if (file) {
       calls.files.push(`${file[1]}:${url.searchParams.get('variant')}`)
+      if (holdOriginals && url.searchParams.get('variant') === 'original') await released
       return route.fulfill({ contentType: 'image/png', body: png, headers: { 'Cache-Control': 'no-store' } })
     }
     return route.abort('blockedbyclient')
@@ -76,12 +78,16 @@ test('存储地址打不开的缩略图改由后端读出；之后同一地址�
   expect(calls.direct.length).toBe(tried)
 })
 
-test('图片编辑里预览原图：存储地址打不开时用后端读出的原图', async ({ page }) => {
-  const calls = await mockApi(page, 1)
+test('图片编辑：先显示缩略图，原图加载完再换上；存储地址打不开时两者都从后端读', async ({ page }) => {
+  const calls = await mockApi(page, 1, { holdOriginals: true })
   await page.route(url => /\/api\/images\/[^/]+$/.test(url.pathname), route => route.fulfill({ status: 503, json: { ok: false, error: 'NOT_READY', detail: 'down', trace_id: 't' } }))
   await openLibrary(page)
   await page.getByRole('button', { name: /^标注 / }).first().click()
-  const preview = page.locator('.ie-figure img')
-  await expect(preview).toHaveAttribute('src', `/api/images/${imageId(1)}/file?variant=original`)
-  expect(calls.files).toContain(`${imageId(1)}:original`)
+  const figure = page.locator('.ie-figure')
+  await expect(figure.locator('.progressive-image-preview')).toHaveAttribute('src', `/api/images/${imageId(1)}/file?variant=thumb`)
+  await expect(figure.getByText('正在加载原图')).toBeVisible()
+  calls.releaseOriginals()
+  await expect(figure.locator('.progressive-image-full.is-loaded')).toHaveAttribute('src', `/api/images/${imageId(1)}/file?variant=original`)
+  await expect(figure.locator('img')).toHaveCount(1)
+  expect(calls.files.filter(file => file.endsWith(':original'))).toEqual([`${imageId(1)}:original`])
 })

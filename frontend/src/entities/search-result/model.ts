@@ -66,12 +66,21 @@ export function displayCategoryLabel(item: {
   return asText(item.sceneLabel) ?? asText(item.category) ?? null
 }
 
+type ImageUrls = Pick<SearchImage, 'imageUrl' | 'thumbnailUrl'> & { alternateUrls?: readonly string[] }
+
 /**
- * URLs to try, in order, for display fallback and downloads: original, alternates, thumbnail.
- * Only safe HTTP(S) URLs, without duplicates. Availability is checked when an image is loaded.
+ * URLs to try, in order, where the full image is wanted (the detail view, downloads): original,
+ * alternates, thumbnail. Only safe HTTP(S) URLs, without duplicates. Availability is checked when
+ * an image is loaded.
  */
-export function getImageSources(
-  item: Pick<SearchImage, 'imageUrl' | 'thumbnailUrl'> & { alternateUrls?: readonly string[] },
-): string[] {
+export function getImageSources(item: ImageUrls): string[] {
   return uniqueHttpUrls([item.imageUrl, ...(item.alternateUrls ?? []), item.thumbnailUrl])
+}
+
+/**
+ * URLs to try, in order, where results are listed (grid, table): the thumbnail (for a self-built
+ * hit the 512 px WebP), the other thumbnail sizes, and the original only when none of them loads.
+ */
+export function getThumbnailSources(item: ImageUrls): string[] {
+  return uniqueHttpUrls([item.thumbnailUrl, ...(item.alternateUrls ?? []), item.imageUrl])
 }

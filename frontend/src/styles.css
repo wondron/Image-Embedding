@@ -234,8 +234,9 @@ main { flex: 1; min-height: 0; width: 100%; max-width: none; padding: 14px; marg
 .detail-fields dt, .detail-links dt { color: #7b8899; font-size: 13px; }
 .detail-fields dd { margin: 0; color: #223046; font-weight: 600; overflow-wrap: anywhere; padding: 1px 6px; }
 .monospace { font-family: ui-monospace,SFMono-Regular,Consolas,monospace; font-size: 13px; }
-.detail-image { display: flex; align-items: center; justify-content: center; min-height: 165px; padding: 10px; border: 1px solid #e8edf5; border-radius: 5px; background: #f5f7fa; }
-.detail-image>img { max-height: 210px; max-width: 100%; object-fit: contain; width: auto; min-width: 1px; }
+/* The original is loaded here (lists show thumbnails only), so give it room to be seen */
+.detail-image { display: flex; align-items: center; justify-content: center; height: min(56vh, 460px); min-height: 200px; padding: 10px; border: 1px solid #e8edf5; border-radius: 5px; background: #f5f7fa; }
+.detail-image>.progressive-image { flex: 1; align-self: stretch; }
 .detail-image .image-unavailable { width: 100%; min-height: 150px; }
 .detail-links { display: flex; flex-direction: column; gap: 15px; margin: 0; }
 .detail-links>div { display: grid; grid-template-columns: 75px minmax(0,1fr); gap: 9px; align-items: start; line-height: 1.7; font-size: 13px; }
@@ -392,8 +393,7 @@ main { flex: 1; min-height: 0; width: 100%; max-width: none; padding: 14px; marg
   .detail-fields>div { font-size: 13px; grid-template-columns: 70px minmax(0,1fr); }
   .detail-fields dt, .detail-links dt { font-size: 12px; }
   .detail-section>h3 { font-size: 13px; margin-bottom: 12px; }
-  .detail-image { min-height: 140px; }
-  .detail-image>img { max-height: 180px; }
+  .detail-image { height: min(48vh, 340px); min-height: 160px; }
   .detail-links>div, .detail-description { grid-template-columns: 60px minmax(0,1fr); font-size: 12px; }
   .detail-footer { flex-wrap: wrap; gap: 9px; padding: 10px; }
   .detail-footer>p { max-width: none; font-size: 12px; }

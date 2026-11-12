@@ -3,6 +3,7 @@
 .ie-top { display: grid; grid-template-columns: 200px minmax(0, 1fr); align-items: start; gap: 14px; }
 .ie-figure { display: grid; place-items: center; margin: 0; aspect-ratio: 1; overflow: hidden; border: 1px solid #e5e9f0; border-radius: 10px; background: #f2f4f8; }
 .ie-figure img { width: 100%; height: 100%; object-fit: contain; }
+.ie-figure > .progressive-image { width: 100%; height: 100%; }
 .ie-noimage { color: #94a3b8; font-size: 13px; }
 .ie-facts { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .ie-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px; margin: 0; }

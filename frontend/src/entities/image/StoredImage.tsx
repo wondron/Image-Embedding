@@ -1,6 +1,7 @@
-import { useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { useApiBase } from '../../shared/api'
-import { markHostBroken, storedImageSources, type StoredImageVariant } from './imageSources'
+import { storedImageSources, type StoredImageVariant } from './imageSources'
+import { useImageCascade } from './useImageCascade'
 
 export interface StoredImageProps {
   /** The image's library id: when `url` cannot be loaded, the API serves the stored file. */
@@ -23,21 +24,17 @@ export interface StoredImageProps {
  */
 export function StoredImage({ id, url, variant = 'thumb', alt = '', className, placeholder = null, loading = 'lazy', apiBase }: StoredImageProps) {
   const contextBase = useApiBase()
-  const sources = storedImageSources([url], id, variant, apiBase ?? contextBase)
-  const key = sources.join('\n')
-  const [failed, setFailed] = useState<{ key: string; count: number }>({ key, count: 0 })
-  const index = failed.key === key ? failed.count : 0
-  const src = sources[index]
-  if (!src) return <>{placeholder}</>
+  const image = useImageCascade(storedImageSources([url], id, variant, apiBase ?? contextBase))
+  if (!image.src) return <>{placeholder}</>
   return <img
-    key={src}
-    src={src}
+    key={image.src}
+    src={image.src}
     alt={alt}
     className={className}
     loading={loading}
     decoding="async"
     referrerPolicy="no-referrer"
-    onLoad={() => { if (index > 0 && url && sources[0] === url) markHostBroken(url) }}
-    onError={() => setFailed({ key, count: index + 1 })}
+    onLoad={image.onLoad}
+    onError={image.onError}
   />
 }

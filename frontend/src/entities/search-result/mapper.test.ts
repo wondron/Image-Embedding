@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getImageSources, toSearchResponse } from '.'
+import { getImageSources, getThumbnailSources, toSearchResponse } from '.'
 
 /** One hit as backend SearchImageUseCase emits it for a heating scene (schemas/retrieval.py SearchHit). */
 const ovenHit = {
@@ -55,6 +55,8 @@ describe('toSearchResponse (§6.1.1 / §6.1.4)', () => {
       outputsHeating: true,
     })
     expect(getImageSources(response.items[0])).toEqual(['https://s3.example/original/1.jpg', 'https://s3.example/thumb/1.webp'])
+    // Lists: the 512 px thumbnail first
+    expect(getThumbnailSources(response.items[0])).toEqual(['https://s3.example/thumb/1.webp', 'https://s3.example/original/1.jpg'])
   })
 
   it('reads heating_group: null (category without a group) and absent keys (non-heating scene) as null', () => {

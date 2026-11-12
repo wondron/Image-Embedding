@@ -4,6 +4,7 @@ export {
   type SearchResponse,
   displayCategoryLabel,
   getImageSources,
+  getThumbnailSources,
 } from './model'
 export { parseSimilarity, toSearchResponse } from './mapper'
 export { fromPredictResponse } from './legacy-predict'

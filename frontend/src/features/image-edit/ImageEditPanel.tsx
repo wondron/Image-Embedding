@@ -9,13 +9,14 @@ import {
   LICENSE_ENUM,
   MAX_DESCRIPTION_LENGTH,
   SOURCE_TYPE_ENUM,
-  StoredImage,
+  ProgressiveImage,
   charLength,
   deleteImage,
   foodFieldsFilled,
   getImage,
   pushImageVector,
   reembedImage,
+  storedImageSources,
   updateImage,
   type ImageDeleteResult,
   type ImageDetailResult,
@@ -242,20 +243,20 @@ export function ImageEditPanel({
     foodState: value => enumValueText(catalog, FOOD_STATE_ENUM, value),
     labelStatus: value => LABEL_TEXT[value as LabelStatus] ?? value,
   }
-  // The original when there is one (the API's copy when its URL cannot be loaded), else the thumbnail
-  const original = image?.originalUrl ?? item.originalUrl
-  const preview = original ?? image?.imageUrl ?? item.imageUrl
+  // The thumbnail the library already loaded at once, the original over it once loaded (each read
+  // back through the API when its URL cannot be loaded)
+  const thumbSources = storedImageSources([image?.imageUrl ?? item.imageUrl], item.id, 'thumb', apiBase)
+  const originalSources = storedImageSources([image?.originalUrl ?? item.originalUrl], item.id, 'original', apiBase)
   const shownPath = image?.categoryId != null && categories.tree ? categoryPath(categories.tree, image.categoryId) : null
   const descriptionLength = draft ? charLength(draft.description.trim()) : 0
 
   return <div className="ie">
     <div className="ie-top">
       <figure className="ie-figure">
-        <StoredImage
-          id={item.id}
-          url={preview}
-          variant={original ? 'original' : 'thumb'}
-          loading="eager"
+        <ProgressiveImage
+          previewSources={thumbSources}
+          fullSources={originalSources}
+          alt={item.description || item.category || '图片'}
           placeholder={<span className="ie-noimage">暂无预览</span>}
         />
       </figure>

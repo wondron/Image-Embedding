@@ -74,8 +74,11 @@ export {
   type StoredImageVariant,
   storedImageUrl,
   storedImageSources,
+  isStoredImageUrl,
   markHostBroken,
   isHostBroken,
   forgetBrokenHosts,
 } from './imageSources'
 export { StoredImage, type StoredImageProps } from './StoredImage'
+export { ProgressiveImage, type ProgressiveImageProps } from './ProgressiveImage'
+export { useImageCascade, type ImageCascade } from './useImageCascade'

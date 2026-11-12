@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { fromPredictResponse, getImageSources } from '.'
+import { fromPredictResponse, getImageSources, getThumbnailSources } from '.'
 
 /** Bodies as POST /api/predict/searchImage_* returns them: { ok, trace_id, result } (FlyB passthrough). */
 const predict = (result: unknown, traceId: string | null = 'trace-1') => ({ ok: true, trace_id: traceId, result })
@@ -108,5 +108,17 @@ describe('fromPredictResponse (现网 Global, legacy)', () => {
       .toEqual(['https://img.example/original.png', 'https://img.example/thumbnail.png'])
     expect(getImageSources({ imageUrl: null, thumbnailUrl: 'https://img.example/thumbnail.png' }))
       .toEqual(['https://img.example/thumbnail.png'])
+  })
+
+  it('lists load the thumbnails first, ranked by size, and the original only after all of them', () => {
+    const doc = {
+      image_url: 'https://img.example/original.png',
+      thumbnail_url: { large: 'https://img.example/large.png', medium: 'https://img.example/medium.png', small: 'https://img.example/small.png' },
+    }
+    const item = fromPredictResponse(predict([doc])).items[0]
+    expect(getThumbnailSources(item)).toEqual([
+      'https://img.example/large.png', 'https://img.example/medium.png', 'https://img.example/small.png', 'https://img.example/original.png',
+    ])
+    expect(getThumbnailSources({ imageUrl: 'https://img.example/original.png', thumbnailUrl: null })).toEqual(['https://img.example/original.png'])
   })
 })
