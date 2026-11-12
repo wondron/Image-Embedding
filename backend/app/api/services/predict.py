@@ -31,6 +31,8 @@ async def run_predict(
     machine_info: str | None,
     trace_id: str | None,
     save_res: bool,
+    *,
+    search_num: int | None = None,
 ) -> dict[str, Any]:
     """Call FoodService.detect with shared logging and upstream error handling."""
     t0 = time.perf_counter()
@@ -43,6 +45,7 @@ async def run_predict(
         result = await run_in_threadpool(
             svc.detect,
             img_bytes,
+            search_num=search_num,
             machine_info=machine_info,
             trace_id=trace_id,
             save_result=save_res,
@@ -89,6 +92,7 @@ async def run_url_predict(
     machine_info: str | None,
     trace_id: str | None,
     save_res: bool,
+    search_num: int | None = None,
 ) -> dict[str, Any]:
     """Download a search input and run the same operation as a file upload."""
     trace_id = trace_id or str(uuid4())
@@ -105,6 +109,7 @@ async def run_url_predict(
     result = await run_predict(
         runtime=runtime,
         img_bytes=img_bytes,
+        search_num=search_num,
         source=source,
         machine_info=machine_info,
         trace_id=trace_id,

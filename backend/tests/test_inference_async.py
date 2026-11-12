@@ -85,14 +85,15 @@ class AsyncInferenceTests(unittest.IsolatedAsyncioTestCase):
             model.release.set()
             await asyncio.gather(request, return_exceptions=True)
 
-    def predict_request(self):
+    def predict_request(self, *, search_num=None):
         return predict.run_predict(
             self.runtime,
             b"query-image",
-            "file",
-            "oven",
-            "trace-async",
-            True,
+            search_num=search_num,
+            source="file",
+            machine_info="oven",
+            trace_id="trace-async",
+            save_res=True,
         )
 
     async def test_predict_allows_other_requests_and_preserves_arguments(self):
@@ -100,13 +101,13 @@ class AsyncInferenceTests(unittest.IsolatedAsyncioTestCase):
         model = BlockingInference(result=result)
         self.service.detect = model
 
-        response = await self.while_model_is_blocked(model, self.predict_request())
+        response = await self.while_model_is_blocked(model, self.predict_request(search_num=7))
 
         self.assertEqual(response, {"result": result, "trace_id": "trace-async"})
         self.assertEqual(model.args, (b"query-image",))
         self.assertEqual(
             model.kwargs,
-            {"machine_info": "oven", "trace_id": "trace-async", "save_result": True},
+            {"search_num": 7, "machine_info": "oven", "trace_id": "trace-async", "save_result": True},
         )
 
     async def test_predict_maps_upstream_timeout_from_worker(self):

@@ -223,14 +223,13 @@ def config_flag(config: Mapping[str, Any], name: str, key: str, default: bool) -
 @dataclass(frozen=True, slots=True)
 class PostgresSettings:
     """元数据库连接，取自生效配置的 POSTGRES_CONFIG。"""
-
     host: str
     user: str
     database: str
     password: str = field(default="", repr=False)
     port: int = PG_DEFAULT_PORT
     connect_timeout: float = PG_CONNECT_TIMEOUT_SECONDS
-
+    
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> PostgresSettings:
         name = "POSTGRES_CONFIG"

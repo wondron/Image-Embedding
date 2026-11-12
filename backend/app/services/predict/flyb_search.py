@@ -2,6 +2,7 @@ import base64, requests, logging, io, json
 from PIL import Image
 import logging, time
 from app.core.observability.log_helper import show_text
+
 logger = logging.getLogger('flyB')
 
 
@@ -58,8 +59,9 @@ class FlyBSearch:
             
         if image_data is None and urls is None:
             return ""
-        logger.info('启用 FLYB 检测')
+        logger.info(f'启用 FLYB 检测: is_url={is_url}, search_num={search_num}, query={query}, roi={roi}')
         result = self.get_result(use_data, search_num, is_url, query, roi)
+        logger.info(f'FLYB 检测结果: {result}')
         return result
 
 

@@ -38,13 +38,13 @@ class PredictEndpointTests(unittest.TestCase):
     def test_query_values_override_body_including_false_and_empty_strings(self):
         response = self.client.post(
             "/api/predict/searchImage_url",
-            params={"img_url": "https://query.example/a.png", "machine_info": "", "trace_id": "query-trace", "save_res": "false"},
-            json={"img_url": "https://body.example/b.png", "machine_info": "body-machine", "trace_id": "body-trace", "save_res": True},
+            params={"img_url": "https://query.example/a.png", "search_num": 7, "machine_info": "", "trace_id": "query-trace", "save_res": "false"},
+            json={"img_url": "https://body.example/b.png", "search_num": 5, "machine_info": "body-machine", "trace_id": "body-trace", "save_res": True},
         )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json(), {"ok": True, "result": [], "trace_id": "query-trace"})
         self.assertEqual(self.requests, ["https://query.example/a.png"])
-        self.service.detect.assert_called_once_with(b"query-image", machine_info="", trace_id="query-trace", save_result=False)
+        self.service.detect.assert_called_once_with(b"query-image", search_num=7, machine_info="", trace_id="query-trace", save_result=False)
 
     def test_url_body_defaults_and_generated_trace_id_are_preserved(self):
         response = self.client.post("/api/predict/searchImage_url", json={"img_url": "//images.example/a.png"})
@@ -52,16 +52,40 @@ class PredictEndpointTests(unittest.TestCase):
         trace_id = response.json()["trace_id"]
         self.assertEqual(str(UUID(trace_id)), trace_id)
         self.assertEqual(self.requests, ["https://images.example/a.png"])
-        self.service.detect.assert_called_once_with(b"query-image", machine_info=None, trace_id=trace_id, save_result=False)
+        self.service.detect.assert_called_once_with(b"query-image", search_num=None, machine_info=None, trace_id=trace_id, save_result=False)
 
     def test_url_body_fills_fields_not_provided_in_query(self):
         response = self.client.post(
             "/api/predict/searchImage_url",
             params={"img_url": "images.example/a.png"},
-            json={"machine_info": "body-machine", "trace_id": "body-trace", "save_res": True},
+            json={"search_num": 5, "machine_info": "body-machine", "trace_id": "body-trace", "save_res": True},
         )
         self.assertEqual(response.status_code, 200, response.text)
-        self.service.detect.assert_called_once_with(b"query-image", machine_info="body-machine", trace_id="body-trace", save_result=True)
+        self.service.detect.assert_called_once_with(b"query-image", search_num=5, machine_info="body-machine", trace_id="body-trace", save_result=True)
+
+    def test_file_query_search_num_reaches_the_model(self):
+        response = self.client.post(
+            "/api/predict/searchImage_file",
+            params={"search_num": 7, "machine_info": "oven", "trace_id": "file-trace", "save_res": "true"},
+            files={"file": ("query.png", b"query-image", "image/png")},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {"ok": True, "result": [], "trace_id": "file-trace"})
+        self.service.detect.assert_called_once_with(
+            b"query-image", search_num=7, machine_info="oven", trace_id="file-trace", save_result=True
+        )
+        self.assertEqual(self.requests, [])
+
+    def test_url_query_search_num_reaches_the_model_without_a_body(self):
+        response = self.client.post(
+            "/api/predict/searchImage_url",
+            params={"img_url": "https://images.example/a.png", "search_num": 7, "trace_id": "url-trace"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.requests, ["https://images.example/a.png"])
+        self.service.detect.assert_called_once_with(
+            b"query-image", search_num=7, machine_info=None, trace_id="url-trace", save_result=False
+        )
 
     def test_invalid_or_missing_url_never_downloads_or_invokes_model(self):
         for body in (None, {}, {"img_url": ""}, {"img_url": "ftp://images.example/a.png"}, {"img_url": "https://[invalid"}):
@@ -73,6 +97,7 @@ class PredictEndpointTests(unittest.TestCase):
 
     def test_file_search_preserves_list_and_envelope_results_with_generated_trace(self):
         for result in ([{"title": "image", "custom": {"rank": 3}}], {"results": [], "status": "upstream_empty_response", "upstream_error": {"code": 500}}):
+            self.service.detect.reset_mock()
             self.service.detect.return_value = result
             with self.subTest(result=result):
                 response = self.client.post("/api/predict/searchImage_file", files={"file": ("query.png", b"query-image", "image/png")})
@@ -80,6 +105,9 @@ class PredictEndpointTests(unittest.TestCase):
                 body = response.json()
                 self.assertEqual((body["ok"], body["result"]), (True, result))
                 self.assertEqual(str(UUID(body["trace_id"])), body["trace_id"])
+                self.service.detect.assert_called_once_with(
+                    b"query-image", search_num=None, machine_info=None, trace_id=body["trace_id"], save_result=False
+                )
 
     def test_file_input_errors_and_unavailable_service_keep_http_statuses(self):
         self.runtime.max_image_bytes = 4

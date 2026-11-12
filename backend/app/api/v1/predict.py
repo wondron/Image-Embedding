@@ -32,6 +32,7 @@ def ping(request: Request) -> dict[str, Any]:
 async def predict_file(
     request: Request,
     file: UploadFile = File(..., description="上传图片文件"),
+    search_num: int | None = Query(default=None, description="搜索结果数量"),
     machine_info: str | None = Query(default=None, description="设备型号"),
     trace_id: str | None = Query(default=None, description="Trace ID"),
     save_res: bool = Query(default=False, description="是否保存结果"),
@@ -43,6 +44,7 @@ async def predict_file(
     return await run_predict(
         runtime=runtime,
         img_bytes=img_bytes,
+        search_num=search_num,
         source=f"file:{file.filename or 'upload'}",
         machine_info=machine_info,
         trace_id=trace_id,
@@ -54,16 +56,18 @@ async def predict_file(
 async def predict_url(
     request: Request,
     img_url: str | None = Query(default=None, description="远程图片 URL（query，可选，与 JSON 二选一）"),
+    search_num: int | None = Query(default=None, description="搜索结果数量"),
     machine_info: str | None = Query(default=None, description="设备型号（query，可选）"),
     trace_id: str | None = Query(default=None, description="Trace ID（query，可选）"),
     save_res: bool | None = Query(default=None, description="是否保存结果（query，可选）"),
     body: PredictUrlBody | None = Body(
         default=None,
-        description="JSON 方式传参：{img_url, machine_info, trace_id, save_res}",
+        description="JSON 方式传参：{img_url, search_num, machine_info, trace_id, save_res}",
     ),
 ) -> dict[str, Any]:
     """URL 参数支持 Query 或 JSON；显式 Query 值优先。"""
     img_url = img_url if img_url is not None else (body.img_url if body else None)
+    search_num = search_num if search_num is not None else (body.search_num if body else None)
     machine_info = machine_info if machine_info is not None else (body.machine_info if body else None)
     trace_id = trace_id if trace_id is not None else (body.trace_id if body else None)
     save_res = save_res if save_res is not None else (body.save_res if body else None)
@@ -76,5 +80,6 @@ async def predict_url(
         img_url=img_url,
         machine_info=machine_info,
         trace_id=trace_id,
+        search_num=search_num,
         save_res=bool(save_res) if save_res is not None else False,
     )

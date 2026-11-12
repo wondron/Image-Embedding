@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 class PredictUrlBody(BaseModel):
     img_url: str | None = None
+    search_num: int | None = None
     machine_info: str | None = None
     trace_id: str | None = None
     save_res: bool | None = None

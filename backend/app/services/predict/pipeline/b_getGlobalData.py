@@ -1,6 +1,7 @@
 from app.services.predict.flyb_search import FlyBSearch
 
 
+
 class GetGlobalData:
     def __init__(self, config):
         self.searchTool = FlyBSearch(config)

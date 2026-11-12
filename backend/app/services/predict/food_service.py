@@ -37,8 +37,8 @@ class FoodService:
         self.embeddingTool = embedding
 
 
-    def detect(self, image_data: bytes, machine_info: str = "", trace_id: str = "", save_result: bool = False):
-        logger.info('start, trace_id: %s, save_result: %s, machine_info: %s', trace_id, save_result, machine_info)
+    def detect(self, image_data: bytes, search_num: int = None, machine_info: str = "", trace_id: str = "", save_result: bool = False):
+        logger.info('start, trace_id: %s, search_num: %s, save_result: %s, machine_info: %s', trace_id, search_num, save_result, machine_info)
         timer_tools = timerUtils.timer_tool()
         
         img_bgr = None
@@ -46,7 +46,7 @@ class FoodService:
             buf = np.frombuffer(image_data, dtype=np.uint8)
             img_bgr = cv2.imdecode(buf, cv2.IMREAD_COLOR)
 
-        res = self.searchTool.detect(image_data)
+        res = self.searchTool.detect(image_data, search_num)
         timer_tools.mark('global_search')
 
         documents = res['results'] if isinstance(res, dict) else res
@@ -76,5 +76,5 @@ if __name__ == '__main__':
     with open(image_path, 'rb') as f:
         image_data = f.read()
         food_service = FoodService(config, Embedder(config))
-        res = food_service.detect(image_data, 'test', False)
+        res = food_service.detect(image_data, None, 'test', False)
         logger.info('res: %s', res)
