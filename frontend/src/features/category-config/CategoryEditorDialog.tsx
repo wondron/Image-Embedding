@@ -23,6 +23,7 @@ import {
 } from '../../entities/category'
 import type { CategoryCreateRequestWire, CategoryUpdateRequestWire } from '../../shared/api'
 import { formatLibraryTime } from '../../shared/lib'
+import { notify } from '../../shared/ui'
 import { retargetCode } from './tableModel'
 import { saveFailureText } from './messages'
 
@@ -101,7 +102,6 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
     return { ...emptyCategoryDraft(null, code), zhName: domainName(code) ?? '' }
   })
   const [fieldErrors, setFieldErrors] = useState<CategoryFieldErrors>({})
-  const [notice, setNotice] = useState<{ text: string; tone: 'error' | 'status' } | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [focusField, setFocusField] = useState<CategoryFieldName | null>(null)
   const submitLock = useRef(false)
@@ -183,12 +183,11 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
   function showFieldErrors(errors: CategoryFieldErrors) {
     setFieldErrors(errors)
     setFocusField(firstField(errors))
-    setNotice(null)
   }
 
   function showFailure(failure: CategoryFailureView) {
     if (Object.keys(failure.fieldErrors).length > 0) showFieldErrors(failure.fieldErrors)
-    else setNotice({ text: saveFailureText(failure), tone: 'error' })
+    else notify.error(saveFailureText(failure), { title: '没有保存' })
   }
 
   async function submit(event: FormEvent) {
@@ -213,7 +212,7 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
       const body = toCategoryUpdateBody(node, validated.payload)
       if (!body) {
         setFieldErrors({})
-        setNotice({ text: '没有改动，无需保存。', tone: 'status' })
+        notify.info('没有改动，无需保存。')
         return
       }
       request = { mode: 'edit', id: node.id, body }
@@ -223,7 +222,6 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
     submitLock.current = true
     setSubmitting(true)
     setFieldErrors({})
-    setNotice(null)
     try {
       const failure = await save(request)
       if (failure && mounted.current) showFailure(failure)
@@ -446,7 +444,6 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
             <small>停用后上传和图库编辑里不再列出它；它的图片和下级类别不受影响。</small>
           </div>
         </section>
-        {notice && <p className={notice.tone === 'status' ? 'cat-status' : 'mg-form-error'} role={notice.tone === 'status' ? 'status' : 'alert'}>{notice.text}</p>}
       </div>
       <div className="mg-editor-actions">
         <button type="button" className="mg-btn mg-secondary" onClick={onClose} disabled={submitting}>取消</button>

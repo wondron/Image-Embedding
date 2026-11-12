@@ -19,14 +19,16 @@ import {
   type PrePostDecision,
   type UncertainProbeDecision,
 } from '../../entities/enum'
-import { EmptyState } from '../../shared/ui'
+import { EmptyState, notify } from '../../shared/ui'
 import '../../components/ManagementViews.css'
 import './enum-config.css'
 
 const REQUEST_TIMEOUT_MS = 20_000
 
 type BlockReason = 'written' | 'unconfirmed'
-type NoticeTone = 'error' | 'status'
+/** error: the append failed; status: a caution to read before trying again; success: done. */
+type NoticeTone = 'error' | 'status' | 'success'
+const NOTICE_TONE = { error: 'error', status: 'warn', success: 'success' } as const
 type Phase = 'idle' | 'checking' | 'submitting' | 'verifying'
 type FileSource = 'file_error' | 'file_invalid'
 
@@ -138,8 +140,6 @@ export function EnumConfigPanel({ apiBase = '' }: { apiBase?: string }) {
   const [draft, setDraft] = useState<AppendDraft>({ value: '', label: '', description: '' })
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<EnumFieldName, string>>>({})
   const [focusField, setFocusField] = useState<EnumFieldName | null>(null)
-  const [formNotice, setFormNotice] = useState<string | null>(null)
-  const [noticeTone, setNoticeTone] = useState<NoticeTone>('error')
   const [phase, setPhase] = useState<Phase>('idle')
   const [refreshPending, setRefreshPending] = useState(false)
   const [blocks, setBlocks] = useState<Record<string, Record<string, BlockReason>>>({})
@@ -168,9 +168,9 @@ export function EnumConfigPanel({ apiBase = '' }: { apiBase?: string }) {
   const writesBlockedRef = useRef(writesBlocked)
   writesBlockedRef.current = writesBlocked
 
+  /** The outcome of an append, as a popup (null: nothing to say; a popup already open stays). */
   const setNotice = useCallback((text: string | null, tone: NoticeTone = 'error') => {
-    setFormNotice(text)
-    setNoticeTone(tone)
+    if (text) notify({ type: NOTICE_TONE[tone], message: text, title: tone === 'error' ? '追加失败' : undefined })
   }, [])
 
   const blockValue = useCallback((name: string, value: string, reason: BlockReason) => {
@@ -502,7 +502,7 @@ export function EnumConfigPanel({ apiBase = '' }: { apiBase?: string }) {
     if (!mounted.current || !pending) return
     if (outcome.state === 'applied') {
       setRefreshPending(false)
-      setNotice('已手动刷新。已写入的取值不能再次追加。', 'status')
+      setNotice('已手动刷新。已写入的取值不能再次追加。', 'success')
       return
     }
     if (outcome.state === 'failed') {
@@ -673,7 +673,6 @@ export function EnumConfigPanel({ apiBase = '' }: { apiBase?: string }) {
             <small id="enum-append-description-hint">可留空。留空时提交空字符串，最长 256 个字符。</small>
             {fieldErrors.description && <p className="enum-field-error" id="enum-append-description-error" role="alert">{fieldErrors.description}</p>}
           </label>
-          {formNotice && <p className={noticeTone === 'status' ? 'enum-refresh-warning' : 'mg-form-error'} role={noticeTone === 'status' ? 'status' : 'alert'}>{formNotice}</p>}
         </div>
         <div className="mg-editor-actions">
           <button type="button" className="mg-btn mg-secondary" onClick={closeAppend} disabled={phase !== 'idle'}>取消</button>

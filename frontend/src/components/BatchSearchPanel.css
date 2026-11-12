@@ -10,7 +10,6 @@
 .batch-upload-copy { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .batch-upload b { color: #334155; font-size: 13px; font-weight: 600; }
 .batch-upload-copy>span { font-size: 11px; color: #6b7280; line-height: 1.5; }
-.batch-messages { color: #8b642d; background: #fffaf1; border: 1px solid #f0e3cd; border-radius: 8px; padding: 10px; max-height: 150px; overflow: auto; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
 .batch-run-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .batch-run-actions .btn { flex: 1; padding-inline: 10px; white-space: nowrap; }
 .batch-selected-preview { margin: 0; min-width: 0; border: 1px solid #e4e9f0; border-radius: 9px; overflow: hidden; background: #f7f8fa; }

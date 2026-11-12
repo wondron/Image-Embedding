@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Check, LoaderCircle, RotateCcw, Trash2 } from 'lucide-react'
 import { ApiError } from '../../shared/api'
+import { notify } from '../../shared/ui'
 import { formatLibraryTime } from '../../shared/lib'
 import { enumValueText, useEnumCatalog } from '../../entities/enum'
 import {
@@ -53,7 +54,12 @@ const REEMBED_FAILED: Record<string, string> = {
   INDEX_BAD_IMAGE: '存储里的原图无法识别为图片，只能重新上传这张图片。',
 }
 
-type Notice = { tone: 'ok' | 'warn' | 'error'; text: string }
+
+/** A write went through: pushed to the search index (success), or not (yet) there (a warning to read). */
+function writeOutcome(sync: VectorSyncOutcome | null, text: string, notPushedTitle: string) {
+  if (sync === null || sync === 'pushed') notify.success(text)
+  else notify.warn(text, { title: notPushedTitle })
+}
 
 function failure(error: unknown): string {
   if (error instanceof ApiError) return `${error.message}${error.traceId ? ` · trace_id=${error.traceId}` : ''}`
@@ -93,7 +99,6 @@ export function ImageEditPanel({
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [busy, setBusy] = useState<null | 'save' | 'push' | 'reembed' | 'delete'>(null)
-  const [notice, setNotice] = useState<Notice | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [membershipKey, setMembershipKey] = useState(0)
   const [foodOpen, setFoodOpen] = useState(false)
@@ -138,7 +143,7 @@ export function ImageEditPanel({
   }, [apiBase, item.id, gone])
 
   useEffect(() => {
-    setDetail(null); setDraft(null); setNotice(null); setConfirmDelete(false); setLoadError(null)
+    setDetail(null); setDraft(null); setConfirmDelete(false); setLoadError(null)
     void load(true)
     return () => { generation.current++ }
   }, [load])
@@ -153,20 +158,20 @@ export function ImageEditPanel({
 
   async function save() {
     if (!image || !draft || busy || invalid || !Object.keys(patch).length) return
-    setBusy('save'); setNotice(null)
+    setBusy('save')
     try {
       const result = await updateImage(image.id, patch, { baseUrl: apiBase })
       // The response carries the vector state after the push; an older server needs one more read
       retireReads()
       setDetail(current => current ? { ...current, image: result.image, vector: result.vector ?? current.vector } : current)
       setDraft(draftFromImage(result.image))
-      setNotice({ tone: result.vectorSync === 'pushed' ? 'ok' : 'warn', text: result.vectorSync ? SAVED[result.vectorSync] : '已保存到数据库。' })
+      writeOutcome(result.vectorSync, result.vectorSync ? SAVED[result.vectorSync] : '已保存到数据库。', '已保存，检索还没更新')
       setMembershipKey(key => key + 1)  // a new category may move rule memberships
       onChangedRef.current()
       if (!result.vector) void load(false)
     } catch (cause) {
       if (notFound(cause)) { gone(null); return }
-      setNotice({ tone: 'error', text: `保存失败：${failure(cause)}` })
+      notify.error(failure(cause), { title: '保存失败' })
       // A timeout or a 5xx may still have saved: show what is stored, keep the edits
       if (!(cause instanceof ApiError) || cause.status === null || cause.status >= 500) void load(false)
     } finally {
@@ -176,10 +181,10 @@ export function ImageEditPanel({
 
   async function push() {
     if (!image || busy) return
-    setBusy('push'); setNotice(null)
+    setBusy('push')
     try {
       const result = await pushImageVector(image.id, { baseUrl: apiBase })
-      setNotice({ tone: result.vectorSync === 'pushed' ? 'ok' : 'warn', text: result.vectorSync ? PUSHED[result.vectorSync] : '已请求同步。' })
+      writeOutcome(result.vectorSync, result.vectorSync ? PUSHED[result.vectorSync] : '已请求同步。', '没有同步到向量库')
       if (result.vector) {
         const vector = result.vector
         retireReads()
@@ -190,7 +195,7 @@ export function ImageEditPanel({
       onChangedRef.current()  // the gallery card shows the vector state too
     } catch (cause) {
       if (notFound(cause)) { gone(null); return }
-      setNotice({ tone: 'error', text: `同步失败：${failure(cause)}` })
+      notify.error(failure(cause), { title: '同步失败' })
     } finally {
       setBusy(null)
     }
@@ -198,21 +203,18 @@ export function ImageEditPanel({
 
   async function reembed() {
     if (!image || busy) return
-    setBusy('reembed'); setNotice(null)
+    setBusy('reembed')
     try {
       const result = await reembedImage(image.id, { baseUrl: apiBase })
       const vector = result.vector
       retireReads()
       setDetail(current => current ? { ...current, vector } : current)
-      setNotice(vector.status === 'synced'
-        ? { tone: 'ok', text: '已用原图重新生成向量，检索可以查到这张图了。' }
-        : { tone: 'warn', text: '向量已写入，但向量库的状态还不对，可以刷新后再看。' })
+      if (vector.status === 'synced') notify.success('已用原图重新生成向量，检索可以查到这张图了。')
+      else notify.warn('向量已写入，但向量库的状态还不对，可以刷新后再看。')
       onChangedRef.current()
     } catch (cause) {
       if (notFound(cause)) { gone(null); return }
-      setNotice({ tone: 'error', text: cause instanceof ApiError && REEMBED_FAILED[cause.code ?? '']
-        ? REEMBED_FAILED[cause.code!]
-        : `重新生成向量失败：${failure(cause)}` })
+      notify.error(cause instanceof ApiError && REEMBED_FAILED[cause.code ?? ''] ? REEMBED_FAILED[cause.code!] : failure(cause), { title: '重新生成向量失败' })
     } finally {
       setBusy(null)
     }
@@ -220,13 +222,13 @@ export function ImageEditPanel({
 
   async function remove() {
     if (!image || busy) return
-    setBusy('delete'); setNotice(null)
+    setBusy('delete')
     try {
       const result = await deleteImage(image.id, { baseUrl: apiBase })
       gone(result)
     } catch (cause) {
       if (notFound(cause)) { gone(null); return }
-      setNotice({ tone: 'error', text: `删除失败：${failure(cause)}` })
+      notify.error(failure(cause), { title: '删除失败' })
       setConfirmDelete(false)
       setBusy(null)
     }
@@ -326,7 +328,6 @@ export function ImageEditPanel({
     </div>
 
     <div className="ie-bar">
-      {notice && <p className={`ie-notice is-${notice.tone}`} role={notice.tone === 'error' ? 'alert' : 'status'}>{notice.text}</p>}
       {confirmDelete
         ? <div className="ie-ask" role="alertdialog" aria-label="确认删除">
           <p>删除后图库和检索结果里都看不到这张图片，向量和原图、缩略图也会清理，无法恢复。</p>

@@ -8,7 +8,6 @@ export interface CategoryDeleteDialogProps {
   entry: CategoryTreeNode
   /** Which request is in flight, if any. */
   submitting: 'delete' | 'deactivate' | null
-  notice: string | null
   onClose: () => void
   onDelete: () => void
   onDeactivate: () => void
@@ -18,7 +17,7 @@ export interface CategoryDeleteDialogProps {
  * Delete a category, or say why it cannot be deleted: the server refuses while a child, an image
  * or a scene rule still uses it. Then the way out is to deactivate it, offered right here.
  */
-export function CategoryDeleteDialog({ entry, submitting, notice, onClose, onDelete, onDeactivate }: CategoryDeleteDialogProps) {
+export function CategoryDeleteDialog({ entry, submitting, onClose, onDelete, onDeactivate }: CategoryDeleteDialogProps) {
   const { node } = entry
   const uses = categoryUses(entry)
   const busy = submitting !== null
@@ -34,7 +33,6 @@ export function CategoryDeleteDialog({ entry, submitting, notice, onClose, onDel
             : '它已经停用：上传和图库编辑里不再列出它。'}</p>
         </>
         : <p>确定删除{name}吗？它的全部名称会一起删除，删除后不能恢复。</p>}
-      {notice && <p className="mg-form-error" role="alert">{notice}</p>}
       <div className="dialog-actions">
         <button type="button" className="mg-btn mg-secondary" data-dialog-initial-focus disabled={busy} onClick={onClose}>{uses.length > 0 ? '关闭' : '取消'}</button>
         {uses.length > 0

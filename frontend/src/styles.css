@@ -194,13 +194,6 @@ main { flex: 1; min-height: 0; width: 100%; max-width: none; padding: 14px; marg
 .table-title:hover { color: var(--primary); }
 .table-actions { display: flex; gap: 7px; }
 .table-actions .btn { min-height: 34px; padding: 6px 10px; font-size: 14px; }
-.message-banner { display: flex; align-items: center; gap: 8px; padding: 10px 10px; margin-bottom: 8px; border: 1px solid; border-radius: 5px; font-size: 13px; line-height: 1.5; }
-.message-banner>svg { flex-shrink: 0; }
-.message-banner>span { flex: 1; }
-.message-banner a { display: inline-flex; align-items: center; gap: 3px; text-decoration: underline; white-space: nowrap; }
-.message-banner .icon-button { flex-shrink: 0; width: 24px; height: 24px; }
-.message-error { background: #fff8f7; border-color: #efd9d5; color: #ae7269; }
-.message-success { background: #f5faf8; border-color: #dcebe4; color: #6b9384; }
 .loading-state { min-height: 330px; padding: 45px 20px; text-align: center; }
 .loading-orbit { display: grid; place-items: center; width: 62px; height: 62px; margin: 0 auto 22px; background: #f3f6fb; border: 1px solid #e1e8f3; border-radius: 8px; color: #90a6c6; animation: pulse 1.6s infinite; }
 .loading-state h3 { font-size: 16px; font-weight: 500; color: #64748b; }
@@ -389,9 +382,6 @@ main { flex: 1; min-height: 0; width: 100%; max-width: none; padding: 14px; marg
   .pagination { gap: 6px; }
   .search-bottom-note { font-size: 12px; gap: 8px; }
   .trace-id { max-width: 100%; }
-  .message-banner { flex-wrap: wrap; gap: 6px; padding: 9px 9px; font-size: 12px; }
-  .message-banner>span { min-width: 210px; }
-  .message-banner .icon-button { margin-left: auto; }
   .dialog { width: calc(100vw - 22px); max-height: 90dvh; }
   .dialog-heading { padding: 11px 13px; }
   .dialog-heading h2 { font-size: 16px; }

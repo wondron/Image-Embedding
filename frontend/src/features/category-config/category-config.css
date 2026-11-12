@@ -7,8 +7,6 @@
 .ct-connection.is-online > span { background: #599987; }
 .ct-connection.is-error > span { background: #c5a16b; }
 
-.ct-status { margin: 0 0 12px; padding: 9px 12px; border: 1px solid #dcebe4; border-radius: 10px; background: #f5faf8; color: #3f6b5c; font-size: 13px; line-height: 1.7; }
-.ct-status:empty { display: none; }
 
 .ct-alert { margin: 14px 18px; }
 .ct-alert p { margin: 6px 0 0; line-height: 1.7; overflow-wrap: anywhere; }
@@ -109,7 +107,6 @@
 }
 .cat-check { display: inline-flex; align-items: center; gap: 8px; padding-top: 7px; color: #223046; font-size: 14px; cursor: pointer; }
 .cat-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--primary); }
-.cat-form .cat-status { margin: 12px 4px 0; padding: 9px 12px; border: 1px solid #dcebe4; border-radius: 8px; background: #f5faf8; color: #3f6b5c; font-size: 13px; }
 
 /* -- narrower screens: columns drop out from the least needed ------------------------- */
 @media (max-width: 1360px) {

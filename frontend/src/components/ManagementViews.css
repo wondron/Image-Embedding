@@ -249,8 +249,6 @@
 .mg-row-actions button { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 8px; background: none; color: #64748b; cursor: pointer; }
 .mg-row-actions button:hover { color: var(--primary); background: rgba(15, 23, 42, .04); }
 .mg-row-actions button:last-child:hover { color: #bd6464; }
-.mg-live-status { margin-top: 10px; min-height: 16px; color: #475569; font-size: 13px; line-height: 1.7; }
-.mg-live-status:empty { margin: 0; min-height: 0; }
 
 /* Detail forms share the same quiet section structure as the result dialog. */
 .mg-editor { display: flex; flex-direction: column; min-height: 0; padding: 0; overflow: hidden; }

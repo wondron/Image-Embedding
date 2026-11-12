@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Layers3, ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUpRight, Check, CheckCircle2,
+  Layers3, ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUpRight, Check,
   CircleHelp, Database, FolderOpen, ImageIcon, Images, LayoutGrid, List, Link2, PanelLeftClose, PanelLeftOpen,
   ListFilter, ListTree, LoaderCircle, Menu, ScanLine, Search, Settings2, SlidersHorizontal,
-  Tags, Upload, UploadCloud, Workflow, X, XCircle,
+  Tags, Upload, UploadCloud, Workflow, X,
 } from 'lucide-react'
 import { ManagementViews, type ManagementView } from './components/ManagementViews'
 import { EnumConfigPage } from './pages/enums'
@@ -24,6 +24,7 @@ import {
 } from './entities/search-result'
 import { pingApi } from './shared/api'
 import { safeHttpUrl } from './shared/lib'
+import { StatusOverlay, notify } from './shared/ui'
 import { SceneSelect } from './features/scene-select'
 import {
   ScoreThresholdControl,
@@ -124,8 +125,6 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [searched, setSearched] = useState(false)
   const [response, setResponse] = useState<SearchResponse | null>(null)
-  const [error, setError] = useState('')
-  const [notice, setNotice] = useState('')
   const [elapsed, setElapsed] = useState<number | null>(null)
   const [keyword, setKeyword] = useState('')
   const [category, setCategory] = useState('all')
@@ -134,7 +133,6 @@ export default function App() {
   const [page, setPage] = useState(1)
   const [detail, setDetail] = useState<SearchImage | null>(null)
   const [downloading, setDownloading] = useState<string | null>(null)
-  const [downloadFailure, setDownloadFailure] = useState<SearchImage | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [downloadItems, setDownloadItems] = useState<SearchImage[] | null>(null)
   const [apiBase, setApiBase] = useState(loadBaseUrl)
@@ -163,8 +161,8 @@ export default function App() {
   const resetResults = useCallback(() => {
     activeRequest.current?.abort()
     activeRequest.current = null
-    setBusy(false); setError(''); setNotice(''); setResponse(null); setSearched(false)
-    setPage(1); setCategory('all'); setKeyword(''); setElapsed(null); setDownloadFailure(null)
+    setBusy(false); setResponse(null); setSearched(false)
+    setPage(1); setCategory('all'); setKeyword(''); setElapsed(null)
     setSelected(new Set()); setActiveQueryName(''); setDetail(null)
   }, [])
   useEffect(() => { resetResults() }, [scene, resetResults])
@@ -175,7 +173,8 @@ export default function App() {
   const handleBatchResult = useCallback(({ response: result, file: queryFile, elapsed: seconds }: BatchSearchResult) => {
     setResponse(result); setSearched(true); setElapsed(seconds); setActiveQueryName(queryFile.name)
     setSelected(new Set()); setPage(1); setCategory('all'); setKeyword(''); setSort('default')
-    setError(''); setNotice(result.message ?? ''); setDownloadFailure(null); setDetail(null)
+    setDetail(null)
+    if (result.message) notify.info(result.message, { title: '搜索提示' })
   }, [])
   function toggleSelected(id: string) {
     setSelected(current => {
@@ -188,20 +187,20 @@ export default function App() {
   function selectFile(next: File | undefined) {
     if (!next) return
     if (!['image/jpeg', 'image/png', 'image/webp', 'image/bmp'].includes(next.type)) {
-      setError('请选择 JPG、PNG、WebP 或 BMP 格式的图片。'); return
+      notify.warn('请选择 JPG、PNG、WebP 或 BMP 格式的图片。', { title: '不能用这张图片' }); return
     }
-    if (next.size > maxBytes || next.size === 0) { setError('图片大小需大于 0 且不超过 15 MB。'); return }
+    if (next.size > maxBytes || next.size === 0) { notify.warn('图片大小需大于 0 且不超过 15 MB。', { title: '不能用这张图片' }); return }
     resetResults(); setFile(next); setMode('file')
   }
   async function runSearch() {
     if (busy || batchRunning) return
-    if (searchTarget === 'local' && !sceneCatalog.selectionValid) { setError('场景目录不可用，请刷新后重试。'); return }
-    if (mode === 'file' && !file) { setError('请先上传一张查询图片。'); return }
-    if (mode === 'url' && !safeHttpUrl(url.trim())) { setError('请输入有效的 HTTP 或 HTTPS 图片链接。'); return }
+    if (searchTarget === 'local' && !sceneCatalog.selectionValid) { notify.warn('场景目录不可用，请刷新后重试。', { title: '暂时不能搜索' }); return }
+    if (mode === 'file' && !file) { notify.warn('请先上传一张查询图片。', { title: '暂时不能搜索' }); return }
+    if (mode === 'url' && !safeHttpUrl(url.trim())) { notify.warn('请输入有效的 HTTP 或 HTTPS 图片链接。', { title: '暂时不能搜索' }); return }
     const controller = new AbortController()
     activeRequest.current?.abort(); activeRequest.current = controller
-    setBusy(true); setError(''); setNotice(''); setResponse(null); setSearched(false)
-    setCategory('all'); setKeyword(''); setPage(1); setDownloadFailure(null); setElapsed(null)
+    setBusy(true); setResponse(null); setSearched(false)
+    setCategory('all'); setKeyword(''); setPage(1); setElapsed(null)
     setSelected(new Set()); setActiveQueryName(mode === 'file' ? file!.name : url.trim())
     const started = performance.now()
     const timer = window.setTimeout(() => controller.abort('timeout'), 120000)
@@ -212,11 +211,11 @@ export default function App() {
         : await searchGlobalImages(common)
       if (activeRequest.current !== controller) return
       setResponse(result); setSearched(true); setElapsed((performance.now() - started) / 1000)
-      if (result.message) setNotice(result.message)
+      if (result.message) notify.info(result.message, { title: '搜索提示' })
     } catch (cause) {
       if (activeRequest.current !== controller) return
       if (unknownScene(cause)) void sceneCatalog.refresh()
-      setError(controller.signal.aborted ? '搜索等待超时，请稍后重试。' : sceneError(cause))
+      notify.error(controller.signal.aborted ? '搜索等待超时，请稍后重试。' : sceneError(cause), { title: '搜索失败' })
     } finally {
       window.clearTimeout(timer)
       if (activeRequest.current === controller) { activeRequest.current = null; setBusy(false) }
@@ -224,9 +223,16 @@ export default function App() {
   }
   async function saveImage(item: SearchImage) {
     if (downloading) return
-    setDownloading(item.id); setDownloadFailure(null); setError(''); setNotice('')
-    try { await downloadImage(item, apiBase); setNotice('已发起图片下载，请在浏览器下载列表中查看。') }
-    catch (cause) { setError(cause instanceof Error ? cause.message : '下载失败，请打开原图另存为。'); setDownloadFailure(item) }
+    setDownloading(item.id)
+    try { await downloadImage(item, apiBase); notify.success('已发起图片下载，请在浏览器下载列表中查看。') }
+    catch (cause) {
+      // The source can still be opened by hand and saved from there
+      const original = safeHttpUrl(item.imageUrl ?? item.thumbnailUrl ?? '')
+      notify.error(cause instanceof Error ? cause.message : '下载失败，请打开原图另存为。', {
+        title: '图片下载失败',
+        action: original ? { label: '打开原图', href: original } : undefined,
+      })
+    }
     finally { setDownloading(null) }
   }
   function navigate(next: View) {
@@ -299,7 +305,6 @@ export default function App() {
       {view === 'categories' && <CategoryConfigPage apiBase={apiBase} />}
       {view === 'scenes' && <SceneConfigPage apiBase={apiBase} />}
       <div className="search-view" hidden={view !== 'search'}>
-        {(error || notice) && <div className={`message-banner ${error ? 'message-error' : 'message-success'}`} role={error ? 'alert' : 'status'}>{error ? <XCircle size={18} /> : <CheckCircle2 size={18} />}<span>{error || notice}</span>{downloadFailure && safeHttpUrl(downloadFailure.imageUrl ?? downloadFailure.thumbnailUrl ?? '') && <a href={downloadFailure.imageUrl ?? downloadFailure.thumbnailUrl!} target="_blank" rel="noreferrer">打开原图 <ArrowUpRight size={14} /></a>}<button className="icon-button" aria-label="关闭提示" onClick={() => { setError(''); setNotice(''); setDownloadFailure(null) }}><X size={16} /></button></div>}
         <div className="search-workspace">
           <section className="query-panel panel" aria-label="图像搜索"><div className="query-toolbar">
             <div className="query-kind-tabs" aria-label="搜索模式">
@@ -348,8 +353,8 @@ export default function App() {
             </div>
             <div className="query-actions">
               <button className="btn btn-primary search-button" onClick={() => void runSearch()} disabled={!inputReady || busy || (searchTarget === 'local' && !sceneCatalog.selectionValid)}>{busy ? <LoaderCircle size={15} className="spin" /> : <Search size={15} />}{busy ? '正在搜索相似图片…' : '开始搜索'}</button>
-              {busy && <button className="text-button cancel-search" onClick={() => { activeRequest.current?.abort(); activeRequest.current = null; setBusy(false); setNotice('已取消本次搜索。') }}>取消搜索</button>}
-              <button className="btn btn-secondary" disabled={!file && !url && !searched && !error} onClick={() => { resetResults(); setFile(null); setUrl('') }}>重置</button>
+              {busy && <button className="text-button cancel-search" onClick={() => { activeRequest.current?.abort(); activeRequest.current = null; setBusy(false); notify.info('已取消本次搜索。') }}>取消搜索</button>}
+              <button className="btn btn-secondary" disabled={!file && !url && !searched} onClick={() => { resetResults(); setFile(null); setUrl('') }}>重置</button>
             </div>
             </div>
             </div>
@@ -414,12 +419,13 @@ export default function App() {
           {detail.snippets.length > 0 && <div className="detail-description"><span>来源描述</span><div>{detail.snippets.map((text, i) => <p key={i}>{text}</p>)}</div></div>}
         </section>
         {detail.source === 'self' && <SceneMembershipPanel imageId={detail.id} apiBase={apiBase} onManage={() => { setDetail(null); navigate('scenes'); const u = new URL(window.location.href); u.searchParams.set('sceneTab', 'sync'); window.history.replaceState(null, '', u.toString()) }} />}
-        {downloadFailure?.id === detail.id && <p className="inline-error" role="alert">{error}</p>}
       </div>
 
     </Dialog>}
     {downloadItems && <DownloadDialog items={downloadItems} apiBase={apiBase} onClose={() => setDownloadItems(null)} />}
     {settingsOpen && <Dialog title="搜索服务连接" onClose={() => setSettingsOpen(false)}><div className="settings-content"><p>连接现有的图像搜索服务。留空时使用当前站点的接口。</p><label htmlFor="api-base">服务地址</label><input className="input" id="api-base" type="url" placeholder="默认使用站点 /api" value={apiDraft} onChange={event => setApiDraft(event.target.value)} /><small>例如 http://127.0.0.1:8320，不包含 /api 路径。跨域连接需服务端允许访问。</small>{apiDraft.trim() && !safeHttpUrl(apiDraft.trim()) && <p className="inline-error">请输入 HTTP 或 HTTPS 地址。</p>}<div className="connection-info"><span className={`status-dot ${connection}`} />{connection === 'online' ? '接口可连接' : connection === 'checking' ? '正在检查连接…' : '当前未连接，请检查服务地址与后端运行状态'}<button className="text-button" onClick={() => void checkConnection()}>重新检查</button></div><div className="dialog-actions"><button className="btn btn-secondary" onClick={() => setSettingsOpen(false)}>取消</button><button className="btn btn-primary" disabled={Boolean(apiDraft.trim() && !safeHttpUrl(apiDraft.trim()))} onClick={saveSettings}><Check size={16} />保存连接</button></div></div></Dialog>}
     {helpOpen && <Dialog title="开始使用食图" onClose={() => setHelpOpen(false)}><div className="help-content"><div><Search size={21} /><section><h3>以图搜图</h3><p>上传图片或输入可公开访问的图片直链，在自建库中检索。默认场景为「通用」（general）；可切换场景与拒识阈值后点「开始搜索」。空库时请先去「上传与导入」入库（PG + S3），不以 FlyB 外搜兜底为完成标准。</p></section></div><div><ArrowDownToLine size={21} /><section><h3>查看与下载</h3><p>点击结果打开详情，勾选图片后可「批量下载」。一体机场景下结果会展示加热组与食物状态（缺字段显示「—」）。</p></section></div><div><FolderOpen size={21} /><section><h3>图库与入库</h3><p>图库按场景筛选（默认 general），缩略图使用 S3 https 地址。入库时可设置类别（取自「食材管理」的类别树）、标签、描述、食物标注、来源与许可；场景按所选类别的规则预览，和规则不同的勾选入库后写成人工纳入 / 排除。单张图片可单独标注。</p></section></div><div className="help-note">相似度仅在服务返回分数时展示；类别优先展示 scene_label，否则回落通用类别。</div></div></Dialog>}
+    {/* The one popup every page signals through notify() */}
+    <StatusOverlay />
   </div></EnumCatalogProvider></SceneApiContext.Provider>
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { ApiError } from '../../shared/api'
+import { notify } from '../../shared/ui'
 import { readMemberships, sceneError, uncertainWrite, writeMembership, type Membership, type MembershipSnapshot, type VectorSync } from '../../entities/scene'
 import { useSceneCatalog, markScenePending } from '../scene-catalog'
 import { beginSceneWrite, endSceneWrite, sceneWritesLocked, useSceneSync } from '../scene-sync'
@@ -36,7 +37,8 @@ export function SceneMembershipPanel({ imageId, apiBase = '', onSaved, onManage 
   const busy = useSyncExternalStore(subscribe, () => busyImages.has(key))
   const [snapshot, setSnapshot] = useState<MembershipSnapshot | null>(null)
   const [unsupported, setUnsupported] = useState(false); const [ready, setReady] = useState(false); const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(''); const [notice, setNotice] = useState(''); const [needsSync, setNeedsSync] = useState(false)
+  /** Why the members could not be read: the panel stays read-only until a refresh works. */
+  const [error, setError] = useState('')
   const generation = useRef(0)
   const read = useCallback(async () => {
     const g = ++generation.current; setLoading(true); setReady(false)
@@ -44,26 +46,29 @@ export function SceneMembershipPanel({ imageId, apiBase = '', onSaved, onManage 
     catch (e) { if (g === generation.current) setError(`读取场景成员失败，暂不可修改。${sceneError(e)}`) }
     finally { if (g === generation.current) setLoading(false) }
   }, [apiBase, imageId])
-  useEffect(() => { setSnapshot(null); setUnsupported(false); setError(''); setNotice(''); setNeedsSync(false); void read(); return () => { generation.current++ } }, [read])
+  useEffect(() => { setSnapshot(null); setUnsupported(false); setError(''); void read(); return () => { generation.current++ } }, [read])
 
   async function write(sceneId: number, isMember: boolean | null) {
     if (!ready || unsupported || busyImages.has(key) || sceneWritesLocked()) return
     if (!beginSceneWrite()) return
-    lock(key, true); setError(''); setNotice('')
+    lock(key, true)
     const g = generation.current
     try {
       const value = await writeMembership(apiBase, imageId, sceneId, isMember)
       if (value.syncRequired) markScenePending(apiBase)
       if (g === generation.current) {
-        setSnapshot(value); setNeedsSync(value.syncRequired)
-        setNotice(value.vectorSync ? SAVED[value.vectorSync] : '已保存到数据库，检索要等同步后才能看到这次修改。')
+        setSnapshot(value)
+        const text = value.vectorSync ? SAVED[value.vectorSync] : '已保存到数据库，检索要等同步后才能看到这次修改。'
+        const action = value.syncRequired && onManage ? { label: '去同步', onClick: onManage } : undefined
+        if (value.vectorSync === 'pushed') notify.success(text, { action })
+        else notify.warn(text, { title: '场景已保存，检索还没更新', action })
         onSaved?.()
       }
     } catch (e) {
       if (g === generation.current) {
-        setError(sceneError(e))
+        notify.error(sceneError(e), { title: '场景成员没有保存' })
         if (e instanceof ApiError && (e.status === 405 || e.status === 501 || (e.status === 404 && e.code !== 'SCENE_NOT_FOUND'))) setUnsupported(true)
-        if (uncertainWrite(e)) { setReady(false); setNotice('保存结果不确定，已重新读取成员；不会自动重试，请核对后再操作。'); await read() }
+        if (uncertainWrite(e)) { setReady(false); notify.warn('保存结果不确定，已重新读取成员；不会自动重试，请核对后再操作。', { title: '请核对场景成员' }); await read() }
       }
     } finally { lock(key, false); endSceneWrite() }
   }
@@ -72,14 +77,13 @@ export function SceneMembershipPanel({ imageId, apiBase = '', onSaved, onManage 
   const disabled = !ready || unsupported || busy || loading || syncing
   const nameById = new Map(catalog.data?.scenes.map(s => [s.id, s.name]))
   const nameByCode = new Map(catalog.data?.scenes.map(s => [s.code, s.name]))
-  const configPending = catalog.pendingSync && !notice
+  const configPending = catalog.pendingSync
   return <section className="scene-membership-panel" aria-busy={busy || loading}>
     <div className="scene-membership-head"><h4>场景成员</h4><button type="button" className="text-button" disabled={busy || loading} onClick={() => { setError(''); void read() }}>刷新</button></div>
     {loading && <p role="status">正在读取场景成员…</p>}
     {error && <p role="alert" className="mg-form-error">{error}</p>}
     {unsupported && <p role="alert">人工成员写接口不可用，本面板只读。</p>}
     {syncing && <p role="status">全量同步进行中，暂不可修改成员。</p>}
-    {notice && <p role="status">{notice}{needsSync && onManage && <> <button type="button" className="text-button" onClick={onManage}>去同步</button></>}</p>}
     {configPending && <p role="status">场景配置有尚未同步的改动，这里显示的是同步前的归属。{onManage && <> <button type="button" className="text-button" onClick={onManage}>去同步</button></>}</p>}
     {snapshot && <>
       <p>当前所属：{snapshot.scenes.map(code => nameByCode.get(code) ?? code).join('、') || '无'}</p>

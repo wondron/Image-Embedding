@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Check, ChevronLeft, ChevronRight, ListChecks, LoaderCircle, RefreshCw, XCircle } from 'lucide-react'
-import { EmptyState, Metric } from '../../shared/ui'
+import { EmptyState, Metric, notify } from '../../shared/ui'
 import type { IndexTaskStatus } from '../../entities/task'
 import { TaskDetails, TaskThumbnail } from './TaskDetails'
 import { taskDuration, taskNewImage, taskTime } from './presentation'
@@ -13,13 +13,12 @@ const filters: { status: IndexTaskStatus | null; label: string }[] = [
 export function IndexTaskHistory({ apiBase }: { apiBase: string }) {
   const history = useIndexTaskHistory(apiBase)
   const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [notice, setNotice] = useState('')
   const { data, loading, error, query } = history
   const selected = data?.items.find(item => item.id === selectedId)
-  useEffect(() => { setSelectedId(null); setNotice('') }, [history.key])
+  useEffect(() => { setSelectedId(null) }, [history.key])
   useEffect(() => {
     if (selectedId !== null && data && !loading && !error && !data.items.some(item => item.id === selectedId)) {
-      setSelectedId(null); setNotice('该记录不在当前页，请重新选择')
+      setSelectedId(null); notify.info('该记录不在当前页，请重新选择。')
     }
   }, [selectedId, data, loading, error])
   const pages = data ? Math.max(1, Math.ceil(data.total / TASK_PAGE_SIZE)) : 1
@@ -50,7 +49,6 @@ export function IndexTaskHistory({ apiBase }: { apiBase: string }) {
         {error.status === 422 && query.status !== null && <button type="button" className="mg-btn mg-secondary" onClick={() => history.filter(null)}>回到全部</button>}
       </div>}
       {history.changed && <p role="status">记录已变化，请刷新</p>}
-      {notice && <p role="status">{notice}</p>}
     </div>
     {data && <section className="mg-panel" aria-label="当前页入库记录" aria-busy={loading}>
       {data.items.length > 0 ? <>
@@ -63,7 +61,7 @@ export function IndexTaskHistory({ apiBase }: { apiBase: string }) {
             <span><small className="index-tasks-label">耗时：</small>{taskDuration(task.durationMs)}</span>
             <span><small className="index-tasks-label">记录时间：</small>{taskTime(task.createdAt)}</span>
           </div>
-          <button type="button" className="mg-text-button index-tasks-detail-button" onClick={() => { setSelectedId(task.id); setNotice('') }}>查看详情</button>
+          <button type="button" className="mg-text-button index-tasks-detail-button" onClick={() => setSelectedId(task.id)}>查看详情</button>
         </article>)}</div>
       </> : !history.changed && <EmptyState icon={ListChecks} title={allEmpty ? '暂无服务端入库记录' : '当前筛选无记录'} description={allEmpty ? '这里只含接入后实际记录的逐文件结果；写记录可能缺行，不表示图库没有图片，也不承诺永久保留。' : '全历史仍有记录，当前结果筛选没有匹配项。'}>
         {!allEmpty && query.status !== null && <button type="button" className="mg-btn mg-secondary" onClick={() => history.filter(null)}>查看全部</button>}

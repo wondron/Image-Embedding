@@ -6,7 +6,7 @@ import { LibraryPage } from '../pages/library'
 import { categoryLabel, type CategoryTree } from '../entities/category'
 import { indexImage } from '../entities/image'
 import { sceneDisplayLabel, sceneError, writeMembership, type VectorSync } from '../entities/scene'
-import { EmptyState, Metric } from '../shared/ui'
+import { EmptyState, Metric, notify } from '../shared/ui'
 import { useCategoryTree } from '../features/category-picker'
 import { INITIAL_LIBRARY_FILTERS, type LibraryFilters } from '../features/library-filters'
 import {
@@ -112,7 +112,6 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
   const [jobs, setJobs] = useState<IndexJob[]>([])
   const jobsRef = useRef(jobs)
   jobsRef.current = jobs
-  const [fileIssues, setFileIssues] = useState<string[]>([])
   const [dragging, setDragging] = useState(false)
   const [batchAnnotation, setBatchAnnotation] = useState<ImportAnnotation>(emptyAnnotation)
   /** The image being annotated on its own, with the dialog's unsaved draft. */
@@ -125,7 +124,6 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
   const fileInput = useRef<HTMLInputElement>(null)
   const dirInput = useRef<HTMLInputElement>(null)
   const [dirSupported] = useState(supportsDirectoryPicker)
-  const [notice, setNotice] = useState('')
   const apiBaseRef = useRef(apiBase)
   apiBaseRef.current = apiBase
   const prevApiBase = useRef(apiBase)
@@ -145,7 +143,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
       prevApiBase.current = apiBase
       if (indexingRef.current) {
         stopIndexing()
-        setNotice('服务地址已改变，当前入库已停止。可继续未完成的图片。')
+        notify.warn('服务地址已改变，当前入库已停止。可继续未完成的图片。', { title: '入库已停止' })
       }
     }
   }, [apiBase])
@@ -195,7 +193,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
       }
     }
     if (additions.length) commitJobs([...jobsRef.current, ...additions])
-    setFileIssues(issues)
+    if (issues.length) notify.warn(additions.length ? `已添加 ${additions.length} 张，另有 ${issues.length} 张没有添加：` : `${issues.length} 张图片没有添加：`, { title: '部分图片未添加', details: issues })
   }
 
   function removeJob(id: string) {
@@ -213,7 +211,6 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     commitJobs([])
     setPreview(null)
     setEditing(null)
-    setFileIssues([])
   }
 
   const openSceneSync = useCallback(() => {
@@ -256,12 +253,12 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
 
   async function startIndexing(retryFailed = false) {
     if (indexingRef.current) return
-    if (!importReady) { setNotice(blockers[0] ?? '标注里有需要修改的内容。'); return }
+    if (!importReady) { notify.warn(blockers[0] ?? '标注里有需要修改的内容。', { title: '暂时不能入库' }); return }
     const targets = jobsRef.current.filter(job => retryFailed
       ? job.status === 'error' || job.status === 'cancelled'
       : job.status === 'pending' || job.status === 'cancelled')
     if (!targets.length) {
-      setNotice(retryFailed ? '没有可重试的失败或已取消项。' : '请先添加待入库图片。')
+      notify.info(retryFailed ? '没有可重试的失败或已取消项。' : '请先添加待入库图片。')
       return
     }
     const token = ++runToken.current
@@ -273,8 +270,6 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     indexingRef.current = true
     setIndexing(true)
     setEditing(null)
-    setNotice('')
-    setFileIssues([])
     const currentRun = () => runToken.current === token && apiBaseRef.current === requestBase
     const updateJob = (id: string, patch: (job: IndexJob) => Partial<IndexJob>) =>
       commitJobs(jobsRef.current.map(job => job.id === id ? { ...job, ...patch(job) } : job))
@@ -394,7 +389,6 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
       <div className={`mg-dropzone ${dragging ? 'is-dragging' : ''} ${indexing ? 'is-disabled' : ''}`} onDragOver={event => { event.preventDefault(); if (!indexing) setDragging(true) }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false) }} onDrop={dropFiles}>
         <span className="mg-drop-icon"><CloudUpload size={28} strokeWidth={1.5} /></span><div><h3>把图片拖到这里</h3><p>或使用顶部的「选择图片」{dirSupported ? ' / 「选择目录」' : ''}添加文件</p></div>
       </div>
-      {fileIssues.length > 0 && <div className="mg-errors" role="alert"><div><strong>部分图片未添加</strong><button onClick={() => setFileIssues([])} aria-label="关闭文件提示"><X size={16} /></button></div><ul>{fileIssues.map((issue, index) => <li key={index}>{issue}</li>)}</ul></div>}
       <div className="mg-queue-heading"><h3>待入库队列 <span>{jobs.length}</span></h3>{jobs.length > 0 && <button className="mg-text-button" disabled={indexing} onClick={clearQueue}>清空列表</button>}</div>
       {jobs.length === 0 ? <div className="mg-queue-empty"><Images size={22} /><p>选好的图片会在这里显示</p></div> : <div className="mg-upload-grid">{jobs.map(item => {
         const annotation = item.annotation ?? batchAnnotation
@@ -463,7 +457,6 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
       <div className="mg-info"><Info size={17} /><p>这里只显示本会话上传队列。刷新或离开数据管理宿主后不保留；浏览器停止等待、超时或离开不保证服务器未成功或未记记录。后续人工场景调整与 notes 只属本会话，不是历史记录的全流程结果。</p></div>
     </>} />}
 
-    <div className="mg-live-status" role="status" aria-live="polite">{notice}</div>
     {preview && <Dialog title="图片预览" onClose={() => setPreview(null)} wide><img className="mg-dialog-image" src={preview.preview} alt={preview.file.name} /><p className="mg-preview-name">{preview.file.name}</p>{preview.remoteId && <p className="mg-preview-name monospace">入库 id：{preview.remoteId}</p>}{preview.error && <p className="mg-form-error" role="alert">{preview.error}</p>}</Dialog>}
     {editing && (() => {
       const job = jobs.find(item => item.id === editing.jobId)

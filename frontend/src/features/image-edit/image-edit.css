@@ -63,10 +63,6 @@
 .ie-changes { flex: 1; min-width: 0; color: #7b8899; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ie-delete { color: #b42318; }
 .ie-delete:disabled { color: var(--muted); cursor: not-allowed; text-decoration: none; }
-.ie-notice { margin: 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
-.ie-notice.is-ok { color: #2f7d4a; }
-.ie-notice.is-warn { color: #9a6700; }
-.ie-notice.is-error { color: #b42318; }
 .ie-ask { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 8px 10px; border: 1px solid #f0c2bc; border-radius: 8px; background: #fffafa; }
 .ie-ask p { flex: 1 1 260px; margin: 0; color: #7a2e26; font-size: 13px; line-height: 1.6; }
 .ie-ask > div { display: flex; gap: 8px; }

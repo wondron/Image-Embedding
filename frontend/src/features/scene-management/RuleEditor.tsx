@@ -11,7 +11,7 @@ const cuisinePattern = /^[a-z][a-z0-9_]*$/
  * Create a rule, or change one in place: the server replaces the target and / or the label in one
  * PATCH, so there is no half-done state to recover from.
  */
-export function RuleEditor({ scene, rule, apiBase, busy, error, onClose, onSave }: { scene: Scene; rule?: SceneRule; apiBase: string; busy: boolean; error: string; onClose: () => void; onSave: (input: RuleInput) => Promise<boolean> }) {
+export function RuleEditor({ scene, rule, apiBase, busy, onClose, onSave }: { scene: Scene; rule?: SceneRule; apiBase: string; busy: boolean; onClose: () => void; onSave: (input: RuleInput) => Promise<boolean> }) {
   const [kind, setKind] = useState<Kind>(rule && rule.category === null ? 'cuisine' : 'category')
   const [categoryId, setCategoryId] = useState<number | null>(rule?.category?.id ?? null)
   const [cuisine, setCuisine] = useState(rule?.cuisine ?? '')
@@ -65,7 +65,7 @@ export function RuleEditor({ scene, rule, apiBase, busy, error, onClose, onSave 
     {kind === 'category' && categoryError && <p className="mg-form-error">类别加载失败：{categoryError}<button type="button" className="text-button" onClick={() => setReload(v => v + 1)}>重试类别</button></p>}
     {membershipChanges && <p className="mg-help">{rule ? '目标改动会在原规则上直接保存；' : ''}已入库图片要在「同步」里重算后才按新规则归属。</p>}
     {rule && !targetChanged && <p className="mg-help">只改映射标签：检索立即使用，不需要同步。</p>}
-    {(invalid || error) && <p className="mg-form-error" role="alert">{invalid || error}</p>}
+    {invalid && <p className="mg-form-error" role="alert">{invalid}</p>}
     <div className="dialog-actions"><button type="button" className="mg-btn mg-secondary" disabled={busy} onClick={onClose}>取消</button><button type="submit" className="mg-btn mg-primary" disabled={busy}>保存</button></div>
   </form></Dialog>
 }

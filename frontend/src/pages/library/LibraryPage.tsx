@@ -5,7 +5,7 @@ import type { ImageDeleteResult, LabelStatus, LibraryImageItem } from '../../ent
 import { sceneDisplayLabel, toApiSceneCode } from '../../entities/scene'
 import { EMPTY_COPY } from '../../shared/config'
 import { oneOf, usePreference } from '../../shared/lib'
-import { EmptyState } from '../../shared/ui'
+import { EmptyState, notify } from '../../shared/ui'
 import { categoryPath, type CategoryTreeState } from '../../features/category-picker'
 import { ImageEditPanel } from '../../features/image-edit'
 import {
@@ -60,7 +60,6 @@ export function LibraryPage({ apiBase, filters, setFilters, page, setPage, categ
   /** The keyword as last requested: typing waits for a pause. */
   const [requestedQuery, setRequestedQuery] = useState(() => filters.query.trim())
   const [reloadKey, setReloadKey] = useState(0)
-  const [notice, setNotice] = useState('')
   const [toolsOpen, setToolsOpen] = useState(false)
   const [preview, setPreview] = useState<LibraryImageItem | null>(null)
   /** The open editor has unsaved edits: its dialog stays open until they are saved or undone. */
@@ -120,7 +119,7 @@ export function LibraryPage({ apiBase, filters, setFilters, page, setPage, categ
   function apply(next: LibraryFilters, message = '') {
     setFilters(next)
     setPage(1)
-    setNotice(message)
+    if (message) notify.info(message, { title: '筛选已调整' })
   }
 
   function changeQuery(text: string) {
@@ -179,11 +178,8 @@ export function LibraryPage({ apiBase, filters, setFilters, page, setPage, categ
     setDirty(false)
     wrote.current = false
     refreshCategories()
-    setNotice(result === null
-      ? '这张图片已经被删除了。'
-      : result.cleanup === 'done'
-        ? '已删除图片，向量和原图、缩略图已清理。'
-        : '已删除图片；向量和图片文件稍后由清理任务删除。')
+    if (result === null) notify.info('这张图片已经被删除了。')
+    else notify.success(result.cleanup === 'done' ? '已删除图片，向量和原图、缩略图已清理。' : '已删除图片；向量和图片文件稍后由清理任务删除。')
   }, [refreshCategories])
 
   const vectorUnreadable = items.length > 0 && items.every(item => item.vectorStatus === 'unavailable')
@@ -250,10 +246,6 @@ export function LibraryPage({ apiBase, filters, setFilters, page, setPage, categ
         </span>)}
         <button type="button" className="mg-text-button" onClick={resetFilters}>清空筛选</button>
       </div>}
-
-      <div className="lib-notice-slot" role="status" aria-live="polite">
-        {notice && <div className="lib-notice"><span>{notice}</span><button type="button" aria-label="关闭提示" onClick={() => setNotice('')}><X size={14} /></button></div>}
-      </div>
 
       <div className={`lib-content${layout === 'list' ? ' is-list' : ''}`} ref={content}>
         {list.error && <div className="mg-errors" role="alert"><div><strong>图库加载失败</strong><button type="button" className="mg-text-button" onClick={() => setReloadKey(key => key + 1)}>重试</button></div><p>{list.error}</p></div>}

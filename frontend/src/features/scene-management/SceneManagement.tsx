@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Dialog } from '../../components/Dialog'
-import { EmptyState } from '../../shared/ui'
+import { EmptyState, notify } from '../../shared/ui'
+import { ApiError } from '../../shared/api'
 import { Layers3, LoaderCircle } from 'lucide-react'
 import { createRule, deleteSceneResource, sceneError, uncertainWrite, updateRule, writeLabel, writeScene, type Scene, type SceneLabel, type SceneRule, type SceneWrite } from '../../entities/scene'
 import { refreshSceneCatalog, sceneSaved, useSceneCatalog } from '../scene-catalog'
@@ -17,9 +18,9 @@ export function SceneManagement({ apiBase }: { apiBase: string }) {
   const c = useSceneCatalog(apiBase); const sync = useSceneSync(); const [selected, setSelected] = useState<number | null>(() => initial().id); const [tab, setTab] = useState<Tab>(() => initial().tab)
   const [editor, setEditor] = useState<Editor | null>(null)
   const [busy, setBusy] = useState(false); const pending = useRef(false)
-  const [error, setError] = useState(''); const [notice, setNotice] = useState(''); const [trace, setTrace] = useState<string | null>(null)
+  /** The last write was refused for a code already taken: the editor marks its code field. */
+  const [codeTaken, setCodeTaken] = useState(false)
   const [confirmation, setConfirmation] = useState<{ title: string; text: string; action: () => Promise<boolean> } | null>(null)
-  const [feedbackTarget, setFeedbackTarget] = useState<number | 'new' | null>(null)
   const detailsRef = useRef<HTMLElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const headingRef = useRef<HTMLElement>(null)
@@ -34,21 +35,30 @@ export function SceneManagement({ apiBase }: { apiBase: string }) {
   async function perform(action: () => Promise<SceneWrite>): Promise<boolean> {
     if (pending.current || sceneWritesLocked() || !c.data || c.error || c.loading) return false
     if (!beginSceneWrite()) return false
-    pending.current = true; setBusy(true); setError(''); setNotice('')
+    pending.current = true; setBusy(true); setCodeTaken(false)
     try {
-      const result = await action(); setTrace(result.traceId)
+      const result = await action()
       await sceneSaved(apiBase, result.scene, result.deletedId, result.syncRequired)
       // The server says whether stored images still follow the old configuration
-      setNotice(result.syncRequired ? '已保存。' : '已保存，已生效（不需要同步）。'); return true
+      if (result.syncRequired) notify.success('已保存。已入库图片要全量同步后才按新配置归属。', { action: { label: '去同步', onClick: () => setTab('sync') } })
+      else notify.success('已保存，已生效（不需要同步）。')
+      return true
     }
-    catch (e) { setError(sceneError(e)); if (uncertainWrite(e)) { setNotice('写入结果不确定，已先刷新目录对账。不会自动重放，请核对后再决定手动操作。'); await refreshSceneCatalog(apiBase, true) }; return false }
+    catch (e) {
+      const reason = sceneError(e)
+      setCodeTaken(reason.includes('SCENE_CODE_EXISTS') || (e instanceof ApiError && e.code === 'SCENE_CODE_EXISTS'))
+      if (uncertainWrite(e)) {
+        notify.warn(`${reason}
+写入结果不确定，已先刷新目录对账。不会自动重放，请核对后再决定手动操作。`, { title: '写入结果不确定' })
+        await refreshSceneCatalog(apiBase, true)
+      } else notify.error(reason)
+      return false
+    }
     finally { pending.current = false; setBusy(false); endSceneWrite() }
   }
-  function open(value: Editor) { setFeedbackTarget(value.scene?.id ?? 'new'); setError(''); setEditor(value) }
-  function ask(title: string, text: string, action: () => Promise<boolean>) { setFeedbackTarget(scene?.id ?? null); setError(''); setConfirmation({ title, text, action }) }
+  function open(value: Editor) { setCodeTaken(false); setEditor(value) }
+  function ask(title: string, text: string, action: () => Promise<boolean>) { setConfirmation({ title, text, action }) }
   const protectedScene = Boolean(scene && (scene.code === 'general' || scene.code === c.data?.defaultScene))
-  const feedbackMatches = Boolean(scene && feedbackTarget === scene.id)
-  const detachedFeedback = Boolean((notice || error) && !feedbackMatches && !editor && !confirmation)
   useLayoutEffect(() => {
     const details = detailsRef.current; const scroll = scrollRef.current
     if (!details || !scroll) return
@@ -76,8 +86,6 @@ export function SceneManagement({ apiBase }: { apiBase: string }) {
       {c.error && <p className="mg-form-error" role="alert">{c.error} 已保留上次结果，依赖目录的写入已禁用。<button type="button" className="text-button" onClick={() => void c.refresh()}>重试刷新</button></p>}
       {locked && <p role="status">全量同步正在进行，本页配置与同窗口人工成员写入已禁用。</p>}
       {c.pendingSync && <p role="status">有配置改动尚未同步：已入库图片仍按旧配置归属，检索也是。<button type="button" className="text-button" onClick={() => setTab('sync')}>去同步</button></p>}
-      {detachedFeedback && error && <p className="mg-form-error" role="alert">{error}</p>}
-      {detachedFeedback && notice && <p role="status">{notice}</p>}
       {c.loading && <p className="scene-loading" role="status"><LoaderCircle size={15} className="spin" aria-hidden />正在加载场景目录…</p>}
     </div>
     {/* Narrow screens show one pane at a time: the list, or what was picked from it (a scene, or the full sync) */}
@@ -92,8 +100,6 @@ export function SceneManagement({ apiBase }: { apiBase: string }) {
         if (target.getBoundingClientRect().top < top) scroll.scrollBy({ top: target.getBoundingClientRect().top - top, behavior: 'auto' })
       }}>
         <div className="scene-status-stack scene-scoped-status" aria-label="当前场景状态">
-          {feedbackMatches && error && !editor && !confirmation && <p className="mg-form-error" role="alert">{error}</p>}
-          {feedbackMatches && notice && <p role="status">{notice}</p>}
           {protectedScene && !editor && !confirmation && <p id="scene-protection-note">默认场景不可停用、删除或取消全包含；名称、描述和加热标志仍可编辑。</p>}
         </div>
         {(scene || tab === 'sync') && <button type="button" className="text-button scene-back" onClick={() => { setSelected(null); if (tab === 'sync') setTab('overview') }}>返回列表</button>}
@@ -131,14 +137,14 @@ export function SceneManagement({ apiBase }: { apiBase: string }) {
           <div className="scene-tab-toolbar"><h4>规则</h4><button type="button" className="mg-btn mg-primary" disabled={!canWrite} onClick={() => open({ type: 'rule', scene })}>新建规则</button></div>
           {!scene.rules.length ? <div className="scene-tab-empty"><EmptyState icon={Layers3} title="暂无规则" description="通过工具栏新建类别或菜系规则。" /></div> : <div className="scene-table-scroll"><table className="scene-table"><thead><tr><th>目标</th><th>映射标签</th><th>操作</th></tr></thead><tbody>{scene.rules.map(r => <tr key={r.id}><td>{r.category ? `${r.category.name ?? r.category.code}（${r.category.code}）` : r.cuisine}</td><td>{r.label ? `${r.label.name ?? r.label.code}（${r.label.code}）` : '无'}</td><td><div className="scene-table-actions"><button type="button" className="text-button" disabled={!canWrite} onClick={() => open({ type: 'rule', scene, rule: r })}>编辑</button><button type="button" className="text-button" disabled={!canWrite} onClick={() => ask('删除规则', '删除规则不会清除已有的人工调整；已入库图片要同步后才按剩下的规则归属。', () => perform(() => deleteSceneResource(apiBase, scene.id, 'rules', r.id)))}>删除</button></div></td></tr>)}</tbody></table></div>}
         </div>}
-        <small className="scene-detail-trace">{(feedbackMatches && trace) || c.data?.traceId ? `trace_id=${feedbackMatches && trace ? trace : c.data?.traceId}` : ''}</small>
+        <small className="scene-detail-trace">{c.data?.traceId ? `trace_id=${c.data.traceId}` : ''}</small>
       </div>
     </section></div>
-    {editor?.type === 'scene' && <SceneEditor scene={editor.scene} protectedScene={Boolean(editor.scene && (editor.scene.code === 'general' || editor.scene.code === c.data?.defaultScene))} busy={busy || locked} error={error} onClose={() => setEditor(null)} onSave={input => perform(() => writeScene(apiBase, input, editor.scene?.id))} />}
-    {editor?.type === 'label' && <LabelEditor label={editor.label} busy={busy || locked} error={error} onClose={() => setEditor(null)} onSave={input => perform(() => writeLabel(apiBase, editor.scene.id, input, editor.label?.id))} />}
-    {editor?.type === 'rule' && <RuleEditor scene={editor.scene} rule={editor.rule} apiBase={apiBase} busy={busy || locked} error={error} onClose={() => setEditor(null)} onSave={input => perform(() => editor.rule
+    {editor?.type === 'scene' && <SceneEditor scene={editor.scene} protectedScene={Boolean(editor.scene && (editor.scene.code === 'general' || editor.scene.code === c.data?.defaultScene))} busy={busy || locked} codeTaken={codeTaken} onClose={() => setEditor(null)} onSave={input => perform(() => writeScene(apiBase, input, editor.scene?.id))} />}
+    {editor?.type === 'label' && <LabelEditor label={editor.label} busy={busy || locked} codeTaken={codeTaken} onClose={() => setEditor(null)} onSave={input => perform(() => writeLabel(apiBase, editor.scene.id, input, editor.label?.id))} />}
+    {editor?.type === 'rule' && <RuleEditor scene={editor.scene} rule={editor.rule} apiBase={apiBase} busy={busy || locked} onClose={() => setEditor(null)} onSave={input => perform(() => editor.rule
       ? updateRule(apiBase, editor.scene.id, editor.rule.id, input)
       : createRule(apiBase, editor.scene.id, input))} />}
-    {confirmation && <Dialog title={confirmation.title} size="sm" onClose={() => setConfirmation(null)} dismissDisabled={busy}><p>{confirmation.text}</p>{error && <p className="mg-form-error" role="alert">{error}</p>}<button type="button" className="mg-btn mg-secondary" disabled={busy} onClick={() => setConfirmation(null)}>取消</button><button type="button" className="mg-btn mg-primary" disabled={!canWrite} onClick={async () => { if (await confirmation.action()) setConfirmation(null) }}>确认</button></Dialog>}
+    {confirmation && <Dialog title={confirmation.title} size="sm" onClose={() => setConfirmation(null)} dismissDisabled={busy}><p>{confirmation.text}</p><button type="button" className="mg-btn mg-secondary" disabled={busy} onClick={() => setConfirmation(null)}>取消</button><button type="button" className="mg-btn mg-primary" disabled={!canWrite} onClick={async () => { if (await confirmation.action()) setConfirmation(null) }}>确认</button></Dialog>}
   </div>
 }

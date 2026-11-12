@@ -15,7 +15,7 @@ import {
 } from '../../entities/category'
 import { enumValueLabel, useEnumCatalog } from '../../entities/enum'
 import { requestSignal } from '../../shared/lib'
-import { EmptyState } from '../../shared/ui'
+import { EmptyState, notify } from '../../shared/ui'
 import { CategoryDeleteDialog } from './CategoryDeleteDialog'
 import { CategoryEditorDialog, type CategoryEditorTarget, type CategorySaveRequest } from './CategoryEditorDialog'
 import { CategoryTable, rowElementId } from './CategoryTable'
@@ -33,7 +33,6 @@ type LoadState = 'applied' | 'stale' | 'aborted' | 'failed'
 interface RemoveState {
   node: CategoryNode
   submitting: 'delete' | 'deactivate' | null
-  notice: string | null
 }
 
 function readCategoryParam(): number | null {
@@ -79,7 +78,6 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
   const [filter, setFilter] = useState<CategoryTableFilter>(NO_CATEGORY_FILTER)
   const [editor, setEditor] = useState<CategoryEditorTarget | null>(null)
   const [removing, setRemoving] = useState<RemoveState | null>(null)
-  const [status, setStatus] = useState<string | null>(null)
   const [copiedTrace, setCopiedTrace] = useState<string | null>(null)
 
   const mounted = useRef(true)
@@ -163,7 +161,7 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
       if (loading || listFailure) return // wait for a tree that loaded
       if (reveal === selectedId) {
         setSelectedId(null)
-        setStatus(`没有找到编号为 ${reveal} 的类别，它可能已被删除。`)
+        notify.warn(`没有找到编号为 ${reveal} 的类别，它可能已被删除。`, { title: '找不到这个类别' })
       }
       setReveal(null)
       return
@@ -204,7 +202,6 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
 
   function openEditor(target: CategoryEditorTarget) {
     if (busy) return
-    setStatus(null)
     if (target.mode === 'edit') setSelectedId(target.node.id)
     else if (typeof target.parentId === 'number') setSelectedId(target.parentId)
     setEditor(target)
@@ -237,7 +234,7 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
         : await updateCategory(request.id, request.body, options)
       if (!mounted.current) return null
       if (result.node) showSaved(result.node)
-      setStatus(done(result.node ? `「${categoryLabel(result.node)}」` : '类别'))
+      notify.success(done(result.node ? `「${categoryLabel(result.node)}」` : '类别'))
       void reload() // a move changes the paths below it; counts and order come from the server
       return null
     } catch (error) {
@@ -258,15 +255,14 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
 
   function openRemove(entry: CategoryTreeNode) {
     if (busy) return
-    setStatus(null)
     setSelectedId(entry.node.id)
-    setRemoving({ node: entry.node, submitting: null, notice: null })
+    setRemoving({ node: entry.node, submitting: null })
   }
 
   async function confirmRemove() {
     if (!removing || removing.submitting) return
     const target = removing.node
-    setRemoving({ node: target, submitting: 'delete', notice: null })
+    setRemoving({ node: target, submitting: 'delete' })
     try {
       await deleteCategory(target.id, {
         baseUrl: apiBase,
@@ -278,19 +274,20 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
       setNodes(remaining)
       setSelectedId(target.parentId)
       setRemoving(null)
-      setStatus(`已删除「${categoryLabel(target)}」。`)
+      notify.success(`已删除「${categoryLabel(target)}」。`)
       void reload()
     } catch (error) {
       if (!mounted.current) return
       const failure = toCategoryFailure(error)
       if (failure.kind === 'not_found') {
         setRemoving(null)
-        setStatus(`「${categoryLabel(target)}」已经不存在，类别树已刷新。`)
+        notify.info(`「${categoryLabel(target)}」已经不存在，类别树已刷新。`)
         void reload()
         return
       }
       if (failure.kind === 'uncertain' || failure.kind === 'in_use') void reload()
-      setRemoving({ node: target, submitting: null, notice: deleteFailureText(failure) })
+      setRemoving({ node: target, submitting: null })
+      notify.error(deleteFailureText(failure), { title: '没有删除' })
     }
   }
 
@@ -298,10 +295,13 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
   async function deactivate() {
     if (!removing || removing.submitting) return
     const target = removing.node
-    setRemoving({ node: target, submitting: 'deactivate', notice: null })
+    setRemoving({ node: target, submitting: 'deactivate' })
     const failure = await write({ mode: 'edit', id: target.id, body: { is_active: false } }, name => `已停用${name}。`)
     if (!mounted.current) return
-    if (failure) setRemoving({ node: target, submitting: null, notice: saveFailureText(failure) })
+    if (failure) {
+      setRemoving({ node: target, submitting: null })
+      notify.error(saveFailureText(failure), { title: '没有停用' })
+    }
     else setRemoving(null)
   }
 
@@ -352,8 +352,6 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
       <span className={`mg-status ct-connection${failedEmpty ? ' is-error' : loadedOnce && !listFailure ? ' is-online' : ''}`}><span />{connection}</span>
     </div>
 
-    <p className="ct-status" role="status" aria-live="polite">{status}</p>
-
     <section className="mg-panel ct-panel" aria-label="类别列表">
       {listFailure && <div className="mg-errors ct-alert" role="alert">
         <div><strong>{nodes.length > 0 ? '类别树刷新失败，仍显示已有内容' : '类别树加载失败'}</strong></div>
@@ -397,7 +395,7 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
         <div>
           <button type="button" className="mg-text-button" disabled={view.filtering} onClick={() => setExpanded(new Set(nodes.map(node => node.id)))}>全部展开</button>
           <button type="button" className="mg-text-button" disabled={view.filtering} onClick={() => setExpanded(new Set())}>全部收起</button>
-          <button type="button" className="mg-text-button" disabled={loading} onClick={() => { setStatus(null); setReloadKey(key => key + 1) }}>{loading && loadedOnce ? '正在刷新…' : '刷新'}</button>
+          <button type="button" className="mg-text-button" disabled={loading} onClick={() => setReloadKey(key => key + 1)}>{loading && loadedOnce ? '正在刷新…' : '刷新'}</button>
         </div>
       </div>}
     </section>
@@ -417,7 +415,6 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
     {removing && removingEntry && <CategoryDeleteDialog
       entry={removingEntry}
       submitting={removing.submitting}
-      notice={removing.notice}
       onClose={() => setRemoving(null)}
       onDelete={() => void confirmRemove()}
       onDeactivate={() => void deactivate()}

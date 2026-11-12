@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test'
+import { acknowledgeNotice } from './notice'
 
 // Fixtures only: every API request is answered by the in-memory backend below.
 // It follows backend/app/schemas/categories.py closely enough to drive the page.
@@ -168,7 +169,7 @@ test('空库：先建类别域，再在它下面建下级类别', async ({ page 
   await expect(rootDialog.locator('#category-form-zhName')).toHaveValue('菜品')
   await rootDialog.getByRole('button', { name: '创建', exact: true }).click()
   await expect(rootDialog).toBeHidden()
-  await expect(page.getByRole('status').filter({ hasText: '已创建「菜品」。' })).toBeVisible()
+  await acknowledgeNotice(page, '已创建「菜品」。', 'success')
   await expect(nodeButton(page, '菜品', 'dish')).toHaveAttribute('aria-current', 'true')
   expect(backend.writes()[0]).toEqual({
     method: 'POST',
@@ -267,7 +268,7 @@ test('编辑只提交改过的字段；换上级时下级类别一起移动', as
   // A node cannot move under itself or its own subtree: those are not offered.
   await expect(dialog.locator('#category-form-parentId option')).toHaveText(['菜品（dish）', '　面条（dish.noodle）', '食材（ingredient）'])
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(dialog.getByRole('status')).toHaveText('没有改动，无需保存。')
+  await acknowledgeNotice(page, '没有改动，无需保存。', 'info')
   expect(backend.writes()).toEqual([])
 
   await dialog.locator('#category-form-sortOrder').fill('5')
@@ -329,7 +330,7 @@ test('删除：在用的类别说明原因并可改为停用；空类别确认�
   await confirm.getByRole('button', { name: '改为停用' }).click()
   await expect(confirm).toBeHidden()
   expect(backend.writes()).toEqual([{ method: 'PATCH', path: '/api/categories/3', body: { is_active: false } }])
-  await expect(page.getByRole('status').filter({ hasText: '已停用「面条」。' })).toBeVisible()
+  await acknowledgeNotice(page, '已停用「面条」。', 'success')
   await expect(rowOf(page, 3).locator('.ct-col-status')).toHaveText('停用')
 
   await page.getByRole('button', { name: '删除「披萨」' }).click()
@@ -347,7 +348,7 @@ test('删除：在用的类别说明原因并可改为停用；空类别确认�
   await confirm.getByRole('button', { name: '删除', exact: true }).click()
   await expect(confirm).toBeHidden()
   expect(backend.writes()[1]).toEqual({ method: 'DELETE', path: '/api/categories/4', body: undefined })
-  await expect(page.getByRole('status').filter({ hasText: '已删除「披萨切片」。' })).toBeVisible()
+  await acknowledgeNotice(page, '已删除「披萨切片」。', 'success')
   await expect(nodeButton(page, '披萨切片', 'dish.pizza.slice')).toHaveCount(0)
   // The parent is highlighted next, and without children it can now be deleted too.
   await expect(nodeButton(page, '披萨', 'dish.pizza')).toHaveAttribute('aria-current', 'true')
@@ -406,7 +407,7 @@ test('列表加载失败时显示错误码和追踪号，重试后恢复；链�
 
 test('链接里的类别已不存在时说明原因，并从地址里去掉它', async ({ page }) => {
   await open(page, seededRows(), '/?view=categories&category=99')
-  await expect(page.getByRole('status').filter({ hasText: '没有找到编号为 99 的类别，它可能已被删除。' })).toBeVisible()
+  await acknowledgeNotice(page, '没有找到编号为 99 的类别，它可能已被删除。', 'warn')
   await expect(page).not.toHaveURL(/category=/)
   await expect(nodeButton(page, '菜品', 'dish')).toBeVisible()
 })

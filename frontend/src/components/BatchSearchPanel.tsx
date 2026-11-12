@@ -3,6 +3,7 @@ import { CheckCircle2, ChevronLeft, ChevronRight, Circle, Clock3, Images, Loader
 import { searchGlobalImages, type SearchResponse } from '../entities/search-result'
 import { maxBatchImages, selectBatchFiles } from '../lib/batch-search'
 import { ImageFilePicker } from './ImageFilePicker'
+import { notify } from '../shared/ui'
 import './BatchSearchPanel.css'
 
 type JobStatus = 'pending' | 'running' | 'success' | 'error' | 'cancelled'
@@ -39,7 +40,6 @@ const statusText: Record<JobStatus, string> = {
 export function BatchSearchPanel({ baseUrl, active: isActive = true, onResult, onClearResult, onRunningChange }: BatchSearchPanelProps) {
   const [jobs, setJobs] = useState<SearchJob[]>([])
   const [running, setRunning] = useState(false)
-  const [messages, setMessages] = useState<string[]>([])
   const [dragging, setDragging] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const selectedIdRef = useRef<string | null>(null)
@@ -120,7 +120,7 @@ export function BatchSearchPanel({ baseUrl, active: isActive = true, onResult, o
       previousBase.current = baseUrl
       if (isRunning.current) {
         stop()
-        setMessages(['搜索服务地址已改变，当前搜索已停止。可继续未完成的图片。'])
+        notify.warn('搜索服务地址已改变，当前搜索已停止。可继续未完成的图片。', { title: '批量搜索已停止' })
       }
     }
   }, [baseUrl, stop])
@@ -128,7 +128,7 @@ export function BatchSearchPanel({ baseUrl, active: isActive = true, onResult, o
   function addFiles(incoming: File[]) {
     if (isRunning.current) return
     const selected = selectBatchFiles(incoming, jobsRef.current.map(job => job.file))
-    setMessages(selected.messages)
+    if (selected.messages.length) notify.warn(selected.files.length ? `已加入 ${selected.files.length} 张，有些没有加入：` : '这些图片没有加入：', { title: '部分图片未加入', details: selected.messages })
     const next = [...jobsRef.current, ...selected.files.map(file => ({
       id: `batch-query-${++nextId.current}`, file,
       preview: URL.createObjectURL(file), status: 'pending' as const,
@@ -145,7 +145,6 @@ export function BatchSearchPanel({ baseUrl, active: isActive = true, onResult, o
     selectedByUser.current = false
     displayedResult.current = null
     setSelectedId(null)
-    setMessages([])
     callbacks.current.onClearResult?.()
   }
 
@@ -192,7 +191,6 @@ export function BatchSearchPanel({ baseUrl, active: isActive = true, onResult, o
     let autoShown = false
     isRunning.current = true
     setRunning(true)
-    setMessages([])
     const currentRun = () => mounted.current && runId.current === token && baseRef.current === requestBase
     try {
       displayedResult.current = null
@@ -276,7 +274,6 @@ export function BatchSearchPanel({ baseUrl, active: isActive = true, onResult, o
         {!running && retryable && <button type="button" className="btn btn-secondary" onClick={() => void start(true)}><RotateCcw size={15} />重试未完成</button>}
       </div>
     </div>
-    {messages.length > 0 && <div className="batch-messages" role="status">{messages.map((message, index) => <p key={index}>{message}</p>)}</div>}
     {selectedJob && <figure className="batch-selected-preview">
       <div className="batch-selected-heading"><b>当前查询图</b><span>{selectedIndex + 1} / {jobs.length}</span>
         <button type="button" className="icon-button" aria-label="上一张查询图片" disabled={selectedIndex <= 0} onClick={() => selectJob(jobs[selectedIndex - 1])}><ChevronLeft size={16} /></button>

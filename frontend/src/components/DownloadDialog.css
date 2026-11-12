@@ -16,7 +16,6 @@
 .download-destination>small { width: 100%; color: var(--muted); font-size: 13px; }
 .download-help, .download-limits { color: var(--muted); font-size: 13px; line-height: 1.8; }
 .download-limits { padding: 10px 12px; border-radius: 8px; background: #f0f2f5; }
-.download-status-note { padding: 10px 12px; border: 1px solid #e4d4b7; border-radius: 8px; color: #7f602e; background: #fffaf0; }
 .download-progress { display: grid; gap: 10px; padding: 16px; border-radius: 10px; border: 1px solid var(--border); background: #fff; }
 .download-progress-title { display: flex; justify-content: space-between; gap: 10px; }
 .download-progress-title strong { font-weight: 650; }

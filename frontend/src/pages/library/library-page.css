@@ -60,23 +60,6 @@
 .lib-chip > button:hover { color: #b42318; background: #fdf0ee; }
 .lib-chips > .mg-text-button { margin-left: 4px; font-size: 12px; }
 
-.lib-notice {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 8px 14px 0;
-  padding: 7px 8px 7px 12px;
-  border: 1px solid #dcebe4;
-  border-radius: 8px;
-  background: #f5faf8;
-  color: #4f7d6c;
-  font-size: 13px;
-  line-height: 1.6;
-}
-.lib-notice > span { flex: 1; min-width: 0; }
-.lib-notice > button { display: grid; place-items: center; flex-shrink: 0; width: 24px; height: 24px; border-radius: 6px; color: inherit; }
-.lib-notice > button:hover { background: rgba(15, 23, 42, .05); }
-
 .lib-content { position: relative; flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .lib-content > .mg-errors { margin-top: 14px; }
 .lib-content > .mg-empty { justify-content: center; min-height: 100%; }
@@ -172,7 +155,6 @@
   .mg-library-grid.lib-grid.is-small { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
   .lib-chips { padding: 7px 10px; }
   .lib-chip-value { max-width: 180px; }
-  .lib-notice { margin-inline: 10px; }
   .mg-pagination.lib-pagination { justify-content: center; padding: 8px 10px; }
   .lib-page-summary { width: 100%; text-align: center; }
 }

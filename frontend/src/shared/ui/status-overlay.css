@@ -1,0 +1,83 @@
+/*
+ * The app's popup (StatusOverlay): a frosted panel with a status bar on its left edge and a soft
+ * glow in its corner, tinted by type. A modal <dialog>, so it stacks above any open dialog.
+ */
+.status-overlay {
+  --so-accent: #3b82f6;
+  --so-accent-2: #60a5fa;
+  --so-ink: #1d4ed8;
+  --so-soft: rgba(59, 130, 246, .12);
+  --so-glow: rgba(59, 130, 246, .24);
+  width: min(460px, calc(100vw - 32px));
+  max-height: min(80dvh, 640px);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(22, 26, 29, .1);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, .95);
+  color: #1f2a3a;
+  box-shadow: 0 26px 90px rgba(15, 23, 42, .2), 0 10px 26px rgba(15, 23, 42, .1);
+}
+.status-overlay[open] { display: flex; animation: so-panel-in 190ms cubic-bezier(.2, .9, .2, 1); }
+.status-overlay::backdrop { background: rgba(15, 23, 42, .26); backdrop-filter: blur(6px); animation: so-mask-in 160ms ease-out; }
+.status-overlay.is-success { --so-accent: #10b981; --so-accent-2: #34d399; --so-ink: #0f766e; --so-soft: rgba(16, 185, 129, .14); --so-glow: rgba(16, 185, 129, .28); }
+.status-overlay.is-warn { --so-accent: #f59e0b; --so-accent-2: #fbbf24; --so-ink: #b45309; --so-soft: rgba(245, 158, 11, .15); --so-glow: rgba(245, 158, 11, .22); }
+.status-overlay.is-error { --so-accent: #ef4444; --so-accent-2: #fb7185; --so-ink: #b42318; --so-soft: rgba(239, 68, 68, .12); --so-glow: rgba(239, 68, 68, .22); }
+
+.so-panel { position: relative; display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+.so-fx { position: absolute; inset: 0; pointer-events: none; overflow: hidden; border-radius: inherit; }
+.so-fx::before { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 6px; background: linear-gradient(180deg, var(--so-accent-2), var(--so-accent)); }
+.so-fx::after { content: ''; position: absolute; top: -90px; right: -90px; width: 250px; height: 250px; border-radius: 50%; background: radial-gradient(circle, var(--so-glow), transparent 62%); filter: blur(18px); }
+
+.so-head { position: relative; display: flex; flex-shrink: 0; align-items: center; gap: 10px; padding: 14px 12px 12px 20px; border-bottom: 1px solid rgba(22, 26, 29, .06); }
+.so-badge { display: grid; place-items: center; flex-shrink: 0; width: 30px; height: 30px; border-radius: 10px; background: var(--so-soft); color: var(--so-ink); }
+.so-title { flex: 1; min-width: 0; margin: 0; color: #161a1d; font-size: 15px; font-weight: 800; letter-spacing: .2px; }
+.so-close { display: grid; place-items: center; flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; color: #7b8899; }
+.so-close:hover { background: rgba(15, 23, 42, .06); color: #334155; }
+
+.so-body { position: relative; min-height: 0; overflow: auto; padding: 12px 18px 4px 20px; overscroll-behavior: contain; }
+.so-message { margin: 0; color: #3b4656; font-size: 14px; line-height: 1.75; white-space: pre-line; overflow-wrap: anywhere; }
+.so-details { max-height: 200px; margin: 8px 0 0; padding: 8px 10px 8px 26px; overflow: auto; border: 1px solid rgba(22, 26, 29, .07); border-radius: 10px; background: rgba(248, 250, 252, .8); color: #475569; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+
+.so-foot { position: relative; display: flex; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 12px 16px 16px 20px; }
+.so-ok, .so-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 84px;
+  height: 36px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background .12s, border-color .12s, filter .12s;
+}
+.so-ok { background: var(--so-accent); color: #fff; }
+.so-ok:hover { filter: brightness(.95); }
+.so-action { border-color: #d7e2ff; background: #f2f6ff; color: #334155; }
+.so-action:hover { border-color: #c2d2ff; background: #e9efff; color: #334155; }
+.status-overlay :focus-visible { outline: 2px solid #85a8e2; outline-offset: 2px; }
+
+/* What is left before it closes by itself; holds while the pointer is on the panel */
+.so-countdown { position: absolute; left: 6px; right: 0; bottom: 0; height: 3px; background: var(--so-accent); opacity: .55; transform-origin: left center; animation: so-countdown var(--so-duration, 2000ms) linear forwards; }
+.so-countdown.is-paused { animation-play-state: paused; }
+
+@keyframes so-panel-in { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes so-mask-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes so-countdown { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+
+@media (max-width: 500px) {
+  .so-head { padding: 12px 10px 10px 18px; }
+  .so-body { padding: 10px 14px 4px 18px; }
+  .so-foot { padding: 10px 12px 14px 18px; }
+  .so-ok, .so-action { flex: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-overlay[open], .status-overlay::backdrop { animation: none; }
+  .so-countdown { display: none; }
+}

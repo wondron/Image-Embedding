@@ -3,6 +3,7 @@ import { Archive, CheckCircle2, Download, ExternalLink, FolderOpen, LoaderCircle
 import type { SearchImage } from '../entities/search-result'
 import { safeHttpUrl } from '../shared/lib'
 import { Dialog } from './Dialog'
+import { notify } from '../shared/ui'
 import { canChooseDownloadDirectory, chooseDownloadDirectory, downloadImages,
   type DownloadDirectory, type DownloadProgress, type DownloadReport } from '../lib/downloads'
 import './DownloadDialog.css'
@@ -15,7 +16,6 @@ export function DownloadDialog({ items, onClose, apiBase }: { items: SearchImage
   const [runMode, setRunMode] = useState<'zip' | 'folder'>('zip')
   const [busy, setBusy] = useState(false)
   const [choosing, setChoosing] = useState(false)
-  const [message, setMessage] = useState('')
   const active = useRef<AbortController | null>(null)
   const mounted = useRef(true)
   const folderSupported = canChooseDownloadDirectory()
@@ -28,7 +28,6 @@ export function DownloadDialog({ items, onClose, apiBase }: { items: SearchImage
     // Invoke the picker before awaiting anything else: browsers require a live user gesture.
     const selection = chooseDownloadDirectory()
     setChoosing(true)
-    setMessage('')
     try {
       const selected = await selection
       if (!mounted.current) return
@@ -36,9 +35,8 @@ export function DownloadDialog({ items, onClose, apiBase }: { items: SearchImage
       setMode('folder')
     } catch (error) {
       if (!mounted.current) return
-      setMessage(error instanceof Error && error.name === 'AbortError'
-        ? '已取消选择目录，保存设置未改变。'
-        : '无法访问该目录，请重新选择，或改用 ZIP 下载。')
+      if (error instanceof Error && error.name === 'AbortError') notify.info('已取消选择目录，保存设置未改变。')
+      else notify.warn('无法访问该目录，请重新选择，或改用 ZIP 下载。', { title: '不能使用这个目录' })
     } finally { if (mounted.current) setChoosing(false) }
   }
 
@@ -47,7 +45,6 @@ export function DownloadDialog({ items, onClose, apiBase }: { items: SearchImage
     const controller = new AbortController()
     active.current = controller
     setBusy(true)
-    setMessage('')
     setProgress(null)
     setReport(null)
     setRunMode(mode)
@@ -56,7 +53,7 @@ export function DownloadDialog({ items, onClose, apiBase }: { items: SearchImage
         onProgress: value => { if (mounted.current) setProgress(value) } })
       if (mounted.current) setReport(result)
     } catch (error) {
-      if (mounted.current) setMessage(`下载未完成：${error instanceof Error ? error.message : '请稍后重试'}`)
+      if (mounted.current) notify.error(error instanceof Error ? error.message : '请稍后重试', { title: '下载未完成' })
     } finally {
       active.current = null
       if (mounted.current) setBusy(false)
@@ -102,7 +99,6 @@ export function DownloadDialog({ items, onClose, apiBase }: { items: SearchImage
       </div> : <p className="download-help">保存位置由浏览器的下载设置决定。如需每次指定路径，请在浏览器中开启“下载前询问保存位置”。</p>}
 
       <div className="download-limits">单次最多获取 200 MB 图片。来源网站可能限制跨域访问，失败项可重试或打开来源手动保存。</div>
-      {message && <p className="download-status-note" role="status">{message}</p>}
 
       {progress && <section className="download-progress" aria-label="下载进度" aria-busy={busy}>
         <div className="download-progress-title"><strong>{busy
