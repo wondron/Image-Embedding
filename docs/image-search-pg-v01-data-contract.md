@@ -454,7 +454,7 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | **Health** | 聚合 Qdrant+MySQL | 改探 PG + Qdrant(current collection) +（可选）S3；回报 current model/collection |
 | **枚举** `/api/enums`（**已落地 2026-11-09**） | 写死在代码 | `GET /api/enums`、`GET /api/enums/{name}` 返回取值 + 中文名 + `editable`；`POST /api/enums/{name}/values` `{value, label, description?}` 给可编辑枚举追加取值（201，返回整个枚举），写回 `backend/config/param/enums.yaml`。错误码 `ENUM_NOT_FOUND` 404、`ENUM_NOT_EDITABLE` 403（系统枚举）、`ENUM_VALUE_EXISTS` 409、`ENUM_FILE_INVALID` 503、`VALIDATION_ERROR` 422。字段见 `backend/app/schemas/enums.py` |
 
-**结果卡形状**：旧 SSOT §9 统一 wire **仍作废**（见 §0.1）。前后端统一 wire 见 **§6.1（已拍 2026-11-05 · 一刀切；2026-11-08 更正 `description` 允许、`heating_group` 为对象）**；实现须按已拍定案改 BE hit/list 与 FE 适配层。
+**结果卡形状**：旧 SSOT §9 统一 wire **仍作废**（见 §0.1）。前后端统一 wire 见 **§6.1（已拍 2026-11-05 · 一刀切；2026-11-08 更正 `description` 允许、`heating_group` 为对象；2026-11-12 更正：自建 hit 与 FlyB 结果同为一张结果卡，见 §6.1.1）**；实现须按已拍定案改 BE hit/list 与 FE 适配层。
 
 **错误码**：MVP 已定码能复用的复用（如 `SEARCH_BAD_SCORE_THRESHOLD`）；uuid/sha 冲突、未知 scene code、无 current 模型等 **TBD 补表**。
 
@@ -468,7 +468,7 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 
 ## 6.1 前后端 Wire / 结果卡（**已拍 · 2026-11-05 · 一刀切**；**2026-11-08 更正**）
 
-> **状态**：**已拍 · 2026-11-05 · 一刀切**（P1–P12）。**2026-11-08 总裁拍更正**（以 `backend/app/schemas/retrieval.py` 为准）：`description` 允许（更正 P6）；`heating_group` 改为对象 `{id, code, name}`（更正 W2）。  
+> **状态**：**已拍 · 2026-11-05 · 一刀切**（P1–P12）。**2026-11-08 总裁拍更正**（以 `backend/app/schemas/retrieval.py` 为准）：`description` 允许（更正 P6）；`heating_group` 改为对象 `{id, code, name}`（更正 W2）。**2026-11-12 更正（结果卡统一）**：自建检索 hit 与 FlyB 结果（`POST /api/predict/searchImage_*`）改为同一张结果卡——顶层只有 `tags` / `description` / `original_url` / `similarity`，其余字段一律放进 `details`；Search hit 的 `tags` 改为字符串（更正 P1 缩略图位置、P7、`tags` 类型）。以 `backend/app/schemas/search_hit.py` 为准，见 §6.1.1。  
 > **本刀交付**：补齐 §6「细字段 TBD（FE 对齐刀）」——只定 **HTTP JSON wire**（snake_case），不复活旧 §9，不写业务代码。  
 > **摸底基线（2026-11-05 本机核实）**：  
 > - BE Search hit（`application/retrieval/search_image.py`）仍吐 FlyB 旧壳：`image_url`/`thumbnail_url`、`site_name`、`text_snippets:[]`、嵌套 `details.{page_url,site,text_snippets,images[]}`；加热时另带 `scene_label`/`heating_group`/`food_state`；envelope 用 `result` + `source=self|empty`（空时 `result` 竟为嵌套 `{results,status,message}` 对象）。  
@@ -484,13 +484,13 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 
 | # | 议题 | 已拍定案 | 备注 |
 |---|---|---|---|
-| **P1** | Search/List 权威 URL 字段名 | **已拍**：`original_url` / `thumb_url` 为唯一权威（完整 https） | 与 §2.4 / §5 一致 · 拍板日期 2026-11-05 |
-| **P2** | 是否一期保留 `image_url` / `thumbnail_url` 别名 | **已拍**：**不保留**（一刀切）；无兼容窗 | 现状 BE search 只吐别名、list 双吐 → 实现刀须同发删 |
+| **P1** | Search/List 权威 URL 字段名 | **已拍**：`original_url` / `thumb_url` 为唯一权威（完整 https） | 与 §2.4 / §5 一致 · 拍板日期 2026-11-05。**2026-11-12**：Search hit 顶层只留 `original_url`，缩略图在 `details.images[0].thumbnail_url`（§6.1.1）；List 不变 |
+| **P2** | 是否一期保留 `image_url` / `thumbnail_url` 别名 | **已拍**：**不保留**（一刀切）；无兼容窗 | 现状 BE search 只吐别名、list 双吐 → 实现刀须同发删。**2026-11-12**：顶层别名仍禁；`details.images[]` 里的 `image_url` / `thumbnail_url` 是图片条目的键名（与 FlyB 同名），不是别名 |
 | **P3** | Search envelope 数组键名 | **已拍**：权威键 = `items`（始终 array）；**禁**把对象塞进 `result` | 现状 BE 用 `result`；FE 须只读 `items` |
 | **P4** | 空结果形态 | **已拍**：`source=empty` + `items: []`；可选顶层 `message`；**禁**嵌套空壳 | 对齐 A4；FE 可简化 |
 | **P5** | `title` 是否出现在 wire | **已拍**：**禁**（`images` 无 title 列）；展示名用 `category` / `scene_label` | 现状 BE 用 category_name 冒充 title |
 | **P6** | `description` | **已拍更正 2026-11-08**：**允许**。类型 `string`，默认 `""`。Index 请求（`IndexJsonRequest.description`）、Index 响应（`IndexedImage.description`）、Search hit（`SearchHit.description`）、List item（`ListImageItem.description`）均带此字段 | 对应 `images.description`（§2.4 / 迁移 `0003`）；**不进** Qdrant payload；改描述不 bump `payload_version` |
-| **P7** | `site` / `site_name` / `page_url` / `snippets` / `text_snippets` / `details.*` | **已拍**：**全禁**（FlyB 壳） | 本轮无外搜 |
+| **P7** | `site` / `site_name` / `page_url` / `snippets` / `text_snippets` / `details.*` | **已拍**：**全禁**（FlyB 壳）。**2026-11-12 更正**：`details` 是结果卡的必有字段（两通道同名，内容按通道）；`page_url` / `site` 只出现在 FlyB 结果的 `details` 里；`snippets` / `text_snippets` 仍禁（FlyB 文字片段并入 `description`） | 见 §6.1.1 |
 | **P8** | `scene_label` 类型 | **已拍**：`string \| null`（场景展示名）；禁止随意 object | 若需 id+name 对象另开拍板（见 ASSUMPTION W3） |
 | **P9** | `outputs_heating` 放哪 | **已拍**：**仅 envelope** 布尔；hit 上仅当 true 出现 `heating_group`/`food_state` | 避免双源 |
 | **P10** | 迁移策略 | **已拍**：**一刀切**（BE 改吐 + FE 适配同发）；B 兼容窗 **未采纳** | 见 §6.1.6 |
@@ -518,40 +518,49 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 
 请求侧沿用 §6 / 附录 Q：`scene`、`top_k`、`score_threshold`（A6）、file 或 `img_url`；细 path **已有实现者不在本刀重开**。
 
-#### Hit 顶层字段表（`items[]` 元素）
+#### Hit = 结果卡（`items[]` 元素；**2026-11-12 起与 FlyB 结果同形**）
+
+自建检索 hit 与 FlyB 结果（`POST /api/predict/searchImage_*` 的 `result[]`）是同一张结果卡：顶层只有下面四个字段和 `details`，其余字段一律在 `details` 里（`backend/app/schemas/search_hit.py` `SearchHitBase`；自建 `SearchHit`、FlyB `PredictHit` 都继承它）。
+
+| 字段 | 必填 | 类型 | 自建（`POST /api/search`） | FlyB（`POST /api/predict/searchImage_*`） |
+|---|---|---|---|---|
+| `tags` | 是 | `string` | `images.tags` 用「、」连接；无标签为 `""`。仅供展示：标签本身可能含「、」，要标签数组请读单图 / List | 结果标题（`Title`）；没有为 `""` |
+| `description` | 是 | `string` | `images.description`；默认 `""`；不进 Qdrant payload | 文字片段（`Snippet` 中 `Type=text`）去首尾空白后用空格连接；没有为 `""` |
+| `original_url` | 是 | `string \| null` | 原图（https）；**权威** | 第一张图的原图；没有原图时为最大的缩略图（总是 URL 字符串，不会是尺寸字典）；开了相似度过滤时为实际下载、比对过的那张 |
+| `similarity` | 是 | `number \| null` | 向量检索分数；合法有限数；**禁止**拼写 `similiar` | 与查询图的 embedding 相似度；没开相似度过滤（`GLOBAL_FILTER.switch=false`）时为 `null` |
+| `details` | 是 | `object` | 见「自建 `details`」 | 见「FlyB `details`」 |
+
+**自建 `details`**（`SearchHitDetails`）：
 
 | 字段 | 必填 | 类型 | 说明 |
 |---|---|---|---|
 | `id` | 是 | `string`（uuid） | = `images.id` = Qdrant point id |
-| `original_url` | 是 | `string`（https） | 原图；**权威** |
-| `thumb_url` | 是 | `string`（https） | 缩略图；**权威** |
-| `similarity` | 是（`source=self`） | `number` | 相似度；合法有限数；**禁止**拼写 `similiar` |
 | `category_id` | 否 | `integer \| null` | |
 | `category` | 否 | `string \| null` | 通用类别**展示名**（由 `category_names` 解析；非 code） |
 | `scenes` | 否 | `string[]` | 有效场景 code 列表 |
-| `scene_label` | 否 | `string \| null` | 当前检索 scene 下的场景类别展示名（有 `scene_labels` 时） |
+| `scene_label` | 条件 | `string \| null` | 当前检索 scene 下的场景类别展示名；做了场景标签映射才出现（映射到无标签时为 `null`） |
 | `label_status` | 否 | `string` | `unlabeled`/`auto`/`verified` |
-| `width` | 否 | `integer \| null` | |
-| `height` | 否 | `integer \| null` | |
-| `description` | 否 | `string` | 图片描述；默认 `""`；与 `images.description` 一致；不进 Qdrant payload |
-| `tags` | 否 | `string[]` | 图片标签；默认 `[]`；与 `images.tags` 一致；不进 Qdrant payload（2026-11-09 新增） |
+| `images` | 是 | `array` | 一项 `{image_url, thumbnail_url, width, height}`：原图（同顶层 `original_url`）、缩略图（512px WebP；**权威**，即 List 的 `thumb_url`）、宽高。键名与 FlyB `details.images[]` 相同 |
 | `food_state` | 条件 | `string \| null` | 食物状态，取值见 `GET /api/enums/food_state`（初始 `raw`/`cooked`/`frozen`）。**仅当**该 scene `outputs_heating=true` 时可出现 |
 | `food_processing` | 条件 | `string \| null` | 加工状态，取值见 `GET /api/enums/food_processing`；出现条件同 `food_state`（2026-11-09 新增） |
 | `food_count` | 条件 | `integer \| null` | 食物个数；出现条件同 `food_state`（2026-11-09 新增） |
 | `total_mass_g` / `water_mass_g` / `main_ingredient_mass_g` | 条件 | `integer \| null` | 总质量 / 含水质量 / 主食材质量（克）；出现条件同 `food_state`（2026-11-09 新增）。六个食物字段存于 `image_foods`（§2.4） |
-| `heating_group` | 条件 | `{ "id": int, "code": string, "name": string }` | `HeatingGroup` 对象。**仅当**该次检索对应 scene 的 `outputs_heating=true` 且用例已设置时出现（实现 `exclude_unset`：未设置则键不出现）；`outputs_heating=false` 时不出现 |
+| `heating_group` | 条件 | `{ "id": int, "code": string, "name": string }` | `HeatingGroup` 对象。**仅当**该次检索对应 scene 的 `outputs_heating=true` 且用例已设置时出现（实现 `exclude_unset`，嵌套的 `details` 同样生效：未设置则键不出现）；`outputs_heating=false` 时不出现 |
 
-**禁字段（Search hit）**——出现即视为违约（实现刀须删）：
+**FlyB `details`**（`PredictHitDetails`，值按上游原样）：`rank`（`Rank`）、`page_url`（`Url`）、`site`（`HostInfo`，目前为 `{Hostname, IconUrl}`，`Hostname` 是站点名）、`images[]`（`{image_url, thumbnail_url, alt, width, height}`；`thumbnail_url` 是按尺寸给的字典，目前为 `{Tiny, Small, Medium, Large}`，BE / FE 选图时尺寸名不区分大小写，按 large → medium → small → 其他）、`document_info`（`DocumentInfo`）。
+
+**FlyB envelope**（不变）：`{ ok, trace_id, result }`，`result` 为结果卡数组；上游返回空结果时为 `{ request_id, total_doc_count, result_count, results: [], status: "upstream_empty_response", upstream_error: {code, message} }`。
+
+**禁字段（结果卡顶层）**——出现即视为违约：
 
 | 禁字段 | 原因 |
 |---|---|
-| `image_url` / `thumbnail_url` | 非权威 URL；**P2 已拍禁**（一刀切，无别名窗） |
-| `text_snippets` / `snippets` | FlyB 旧壳 |
-| `details` / `details.*` | FlyB 嵌套壳 |
-| `page_url` | 外链页；本轮无 |
-| `site` / `site_name` | 站点壳；本轮无 |
+| `id` / `thumb_url` / `category_id` / `category` / `scenes` / `scene_label` / `label_status` / `width` / `height` / 六个食物字段 / `heating_group` | 2026-11-12 起都在 `details` 里 |
+| `image_url` / `thumbnail_url` | 非权威 URL；**P2 已拍禁**（图片条目的这两个键只在 `details.images[]` 里） |
+| `text_snippets` / `snippets` | FlyB 文字片段并入 `description` |
+| `page_url` / `site` / `site_name` / `rank` | FlyB 的在 `details` 里；自建没有 |
 | `similiar` | 错误拼写 |
-| `title` | 表无列；**P5 已拍禁** |
+| `title` | 表无列；**P5 已拍禁**；FlyB 的标题放在 `tags` |
 | `source`（hit 级） | 渠道只在 envelope；禁止 hit 自报 flyb/self |
 
 **`description` 三接口口径（2026-11-08 已拍更正）**：
@@ -564,12 +573,13 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 **`tags` 口径（2026-11-09 新增）**：
 
 - Index 请求：JSON `IndexJsonRequest.tags` 为 `string[]`；multipart 的 `tags` 是 JSON 字符串数组文本，如 `["红薯叶"]`。不传即 `[]`。不是字符串数组 → 422 `VALIDATION_ERROR`。
-- Index 响应 `IndexedImage.tags`、Search `SearchHit.tags`、List `ListImageItem.tags`：`string[]`，默认 `[]`，总是出现。
+- Index 响应 `IndexedImage.tags`、List `ListImageItem.tags`：`string[]`，默认 `[]`，总是出现。
+- Search hit（结果卡）`tags`：**2026-11-12 起为 `string`**，`images.tags` 用「、」连接，无标签为 `""`，总是出现（与 FlyB 结果的标题同一个字段）。
 - List 查询：`q` 的子串匹配范围加上标签（任一标签含 `q` 即命中）；新增 `tag`，精确匹配 `tags` 中的一个元素（区分大小写，走 GIN 索引），trim 后为空视为未传。
 - Search 不按标签过滤（标签不在 Qdrant payload 里）。
 - 列存 `images.tags`（§2.4）；**不进** Qdrant payload；修改不 bump `payload_version`。
 
-**`heating_group` 对象口径（2026-11-08 已拍更正）**：形状为 `{ "id": <int>, "code": <string>, "name": <string> }`（`HeatingGroup`）。Search `SearchHit` 与 List `ListImageItem` 仅当该次请求所针对 scene 的 `outputs_heating=true` 且用例已赋值时出现；实现用 `exclude_unset`，未设置则 JSON 键不出现。`outputs_heating=false` 时不出现。Search envelope 的 `outputs_heating` 布尔仍仅在 envelope（P9 不变）。
+**`heating_group` 对象口径（2026-11-08 已拍更正）**：形状为 `{ "id": <int>, "code": <string>, "name": <string> }`（`HeatingGroup`）。Search hit（2026-11-12 起在 `details` 里）与 List `ListImageItem` 仅当该次请求所针对 scene 的 `outputs_heating=true` 且用例已赋值时出现；实现用 `exclude_unset`，未设置则 JSON 键不出现。`outputs_heating=false` 时不出现。Search envelope 的 `outputs_heating` 布尔仍仅在 envelope（P9 不变）。
 
 ### 6.1.2 List item 与 Search 对齐 / 差量（`GET /api/images`）
 
@@ -587,19 +597,21 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 
 #### List item vs Search hit
 
+> 2026-11-12 起 Search hit 是结果卡（§6.1.1）：下表 Search 列写了字段在卡里的位置；List item 仍是扁平结构。
+
 | 字段 | Search | List | 差量说明 |
 |---|---|---|---|
-| `id` | ✓ | ✓ | 同 |
-| `original_url` / `thumb_url` | ✓ 权威 | ✓ 权威 | 同；https-only |
-| `similarity` | ✓ | **禁** | List 非检索打分 |
-| `category_id` / `category` | ✓ | ✓ | 同 |
-| `scenes` | ✓ | ✓ | 同 |
-| `scene_label` | ✓（按检索 scene） | **通常不出现** | List 无「当前投票 scene 标签」语义；若产品要展示另刀 |
-| `label_status` | 可选 | 可选 | 同 |
-| `width` / `height` | 可选 | 可选 | 同 |
-| `description` | ✓ 默认 `""` | ✓ 默认 `""` | 同；Index `IndexedImage` 亦同 |
-| `tags` | ✓ 默认 `[]` | ✓ 默认 `[]` | 同；Index `IndexedImage` 亦同；List 可按 `tag` 精确筛选、`q` 子串命中标签 |
-| `food_state` / `food_processing` / `food_count` / `total_mass_g` / `water_mass_g` / `main_ingredient_mass_g` / `heating_group` | 加热 scene 条件出现 | 同（该 scene `outputs_heating=true`） | `heating_group` 为对象 `{id,code,name}`，非 string；出现规则见 §6.1.1；Index `IndexedImage` 总是带六个食物字段 |
+| `id` | ✓ `details.id` | ✓ | 同值 |
+| `original_url` / `thumb_url` | `original_url` 顶层；缩略图 `details.images[0].thumbnail_url` | ✓ 权威 | 同值；https-only |
+| `similarity` | ✓ 顶层 | **禁** | List 非检索打分 |
+| `category_id` / `category` | ✓ `details.*` | ✓ | 同值 |
+| `scenes` | ✓ `details.scenes` | ✓ | 同值 |
+| `scene_label` | ✓ `details.scene_label`（按检索 scene） | **通常不出现** | List 无「当前投票 scene 标签」语义；若产品要展示另刀 |
+| `label_status` | 可选 `details.label_status` | 可选 | 同值 |
+| `width` / `height` | 可选 `details.images[0].*` | 可选 | 同值 |
+| `description` | ✓ 顶层，默认 `""` | ✓ 默认 `""` | 同；Index `IndexedImage` 亦同 |
+| `tags` | ✓ 顶层 `string`（「、」连接），默认 `""` | ✓ `string[]`，默认 `[]` | **类型不同**（2026-11-12）；Index `IndexedImage` 同 List；List 可按 `tag` 精确筛选、`q` 子串命中标签 |
+| `food_state` / `food_processing` / `food_count` / `total_mass_g` / `water_mass_g` / `main_ingredient_mass_g` / `heating_group` | 加热 scene 条件出现，在 `details` 里 | 同（该 scene `outputs_heating=true`） | `heating_group` 为对象 `{id,code,name}`，非 string；出现规则见 §6.1.1；Index `IndexedImage` 总是带六个食物字段 |
 | `created_at` / `updated_at` | **禁**（非检索所需） | 可选 `string`（ISO-8601 / timestamptz 序列化） | List 可展示入库时间 |
 | `image_url` / `thumbnail_url` | **禁**（P2 已拍） | **禁**（P2 已拍） | 双边同时删除（一刀切） |
 | `qdrant_point_id` | 禁 | **禁**（P11 已拍） | 与 `id` 重复 |
@@ -656,7 +668,8 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 
 1. **Wire 一律 snake_case**；UI 层 camelCase **只**由 FE 适配层转换。  
 2. **禁止双源猜字段**：某一 UI 属性只对应一张映射表中的**一个** wire 字段；不得再回落读 `details.*` / 旧别名（P2/P10 已拍一刀切，**无**兼容窗）。  
-3. Library 与 Search 对 URL 的映射必须一致：展示缩略图 ← `thumb_url`；打开原图 ← `original_url`。
+3. Library 与 Search 对 URL 的映射必须一致：展示缩略图 ← List `thumb_url` / Search `details.images[0].thumbnail_url`；打开原图 ← `original_url`。
+4. 两个搜索通道的结果卡字段（`tags` / `description` / `original_url` / `similarity`）用同一个读法（FE `readCardFields`）；只有 `details` 按通道各读各的（2026-11-12）。
 
 #### Search 一一对应
 
@@ -668,20 +681,23 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | `outputs_heating` | `SearchResponse.outputsHeating` | |
 | `trace_id` | `SearchResponse.traceId` | |
 | `message` | `SearchResponse.message` | |
-| `id` | `SearchImage.id` | |
-| `original_url` | → 适配为 `imageUrl`（原图） | **勿**再读 `image_url`（P2 已拍禁） |
-| `thumb_url` | → 适配为 `thumbnailUrl` | **勿**再读 `thumbnail_url`/`details.images` |
-| `similarity` | `similarity` | 禁读 `similiar` |
-| `category` | `category` | |
-| `category_id` | （若 UI 需要）`categoryId` | 现状类型可补 |
-| `scenes` | （若 UI 需要）`scenes` | |
-| `scene_label` | `sceneLabel` | string |
+| `tags` | `tags`；`title` 依次取 `details.scene_label` → `details.category` → `tags` → 「未命名图片 N」 | string |
 | `description` | `description` | 默认 `""`；一对一，勿猜其它字段 |
-| `heating_group` | `heatingGroup` | **对象**；子字段 `id` / `code` / `name` 保持，勿把 `name` 抽成顶层 string |
-| `food_state` | `foodState` | |
-| `food_processing` / `food_count` / `total_mass_g` / `water_mass_g` / `main_ingredient_mass_g` | `foodProcessing` / `foodCount` / `totalMassG` / `waterMassG` / `mainIngredientMassG` | 2026-11-09 新增；FE 适配 TBD |
-| `width` / `height` | `width` / `height` | |
-| — | `pageUrl` / `siteName` / `snippets` | **恒为 null / []**；适配层可删字段（产品刀） |
+| `original_url` | → 适配为 `imageUrl`（原图） | **勿**再读 `image_url`（P2 已拍禁） |
+| `similarity` | `similarity` | 禁读 `similiar` |
+| `details.id` | `SearchImage.id` | |
+| `details.images[0].thumbnail_url` | → 适配为 `thumbnailUrl` | 512px WebP |
+| `details.images[0].width` / `.height` | `width` / `height` | |
+| `details.category` | `category` | |
+| `details.category_id` | `categoryId` | |
+| `details.scenes` | `scenes` | |
+| `details.scene_label` | `sceneLabel` | string |
+| `details.heating_group` | `heatingGroup` | **对象**；子字段 `id` / `code` / `name` 保持，勿把 `name` 抽成顶层 string |
+| `details.food_state` | `foodState` | |
+| `details.food_processing` / `food_count` / `total_mass_g` / `water_mass_g` / `main_ingredient_mass_g` | `foodProcessing` / `foodCount` / `totalMassG` / `waterMassG` / `mainIngredientMassG` | 2026-11-09 新增；FE 适配 TBD |
+| — | `pageUrl` / `siteName` | 自建恒为 `null` |
+
+**现网 Global（predict）**：同一张卡、同样的四个字段读法；`title` 取 `tags`（FlyB 标题）→ 图片 `alt` → 「未命名图片 N」；`id` 为「image-N」；`imageUrl` ← `original_url`（不是安全 https 时取第一张有安全原图的 `details.images[]`）；`thumbnailUrl` / `alternateUrls` ← `details.images[].thumbnail_url` 按 large → medium → small → 其他（如 tiny）排，尺寸名不区分大小写；`pageUrl` ← `details.page_url`；`siteName` ← `details.site`（字符串，或 `{Hostname}` / `{name/Name/host/Host}`）→ 来源网页域名；类别、场景、食物字段恒为空。
 
 #### List 一一对应
 
@@ -716,6 +732,9 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | FE `normalizeItem` | 读 `details`/`text_snippets`/`similiar`、多 URL 回落 | 单源映射表 | **删除回落枝**（实现刀） |
 | FE `pickSearchImageUrls` | 仍回落 `thumbnail_url`/`image_url` | 只读 thumb/original | **收紧** |
 | 旧 §9 结果卡 | 已作废 | 不复活 | **保持作废** |
+| Search hit 形状（2026-11-12） | 扁平：`id` / `thumb_url` / `category` / 食物字段 … 都在顶层 | 结果卡：顶层 `tags` / `description` / `original_url` / `similarity`，其余进 `details`（§6.1.1） | **改形**（BE 改吐 + FE 适配同发） |
+| Search hit `tags`（2026-11-12） | `string[]` | `string`（「、」连接） | **改类型**；Index / List 仍为 `string[]` |
+| FlyB 结果（predict，2026-11-12） | `title` / `image_url` / `similiar`，`details.text_snippets` | 同一张结果卡：`tags` = 标题、`description` = 文字片段、`original_url`（总是 URL 字符串）、`similarity`；`details.{rank, page_url, site, images, document_info}` | **改名 + 改形**；直接调 `/api/predict/searchImage_*` 的设备端须同步改读法 |
 
 ### 6.1.6 迁移策略（**已拍 · P10 · 一刀切**）
 
@@ -951,7 +970,8 @@ PATCH 字段（不传 = 不变）：
 | 2026-11-11 | **向量修复与筛选**（无表结构变化、无新迁移）：① 新增 `POST /api/images/{image_id}/reembed`：从对象存储读回这张图的原图，用当前模型重新算向量，按 PostgreSQL 现在的数据写 payload 并记账 `image_embeddings`，修复 `vector.status=missing` 而不用重新上传（标注不变）；成功体 `{ ok, image_id, payload_version, vector }`。新错误码 `IMAGE_FILE_UNAVAILABLE` 502（原图读不到：对象已不在、存储失败，或 mock 存储没有配置 `mock_mirror_dir`，重启后不保留字节）；编码器 / 向量库 / 对象存储未就绪 `NOT_READY` 503。为此 `ImageStoragePort` 新增 `read_by_url_or_key`（boto3 `get_object`；mock 先读内存再读 mirror 目录）。② `GET /api/images` 新增 `out_of_sync=true`：只列当前模型写入记录缺失或 `synced_version` 落后于 `payload_version` 的图片（待同步或没有向量）；按记账判断、只读 PostgreSQL，绕过记账删掉的点要靠列表项的 `vector_status` 或全量同步发现。前端：「图片标注」的「没有向量」给出「用存储里的原图重新生成向量」（原图读不到时说明原因、保留重新上传入口）；图片数据新增「待同步或没有向量」筛选；场景管理「全量同步」结束后可对没有向量的图片批量重新生成（逐张请求，可停止，已删除的图片自动略过，失败的列出原因）；场景管理在 800px 以下改为一次只显示列表或详情（此前两栏叠在一起，列表透到详情下面） |
 | 2026-11-11 | **PostgreSQL 与 Qdrant 同步补齐 + 缩略图读回**（无表结构变化、无新迁移）：① 移动类别或改菜系时，同一事务里重算其子树图片的 `image_scenes`（有效场景变化的 `payload_version` +1），提交后推 payload；`PATCH /api/categories/{id}` 成功体新增 `scene_sync`（§6 类别行）。此前要靠手动全量同步，忘了就一直不一致、且记账也看不出来。② 后台对账（§2.11 同步规则下）：API 进程按 `RECONCILE_CONFIG` 定时补推记账落后的 payload、清理删除队列，多进程用 PG 咨询锁互斥；另有 `python -m app.workers.reconcile`。③ 前端「入库任务」新增「待清理图片」页签：列出 `GET /api/image-deletions`，「立即清理」连续调 `POST /api/image-deletions/process`（有进展才继续，失败的写明原因）。④ 新增 `GET /api/images/{image_id}/file`（§6.3）：mock 存储（`use_boto3: false`）的 URL 是占位域名，浏览器打不开，所以缩略图一直不显示；前端图库、编辑、批量、任务、检索结果的图片改为先用 URL、失败用这个接口读回，并记住失败的域名。根治仍需配置真实对象存储（`use_boto3: true`、`endpoint_url`、`public_base_url`）；已入库图片的 URL 不会因此改变（同字节重传沿用第一次的 URL），要换成真实地址需另做迁移 |
 | 2026-11-12 | **前端图片加载顺序**（纯前端，无接口变化）：搜索结果的网格和列表只加载缩略图（自建库 `thumb_url`，即 512px WebP；现网结果按 large → medium → small，缩略图都失败才用原图），此前先加载原图、失败才退到缩略图，每页 12 张都是原图。点开详情才加载 `original_url`：先显示已缓存的缩略图，原图加载完原位替换，加载失败保留缩略图并提示；详情预览区加高以显示原图清晰度。图片数据的「图片标注」同样处理。下载仍是原图优先 |
+| 2026-11-12 | **自建检索与 FlyB 结果卡统一**（无表结构变化、无新迁移；**破坏性 wire 变化**，BE 与 FE 同发）：`POST /api/search` 的 `items[]` 与 `POST /api/predict/searchImage_*` 的 `result[]` 改为同一张结果卡（`backend/app/schemas/search_hit.py`）：顶层只有 `tags` / `description` / `original_url` / `similarity`，其余放进 `details`。自建：`tags` 由 `string[]` 改为「、」连接的字符串；`id`、类别、场景、`scene_label`、标注状态、食物字段、`heating_group` 进 `details`（`exclude_unset` 对嵌套同样生效），原图 / 缩略图 / 宽高进 `details.images[0]`（键名与 FlyB 相同）。FlyB：`title` → `tags`，`details.text_snippets` 并入 `description`，`image_url` → `original_url`（总是 URL 字符串，没有原图时取最大缩略图），`similiar` → `similarity`（相似度过滤写回同一个键，过滤时下载比对的那张写回 `original_url`）；predict 响应改为带类型的 `PredictResponse`（顶层多余的键不再输出）。Index / List / 单图的 `tags` 仍是 `string[]`。FE 两个通道共用一套卡片字段读法，详情新增「标签」，「描述」两个通道都显示。另按日志里的真实 FlyB 返回修正两处读法：缩略图尺寸名实际是 `Large/Medium/Small/Tiny`，BE `iter_image_urls` 与 FE 排序此前只认小写，落到「其他尺寸」按字典顺序先取了 112px 的 Tiny（网格显示最小图、原图下载失败时也用它算相似度），改为不区分大小写；站点名读 `HostInfo.Hostname`（此前退回成网页域名）。见 §6.1.1 / §6.1.2 / §6.1.4 / §6.1.5 |
 
 ---
 
-*文档结束 · §6.1 Wire **已拍 2026-11-05 · 一刀切**（P1–P12）；**2026-11-08 更正** `description` 允许、`heating_group` 对象；实现刀派后端/前端适配*
+*文档结束 · §6.1 Wire **已拍 2026-11-05 · 一刀切**（P1–P12）；**2026-11-08 更正** `description` 允许、`heating_group` 对象；**2026-11-12 更正** 自建 hit 与 FlyB 结果同为一张结果卡；实现刀派后端/前端适配*

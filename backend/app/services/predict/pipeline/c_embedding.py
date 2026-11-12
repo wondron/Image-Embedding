@@ -47,22 +47,23 @@ class GlobalFilter:
             similarity = None
             try:
                 refer_bgr = item.get("image_bgr")
-                resolved_url = item.get("image_url")
+                resolved_url = item.get("original_url")
                 downloaded = refer_bgr is None
                 if downloaded:
                     resolved_url, refer_bgr = resolve_image_bgr(item)
                     if refer_bgr is None:
-                        logger.warning("Skipping candidate with no usable image: %s", item.get("image_url"))
+                        logger.warning("Skipping candidate with no usable image: %s", item.get("original_url"))
                         continue
                 similarity = self.get_similar(embedd_vect, refer_bgr)
                 item["similarity"] = similarity
                 if similarity > self.threshold:
                     result = {key: value for key, value in item.items() if key != "image_bgr"}
                     if downloaded:
-                        result["image_url"] = resolved_url
+                        # the card shows the image that was actually compared
+                        result["original_url"] = resolved_url
                     final_data.append(result)
             except (TypeError, ValueError) as exc:
-                logger.warning("Skipping invalid candidate image %s: %s", item.get("image_url"), exc)
+                logger.warning("Skipping invalid candidate image %s: %s", item.get("original_url"), exc)
                 continue
             finally:
                 elapsed_ms = (time.perf_counter() - started_at) * 1000

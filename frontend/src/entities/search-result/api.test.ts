@@ -93,12 +93,16 @@ describe('searchLocalImages (自建 POST /api/search)', () => {
   it('maps the §6.1 response, including the heating group object', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({
       ok: true, trace_id: 't', source: 'self', scene: 'oven', outputs_heating: true,
-      items: [{ id: 'a', original_url: 'https://s3.example/a.jpg', thumb_url: 'https://s3.example/a.webp', similarity: 0.8,
-        category_id: 1, category: '番茄', scenes: ['oven'], label_status: 'auto', description: '', width: 10, height: 10,
-        food_state: 'cooked', heating_group: { id: 2, code: 'bake', name: '烘焙' } }],
+      items: [{ tags: '番茄', description: '', original_url: 'https://s3.example/a.jpg', similarity: 0.8, details: {
+        id: 'a', category_id: 1, category: '番茄', scenes: ['oven'], label_status: 'auto',
+        images: [{ image_url: 'https://s3.example/a.jpg', thumbnail_url: 'https://s3.example/a.webp', width: 10, height: 10 }],
+        food_state: 'cooked', heating_group: { id: 2, code: 'bake', name: '烘焙' },
+      } }],
     })))
     const response = await searchLocalImages({ url: 'https://example.com/q.png', scene: 'oven' })
-    expect(response.items[0]).toMatchObject({ heatingGroup: { id: 2, code: 'bake', name: '烘焙' }, foodState: 'cooked', source: 'self' })
+    expect(response.items[0]).toMatchObject({
+      id: 'a', thumbnailUrl: 'https://s3.example/a.webp', heatingGroup: { id: 2, code: 'bake', name: '烘焙' }, foodState: 'cooked', source: 'self',
+    })
   })
 
   it('surfaces the error envelope as ApiError and names the self-built service on network failure', async () => {

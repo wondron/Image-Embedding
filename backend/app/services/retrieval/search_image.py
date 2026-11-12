@@ -5,8 +5,9 @@ code → hydrate from PG → map categories to the scene's labels (one query for
 Empty self-built → source=empty. FlyB OUT OF SCOPE (never called).
 score_threshold: omit→0.55; 0 disables; else {0}∪[0.30,1].
 
-§6.1 (R1): items envelope; original_url/thumb_url only; no FlyB shell / title /
-image_url aliases; scene_label string|null; outputs_heating on envelope.
+§6.1 (2026-11-12): items envelope; each hit is the result card shared with FlyB results
+(tags / description / original_url / similarity), every other field in details;
+scene_label string|null; outputs_heating on envelope.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from app.core import errors as err
 from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.embedding_validate import validate_embedding
 from app.core.rules.food_fields import FOOD_FIELDS
+from app.core.rules.text_fields import tags_text
 from app.repositories.ports import (
     EmbeddingPort,
     MetadataStorePort,
@@ -70,31 +72,35 @@ def _hit_from_row(
     scene_meta: dict[str, Any] | None,
     scene_label: Any,
 ) -> dict[str, Any]:
-    """Build one Search hit per §6.1.1 (authoritative fields only)."""
-    image_id = _as_id_str(row.get("id"))
+    """One search hit (§6.1.1): the card fields shared with FlyB results, the rest in details."""
     original = row.get("original_url") or row.get("url")
-    thumb = row.get("thumb_url")
-    hit: dict[str, Any] = {
-        "id": image_id,
-        "original_url": original,
-        "thumb_url": thumb,
-        "similarity": score,
+    details: dict[str, Any] = {
+        "id": _as_id_str(row.get("id")),
         "category_id": row.get("category_id"),
         "category": row.get("category_name") or row.get("category"),
         "scenes": row.get("scenes"),
         "label_status": row.get("label_status"),
-        "description": row.get("description") or "",
-        "tags": list(row.get("tags") or []),
-        "width": row.get("width"),
-        "height": row.get("height"),
+        # same keys as a FlyB result's details.images[]
+        "images": [{
+            "image_url": original,
+            "thumbnail_url": row.get("thumb_url"),
+            "width": row.get("width"),
+            "height": row.get("height"),
+        }],
     }
     # Optional: include scene_label when mapping was attempted (string|null).
     if scene_label is not None:
-        hit["scene_label"] = _scene_label_name(scene_label)
+        details["scene_label"] = _scene_label_name(scene_label)
     if _outputs_heating(scene_meta):
-        hit.update({key: row.get(key) for key in FOOD_FIELDS})
-        hit["heating_group"] = row.get("heating_group")
-    return hit
+        details.update({key: row.get(key) for key in FOOD_FIELDS})
+        details["heating_group"] = row.get("heating_group")
+    return {
+        "tags": tags_text(row.get("tags")),
+        "description": row.get("description") or "",
+        "original_url": original,
+        "similarity": score,
+        "details": details,
+    }
 
 
 class SearchImageUseCase:
@@ -185,9 +191,8 @@ class SearchImageUseCase:
                 scene_meta=scene_meta,
                 scene_label=labels.get(int(category_id)) if mapped else None,
             )
-            # When mapping ran and found no label → emit scene_label: null (optional but typed).
-            if mapped and "scene_label" not in hit:
-                hit["scene_label"] = None
+            if mapped:
+                hit["details"].setdefault("scene_label", None)
             items.append(hit)
 
         if items:

@@ -185,26 +185,55 @@ export interface SearchJsonRequestWire {
   trace_id?: string | null
 }
 
-/** schemas/retrieval.py SearchHit. */
-export interface SearchHitWire {
-  id: string
+/**
+ * schemas/search_hit.py SearchHitBase — the result card both search channels answer with
+ * (POST /api/search items[], POST /api/predict/searchImage_* result[]): these four fields at the
+ * top level, everything else in `details`, whose content depends on the channel.
+ */
+export interface SearchHitBaseWire<Details> {
+  /** 自建: images.tags joined with「、」(display text); FlyB: the result title. "" when none. */
+  tags: string
+  /** 自建: images.description; FlyB: the result's text snippets joined with spaces. "" when none. */
+  description: string
+  /** 自建: the stored original; FlyB: the result image (the one compared when the similarity filter ran). */
   original_url: string | null
-  thumb_url: string | null
+  /** 自建: the vector score; FlyB: embedding similarity, null when the similarity filter is off. */
   similarity: number | null
+  details: Details
+}
+
+/**
+ * schemas/retrieval.py SearchHitImage — one image of a card (details.images[]); FlyB results use
+ * the same keys. A FlyB thumbnail may be URLs keyed by size; a self-built one is the 512 px WebP.
+ */
+export interface SearchHitImageWire {
+  image_url: string | null
+  thumbnail_url: PredictThumbnailWire | null
+  width: number | null
+  height: number | null
+  /** FlyB only. */
+  alt?: string | null
+}
+
+/** schemas/retrieval.py SearchHitDetails — a self-built hit besides the card fields. */
+export interface SearchHitDetailsWire {
+  id: string
   category_id: number | null
   category: string | null
   scenes: string[] | null
   /** Present only when a scene label was mapped (exclude_unset). */
   scene_label?: string | null
   label_status: LabelStatusWire | null
-  description: string
-  width: number | null
-  height: number | null
+  /** One entry: the hit's original, thumbnail and size. */
+  images: SearchHitImageWire[]
   /** Present only when the scene has outputs_heating. */
   food_state?: FoodStateWire | null
   /** Present only when the scene has outputs_heating; null when the category has no heating group. */
   heating_group?: HeatingGroupWire | null
 }
+
+/** schemas/retrieval.py SearchHit. */
+export type SearchHitWire = SearchHitBaseWire<SearchHitDetailsWire>
 
 /** schemas/retrieval.py SearchResponse. */
 export interface SearchResponseWire {
@@ -292,7 +321,7 @@ export interface IndexResponseWire {
   failed: IndexFailureWire[]
 }
 
-// -- POST /api/predict/searchImage_* (现网 Global · legacy, outside §6.1) ------------------
+// -- POST /api/predict/searchImage_* (现网 Global · FlyB; hits are §6.1.1 cards) ----------
 
 /** schemas/predict.py PredictUrlBody (searchImage_url JSON body). */
 export interface PredictUrlBodyWire {
@@ -302,62 +331,38 @@ export interface PredictUrlBodyWire {
   save_res?: boolean | null
 }
 
-/** schemas/predict.py PredictResponse: `result` is a FlyB document list or an upstream status envelope. */
+/** schemas/predict.py PredictResponse: `result` is a list of result cards, or the upstream-empty status. */
 export interface PredictResponseWire {
   ok: true
   trace_id: string
-  result: PredictDocWire[] | PredictUpstreamEnvelopeWire
+  result: PredictHitWire[] | PredictUpstreamEmptyWire
 }
 
-/** Upstream status envelope inside `result` (e.g. status=upstream_empty_response). */
-export interface PredictUpstreamEnvelopeWire {
-  results: PredictDocWire[]
-  status?: string
-  message?: string
-  request_id?: string
-  trace_id?: string
-  upstream_error?: { code?: number; message?: string }
+/** schemas/predict.py PredictUpstreamEmpty — FlyB found nothing (status=upstream_empty_response). */
+export interface PredictUpstreamEmptyWire {
+  request_id: string | null
+  total_doc_count: number
+  result_count: number
+  results: PredictHitWire[]
+  status: string
+  upstream_error: { code?: number; message?: string } | null
 }
 
 /** A thumbnail is one URL, or URLs keyed by size (large / medium / small / …). */
 export type PredictThumbnailWire = string | Record<string, unknown>
 
-/** FlyB search document (legacy shape; P7 forbids these fields on §6.1 hits). */
-export interface PredictDocWire {
-  id?: string | number
-  point_id?: string | number
-  image_id?: string | number
-  title?: string
-  image_url?: PredictThumbnailWire
-  thumbnail_url?: PredictThumbnailWire
-  similarity?: number
-  /** Upstream misspelling, still sent by FlyB. */
-  similiar?: number
-  category?: string
-  source?: string
-  site_name?: string
-  page_url?: string
-  text_snippets?: string[]
-  width?: number
-  height?: number
-  details?: PredictDocDetailsWire
+/** schemas/predict.py PredictHitDetails — a FlyB result besides the card fields, values as FlyB sends them. */
+export interface PredictHitDetailsWire {
+  rank: number | null
+  page_url: string | null
+  /** FlyB HostInfo, sent today as `{ Hostname, IconUrl }` (Hostname is the site's name); a plain name or older keys are read too. */
+  site: string | { Hostname?: string; IconUrl?: string; name?: string; Name?: string; host?: string; Host?: string } | null
+  images: SearchHitImageWire[]
+  document_info: unknown
 }
 
-export interface PredictDocDetailsWire {
-  category?: string
-  page_url?: string
-  site?: string | { name?: string; Name?: string; host?: string; Host?: string }
-  text_snippets?: string[]
-  images?: PredictDocImageWire[]
-}
-
-export interface PredictDocImageWire {
-  image_url?: string
-  thumbnail_url?: PredictThumbnailWire
-  alt?: string
-  width?: number
-  height?: number
-}
+/** schemas/predict.py PredictHit — the same card as a self-built hit (SearchHitWire). */
+export type PredictHitWire = SearchHitBaseWire<PredictHitDetailsWire>
 
 // -- one stored image: GET / PATCH / DELETE /api/images/{id}, POST …/vector-sync ----------
 

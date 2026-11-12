@@ -15,7 +15,7 @@ class ImageResolutionTests(unittest.TestCase):
         self.large = 'https://images.invalid/large.png'
         self.medium = 'https://images.invalid/medium.png'
         self.small = 'https://images.invalid/small.png'
-        self.item = {'title': 'example', 'image_url': self.original, 'details': {'images': [
+        self.item = {'tags': 'example', 'original_url': self.original, 'details': {'images': [
             {'thumbnail_url': {'small': self.small, 'large': self.large, 'medium': self.medium}},
         ]}}
         self.bgr = np.array([[[19, 77, 231], [255, 0, 0]], [[0, 255, 0], [0, 0, 255]]], dtype=np.uint8)
@@ -47,21 +47,31 @@ class ImageResolutionTests(unittest.TestCase):
 
         self.assertEqual(list(image_utils.iter_image_urls(self.item)), [self.original, self.large, second_large, self.medium, second_medium, self.small])
 
-    def test_string_and_top_level_thumbnail_urls_are_supported_and_deduplicated(self):
-        item = {'image_url': f'  {self.original}  ', 'thumbnail_url': self.large, 'details': {'images': [
+    def test_string_thumbnail_urls_are_supported_and_deduplicated(self):
+        item = {'original_url': f'  {self.original}  ', 'details': {'images': [
+            {'thumbnail_url': self.large},
             {'thumbnail_url': self.large},
             {'thumbnail_url': {'large': self.original, 'medium': self.medium, 'small': self.small}},
         ]}}
         self.assertEqual(list(image_utils.iter_image_urls(item)), [self.original, self.large, self.medium, self.small])
 
+    def test_flyb_size_names_are_matched_case_insensitively(self):
+        # what FlyB actually sends (logged 2026-11-12): capitalized sizes, Tiny first
+        tiny = 'https://images.invalid/tiny.png'
+        item = {'original_url': self.original, 'details': {'images': [{'thumbnail_url': {
+            'Tiny': tiny, 'Small': self.small, 'Medium': self.medium, 'Large': self.large,
+        }}]}}
+        self.assertEqual(list(image_utils.iter_image_urls(item)), [self.original, self.large, self.medium, self.small, tiny])
+
     def test_primary_url_may_itself_be_a_thumbnail_dictionary(self):
-        item = {'image_url': {'small': self.small, 'medium': self.medium, 'large': self.large, 'tiny': 'https://images.invalid/tiny.png'}}
+        item = {'original_url': {'small': self.small, 'medium': self.medium, 'large': self.large, 'tiny': 'https://images.invalid/tiny.png'}}
         before = copy.deepcopy(item)
         self.assertEqual(list(image_utils.iter_image_urls(item)), [self.large, self.medium, self.small, 'https://images.invalid/tiny.png'])
         self.assertEqual(item, before)
 
     def test_invalid_thumbnail_fields_and_empty_urls_are_ignored(self):
-        for item in ({}, {'image_url': None, 'details': None}, {'image_url': 123, 'details': 'invalid'}, {'details': {'images': 'invalid'}}, {'details': {'images': [None, 42, {}, {'thumbnail_url': {'large': None, 'medium': '', 'small': '  ', 'bad': []}}]}}):
+        # the pre-card keys image_url / top-level thumbnail_url are no longer read either
+        for item in ({}, {'original_url': None, 'details': None}, {'original_url': 123, 'details': 'invalid'}, {'details': {'images': 'invalid'}}, {'details': {'images': [None, 42, {}, {'thumbnail_url': {'large': None, 'medium': '', 'small': '  ', 'bad': []}}]}}, {'image_url': 'https://images.invalid/a.png', 'thumbnail_url': 'https://images.invalid/b.png'}):
             with self.subTest(item=item):
                 self.assertEqual(list(image_utils.iter_image_urls(item)), [])
         self.get.assert_not_called()

@@ -7,8 +7,8 @@ const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 function candidate(id = '1', values: Partial<SearchImage> = {}): SearchImage {
   return { id, title: '同名/:食材', imageUrl: `https://images.example/${id}.jpg`, thumbnailUrl: null,
     alternateUrls: [], similarity: .87, categoryId: null, category: null, scenes: [], sceneLabel: null,
-    labelStatus: null, description: '', foodState: null, heatingGroup: null, width: null, height: null,
-    pageUrl: 'https://source.example/item', siteName: null, snippets: [], ...values }
+    labelStatus: null, description: '', tags: '', foodState: null, heatingGroup: null, width: null, height: null,
+    pageUrl: 'https://source.example/item', siteName: null, ...values }
 }
 function imageResponse() { return new Response(png, { headers: { 'Content-Type': 'image/png' } }) }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
@@ -252,8 +252,12 @@ describe('directory saving', () => {
 })
 
 describe('downloadImage', () => {
-  /** A card as the 现网 predict adapter builds it from one FlyB document. */
-  const predictItem = (doc: Record<string, unknown>) => fromPredictResponse({ result: [doc] }).items[0]
+  /** A card as the 现网 predict adapter builds it from one FlyB result (one image). */
+  const predictItem = ({ tags = '', original_url, thumbnail_url }: { tags?: string; original_url: string; thumbnail_url?: unknown }) =>
+    fromPredictResponse({ result: [{
+      tags, description: '', original_url, similarity: null,
+      details: { images: [{ image_url: original_url, thumbnail_url: thumbnail_url ?? null }] },
+    }] }).items[0]
   function stubAnchor() {
     const anchor = { href: '', download: '', click: vi.fn(), remove: vi.fn() }
     vi.stubGlobal('document', { createElement: vi.fn().mockReturnValue(anchor), body: { appendChild: vi.fn() } })
@@ -269,7 +273,7 @@ describe('downloadImage', () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:medium')
     const anchor = stubAnchor()
     await downloadImage(predictItem({
-      image_url: 'https://img.example/original.png', thumbnail_url: {
+      original_url: 'https://img.example/original.png', thumbnail_url: {
         large: 'https://img.example/large.png', medium: 'https://img.example/medium.png', small: 'https://img.example/small.png',
       },
     }))
@@ -286,7 +290,7 @@ describe('downloadImage', () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:proxy-image')
     const anchor = stubAnchor()
     await downloadImage(predictItem({
-      title: 'food', image_url: 'https://example.com/original.webp', thumbnail_url: 'https://example.com/large.png',
+      tags: 'food', original_url: 'https://example.com/original.webp', thumbnail_url: 'https://example.com/large.png',
     }), 'http://localhost:8320/')
     expect(fetchMock.mock.calls.map(call => call[0])).toEqual([
       'https://example.com/original.webp',
@@ -304,7 +308,7 @@ describe('downloadImage', () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:proxy-image')
     const anchor = stubAnchor()
     await downloadImage(predictItem({
-      title: 'food', image_url: 'https://example.com/original.jpg', thumbnail_url: 'https://example.com/large.png',
+      tags: 'food', original_url: 'https://example.com/original.jpg', thumbnail_url: 'https://example.com/large.png',
     }), '')
     expect(fetchMock.mock.calls.map(call => call[0])).toEqual([
       'https://example.com/original.jpg',
@@ -323,7 +327,7 @@ describe('downloadImage', () => {
     vi.stubGlobal('document', { createElement: vi.fn().mockReturnValue(anchor), body: { appendChild } })
     const schedule = vi.fn()
     vi.stubGlobal('window', { setTimeout: schedule })
-    await downloadImage(predictItem({ title: '食材/西红柿', image_url: 'https://example.com/a.jpg' }))
+    await downloadImage(predictItem({ tags: '食材/西红柿', original_url: 'https://example.com/a.jpg' }))
     expect(createObjectUrl).toHaveBeenCalledWith(expect.any(Blob))
     expect(anchor.href).toBe('blob:test-image')
     expect(anchor.download).toBe('食材_西红柿.png')
@@ -340,7 +344,7 @@ describe('downloadImage', () => {
     const open = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
     vi.stubGlobal('open', open)
-    await expect(downloadImage(predictItem({ image_url: 'https://example.com/a.png' }))).rejects.toThrow('打开原图')
+    await expect(downloadImage(predictItem({ original_url: 'https://example.com/a.png' }))).rejects.toThrow('打开原图')
     expect(fetchMock).toHaveBeenCalledWith('https://example.com/a.png', {
       mode: 'cors', credentials: 'omit', signal: expect.any(AbortSignal),
     })
@@ -349,7 +353,7 @@ describe('downloadImage', () => {
 
   it('does not save an HTML error page returned by an image source', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>denied</html>', { headers: { 'Content-Type': 'text/html' } })))
-    await expect(downloadImage(predictItem({ image_url: 'https://example.com/a.png' }))).rejects.toThrow('图片下载失败')
+    await expect(downloadImage(predictItem({ original_url: 'https://example.com/a.png' }))).rejects.toThrow('图片下载失败')
   })
 
   it('downloads a self-built hit from original_url, then thumb_url', async () => {
@@ -377,7 +381,7 @@ describe('downloadImage', () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:thumbnail')
     const anchor = stubAnchor()
     await downloadImage(predictItem({
-      title: '食材', image_url: 'https://example.com/original.jpg', thumbnail_url: 'https://example.com/large.webp',
+      tags: '食材', original_url: 'https://example.com/original.jpg', thumbnail_url: 'https://example.com/large.webp',
     }))
     expect(fetchMock.mock.calls.map(call => call[0])).toEqual(['https://example.com/original.jpg', 'https://example.com/large.webp'])
     expect(anchor.download).toBe('食材.webp')

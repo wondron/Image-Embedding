@@ -10,6 +10,16 @@ from app.core import errors as err
 MAX_DESCRIPTION_LENGTH = 1000
 MAX_TAGS = 32
 MAX_TAG_LENGTH = 64
+# A search result card carries the tags as one text (contract §6.1.1, shared with FlyB's title).
+TAG_SEPARATOR = "、"
+
+
+def tags_text(value: Any) -> str:
+    """images.tags as the card's tags text: joined with TAG_SEPARATOR; "" when there are none.
+    For display only: a tag may itself contain the separator."""
+    if isinstance(value, (list, tuple)):
+        return TAG_SEPARATOR.join(str(tag) for tag in value if tag)
+    return str(value or "")
 
 
 def normalize_description(value: Any) -> str:

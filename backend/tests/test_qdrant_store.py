@@ -165,7 +165,7 @@ class ScoreThresholdEndToEndTests(unittest.TestCase):
         self.uc = SearchImageUseCase(embedding, vectors, FakeMetadata([self.near, self.far]), model=model)
 
     def ids(self, **kw):
-        return {item["id"] for item in self.uc.execute(image_bytes=b"x", **kw)["items"]}
+        return {item["details"]["id"] for item in self.uc.execute(image_bytes=b"x", **kw)["items"]}
 
     def test_default_threshold_rejects_dissimilar_hits(self):
         self.assertEqual(self.ids(), {str(self.near)})

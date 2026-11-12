@@ -1,15 +1,22 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 
 // Fixtures only: every API and image request is answered below; nothing reaches a real backend.
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
 const imageId = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const SCENES = [{ id: 1, code: 'general', name: '通用', description: null, include_all: true, outputs_heating: false, is_active: true, created_at: null, member_count: 0, labels: [], rules: [] }]
 
-/** A self-built hit (§6.1): original and 512 px thumbnail under `host`. */
+/** A self-built hit (§6.1.1 result card): original and 512 px thumbnail under `host`. */
 const hit = (n: number, host = 'https://cdn.test') => ({
-  id: imageId(n), original_url: `${host}/original/${n}.jpg`, thumb_url: `${host}/thumb/${n}.webp`,
-  similarity: 0.9 - n * 0.01, category_id: 1, category: `食材${n}`, scenes: ['general'], scene_label: null,
-  label_status: 'verified', description: '', width: 1600, height: 1200,
+  tags: '', description: '', original_url: `${host}/original/${n}.jpg`, similarity: 0.9 - n * 0.01,
+  details: {
+    id: imageId(n), category_id: 1, category: `食材${n}`, scenes: ['general'], scene_label: null, label_status: 'verified',
+    images: [{ image_url: `${host}/original/${n}.jpg`, thumbnail_url: `${host}/thumb/${n}.webp`, width: 1600, height: 1200 }],
+  },
+})
+/** A FlyB result card (the same card, FlyB details). */
+const flybCard = (tags: string, original: string, thumbnail: unknown) => ({
+  tags, description: '', original_url: original, similarity: null,
+  details: { rank: 1, page_url: null, site: null, document_info: null, images: [{ image_url: original, thumbnail_url: thumbnail, alt: null, width: null, height: null }] },
 })
 
 /**
@@ -93,10 +100,9 @@ test('现网结果：列表用缩略图（大图失败退到中图），原图�
   const mock = await mockApi(page, {
     predict: {
       trace_id: 't',
-      result: [{
-        title: '外部图片', image_url: 'https://cdn.test/original/missing.jpg',
-        thumbnail_url: { large: 'https://cdn.test/thumb/missing-large.png', medium: 'https://cdn.test/thumb/medium.png', small: 'https://cdn.test/thumb/small.png' },
-      }],
+      result: [flybCard('外部图片', 'https://cdn.test/original/missing.jpg', {
+        large: 'https://cdn.test/thumb/missing-large.png', medium: 'https://cdn.test/thumb/medium.png', small: 'https://cdn.test/thumb/small.png',
+      })],
     },
   })
   await searchByUrl(page, '现网 Global')
@@ -125,4 +131,33 @@ test('自建库图片的存储地址打不开：列表用后端读出的缩略�
   // The placeholder host failed once for the thumbnail; the original went to the API straight away
   expect(mock.unreachable).toEqual(['/image-embedding/thumb/1.webp'])
   expect(mock.files.filter(file => file.endsWith(':original'))).toEqual([`${imageId(1)}:original`])
+})
+
+test('两个通道的结果卡一样：详情里都显示标签和描述，结果内筛选也能按标签找', async ({ page }) => {
+  const self = { ...hit(1), tags: '红薯叶、带皮', description: '清炒前的红薯叶' }
+  await mockApi(page, {
+    hits: [self, hit(2)],
+    predict: { trace_id: 't', result: [{ ...flybCard('清蒸鲈鱼的做法', 'https://cdn.test/original/fish.jpg', 'https://cdn.test/thumb/fish.png'), description: '鲈鱼一条 清蒸十分钟' }] },
+  })
+  const detailOf = async (name: string) => {
+    await page.locator('.result-card').getByRole('button', { name: `查看图片详情：${name}` }).click()
+    return page.getByRole('dialog', { name: '图片详情' })
+  }
+  const field = (dialog: Locator, name: string) => dialog.locator('.detail-fields > div').filter({ hasText: name }).locator('dd')
+
+  await searchByUrl(page)
+  await page.getByLabel('搜索结果标题或来源').fill('带皮')
+  await expect(page.locator('.result-card')).toHaveCount(1)
+  let dialog = await detailOf('食材1')
+  await expect(field(dialog, '标签')).toHaveText('红薯叶、带皮')
+  await expect(dialog.locator('.detail-description')).toHaveText(/清炒前的红薯叶/)
+  await dialog.getByRole('button', { name: '关闭', exact: true }).click()
+
+  await page.getByRole('button', { name: '现网 Global', exact: true }).click()
+  await page.getByRole('button', { name: '图片链接', exact: true }).click()
+  await page.getByLabel('图片地址').fill('https://cdn.test/query.png')
+  await page.getByRole('button', { name: '开始搜索', exact: true }).click()
+  dialog = await detailOf('清蒸鲈鱼的做法')
+  await expect(field(dialog, '标签')).toHaveText('清蒸鲈鱼的做法')
+  await expect(dialog.locator('.detail-description')).toHaveText(/鲈鱼一条 清蒸十分钟/)
 })

@@ -8,17 +8,23 @@ import logging
 logger = logging.getLogger('imageutils')
 
 
+def _size_map(thumbnail: Any) -> Any:
+    """按尺寸给的缩略图字典，键统一成小写（FlyB 实际给的是 Large / Medium / Small / Tiny）；其他值原样返回。"""
+    return {str(size).lower(): url for size, url in thumbnail.items()} if isinstance(thumbnail, Mapping) else thumbnail
+
+
 def iter_image_urls(item: Mapping[str, Any]) -> Iterator[str]:
-    """按原图、large、medium、small、其他缩略图的顺序返回不重复的地址，不发起请求。"""
-    original = item.get('image_url')
+    """搜索结果卡（original_url + details.images[]）里的图片地址：按原图、large、medium、small、
+    其他缩略图（如 tiny）的顺序返回不重复的地址，尺寸名不区分大小写，不发起请求。"""
+    original = item.get('original_url')
     candidates = [original]
-    # 上游没有原图时，image_url 也可能是缩略图字典。
+    # 上游没有原图时，original_url 也可能是缩略图字典。
     thumbnails = [original] if isinstance(original, Mapping) else []
-    thumbnails.append(item.get('thumbnail_url'))
     details = item.get('details')
     images = details.get('images') if isinstance(details, Mapping) else None
     if isinstance(images, (list, tuple)):
         thumbnails.extend(image.get('thumbnail_url') for image in images if isinstance(image, Mapping))
+    thumbnails = [_size_map(thumbnail) for thumbnail in thumbnails]
 
     sizes = ('large', 'medium', 'small')
     for size in sizes:

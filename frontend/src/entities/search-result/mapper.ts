@@ -9,7 +9,13 @@ import {
   type Untrusted,
 } from '../../shared/lib/parse'
 import { safeHttpUrl } from '../../shared/lib/safeHttpUrl'
-import type { SearchHitWire, SearchResponseWire } from '../../shared/api'
+import type {
+  SearchHitBaseWire,
+  SearchHitDetailsWire,
+  SearchHitImageWire,
+  SearchHitWire,
+  SearchResponseWire,
+} from '../../shared/api'
 import {
   parseDescription,
   parseFoodState,
@@ -25,6 +31,16 @@ export function parseSimilarity(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= -1 && value <= 1 ? value : null
 }
 
+/** The four top-level fields of a result card, read the same way for both channels (§6.1.1). */
+export function readCardFields(hit: Untrusted<SearchHitBaseWire<unknown>>): Pick<SearchImage, 'tags' | 'description' | 'imageUrl' | 'similarity'> {
+  return {
+    tags: asText(hit.tags) ?? '',
+    description: parseDescription(hit.description),
+    imageUrl: safeHttpUrl(hit.original_url),
+    similarity: parseSimilarity(hit.similarity),
+  }
+}
+
 /** Envelope `source`: exactly self | empty (§6.1.1); anything else is treated as not sent. */
 function parseSource(value: unknown): 'self' | 'empty' | undefined {
   const source = asText(value)?.toLowerCase()
@@ -36,36 +52,36 @@ function toSearchImage(
   index: number,
   envelope: { source?: 'self' | 'empty'; outputsHeating?: boolean },
 ): SearchImage {
-  const category = asText(hit.category)
-  const sceneLabel = asText(hit.scene_label)
+  const card = readCardFields(hit)
+  const details = untrusted<SearchHitDetailsWire>(hit.details) ?? {}
+  const image = untrustedList<SearchHitImageWire>(details.images)[0] ?? {}
+  const category = asText(details.category)
+  const sceneLabel = asText(details.scene_label)
   return {
-    id: asId(hit.id) ?? `image-${index + 1}`,
-    title: displayCategoryLabel({ sceneLabel, category }) ?? `未命名图片 ${index + 1}`,
-    imageUrl: safeHttpUrl(hit.original_url),
-    thumbnailUrl: safeHttpUrl(hit.thumb_url),
+    ...card,
+    id: asId(details.id) ?? `image-${index + 1}`,
+    title: displayCategoryLabel({ sceneLabel, category }) ?? (card.tags || `未命名图片 ${index + 1}`),
+    thumbnailUrl: safeHttpUrl(image.thumbnail_url),
     alternateUrls: [],
-    similarity: parseSimilarity(hit.similarity),
-    categoryId: asInteger(hit.category_id),
+    categoryId: asInteger(details.category_id),
     category,
-    scenes: parseSceneCodes(hit.scenes),
+    scenes: parseSceneCodes(details.scenes),
     sceneLabel,
-    labelStatus: parseLabelStatus(hit.label_status),
-    description: parseDescription(hit.description),
-    foodState: parseFoodState(hit.food_state),
-    heatingGroup: parseHeatingGroup(hit.heating_group),
-    width: asPositiveNumber(hit.width),
-    height: asPositiveNumber(hit.height),
+    labelStatus: parseLabelStatus(details.label_status),
+    foodState: parseFoodState(details.food_state),
+    heatingGroup: parseHeatingGroup(details.heating_group),
+    width: asPositiveNumber(image.width),
+    height: asPositiveNumber(image.height),
     ...(envelope.outputsHeating !== undefined ? { outputsHeating: envelope.outputsHeating } : {}),
     ...(envelope.source === 'self' ? { source: 'self' as const } : {}),
     pageUrl: null,
     siteName: null,
-    snippets: [],
   }
 }
 
 /**
- * POST /api/search body (§6.1.1) → SearchResponse. Reads only the contract's fields:
- * `items` must be an array (P3/P4), and FlyB-era keys (`result`, `image_url`, `details` …) are never read.
+ * POST /api/search body (§6.1.1) → SearchResponse. `items` must be an array (P3/P4); each hit is
+ * the shared result card (top-level card fields, the rest under `details`).
  */
 export function toSearchResponse(payload: unknown): SearchResponse {
   const body = untrusted<SearchResponseWire>(payload)

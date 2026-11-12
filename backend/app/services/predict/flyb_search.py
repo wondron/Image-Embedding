@@ -1,7 +1,9 @@
 import base64, requests, logging, io, json
 from PIL import Image
 import logging, time
+import app.utils.timer as timerUtils
 from app.core.observability.log_helper import show_text
+from app.utils.image import iter_image_urls
 
 logger = logging.getLogger('flyB')
 
@@ -61,7 +63,6 @@ class FlyBSearch:
             return ""
         logger.info(f'启用 FLYB 检测: is_url={is_url}, search_num={search_num}, query={query}, roi={roi}')
         result = self.get_result(use_data, search_num, is_url, query, roi)
-        logger.info(f'FLYB 检测结果: {result}')
         return result
 
 
@@ -82,7 +83,8 @@ class FlyBSearch:
     def get_result(self, image_data=None, search_num=None, is_url=False, query=None, roi=None):
         if image_data is None:
             raise ValueError("search global 输入图像数据为空！")
-        
+        time_tool = timerUtils.timer_tool()
+        time_tool.mark("start")
         image_query = self.build_image_query(image_data, is_url, roi)
         payload = {
             "SearchType": "visual",
@@ -91,6 +93,7 @@ class FlyBSearch:
             "MaxSnippetLength": self.max_lenth,
             "EnableWaiting": self.enable
         }
+        time_tool.mark("payload_created")
         if query:
             if len(query) > 100:
                 raise ValueError("QUERY 最多 100 个字符")
@@ -104,11 +107,23 @@ class FlyBSearch:
             logger.warning("Global search upstream HTTP error | status=%s | request_id=%s", response.status_code, response.headers.get("X-Request-Id"),)
             raise
         data = response.json()
-        return self.parse_results(data)
+        time_tool.mark("response_received")
+        
+        res = self.parse_results(data)
+        time_tool.mark("results_parsed")
+        
+        timer_summary = time_tool.summary()
+        logger.info(f"FLYB search completed time={timer_summary}")
+        return res
 
 
-    def parse_results(self, data: dict) -> dict:
-        """Parse documents into primary fields and grouped supporting details."""
+    def parse_results(self, data: dict) -> list[dict] | dict:
+        """FlyB documents → result cards, the same card as a self-built hit (app.schemas.search_hit):
+        tags / description / original_url / similarity, everything else in details.
+
+        similarity stays None here; GlobalFilter fills it in when the similarity filter is on.
+        An upstream "empty response" gives a status envelope instead of the list.
+        """
         metadata = data.get("ResponseMetadata") or {}
         result = data.get("Result") or {}
 
@@ -141,8 +156,8 @@ class FlyBSearch:
             for snippet in doc.get("Snippet") or []:
                 if snippet.get("Type") == "text":
                     text = snippet.get("Text")
-                    if text:
-                        text_snippets.append(text)
+                    if isinstance(text, str) and text.strip():
+                        text_snippets.append(text.strip())
                 elif snippet.get("Type") == "image":
                     image = snippet.get("Image") or {}
                     images.append({
@@ -153,18 +168,23 @@ class FlyBSearch:
                         "height": image.get("Height"),
                     })
 
-            image_url = next((image["image_url"] for image in images if image["image_url"]), None,) or next((image["thumbnail_url"] for image in images if image["thumbnail_url"]), None,)
-            documents.append({
-                "title": doc.get("Title"),
-                "image_url": image_url,
-                "similiar": None,
+            title = doc.get("Title")
+            document = {
+                "tags": title if isinstance(title, str) else "",
+                "description": " ".join(text_snippets),
+                # The first image's original; set below
+                "original_url": next((image["image_url"] for image in images if image["image_url"]), None),
+                "similarity": None,
                 "details": {
                     "rank": doc.get("Rank"),
                     "page_url": doc.get("Url"),
                     "site": doc.get("HostInfo"),
-                    "text_snippets": text_snippets,
                     "images": images,
                     "document_info": doc.get("DocumentInfo"),
                 },
-            })
+            }
+            # Always a URL string: without an original, the largest thumbnail (ThumbnailUrl may
+            # be a {large, medium, small} map, which must not end up in original_url).
+            document["original_url"] = next(iter_image_urls(document), None)
+            documents.append(document)
         return documents

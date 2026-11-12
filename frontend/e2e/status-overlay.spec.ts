@@ -6,8 +6,11 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
 const SCENES = [{ id: 1, code: 'general', name: '通用', description: null, include_all: true, outputs_heating: false, is_active: true, created_at: null, member_count: 0, labels: [], rules: [] }]
 /** One self-built hit (schemas/retrieval.py SearchHit). */
 const HIT = {
-  id: '0b6f2c1e-0000-4000-8000-000000000001', original_url: 'https://images.test/original-1.png', thumb_url: 'https://images.test/thumb-1.png',
-  similarity: 0.9, category_id: 1, category: '番茄', scenes: ['general'], scene_label: null, label_status: 'verified', description: '', width: 640, height: 480,
+  tags: '', description: '', original_url: 'https://images.test/original-1.png', similarity: 0.9,
+  details: {
+    id: '0b6f2c1e-0000-4000-8000-000000000001', category_id: 1, category: '番茄', scenes: ['general'], scene_label: null, label_status: 'verified',
+    images: [{ image_url: 'https://images.test/original-1.png', thumbnail_url: 'https://images.test/thumb-1.png', width: 640, height: 480 }],
+  },
 }
 
 /** sourceRefuses: the image host and the backend proxy refuse downloads (fetch); pictures (<img>) still show. */

@@ -1,13 +1,15 @@
 """Retrieval wire: index / search / list (search and list follow contract §6.1).
 
 Routes declare these as response_model; search/list use exclude_unset so the
-fields §6.1 makes conditional (scene_label, food_state, heating_group) appear
-only when the use case set them.
+fields §6.1 makes conditional (scene_label, food_state, heating_group; in a search
+hit they sit in details) appear only when the use case set them.
 """
 
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+from app.schemas.search_hit import SearchHitBase
 
 
 # -- requests ---------------------------------------------------------------------------
@@ -108,20 +110,25 @@ class IndexResponse(BaseModel):
 
 # -- POST /api/search (§6.1.1) ------------------------------------------------------------
 
-class SearchHit(BaseModel):
-    id: str
-    original_url: str | None = None
-    thumb_url: str | None = None
-    similarity: float | None = None
+class SearchHitImage(BaseModel):
+    """The hit's image (details.images[0]): same keys as a FlyB result's details.images[]."""
+
+    image_url: str | None = Field(default=None, description="原图，同卡片的 original_url")
+    thumbnail_url: str | None = Field(default=None, description="缩略图（512px WebP）")
+    width: int | None = None
+    height: int | None = None
+
+
+class SearchHitDetails(BaseModel):
+    """Everything of a self-built hit besides the card fields."""
+
+    id: str = Field(..., description="images.id，也是 Qdrant point id")
     category_id: int | None = None
     category: str | None = None
     scenes: list[str] | None = None
-    scene_label: str | None = None
+    scene_label: str | None = Field(default=None, description="检索场景下的场景类别名；场景没有标签映射时不出现")
     label_status: str | None = None
-    description: str = ""
-    tags: list[str] = Field(default_factory=list)
-    width: int | None = None
-    height: int | None = None
+    images: list[SearchHitImage] = Field(default_factory=list)
     # food annotation: only when the scene outputs_heating (§6.1 P9), like heating_group
     food_state: str | None = None
     food_processing: str | None = None
@@ -130,6 +137,10 @@ class SearchHit(BaseModel):
     water_mass_g: int | None = None
     main_ingredient_mass_g: int | None = None
     heating_group: HeatingGroup | None = None
+
+
+class SearchHit(SearchHitBase):
+    details: SearchHitDetails
 
 
 class SearchResponse(BaseModel):

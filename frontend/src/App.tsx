@@ -279,7 +279,7 @@ export default function App() {
 
   const items = response?.items ?? []
   const categories = [...new Set(items.flatMap(item => { const label = displayCategoryLabel(item); return label ? [label] : [] }))]
-  const filtered = items.filter(item => (category === 'all' || displayCategoryLabel(item) === category) && (!keyword || `${item.title} ${displayCategoryLabel(item) ?? ''}`.toLocaleLowerCase().includes(keyword.toLocaleLowerCase())))
+  const filtered = items.filter(item => (category === 'all' || displayCategoryLabel(item) === category) && (!keyword || `${item.title} ${item.tags} ${displayCategoryLabel(item) ?? ''}`.toLocaleLowerCase().includes(keyword.toLocaleLowerCase())))
   const sorted = sort === 'similarity' ? [...filtered].sort((a, b) => (b.similarity ?? -Infinity) - (a.similarity ?? -Infinity)) : filtered
   const pages = Math.max(1, Math.ceil(sorted.length / pageSize))
   const currentPage = Math.min(page, pages)
@@ -430,14 +430,14 @@ export default function App() {
       <div className="detail-content">
         <section className="detail-section"><h3>检索信息</h3>
           <div className="detail-summary"><h4>{detail.title}</h4><Score value={detail.similarity} /></div>
-          <dl className="detail-fields"><div><dt>食材类别</dt><dd>{displayCategoryLabel(detail) ?? '未提供类别'}</dd></div>
+          <dl className="detail-fields"><div><dt>食材类别</dt><dd>{displayCategoryLabel(detail) ?? '未提供类别'}</dd></div><div><dt>标签</dt><dd>{detail.tags || '未提供'}</dd></div>
           {(detail.outputsHeating || response?.outputsHeating) && (
             <div className="detail-heating"><dt>加热信息</dt><dd><HeatingFields show heatingGroup={detail.heatingGroup} foodState={detail.foodState} /></dd></div>
           )}<div><dt>图片尺寸</dt><dd>{detail.width && detail.height ? `${detail.width} × ${detail.height} px` : '未提供'}</dd></div><div><dt>图片来源</dt><dd>{detail.siteName ?? '未提供'}</dd></div><div><dt>检索通道</dt><dd>{detail.source === 'self' ? '自建' : detail.source === 'empty' ? '无结果' : detail.source === 'flyb' ? 'FlyB 兜底' : '未提供'}</dd></div><div><dt>结果编号</dt><dd className="monospace">{detail.id}</dd></div></dl>
+          {detail.description.trim() && <div className="detail-description"><span>描述</span><div><p>{detail.description}</p></div></div>}
         </section>
         <section className="detail-section"><h3>图片预览</h3><div className="detail-image"><ResultPreview key={detail.id} item={detail} /></div></section>
         <section className="detail-section"><h3>来源信息</h3><dl className="detail-links"><div><dt>来源网页</dt><dd>{detail.pageUrl ? <a href={detail.pageUrl} target="_blank" rel="noreferrer">{detail.pageUrl}<ArrowUpRight size={12} /></a> : '—'}</dd></div><div><dt>图片地址</dt><dd>{(detail.imageUrl || detail.thumbnailUrl) ? <a className="original-link" href={detail.imageUrl ?? detail.thumbnailUrl!} target="_blank" rel="noreferrer">打开原图 / 另存为 <ArrowUpRight size={12} /></a> : '—'}</dd></div></dl>
-          {detail.snippets.length > 0 && <div className="detail-description"><span>来源描述</span><div>{detail.snippets.map((text, i) => <p key={i}>{text}</p>)}</div></div>}
         </section>
         {detail.source === 'self' && <SceneMembershipPanel imageId={detail.id} apiBase={apiBase} onManage={() => { setDetail(null); navigate('scenes'); const u = new URL(window.location.href); u.searchParams.set('sceneTab', 'sync'); window.history.replaceState(null, '', u.toString()) }} />}
       </div>

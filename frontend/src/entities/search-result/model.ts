@@ -8,26 +8,34 @@ import type { FoodState, HeatingGroup, LabelStatus } from '../image'
  */
 export type SearchChannel = 'self' | 'empty' | 'flyb'
 
-/** One result card: a §6.1 search hit (field map §6.1.4) or a legacy 现网 predict document. */
+/**
+ * One result card, from either channel: a self-built hit (POST /api/search) or a 现网 FlyB result
+ * (POST /api/predict/searchImage_*). Both send the same card (§6.1.1): `tags` / `description` /
+ * `original_url` / `similarity` at the top level, everything else in `details.*`.
+ */
 export interface SearchImage {
+  /** 自建 ← `details.id`; FlyB results have none: 「image-N」. */
   id: string
-  /** Display name: scene_label → category → 「未命名图片 N」 (the wire has no title, P5); predict keeps its document title. */
+  /** Display name. 自建: scene_label → category → tags → 「未命名图片 N」; FlyB: tags (its title) → image alt → 「未命名图片 N」. */
   title: string
+  /** ← `tags`: 自建 the image's tags joined with「、」, FlyB the result title; "" when none. */
+  tags: string
   /** Full image ← `original_url`. */
   imageUrl: string | null
-  /** Thumbnail ← `thumb_url`. */
+  /** Thumbnail ← `details.images[]` `thumbnail_url` (自建: the 512 px WebP; FlyB: the largest size). */
   thumbnailUrl: string | null
-  /** Further candidates tried after imageUrl (predict thumbnail sizes, ranked); [] for §6.1 hits. */
+  /** Further candidates tried after imageUrl (FlyB thumbnail sizes, ranked); [] for self-built hits. */
   alternateUrls: string[]
-  /** Finite score in [-1, 1]; null when not returned (never 0 by default). */
+  /** ← `similarity`: finite score in [-1, 1]; null when not returned (never 0 by default). */
   similarity: number | null
   categoryId: number | null
-  /** Category display name ← `category`. */
+  /** Category display name ← `details.category`. */
   category: string | null
   scenes: string[]
-  /** Label of the searched scene ← `scene_label` (string | null, P8). */
+  /** Label of the searched scene ← `details.scene_label` (string | null, P8). */
   sceneLabel: string | null
   labelStatus: LabelStatus | null
+  /** ← `description`: 自建 images.description, FlyB the result's text snippets; "" when none. */
   description: string
   /** Sent only for scenes with outputs_heating; null otherwise. */
   foodState: FoodState | null
@@ -39,10 +47,9 @@ export interface SearchImage {
   outputsHeating?: boolean
   /** Envelope channel, copied onto each card; absent when the API did not say. */
   source?: SearchChannel
-  /** Predict only: source page / site / text snippets. null / [] for §6.1 hits (P7). */
+  /** FlyB only: source page / site (`details.page_url` / `details.site`); null for self-built hits. */
   pageUrl: string | null
   siteName: string | null
-  snippets: string[]
 }
 
 export interface SearchResponse {

@@ -88,13 +88,15 @@ class HeatingOutputTests(unittest.TestCase):
         self.assertFalse(set(FOOD_FIELDS) & set(self.list_item(False)))
 
     def test_search_hits(self):
-        def hit(outputs_heating):
+        def details(outputs_heating):
             return search_image._hit_from_row(
                 dict(ROW), 0.9, scene_meta={"outputs_heating": outputs_heating}, scene_label=None
-            )
+            )["details"]
 
-        self.assertEqual({key: hit(True)[key] for key in FOOD_FIELDS}, FOOD)
-        self.assertFalse(set(FOOD_FIELDS) & set(hit(False)))
+        self.assertEqual({key: details(True)[key] for key in FOOD_FIELDS}, FOOD)
+        self.assertEqual(details(True)["heating_group"], ROW["heating_group"])
+        self.assertFalse(set(FOOD_FIELDS) & set(details(False)))
+        self.assertNotIn("heating_group", details(False))
 
 
 if __name__ == "__main__":

@@ -95,8 +95,21 @@ class PredictEndpointTests(unittest.TestCase):
         self.assertEqual(self.requests, [])
         self.service.detect.assert_not_called()
 
-    def test_file_search_preserves_list_and_envelope_results_with_generated_trace(self):
-        for result in ([{"title": "image", "custom": {"rank": 3}}], {"results": [], "status": "upstream_empty_response", "upstream_error": {"code": 500}}):
+    def test_file_search_returns_result_cards_and_the_empty_envelope_with_generated_trace(self):
+        card = {
+            "tags": "番茄", "description": "新鲜番茄", "original_url": "https://img.example/a.jpg", "similarity": 0.8,
+            "details": {
+                "rank": 3, "page_url": "https://site.example/a", "site": {"Name": "食材百科"},
+                "images": [{"image_url": "https://img.example/a.jpg", "thumbnail_url": {"large": "https://img.example/l.jpg"},
+                            "alt": None, "width": 600, "height": 400}],
+                "document_info": {"PublishTime": "2026-01-01"},
+            },
+        }
+        empty = {
+            "request_id": "upstream-1", "total_doc_count": 0, "result_count": 0, "results": [],
+            "status": "upstream_empty_response", "upstream_error": {"code": 500, "message": "empty"},
+        }
+        for result in ([card], empty):
             self.service.detect.reset_mock()
             self.service.detect.return_value = result
             with self.subTest(result=result):

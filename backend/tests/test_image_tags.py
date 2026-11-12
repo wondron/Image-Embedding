@@ -44,12 +44,15 @@ class ListTagFilterTests(unittest.TestCase):
 
 
 class SearchHitTagsTests(unittest.TestCase):
-    def test_hits_always_carry_a_tags_list(self):
+    def test_hits_carry_the_tags_as_one_text(self):
         def hit(row):
             return search_image._hit_from_row(row, 0.9, scene_meta=None, scene_label=None)["tags"]
 
-        self.assertEqual(hit({"id": "i1", "tags": ["带皮"]}), ["带皮"])
-        self.assertEqual(hit({"id": "i2"}), [])
+        self.assertEqual(hit({"id": "i1", "tags": ["红薯叶", "带皮"]}), "红薯叶、带皮")
+        self.assertEqual(hit({"id": "i2", "tags": ["带皮"]}), "带皮")
+        for row in ({"id": "i3"}, {"id": "i4", "tags": None}, {"id": "i5", "tags": []}):
+            with self.subTest(row=row):
+                self.assertEqual(hit(row), "")
 
 
 if __name__ == "__main__":
