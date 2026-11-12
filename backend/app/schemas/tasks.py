@@ -1,5 +1,5 @@
-"""Task center wire: index records (GET / DELETE /api/index-tasks) and the deletion queue
-(GET /api/image-deletions, POST /api/image-deletions/process).
+"""Task center wire: index records (GET / DELETE /api/index-tasks, DELETE /api/index-tasks/{id})
+and the deletion queue (GET /api/image-deletions, POST /api/image-deletions/process).
 
 Success bodies carry no trace_id (it is in the X-Trace-Id header), as for the gallery admin.
 Use case: app.services.retrieval.task_center.
@@ -10,7 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.enums import IndexTaskStatus, LabelStatus
-from app.services.retrieval.task_center import MAX_DELETIONS
+from app.services.retrieval.task_center import MAX_DELETIONS, IndexTaskImageState
 
 
 # -- index records ------------------------------------------------------------------------
@@ -38,6 +38,9 @@ class IndexTaskItem(BaseModel):
     duration_ms: int | None = Field(..., description="服务端处理这个文件的用时（毫秒）")
     trace_id: str | None = Field(..., description="入库请求的追踪号，用来查日志")
     created_at: str | None = None
+    image_state: IndexTaskImageState | None = Field(
+        ..., description="成功记录的图片现在还在不在：present 仍在图库 / deleted 之后被删除了；失败记录为 null"
+    )
     image: IndexTaskImage | None = Field(
         ..., description="图片现在的样子；失败，或图片已被删除时为 null（成功记录仍保留 image_id）"
     )
@@ -46,22 +49,31 @@ class IndexTaskItem(BaseModel):
 class IndexTaskCounts(BaseModel):
     succeeded: int
     failed: int
+    image_deleted: int = Field(..., description="成功记录里图片之后被删除了的条数（也算在 succeeded 里）")
 
 
 class IndexTaskListResponse(BaseModel):
     ok: Literal[True] = True
-    status: IndexTaskStatus | None = Field(..., description="本次的筛选；null 表示全部")
+    status: IndexTaskStatus | None = Field(..., description="本次的结果筛选；null 表示全部")
+    image_state: IndexTaskImageState | None = Field(..., description="本次的图片状态筛选（只选成功记录）；null 表示不筛")
     page: int
     page_size: int
     total: int = Field(..., description="符合筛选的记录数")
-    counts: IndexTaskCounts = Field(..., description="全部记录按结果的数量（不受筛选影响）")
+    counts: IndexTaskCounts = Field(..., description="全部记录的数量（不受筛选影响）")
     items: list[IndexTaskItem] = Field(..., description="新的在前")
 
 
 class IndexTaskClearResponse(BaseModel):
     ok: Literal[True] = True
-    status: IndexTaskStatus
+    status: IndexTaskStatus | None = Field(..., description="这次按哪种结果清理；null 表示没按结果筛")
+    image_state: IndexTaskImageState | None = Field(..., description="这次按哪种图片状态清理；null 表示没按图片状态筛")
     deleted: int = Field(..., description="删掉的记录数")
+
+
+class IndexTaskDeleteResponse(BaseModel):
+    ok: Literal[True] = True
+    id: int
+    deleted: int = Field(..., description="1：删掉了这条记录；0：本来就没有这条记录")
 
 
 # -- deletion queue -----------------------------------------------------------------------

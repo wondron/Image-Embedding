@@ -1,5 +1,6 @@
 export {
   type IndexTaskStatus,
+  type IndexTaskImageState,
   type IndexTask,
   type IndexTaskImage,
   type IndexTaskCounts,
@@ -9,7 +10,9 @@ export {
   type ImageDeletionFailure,
   type ImageDeletionRun,
   INDEX_TASK_STATUSES,
+  INDEX_TASK_IMAGE_STATES,
   parseIndexTaskStatus,
+  parseIndexTaskImageState,
   toIndexTask,
   toIndexTaskPage,
   toDeletionQueue,
@@ -18,10 +21,12 @@ export {
 export {
   type TaskRequestOptions,
   type ListIndexTasksOptions,
+  type IndexTaskFilter,
   MAX_TASK_PAGE_SIZE,
   MAX_DELETION_BATCH,
   listIndexTasks,
   clearIndexTasks,
+  deleteIndexTask,
   listImageDeletions,
   processImageDeletions,
 } from './api'

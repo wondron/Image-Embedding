@@ -23,18 +23,28 @@ logger = logging.getLogger("svc.tasks")
 
 
 def list_index_tasks(
-    runtime: ApplicationState, *, status: str | None, page: int, page_size: int
+    runtime: ApplicationState, *, status: str | None, image_state: str | None, page: int, page_size: int
 ) -> dict[str, Any]:
-    result = require_catalog(runtime).tasks_uc.list_index_tasks(status=status, page=page, page_size=page_size)
+    result = require_catalog(runtime).tasks_uc.list_index_tasks(
+        status=status, image_state=image_state, page=page, page_size=page_size
+    )
     return {"ok": True, **result}
 
 
-def clear_index_tasks(runtime: ApplicationState, request: Request, *, status: str) -> dict[str, Any]:
-    result = require_catalog(runtime).tasks_uc.clear_index_tasks(status=status)
+def clear_index_tasks(
+    runtime: ApplicationState, request: Request, *, status: str | None, image_state: str | None
+) -> dict[str, Any]:
+    result = require_catalog(runtime).tasks_uc.clear_index_tasks(status=status, image_state=image_state)
     logger.info(
-        "index task records cleared status=%s deleted=%s | trace_id=%s",
-        result["status"], result["deleted"], get_trace_id(request),
+        "index task records cleared status=%s image_state=%s deleted=%s | trace_id=%s",
+        result["status"], result["image_state"], result["deleted"], get_trace_id(request),
     )
+    return {"ok": True, **result}
+
+
+def delete_index_task(runtime: ApplicationState, request: Request, *, task_id: int) -> dict[str, Any]:
+    result = require_catalog(runtime).tasks_uc.delete_index_task(task_id)
+    logger.info("index task record deleted id=%s deleted=%s | trace_id=%s", result["id"], result["deleted"], get_trace_id(request))
     return {"ok": True, **result}
 
 

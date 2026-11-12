@@ -17,6 +17,20 @@
 .index-tasks-file { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .index-tasks-file strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .index-task-placeholder { display: inline-grid; place-items: center; color: var(--muted); }
+/* A record whose image was deleted from the library since: kept, but visibly not a live result */
+.index-task-placeholder.is-deleted { color: #98a2b3; background: #f2f4f7; border-style: dashed; }
+.index-tasks-row.is-image-deleted .index-tasks-file strong { color: var(--muted); }
+.index-tasks .index-tasks-status-deleted { color: #667085; }
+.mg-btn.index-tasks-danger { border-color: #c2412f; background: #c2412f; color: #fff; }
+.mg-btn.index-tasks-danger:hover:not(:disabled) { border-color: #a8382a; background: #a8382a; }
+.mg-btn.index-tasks-danger-quiet { border-color: #f1c4be; background: #fdf0ee; color: #b42318; }
+.mg-btn.index-tasks-danger-quiet:hover:not(:disabled) { border-color: #e9a59c; background: #fbe4e0; }
+.mg-btn.index-tasks-danger-quiet:disabled { border-color: var(--border); background: transparent; color: var(--muted); }
+.index-tasks-dialog-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid rgba(148, 163, 184, .22); }
+.index-tasks-confirm-inline { flex: 1 1 200px; color: #b42318; font-size: 13px; line-height: 1.6; }
+.index-tasks-confirm { margin: 0; padding: 4px 4px 8px; font-size: 14px; line-height: 1.8; }
+.index-task-details .index-task-deleted-note { display: flex; align-items: flex-start; gap: 6px; color: #475467; }
+.index-task-deleted-note svg { flex-shrink: 0; margin-top: 4px; }
 .index-tasks-meta { display: contents; }
 .index-tasks-label { display: none; color: var(--muted); }
 .index-tasks .mg-job-status { margin-left: 0; }

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Path, Query, Request
 
 from app.api.services import tasks as tasks_service
 from app.bootstrap.state import get_application_state
@@ -14,11 +14,14 @@ from app.schemas.tasks import (
     ImageDeletionProcessRequest,
     ImageDeletionProcessResponse,
     IndexTaskClearResponse,
+    IndexTaskDeleteResponse,
     IndexTaskListResponse,
 )
-from app.services.retrieval.task_center import MAX_DELETIONS, MAX_PAGE_SIZE
+from app.services.retrieval.task_center import MAX_DELETIONS, MAX_PAGE_SIZE, MAX_TASK_ID, IndexTaskImageState
 
 router = APIRouter(prefix="/api", tags=["tasks"])
+
+_IMAGE_STATE_HELP = "present：图片仍在图库的成功记录 / deleted：图片之后被删除了的成功记录"
 
 
 @router.get(
@@ -28,17 +31,20 @@ router = APIRouter(prefix="/api", tags=["tasks"])
     description=(
         "入库记录：POST /api/index 和 /api/index/file 每处理一个文件记一条（成功带图片 id，失败带错误码和原因），"
         "新的在前。整个请求被拒的情况（服务未就绪、文件过大、请求格式错误）没有记录。"
-        "image 是图片现在的样子，图片删除后为 null。只读 PostgreSQL，检索栈未就绪时也能用。"
+        "删除图片时记录保留：image 为 null、image_state=deleted，可按 image_state 筛选、清理。"
+        "只读 PostgreSQL，检索栈未就绪时也能用。"
     ),
 )
 def list_index_tasks(
     request: Request,
     status: Optional[IndexTaskStatus] = Query(default=None, description="succeeded / failed；不传为全部"),
+    image_state: Optional[IndexTaskImageState] = Query(default=None, description=f"{_IMAGE_STATE_HELP}；不传不筛"),
     page: int = Query(default=1, ge=1, le=1_000_000),
     page_size: int = Query(default=50, ge=1, le=MAX_PAGE_SIZE),
 ) -> Any:
     return tasks_service.list_index_tasks(
-        get_application_state(request), status=status.value if status else None, page=page, page_size=page_size
+        get_application_state(request), status=status.value if status else None, image_state=image_state,
+        page=page, page_size=page_size,
     )
 
 
@@ -46,13 +52,32 @@ def list_index_tasks(
     "/index-tasks",
     response_model=IndexTaskClearResponse,
     summary="Clear index records",
-    description="删掉某一种结果的全部入库记录（status 必填）；只删记录，不动图片。",
+    description=(
+        "删掉符合筛选的全部入库记录：status 和 image_state 至少给一个（不会一次删光所有记录），"
+        "例如 ?image_state=deleted 清理图片已删除的记录、?status=failed 清空失败记录。只删记录，不动图片。"
+    ),
 )
 def clear_index_tasks(
     request: Request,
-    status: IndexTaskStatus = Query(..., description="succeeded / failed"),
+    status: Optional[IndexTaskStatus] = Query(default=None, description="succeeded / failed"),
+    image_state: Optional[IndexTaskImageState] = Query(default=None, description=_IMAGE_STATE_HELP),
 ) -> Any:
-    return tasks_service.clear_index_tasks(get_application_state(request), request, status=status.value)
+    return tasks_service.clear_index_tasks(
+        get_application_state(request), request, status=status.value if status else None, image_state=image_state
+    )
+
+
+@router.delete(
+    "/index-tasks/{task_id}",
+    response_model=IndexTaskDeleteResponse,
+    summary="Delete one index record",
+    description="删掉一条入库记录（记录 id，不是图片 id）；只删记录，不动图片。没有这条记录时 deleted=0。",
+)
+def delete_index_task(
+    request: Request,
+    task_id: int = Path(..., ge=1, le=MAX_TASK_ID, description="入库记录 id"),
+) -> Any:
+    return tasks_service.delete_index_task(get_application_state(request), request, task_id=task_id)
 
 
 @router.get(

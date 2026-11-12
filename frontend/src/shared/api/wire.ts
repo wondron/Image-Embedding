@@ -482,6 +482,8 @@ export interface ImageDeleteResponseWire {
 
 /** System enum (app.core.enums.IndexTaskStatus): an index is synchronous, so only the outcome. */
 export type IndexTaskStatusWire = 'succeeded' | 'failed'
+/** A succeeded record's image now: still stored, or deleted since (the record stays). Derived, not a column. */
+export type IndexTaskImageStateWire = 'present' | 'deleted'
 
 /** schemas/tasks.py IndexTaskImage: the record's image as it is now. */
 export interface IndexTaskImageWire {
@@ -506,27 +508,39 @@ export interface IndexTaskWire {
   duration_ms: number | null
   trace_id: string | null
   created_at: string | null
+  /** Succeeded records only (null when failed): is the image still stored? */
+  image_state: IndexTaskImageStateWire | null
   /** null when the file failed, or its image was deleted since. */
   image: IndexTaskImageWire | null
 }
 
-/** GET /api/index-tasks?status=&page=&page_size= (newest first). */
+/** GET /api/index-tasks?status=&image_state=&page=&page_size= (newest first). */
 export interface IndexTaskListResponseWire {
   ok: true
   status: IndexTaskStatusWire | null
+  /** The image-state filter (succeeded records only); null: not filtered. */
+  image_state: IndexTaskImageStateWire | null
   page: number
   page_size: number
   /** Records matching the filter. */
   total: number
-  /** Every record by outcome, whatever the filter. */
-  counts: Record<IndexTaskStatusWire, number>
+  /** Every record, whatever the filter; image_deleted: succeeded records whose image was deleted (also in succeeded). */
+  counts: Record<IndexTaskStatusWire, number> & { image_deleted: number }
   items: IndexTaskWire[]
 }
 
-/** DELETE /api/index-tasks?status= */
+/** DELETE /api/index-tasks?status=&image_state= (at least one): removes what that filter lists; only records. */
 export interface IndexTaskClearResponseWire {
   ok: true
-  status: IndexTaskStatusWire
+  status: IndexTaskStatusWire | null
+  image_state: IndexTaskImageStateWire | null
+  deleted: number
+}
+
+/** DELETE /api/index-tasks/{id}: one record (never its image); deleted 0 when it was already gone. */
+export interface IndexTaskDeleteResponseWire {
+  ok: true
+  id: number
   deleted: number
 }
 

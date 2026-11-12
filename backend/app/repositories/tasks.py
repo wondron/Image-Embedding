@@ -2,6 +2,9 @@
 
 Written by the index use case after each file (best effort: a failed write is logged, the index
 result stands); read and cleared by the task center (GET / DELETE /api/index-tasks).
+
+A succeeded record keeps its image_id after the image is deleted (no foreign key): joined with
+images, such a record has no image any more ("deleted"), the others still have one ("present").
 """
 
 from __future__ import annotations
@@ -25,6 +28,34 @@ def _clip(value: Any, limit: int) -> str | None:
         return None
     text = str(value)
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _filter(status: str | None, image_state: str | None) -> tuple[str, dict[str, Any]]:
+    """WHERE over `index_tasks t LEFT JOIN images i ON i.id = t.image_id`, shared by the list and
+    the clear so that a clear removes exactly what the list shows. image_state: present (a
+    succeeded record whose image is still stored) / deleted (whose image was deleted since)."""
+    clauses: list[str] = []
+    params: dict[str, Any] = {}
+    if status:
+        clauses.append("t.status = :status")
+        params["status"] = IndexTaskStatus(status).value
+    if image_state:
+        if image_state not in ("present", "deleted"):
+            raise ValueError(f"unknown image_state {image_state!r}")
+        clauses.append("t.status = :succeeded AND i.id IS " + ("NOT NULL" if image_state == "present" else "NULL"))
+        params["succeeded"] = IndexTaskStatus.SUCCEEDED.value
+    return ("WHERE " + " AND ".join(clauses) + " ") if clauses else "", params
+
+
+def _matching(counts: dict[str, int], status: str | None, image_state: str | None) -> int:
+    """How many records a filter selects, from the counts (one read for both)."""
+    succeeded = IndexTaskStatus.SUCCEEDED.value
+    if image_state is None:
+        return counts.get(status, 0) if status else counts[succeeded] + counts[IndexTaskStatus.FAILED.value]
+    if status not in (None, succeeded):
+        return 0
+    deleted = counts["image_deleted"]
+    return deleted if image_state == "deleted" else counts[succeeded] - deleted
 
 
 def _record_params(row: dict[str, Any]) -> dict[str, Any]:
@@ -69,24 +100,31 @@ class PgIndexTasksMixin:
         except Exception as exc:
             raise err.index_postgres_failed(f"record_index_tasks: {type(exc).__name__}: {exc}") from exc
 
-    def list_index_tasks(self, *, status: str | None = None, page: int = 1, page_size: int = 50) -> dict[str, Any]:
-        """Newest first, optionally one status: {items, total, counts: {succeeded, failed}}. Each
-        item carries its image's thumbnail and category while the image still exists."""
+    def list_index_tasks(
+        self, *, status: str | None = None, image_state: str | None = None, page: int = 1, page_size: int = 50
+    ) -> dict[str, Any]:
+        """Newest first, optionally one status and / or image state:
+        {items, total, counts: {succeeded, failed, image_deleted}} (image_deleted: the succeeded
+        records whose image was deleted since; counted in succeeded too). Each item carries its
+        image's thumbnail and category while the image still exists."""
         self.ensure_schema()
         from sqlalchemy import text
 
         size = max(1, min(int(page_size), 100))
         offset = (max(1, int(page)) - 1) * size
-        params: dict[str, Any] = {"lim": size, "off": offset, "primary_kind": NameKind.PRIMARY.value}
-        where = ""
-        if status:
-            where = "WHERE t.status = :status "
-            params["status"] = IndexTaskStatus(status).value
+        where, filter_params = _filter(status, image_state)
+        params: dict[str, Any] = {"lim": size, "off": offset, "primary_kind": NameKind.PRIMARY.value, **filter_params}
         try:
             with self._get_engine().connect() as conn:
                 counts = {member.value: 0 for member in IndexTaskStatus}
-                for row in conn.execute(text("SELECT status, count(*) FROM index_tasks GROUP BY status")):
-                    counts[str(row[0])] = int(row[1])
+                counts["image_deleted"] = 0
+                for row in conn.execute(text(
+                    "SELECT t.status, i.id IS NULL AS image_gone, count(*) "
+                    "FROM index_tasks t LEFT JOIN images i ON i.id = t.image_id GROUP BY 1, 2"
+                )):
+                    counts[str(row[0])] += int(row[2])
+                    if row[0] == IndexTaskStatus.SUCCEEDED.value and row[1]:
+                        counts["image_deleted"] += int(row[2])
                 rows = conn.execute(
                     text(
                         "SELECT t.id, t.filename, t.status, t.image_id::text AS image_id, t.new_image, "
@@ -104,19 +142,38 @@ class PgIndexTasksMixin:
                 ).mappings().fetchall()
         except Exception as exc:
             raise err.list_postgres_failed(f"list_index_tasks: {type(exc).__name__}: {exc}") from exc
-        total = counts.get(params["status"], 0) if status else sum(counts.values())
-        return {"items": [_row_to_dict(row) for row in rows], "total": total, "counts": counts}
+        return {"items": [_row_to_dict(row) for row in rows], "total": _matching(counts, status, image_state), "counts": counts}
 
-    def clear_index_tasks(self, *, status: str) -> int:
-        """Delete the records of one status; returns how many went."""
+    def clear_index_tasks(self, *, status: str | None = None, image_state: str | None = None) -> int:
+        """Delete the records the list shows for this filter (at least one of the two: never
+        everything by accident); returns how many went. Only records: images are not touched."""
+        if not status and not image_state:
+            raise ValueError("clear_index_tasks needs a status or an image_state")
+        self.ensure_schema()
+        from sqlalchemy import text
+
+        where, params = _filter(status, image_state)
+        try:
+            with self._get_engine().begin() as conn:
+                return int(conn.execute(
+                    text(
+                        "DELETE FROM index_tasks WHERE id IN (SELECT t.id FROM index_tasks t "
+                        "LEFT JOIN images i ON i.id = t.image_id " + where + ")"
+                    ),
+                    params,
+                ).rowcount or 0)
+        except Exception as exc:
+            raise err.index_postgres_failed(f"clear_index_tasks: {type(exc).__name__}: {exc}") from exc
+
+    def delete_index_task(self, task_id: int) -> int:
+        """Delete one record; 1 when it was there, 0 when not. The image is not touched."""
         self.ensure_schema()
         from sqlalchemy import text
 
         try:
             with self._get_engine().begin() as conn:
                 return int(conn.execute(
-                    text("DELETE FROM index_tasks WHERE status = :status"),
-                    {"status": IndexTaskStatus(status).value},
+                    text("DELETE FROM index_tasks WHERE id = :id"), {"id": int(task_id)}
                 ).rowcount or 0)
         except Exception as exc:
-            raise err.index_postgres_failed(f"clear_index_tasks: {type(exc).__name__}: {exc}") from exc
+            raise err.index_postgres_failed(f"delete_index_task: {type(exc).__name__}: {exc}") from exc

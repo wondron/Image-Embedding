@@ -66,6 +66,7 @@ textarea.lb-input { min-height: 72px; resize: vertical; line-height: 1.6; }
 /* Delete confirmation */
 .lb-confirm p { margin: 0; color: #3b4656; font-size: 14px; line-height: 1.8; }
 .lb-confirm strong { color: #161a1d; }
+.lb-confirm p.lb-note { margin-top: 8px; color: #64748b; font-size: 13px; line-height: 1.6; }
 .lb-type-confirm { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; color: #64748b; font-size: 13px; }
 .lb-type-confirm .lb-input { max-width: 200px; }
 

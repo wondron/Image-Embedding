@@ -63,6 +63,7 @@ export function BatchDeleteDialog({ items, apiBase, onClose, onFinished }: Batch
         ? <BatchProgress run={run} verb="删除" />
         : <div className="lb-confirm">
           <p>将删除选中的 <strong>{items.length}</strong> 张图片：图库和检索结果里都会消失，向量和原图、缩略图一起清理，<strong>无法恢复</strong>。</p>
+          <p className="lb-note">它们的入库记录会保留并标为「图片已删除」，需要时可在「入库任务」里清理。</p>
           {needsTyping && <label className="lb-type-confirm">
             <span>数量较多，请输入「{CONFIRM_WORD}」确认</span>
             <input className="lb-input" value={typed} autoComplete="off" onChange={event => setTyped(event.target.value)} aria-label={`输入「${CONFIRM_WORD}」确认`} />

@@ -867,12 +867,13 @@ PATCH 字段（不传 = 不变）：
 
 ### 6.4.1 已有查询与字段
 
-- **GET `/api/index-tasks`**（已在 `api/router.py` 注册，无额外 `/v1`），无 body。query：`status` 可省略（全部），否则仅 `succeeded` / `failed`；`page=1`（1..1000000）、`page_size=50`（1..100）。已有 FE `listIndexTasks` 默认显式发 `page_size=20`，与 BE 缺省 50 区分；本轮页面沿 FE 每页 20。
-- 只需 catalog/PG，不依赖编码器/Qdrant/OSS 就绪。HTTP 200：`{ok:true,status:"succeeded"|"failed"|null,page:int,page_size:int,total:int,counts:{succeeded:int,failed:int},items:IndexTaskItem[]}`，业务键必返，空 items 为 []。`total` 是当前筛选**记录行数**，counts 是不受筛选/分页影响的全历史两态行数，不是图片去重数/请求数/本页数。
+- **GET `/api/index-tasks`**（已在 `api/router.py` 注册，无额外 `/v1`），无 body。query：`status` 可省略（全部），否则仅 `succeeded` / `failed`；`image_state` 可省略，否则仅 `present`（图片仍在图库的成功记录）/ `deleted`（图片之后被删除的成功记录），与 `status` 同时给时取交集（`status=failed&image_state=…` 为空）；`page=1`（1..1000000）、`page_size=50`（1..100）。已有 FE `listIndexTasks` 默认显式发 `page_size=20`，与 BE 缺省 50 区分；本轮页面沿 FE 每页 20。
+- 只需 catalog/PG，不依赖编码器/Qdrant/OSS 就绪。HTTP 200：`{ok:true,status:"succeeded"|"failed"|null,image_state:"present"|"deleted"|null,page:int,page_size:int,total:int,counts:{succeeded:int,failed:int,image_deleted:int},items:IndexTaskItem[]}`，业务键必返，空 items 为 []。`total` 是当前筛选**记录行数**，counts 是不受筛选/分页影响的全历史行数（`image_deleted` 是图片已删除的成功记录数，**也计在 `succeeded` 里**），不是图片去重数/请求数/本页数。
 - OFFSET/LIMIT，`created_at DESC, id DESC`（id 为同时间 tie-breaker）。counts/items 分开 SQL，无整页/跨页一致快照保证，并发新增或外部清记录可令页偏移；超出总页数不自动纠正。
-- `IndexTaskItem`：`id:int`（bigint identity，记录 ID，非图片 UUID）、`filename:string`、`status:"succeeded"|"failed"`；以下键必返且可 null：`image_id:UUID string|null`、`new_image:bool|null`、`error_code:string|null`、`error_detail:string|null`、`duration_ms:int|null`、`trace_id:string|null`、`created_at:string|null`（schema 默认 null）、`image:IndexTaskImage|null`。其余 nullable 键无 schema 缺省值。
+- `IndexTaskItem`：`id:int`（bigint identity，记录 ID，非图片 UUID）、`filename:string`、`status:"succeeded"|"failed"`；以下键必返且可 null：`image_id:UUID string|null`、`new_image:bool|null`、`error_code:string|null`、`error_detail:string|null`、`duration_ms:int|null`、`trace_id:string|null`、`created_at:string|null`（schema 默认 null）、`image_state:"present"|"deleted"|null`（2026-11-12 新增：成功记录的图片现在在不在图库，按 LEFT JOIN 现算，不是列；失败记录为 null）、`image:IndexTaskImage|null`。其余 nullable 键无 schema 缺省值。
 - `IndexTaskImage`：`id:string` 必填，`thumb_url:string|null=null`、`category_id:int|null=null`、`category:string|null=null`（中文主名）、`label_status:"unlabeled"|"auto"|"verified"|null=null`。LEFT JOIN 取得**当前图片投影**，不是入库时快照。成功图删除后历史仍 succeeded、image_id 保留、image=null；同 ID 重新入库后可能重新有投影。无缩略图不等于图已删。
 - **无独立 `GET /api/index-tasks/{id}`**。本轮明细直接用列表 item 全字段；图库 `GET /api/images/{image_id}` 不是任务记录详情，本轮不依赖它、不新增详情 API。
+- **清理记录（2026-11-12）**：`DELETE /api/index-tasks?status=&image_state=`：删掉同样筛选下列表列出的那些记录，`status` 与 `image_state` **至少给一个**（都不给 422 `VALIDATION_ERROR`，不会一次删光），如 `?image_state=deleted` 清理图片已删除的记录、`?status=failed` 清空失败记录；200 `{ok:true,status:…|null,image_state:…|null,deleted:int}`。`DELETE /api/index-tasks/{id}`（记录 id，1..2^63-1，否则 422）删一条：200 `{ok:true,id:int,deleted:0|1}`，记录本来就不在为 0（幂等，不报 404）。两者都**只删记录、不动图片**，只需 catalog/PG；错误同上（`INDEX_POSTGRES_FAILED` 502、`NOT_READY` 503）。
 - 成功列表顶层无 trace_id，当前 GET trace 取 `X-Trace-Id`；item.trace_id 是原入库请求 trace，不能混用。失败沿 §6 信封：`VALIDATION_ERROR` 422、`NOT_READY` 503、`LIST_POSTGRES_FAILED` 502；schema/建连接失败还可 `INDEX_POSTGRES_FAILED` 502；未预期错误 `INTERNAL_ERROR` 500。
 
 ### 6.4.2 结果粒度、失败与保留边界
@@ -883,16 +884,16 @@ PATCH 字段（不传 = 不变）：
 - 解析/预读上传/整请求格式校验/NOT_READY 在执行前拒绝不产生逐文件记录；已执行失败被记录后，HTTP 适配器仍可能把全失败提升为非 2xx。因此非 200 不等于没历史；浏览器超时/取消不保证服务端停止。
 - 历史失败用 item 的 `error_code/error_detail`（非 index 响应 failed[].error/detail），公开说明已净化；未知异常为 INTERNAL_ERROR。filename 仅文本、可能为源路径，不作图片 URL/文件恢复 token。
 - 记录写入独立事务、best effort：失败只日志，不改变入库结果，无可靠补偿重试保证，可缺行。裁剪上限 filename 255、error_code 64、error_detail 1000、trace_id 128 字符；不伪造被截原文。
-- image_id 无 FK，删图保留历史。已查引用未发现 TTL/自动轮转，不承诺永久或固定天数；已有人工清记录能力及 downgrade 丢表，保留政策另刀。0008 文件存在不证明实际 DB 已迁移，schema 检查不自动迁移，本刀不执行迁移。
+- image_id 无 FK，删图保留历史。**保留政策（2026-11-12）：默认保留、标记、按需清理**——删图不联动删记录（记录用来追溯哪天入过哪些文件、trace 查日志），图片删除后记录 `image_state=deleted`，前端标「图片已删除」、可单独筛选，由人用「清理图片已删除的记录」/「清空失败记录」/ 单条删除处理（均二次确认）。仍无 TTL/自动轮转，不承诺永久或固定天数；如需自动过期（如图片删除 N 天后自动清记录）另刀，需要记录删除时间（加列 + 迁移）。同字节图片删除后又重新入库：同一 image_id 重新有图，旧记录随之回到 `present`（LEFT JOIN 现算）。0008 文件存在不证明实际 DB 已迁移，schema 检查不自动迁移，本刀不执行迁移。
 
 ### 6.4.3 最小 FE 接线规范（待实施）
 
-- 历史列表只做全部/成功/失败、分页、手动刷新、已有明细；与本会话 jobs（pending/running/success/error/cancelled、File/进度/本地重传）明确分区、计数不混算。刷新/卸载丢本地队列不删除服务端历史；不假称 abort 撤销服务端。
+- 历史列表只做全部/成功（图片在库，2026-11-12 起不含图片已删除的）/图片已删除/失败、分页、手动刷新、已有明细；与本会话 jobs（pending/running/success/error/cancelled、File/进度/本地重传）明确分区、计数不混算。刷新/卸载丢本地队列不删除服务端历史；不假称 abort 撤销服务端。
 - 复用 `entities/task/listIndexTasks`、DTO 与共享 client/error，映射 `page_size→pageSize`、`image_id→imageId`、`new_image→newImage`、`error_code/detail→errorCode/Detail`、`duration_ms→durationMs`、`trace_id→traceId`、`created_at→createdAt`、`image.thumb_url→image.imageUrl`、`category_id/label_status→categoryId/labelStatus`；其余原名。nullable bool/0 不得变成假默认；现有 mapper 宽松兜底/过滤不是严格协议保障，关键缺字段/整页被滤掉不能伪装正常空页。
 - 首入/重新进入/分页筛选或 baseUrl 改变读取，切筛选/页大小回 1；手动刷新保留当前页/筛选。成功后发现页越界只有限一次回合法末页重读，total=0 回第一页；持续并发空页提示刷新，不无限循环。
 - 首次加载、全空、筛选空、网络/HTTP/JSON/协议失败明确区分；刷新失败可留旧行但标旧数据，不能归零/回退成本地假历史。带取消信号及请求 token 防迟到覆盖；baseUrl 改变清旧历史/详情；无后台轮询、无页面 fetch、不继续加厚 ManagementViews。
 - 明细只读 item；选中行不在刷新返回页时关闭提示重新选择，不推断记录已删除。失败/error/filename 纯文本转义，缺图/缺字段显示占位。容器交设计，不修改受保护 Dialog/.qa。
-- 既有 `DELETE /api/index-tasks?status=...` **不纳本轮**，不展示清空操作；`GET /api/image-deletions`、`POST /api/image-deletions/process` 已于 2026-11-11 接入「入库任务」的「待清理图片」页签（见变更记录）。process 不是失败入库重试。无服务端 cancel/replay/retry/progress API，不造异步 job；失败可展示，重传需用户重新提供 File。
+- ~~既有 `DELETE /api/index-tasks?status=...` 不纳本轮，不展示清空操作~~（2026-11-12 起已接入：「清理图片已删除的记录」`?image_state=deleted`、「清空失败记录」`?status=failed`、详情「删除这条记录」`DELETE /{id}`，均先确认，按钮在对应计数为 0 时不可用）；`GET /api/image-deletions`、`POST /api/image-deletions/process` 已于 2026-11-11 接入「入库任务」的「待清理图片」页签（见变更记录）。process 不是失败入库重试。无服务端 cancel/replay/retry/progress API，不造异步 job；失败可展示，重传需用户重新提供 File。
 - 本范围**无需新增 BE API/schema**，列表已有明细；需 FE 接线及独立测试验证未提交实现/迁移部署。测试应覆盖真实分页/统计/trace/null/重复图/混合失败/best-effort 缺行、服务端和本地状态分离、刷新越界/错误/迟到请求。本刀不执行验收，不借旧 scene 测试结论。
 
 ---
@@ -971,6 +972,7 @@ PATCH 字段（不传 = 不变）：
 | 2026-11-11 | **PostgreSQL 与 Qdrant 同步补齐 + 缩略图读回**（无表结构变化、无新迁移）：① 移动类别或改菜系时，同一事务里重算其子树图片的 `image_scenes`（有效场景变化的 `payload_version` +1），提交后推 payload；`PATCH /api/categories/{id}` 成功体新增 `scene_sync`（§6 类别行）。此前要靠手动全量同步，忘了就一直不一致、且记账也看不出来。② 后台对账（§2.11 同步规则下）：API 进程按 `RECONCILE_CONFIG` 定时补推记账落后的 payload、清理删除队列，多进程用 PG 咨询锁互斥；另有 `python -m app.workers.reconcile`。③ 前端「入库任务」新增「待清理图片」页签：列出 `GET /api/image-deletions`，「立即清理」连续调 `POST /api/image-deletions/process`（有进展才继续，失败的写明原因）。④ 新增 `GET /api/images/{image_id}/file`（§6.3）：mock 存储（`use_boto3: false`）的 URL 是占位域名，浏览器打不开，所以缩略图一直不显示；前端图库、编辑、批量、任务、检索结果的图片改为先用 URL、失败用这个接口读回，并记住失败的域名。根治仍需配置真实对象存储（`use_boto3: true`、`endpoint_url`、`public_base_url`）；已入库图片的 URL 不会因此改变（同字节重传沿用第一次的 URL），要换成真实地址需另做迁移 |
 | 2026-11-12 | **前端图片加载顺序**（纯前端，无接口变化）：搜索结果的网格和列表只加载缩略图（自建库 `thumb_url`，即 512px WebP；现网结果按 large → medium → small，缩略图都失败才用原图），此前先加载原图、失败才退到缩略图，每页 12 张都是原图。点开详情才加载 `original_url`：先显示已缓存的缩略图，原图加载完原位替换，加载失败保留缩略图并提示；详情预览区加高以显示原图清晰度。图片数据的「图片标注」同样处理。下载仍是原图优先 |
 | 2026-11-12 | **自建检索与 FlyB 结果卡统一**（无表结构变化、无新迁移；**破坏性 wire 变化**，BE 与 FE 同发）：`POST /api/search` 的 `items[]` 与 `POST /api/predict/searchImage_*` 的 `result[]` 改为同一张结果卡（`backend/app/schemas/search_hit.py`）：顶层只有 `tags` / `description` / `original_url` / `similarity`，其余放进 `details`。自建：`tags` 由 `string[]` 改为「、」连接的字符串；`id`、类别、场景、`scene_label`、标注状态、食物字段、`heating_group` 进 `details`（`exclude_unset` 对嵌套同样生效），原图 / 缩略图 / 宽高进 `details.images[0]`（键名与 FlyB 相同）。FlyB：`title` → `tags`，`details.text_snippets` 并入 `description`，`image_url` → `original_url`（总是 URL 字符串，没有原图时取最大缩略图），`similiar` → `similarity`（相似度过滤写回同一个键，过滤时下载比对的那张写回 `original_url`）；predict 响应改为带类型的 `PredictResponse`（顶层多余的键不再输出）。Index / List / 单图的 `tags` 仍是 `string[]`。FE 两个通道共用一套卡片字段读法，详情新增「标签」，「描述」两个通道都显示。另按日志里的真实 FlyB 返回修正两处读法：缩略图尺寸名实际是 `Large/Medium/Small/Tiny`，BE `iter_image_urls` 与 FE 排序此前只认小写，落到「其他尺寸」按字典顺序先取了 112px 的 Tiny（网格显示最小图、原图下载失败时也用它算相似度），改为不区分大小写；站点名读 `HostInfo.Hostname`（此前退回成网页域名）。见 §6.1.1 / §6.1.2 / §6.1.4 / §6.1.5 |
+| 2026-11-12 | **入库记录与删图的平衡**（无表结构变化、无新迁移）：删图仍不删记录（追溯用），但记录不再显示为普通「成功」。BE：`GET /api/index-tasks` 每条加 `image_state`（`present`/`deleted`，LEFT JOIN 现算），`counts` 加 `image_deleted`，新增 `image_state` 筛选；`DELETE /api/index-tasks` 改为 `status` / `image_state` 至少一个（删的正是同筛选下列出的记录）；新增 `DELETE /api/index-tasks/{id}` 删单条（幂等）。均只删记录。FE「服务端入库记录」：指标改为 成功（图片在库）/ 图片已删除 / 失败，筛选 全部 / 成功 / 图片已删除 / 失败（带数量），行内「图片已删除」灰色标记；「清理图片已删除的记录」「清空失败记录」和详情「删除这条记录」都先确认；图库单张、批量删除的确认文案提示记录会保留、可到入库任务清理。自动过期未做（需记录删除时间），见 §6.4.2 |
 
 ---
 

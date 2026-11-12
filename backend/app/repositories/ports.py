@@ -343,14 +343,23 @@ class CatalogStorePort(ABC):
     # -- task center (PG only: readable while the retrieval stack is down) ------
 
     @abstractmethod
-    def list_index_tasks(self, *, status: str | None = None, page: int = 1, page_size: int = 50) -> dict[str, Any]:
-        """Newest first: {items, total, counts: {succeeded, failed}}; each item carries its image's
-        thumb_url / category while the image still exists (image_exists)."""
+    def list_index_tasks(
+        self, *, status: str | None = None, image_state: str | None = None, page: int = 1, page_size: int = 50
+    ) -> dict[str, Any]:
+        """Newest first: {items, total, counts: {succeeded, failed, image_deleted}}; each item carries
+        its image's thumb_url / category while the image still exists (image_exists). image_state
+        filters the succeeded records: present (image still stored) / deleted (deleted since)."""
         raise NotImplementedError
 
     @abstractmethod
-    def clear_index_tasks(self, *, status: str) -> int:
-        """Delete the records of one status; returns how many went."""
+    def clear_index_tasks(self, *, status: str | None = None, image_state: str | None = None) -> int:
+        """Delete the records the list shows for this filter (status and / or image_state, at least
+        one); returns how many went. Images are not touched."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete_index_task(self, task_id: int) -> int:
+        """Delete one record: 1 when it was there, 0 when not."""
         raise NotImplementedError
 
     @abstractmethod

@@ -17,6 +17,9 @@ import { parseLabelStatus, type LabelStatus } from '../image'
 
 export type IndexTaskStatus = 'succeeded' | 'failed'
 export const INDEX_TASK_STATUSES: readonly IndexTaskStatus[] = ['succeeded', 'failed']
+/** A succeeded record's image now: still stored, or deleted since (the record is kept). */
+export type IndexTaskImageState = 'present' | 'deleted'
+export const INDEX_TASK_IMAGE_STATES: readonly IndexTaskImageState[] = ['present', 'deleted']
 
 /** The record's image as it is now. */
 export interface IndexTaskImage {
@@ -40,6 +43,8 @@ export interface IndexTask {
   durationMs: number | null
   traceId: string | null
   createdAt: string | null
+  /** ← `image_state`: succeeded records only (null when failed); 'deleted' once the image is deleted. */
+  imageState: IndexTaskImageState | null
   /** null when the file failed, or when its image has been deleted since. */
   image: IndexTaskImage | null
 }
@@ -47,12 +52,16 @@ export interface IndexTask {
 export interface IndexTaskCounts {
   succeeded: number
   failed: number
+  /** Succeeded records whose image was deleted since (counted in `succeeded` too). */
+  imageDeleted: number
 }
 
 export interface IndexTaskPage {
   /** This list GET's trace; never the original per-item index trace. */
   readTraceId?: string | null
   status: IndexTaskStatus | null
+  /** The image-state filter of this page; null: not filtered. */
+  imageState: IndexTaskImageState | null
   page: number
   pageSize: number
   /** Records matching the filter. */
@@ -94,6 +103,10 @@ export function parseIndexTaskStatus(value: unknown): IndexTaskStatus | null {
   return INDEX_TASK_STATUSES.includes(value as IndexTaskStatus) ? value as IndexTaskStatus : null
 }
 
+export function parseIndexTaskImageState(value: unknown): IndexTaskImageState | null {
+  return INDEX_TASK_IMAGE_STATES.includes(value as IndexTaskImageState) ? value as IndexTaskImageState : null
+}
+
 function count(value: unknown): number {
   const number = asInteger(value)
   return number !== null && number >= 0 ? number : 0
@@ -130,6 +143,7 @@ export function toIndexTask(value: unknown): IndexTask | null {
     durationMs: duration !== null && duration >= 0 ? duration : null,
     traceId: asText(task.trace_id),
     createdAt: asText(task.created_at),
+    imageState: status === 'succeeded' ? parseIndexTaskImageState(task.image_state) : null,
     image: toTaskImage(task.image),
   }
 }
@@ -138,15 +152,16 @@ export function toIndexTask(value: unknown): IndexTask | null {
 export function toIndexTaskPage(payload: unknown): IndexTaskPage | null {
   const body = untrusted<IndexTaskListResponseWire>(payload)
   if (body?.ok !== true || !Array.isArray(body.items)) return null
-  const counts = untrusted<Record<IndexTaskStatus, number>>(body.counts)
+  const counts = untrusted<IndexTaskListResponseWire['counts']>(body.counts)
   const page = asInteger(body.page)
   const pageSize = asInteger(body.page_size)
   return {
     status: parseIndexTaskStatus(body.status),
+    imageState: parseIndexTaskImageState(body.image_state),
     page: page !== null && page >= 1 ? page : 1,
     pageSize: pageSize !== null && pageSize >= 1 ? pageSize : 20,
     total: count(body.total),
-    counts: { succeeded: count(counts?.succeeded), failed: count(counts?.failed) },
+    counts: { succeeded: count(counts?.succeeded), failed: count(counts?.failed), imageDeleted: count(counts?.image_deleted) },
     items: untrustedList<IndexTaskWire>(body.items).map(toIndexTask).filter((task): task is IndexTask => task !== null),
   }
 }

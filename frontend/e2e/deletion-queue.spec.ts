@@ -18,7 +18,7 @@ async function mockApi(page: Page, { queued = 3, failing = [] as string[], ready
     if (path === '/api/enums') return route.fulfill({ json: { ok: true, enums: [] } })
     if (path === '/api/scenes') return route.fulfill({ json: { ok: true, scenes: [], default_scene: 'general' } })
     if (path === '/api/index-tasks') {
-      return route.fulfill({ json: { ok: true, items: [], total: 0, counts: { succeeded: 0, failed: 0 }, page: 1, page_size: 20, status: null } })
+      return route.fulfill({ json: { ok: true, items: [], total: 0, counts: { succeeded: 0, failed: 0, image_deleted: 0 }, page: 1, page_size: 20, status: null, image_state: null } })
     }
     if (path === '/api/image-deletions' && request.method() === 'GET') {
       calls.lists += 1

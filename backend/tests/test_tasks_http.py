@@ -2,7 +2,8 @@
 (the SQL is in test_pg_live).
 
 - index records: newest first, a status filter, counts over everything, the image as it is now;
-- clearing needs a status;
+- a deleted image leaves its record (image_state=deleted), listed and cleared on its own;
+- clearing needs a status or an image state; one record can be deleted by its id;
 - the deletion queue is readable without the retrieval stack; cleaning it needs the stack, and a
   failure stays queued with a client-safe reason (the cause only in the log).
 """
@@ -56,19 +57,34 @@ class FakeTaskStore:
         }
         self.calls = []
 
-    def list_index_tasks(self, *, status=None, page=1, page_size=50):
-        self.calls.append(("list", status, page, page_size))
-        rows = [r for r in self.records if status is None or r["status"] == status]
-        counts = {"succeeded": 0, "failed": 0}
+    @staticmethod
+    def matches(record, status, image_state):
+        if status is not None and record["status"] != status:
+            return False
+        if image_state is not None:
+            return record["status"] == "succeeded" and record["image_exists"] == (image_state == "present")
+        return True
+
+    def list_index_tasks(self, *, status=None, image_state=None, page=1, page_size=50):
+        self.calls.append(("list", status, image_state, page, page_size))
+        rows = [r for r in self.records if self.matches(r, status, image_state)]
+        counts = {"succeeded": 0, "failed": 0, "image_deleted": 0}
         for r in self.records:
             counts[r["status"]] += 1
+            counts["image_deleted"] += r["status"] == "succeeded" and not r["image_exists"]
         start = (page - 1) * page_size
         return {"items": rows[start:start + page_size], "total": len(rows), "counts": counts}
 
-    def clear_index_tasks(self, *, status):
-        self.calls.append(("clear", status))
+    def clear_index_tasks(self, *, status=None, image_state=None):
+        self.calls.append(("clear", status, image_state))
         before = len(self.records)
-        self.records = [r for r in self.records if r["status"] != status]
+        self.records = [r for r in self.records if not self.matches(r, status, image_state)]
+        return before - len(self.records)
+
+    def delete_index_task(self, task_id):
+        self.calls.append(("delete", task_id))
+        before = len(self.records)
+        self.records = [r for r in self.records if r["id"] != task_id]
         return before - len(self.records)
 
     def list_pending_deletions(self, *, limit=50):
@@ -121,37 +137,65 @@ class TaskEndpointTests(unittest.TestCase):
 
     def test_records_come_newest_first_with_the_image_as_it_is_now(self):
         body = self.ok(self.client.get("/api/index-tasks"))
-        self.assertEqual((body["status"], body["page"], body["page_size"], body["total"]), (None, 1, 50, 3))
-        self.assertEqual(body["counts"], {"succeeded": 2, "failed": 1})
+        self.assertEqual((body["status"], body["image_state"], body["page"], body["page_size"], body["total"]), (None, None, 1, 50, 3))
+        self.assertEqual(body["counts"], {"succeeded": 2, "failed": 1, "image_deleted": 1})
         stored, failed, deleted = body["items"]
         self.assertEqual(stored["image"], {"id": IMG_A, "thumb_url": "https://cdn/t/a.webp", "category_id": 12,
                                            "category": "牛排", "label_status": "verified"})
         self.assertEqual((stored["new_image"], stored["duration_ms"], stored["trace_id"]), (True, 812, "t-3"))
-        self.assertEqual((failed["error_code"], failed["error_detail"], failed["image"]), (
-            "INDEX_BAD_IMAGE", "cannot decode image", None))
-        # the image was deleted since: the record keeps its id, the image is gone
-        self.assertEqual((deleted["status"], deleted["image_id"], deleted["image"]), ("succeeded", IMG_B, None))
-        self.assertEqual(self.store.calls[-1], ("list", None, 1, 50))
+        self.assertEqual(stored["image_state"], "present")
+        self.assertEqual((failed["error_code"], failed["error_detail"], failed["image"], failed["image_state"]), (
+            "INDEX_BAD_IMAGE", "cannot decode image", None, None))
+        # the image was deleted since: the record keeps its id and says so
+        self.assertEqual((deleted["status"], deleted["image_id"], deleted["image"], deleted["image_state"]),
+                         ("succeeded", IMG_B, None, "deleted"))
+        self.assertEqual(self.store.calls[-1], ("list", None, None, 1, 50))
 
     def test_a_status_filter_and_paging_reach_the_store(self):
         body = self.ok(self.client.get("/api/index-tasks", params={"status": "failed", "page": 1, "page_size": 10}))
         self.assertEqual((body["status"], body["total"], [i["id"] for i in body["items"]]), ("failed", 1, [2]))
-        self.assertEqual(body["counts"], {"succeeded": 2, "failed": 1})  # counts ignore the filter
-        self.assertEqual(self.store.calls[-1], ("list", "failed", 1, 10))
+        self.assertEqual(body["counts"], {"succeeded": 2, "failed": 1, "image_deleted": 1})  # counts ignore the filter
+        self.assertEqual(self.store.calls[-1], ("list", "failed", None, 1, 10))
+
+    def test_the_image_state_splits_the_succeeded_records(self):
+        for state, ids in (("deleted", [1]), ("present", [3])):
+            with self.subTest(state=state):
+                body = self.ok(self.client.get("/api/index-tasks", params={"image_state": state}))
+                self.assertEqual((body["image_state"], body["total"], [i["id"] for i in body["items"]]), (state, 1, ids))
+        body = self.ok(self.client.get("/api/index-tasks", params={"status": "succeeded", "image_state": "deleted"}))
+        self.assertEqual((body["status"], body["image_state"], [i["id"] for i in body["items"]]), ("succeeded", "deleted", [1]))
 
     def test_bad_list_parameters_are_validation_errors(self):
-        for params in ({"status": "running"}, {"page": 0}, {"page_size": 0}, {"page_size": 101}, {"page": "x"}):
+        for params in ({"status": "running"}, {"page": 0}, {"page_size": 0}, {"page_size": 101}, {"page": "x"},
+                       {"image_state": "gone"}):
             with self.subTest(params=params):
                 self.error(self.client.get("/api/index-tasks", params=params), 422, "VALIDATION_ERROR")
         self.assertEqual(self.store.calls, [])
 
-    def test_clearing_needs_a_status_and_deletes_only_those_records(self):
-        self.error(self.client.delete("/api/index-tasks"), 422, "VALIDATION_ERROR")
+    def test_clearing_needs_a_filter_and_deletes_only_those_records(self):
+        self.error(self.client.delete("/api/index-tasks"), 422, "VALIDATION_ERROR")  # never everything
         self.error(self.client.delete("/api/index-tasks", params={"status": "all"}), 422, "VALIDATION_ERROR")
+        self.error(self.client.delete("/api/index-tasks", params={"image_state": "all"}), 422, "VALIDATION_ERROR")
+        self.assertEqual(self.store.calls, [])
         body = self.ok(self.client.delete("/api/index-tasks", params={"status": "failed"}))
-        self.assertEqual(body, {"ok": True, "status": "failed", "deleted": 1})
+        self.assertEqual(body, {"ok": True, "status": "failed", "image_state": None, "deleted": 1})
         self.assertEqual([r["status"] for r in self.store.records], ["succeeded", "succeeded"])
         self.assertEqual(self.ok(self.client.delete("/api/index-tasks", params={"status": "failed"}))["deleted"], 0)
+
+    def test_clearing_the_records_of_deleted_images_keeps_the_others(self):
+        body = self.ok(self.client.delete("/api/index-tasks", params={"image_state": "deleted"}))
+        self.assertEqual(body, {"ok": True, "status": None, "image_state": "deleted", "deleted": 1})
+        self.assertEqual([r["id"] for r in self.store.records], [3, 2])  # the stored image's and the failure
+        self.assertEqual(self.store.calls[-1], ("clear", None, "deleted"))
+
+    def test_one_record_can_be_deleted_by_its_id(self):
+        self.assertEqual(self.ok(self.client.delete("/api/index-tasks/2")), {"ok": True, "id": 2, "deleted": 1})
+        self.assertEqual([r["id"] for r in self.store.records], [3, 1])
+        self.assertEqual(self.ok(self.client.delete("/api/index-tasks/2"))["deleted"], 0)  # already gone
+        for bad in ("0", "-1", "x", str(2**63)):
+            with self.subTest(task_id=bad):
+                self.error(self.client.delete(f"/api/index-tasks/{bad}"), 422, "VALIDATION_ERROR")
+        self.assertEqual(self.store.calls, [("delete", 2), ("delete", 2)])
 
     # ---- deletion queue ------------------------------------------------------------
 
@@ -202,6 +246,7 @@ class TaskEndpointTests(unittest.TestCase):
         self.runtime.catalog, self.runtime.catalog_error = None, "postgres down"
         self.error(self.client.get("/api/index-tasks"), 503, "NOT_READY")
         self.error(self.client.delete("/api/index-tasks", params={"status": "failed"}), 503, "NOT_READY")
+        self.error(self.client.delete("/api/index-tasks/3"), 503, "NOT_READY")
         self.error(self.client.get("/api/image-deletions"), 503, "NOT_READY")
         self.error(self.client.post("/api/image-deletions/process"), 503, "NOT_READY")
         self.vectors.delete.assert_not_called()
@@ -210,13 +255,17 @@ class TaskEndpointTests(unittest.TestCase):
 class TaskCenterUseCaseTests(unittest.TestCase):
     def test_bounds_are_checked_whatever_the_caller(self):
         uc = TaskCenterUseCase(FakeTaskStore())
-        for kwargs in ({"page": 0}, {"page": True}, {"page_size": 101}, {"page_size": "10"}, {"status": "running"}):
+        for kwargs in ({"page": 0}, {"page": True}, {"page_size": 101}, {"page_size": "10"}, {"status": "running"},
+                       {"image_state": "gone"}):
             with self.subTest(kwargs=kwargs), self.assertRaises(err.AppError) as ctx:
                 uc.list_index_tasks(**kwargs)
             self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
-        for status in (None, "", "everything"):
-            with self.subTest(status=status), self.assertRaises(err.AppError):
-                uc.clear_index_tasks(status=status)
+        for kwargs in ({}, {"status": None}, {"status": ""}, {"status": "everything"}, {"image_state": "everything"}):
+            with self.subTest(clear=kwargs), self.assertRaises(err.AppError):
+                uc.clear_index_tasks(**kwargs)
+        for task_id in (0, -1, True, "3", 2**63):
+            with self.subTest(task_id=task_id), self.assertRaises(err.AppError):
+                uc.delete_index_task(task_id)
         with self.assertRaises(err.AppError):
             uc.list_deletions(limit=0)
 
@@ -224,7 +273,7 @@ class TaskCenterUseCaseTests(unittest.TestCase):
 class RouteRegistrationTests(unittest.TestCase):
     def test_the_task_routes_are_served(self):
         routes = {(r.path, m) for r in api_router.routes for m in getattr(r, "methods", ())}
-        for route in (("/api/index-tasks", "GET"), ("/api/index-tasks", "DELETE"),
+        for route in (("/api/index-tasks", "GET"), ("/api/index-tasks", "DELETE"), ("/api/index-tasks/{task_id}", "DELETE"),
                       ("/api/image-deletions", "GET"), ("/api/image-deletions/process", "POST")):
             self.assertIn(route, routes)
 

@@ -456,7 +456,7 @@ class PgLiveTests(unittest.TestCase):
         store.enqueue_image_deletion(gone)
 
         result = store.list_index_tasks()
-        self.assertEqual((result["total"], result["counts"]), (3, {"succeeded": 2, "failed": 1}))
+        self.assertEqual((result["total"], result["counts"]), (3, {"succeeded": 2, "failed": 1, "image_deleted": 1}))
         newest, failed, deleted = result["items"]
         self.assertEqual((len(newest["filename"]), newest["filename"][-1]), (255, "…"))  # clipped
         self.assertEqual(
@@ -470,15 +470,29 @@ class PgLiveTests(unittest.TestCase):
 
         page = store.list_index_tasks(status="succeeded", page=2, page_size=1)
         self.assertEqual((page["total"], [r["filename"] for r in page["items"]]), (2, ["gone.jpg"]))
-        self.assertEqual(page["counts"], {"succeeded": 2, "failed": 1})
+        self.assertEqual(page["counts"], {"succeeded": 2, "failed": 1, "image_deleted": 1})
+        # the image state splits the succeeded records: still stored / deleted since
+        for state, ids in (("present", [newest["id"]]), ("deleted", [deleted["id"]])):
+            listed = store.list_index_tasks(image_state=state)
+            self.assertEqual((listed["total"], [r["id"] for r in listed["items"]]), (1, ids))
+        listed = store.list_index_tasks(status="failed", image_state="deleted")
+        self.assertEqual((listed["total"], listed["items"]), (0, []))
 
         with self.assertRaises(AppError) as ctx:  # a succeeded record names its image
             store.record_index_tasks([{"filename": "a.png", "status": "succeeded"}])
         self.assertEqual(ctx.exception.code, "INDEX_POSTGRES_FAILED")
         self.assertEqual(store.list_index_tasks()["total"], 3)
 
+        # clearing takes exactly what the same filter lists, and only records
+        self.assertEqual(store.clear_index_tasks(image_state="deleted"), 1)
+        self.assertEqual(store.list_index_tasks()["counts"], {"succeeded": 1, "failed": 1, "image_deleted": 0})
         self.assertEqual(store.clear_index_tasks(status="failed"), 1)
-        self.assertEqual(store.list_index_tasks()["counts"], {"succeeded": 2, "failed": 0})
+        self.assertEqual(store.list_index_tasks()["counts"], {"succeeded": 1, "failed": 0, "image_deleted": 0})
+        with self.assertRaises(ValueError):
+            store.clear_index_tasks()
+        self.assertEqual((store.delete_index_task(newest["id"]), store.delete_index_task(newest["id"])), (1, 0))
+        self.assertEqual(store.list_index_tasks()["total"], 0)
+        self.assertIsNotNone(store.get_image_by_uuid(kept))
         self.assertEqual(store.count_pending_deletions(), 1)
         store.complete_deletion(gone)
         self.assertEqual(store.count_pending_deletions(), 0)

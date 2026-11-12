@@ -340,7 +340,7 @@ export function ImageEditPanel({
     <div className="ie-bar">
       {confirmDelete
         ? <div className="ie-ask" role="alertdialog" aria-label="确认删除">
-          <p>删除后图库和检索结果里都看不到这张图片，向量和原图、缩略图也会清理，无法恢复。</p>
+          <p>删除后图库和检索结果里都看不到这张图片，向量和原图、缩略图也会清理，无法恢复。它的入库记录会保留并标为「图片已删除」，可在「入库任务」里清理。</p>
           <div><button type="button" className="mg-btn mg-secondary" disabled={busy === 'delete'} onClick={() => setConfirmDelete(false)}>取消</button><button type="button" className="mg-btn ie-danger" disabled={busy === 'delete'} onClick={() => void remove()}>{busy === 'delete' ? <LoaderCircle size={15} className="spin" /> : <Trash2 size={15} />}确认删除</button></div>
         </div>
         : <div className="ie-actions">
