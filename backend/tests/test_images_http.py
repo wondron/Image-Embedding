@@ -212,8 +212,17 @@ class FakeImageStore:
             raise err.image_not_found(f"image {uid} does not exist")
         return dict(self.queue[uid])
 
+    def get_image_file_urls(self, image_id):
+        uid = str(image_id)
+        for row, deleted in ((self.rows.get(uid), False), (self.queue.get(uid), True)):
+            if row:
+                return {"original_url": row["original_url"], "thumb_url": row["thumb_url"], "deleted": deleted}
+        return None
 
-class EndpointTests(unittest.TestCase):
+
+class ImageEndpointCase(unittest.TestCase):
+    """The real image routes over the fake store and a fake retrieval stack."""
+
     def setUp(self):
         self.store = FakeImageStore()
         self.vectors = FakeVectors({IMAGE: SYNCED_PAYLOAD})
@@ -255,6 +264,8 @@ class EndpointTests(unittest.TestCase):
     def retrieval_down(self):
         self.runtime.retrieval, self.runtime.retrieval_error = None, "NOT_READY: embedding model unavailable"
 
+
+class EndpointTests(ImageEndpointCase):
     # ---- GET -----------------------------------------------------------------------
 
     def test_the_detail_has_every_field_and_the_vector_state(self):
@@ -406,6 +417,70 @@ class EndpointTests(unittest.TestCase):
         self.retrieval_down()
         self.assertEqual(self.ok(self.client.delete(f"/api/images/{IMAGE}"))["cleanup"], "queued")
         self.error(self.client.delete(f"/api/images/{OTHER}"), 404, "IMAGE_NOT_FOUND")
+
+
+WEBP = b"RIFF\x24\x00\x00\x00WEBPVP8 " + bytes(16)
+JPEG = bytes.fromhex("ffd8ffe000104a464946") + bytes(16)
+
+
+class ImageFileTests(ImageEndpointCase):
+    """GET /api/images/{id}/file: the stored files through the storage port."""
+
+    def setUp(self):
+        super().setUp()
+        self.storage = Mock()
+        self.storage.read_by_url_or_key.side_effect = lambda url: {"https://cdn/t.webp": WEBP, "https://cdn/o.jpg": JPEG}[url]
+        self.runtime.retrieval.infra = SimpleNamespace(storage=self.storage)
+
+    def file(self, image_id=IMAGE, **query):
+        return self.client.get(f"/api/images/{image_id}/file", params=query)
+
+    def test_the_thumbnail_is_served_by_its_bytes_and_may_be_cached_for_good(self):
+        response = self.file()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual((response.content, response.headers["content-type"]), (WEBP, "image/webp"))
+        self.assertEqual(response.headers["cache-control"], "public, max-age=31536000, immutable")
+        self.assertEqual(response.headers["x-content-type-options"], "nosniff")
+        self.assertIn("sandbox", response.headers["content-security-policy"])
+        self.storage.read_by_url_or_key.assert_called_once_with("https://cdn/t.webp")
+
+    def test_the_original_and_the_fallback_to_it(self):
+        response = self.file(variant="original")
+        self.assertEqual((response.content, response.headers["content-type"]), (JPEG, "image/jpeg"))
+        self.store.rows[IMAGE]["thumb_url"] = ""  # no thumbnail stored: the original stands in
+        self.assertEqual(self.file().headers["content-type"], "image/jpeg")
+        self.error(self.file(variant="large"), 422, "VALIDATION_ERROR")
+
+    def test_a_deleted_image_is_readable_until_its_files_are_cleaned(self):
+        self.deletion_worker.clean_up.return_value = False  # queued
+        self.ok(self.client.delete(f"/api/images/{IMAGE}"))
+        self.assertEqual(self.file().content, WEBP)
+        self.store.queue.clear()  # cleaned
+        self.error(self.file(), 404, "IMAGE_NOT_FOUND")
+        self.error(self.file(OTHER), 404, "IMAGE_NOT_FOUND")
+
+    def test_what_cannot_be_read_or_is_not_an_image_is_not_served(self):
+        self.storage.read_by_url_or_key.side_effect = err.image_file_unavailable("get_object bucket/thumb/x.webp: NoSuchKey")
+        with self.assertLogs("api.errors", level="WARNING"):
+            body = self.error(self.file(), 502, "IMAGE_FILE_UNAVAILABLE")
+        self.assertNotIn("bucket", body["detail"])  # keys and buckets stay in the log
+        self.storage.read_by_url_or_key.side_effect = None
+        self.storage.read_by_url_or_key.return_value = b"<svg xmlns='http://www.w3.org/2000/svg'/>"
+        with self.assertLogs("api.errors", level="WARNING"):
+            self.error(self.file(), 502, "IMAGE_FILE_UNAVAILABLE")
+
+    def test_without_the_retrieval_stack_the_catalog_reads_the_storage(self):
+        self.retrieval_down()
+        own = Mock()
+        own.read_by_url_or_key.return_value = WEBP
+        self.runtime.catalog.file_storage = lambda: own
+        self.assertEqual(self.file().content, WEBP)
+        own.read_by_url_or_key.assert_called_once_with("https://cdn/t.webp")
+
+        def broken():
+            raise ValueError("IMAGE_STORAGE_CONFIG.key_prefix must be a string")
+        self.runtime.catalog.file_storage = broken
+        self.assertIn("object storage unavailable", self.error(self.file(), 503, "NOT_READY")["detail"])
 
 
 class RouteOrderTests(unittest.TestCase):

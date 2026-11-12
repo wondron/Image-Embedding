@@ -1,0 +1,24 @@
+/* 入库任务 · 待清理图片: the deletion queue and its cleanup */
+.deletion-queue { min-width: 0; container: deletion-queue / inline-size; }
+.deletion-queue .mg-page-toolbar { flex-wrap: wrap; gap: 10px; }
+.deletion-queue .mg-btn { height: auto; min-height: 38px; padding-block: 8px; white-space: normal; }
+.deletion-queue-caption { margin: 10px 0; color: var(--muted); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.deletion-queue-status { display: grid; gap: 8px; margin-bottom: 12px; font-size: 13px; }
+.deletion-queue-status p { margin: 0; line-height: 1.7; overflow-wrap: anywhere; }
+.deletion-queue-status p[role="status"] { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.deletion-queue-status .mg-form-error { margin: 0; }
+.deletion-queue-status .mg-btn { margin: 8px 8px 0 0; }
+.deletion-queue-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 16px; border-top: 1px solid var(--border); font-size: 13px; }
+.deletion-queue-row:first-child { border-top: 0; }
+.deletion-queue-row.is-failed { background: #fff8f6; }
+.deletion-queue-id { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.deletion-queue-id code { overflow: hidden; color: #334155; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.deletion-queue-id small { color: #b42318; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.deletion-queue-time { color: #64748b; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.deletion-queue-time small { color: var(--muted); }
+.deletion-queue-more { margin: 0; padding: 10px 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+@container deletion-queue (max-width: 560px) {
+  .deletion-queue-row { grid-template-columns: auto minmax(0, 1fr); }
+  .deletion-queue-time { grid-column: 2; white-space: normal; }
+  .deletion-queue .mg-metrics { grid-template-columns: 1fr; }
+}

@@ -14,6 +14,7 @@ VECTOR_DIM is only the fallback default (food ONNX = 1024).
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from contextlib import AbstractContextManager
 from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
@@ -189,6 +190,20 @@ class MetadataStorePort(ABC):
         are still the image's current one are recorded; returns the image ids recorded."""
         raise NotImplementedError
 
+    @abstractmethod
+    def list_unsynced_payload_ids(
+        self, *, after: UUID | str | None = None, until: UUID | str | None = None, limit: int = 200
+    ) -> list[str]:
+        """Images whose current-model ledger row is behind their payload_version, in id order,
+        after `after` and up to `until` (inclusive). Images without a ledger row are left out."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def try_maintenance_lock(self, key: int) -> AbstractContextManager[bool]:
+        """Session advisory lock for a maintenance job: yields True while held, False when another
+        process holds it (repositories.maintenance)."""
+        raise NotImplementedError
+
     # -- deletion queue -----------------------------------------------------
 
     @abstractmethod
@@ -201,6 +216,10 @@ class MetadataStorePort(ABC):
 
     @abstractmethod
     def complete_deletion(self, image_id: UUID | str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def count_pending_deletions(self) -> int:
         raise NotImplementedError
 
     # -- task center ----------------------------------------------------------
@@ -246,7 +265,11 @@ class CatalogStorePort(ABC):
 
     @abstractmethod
     def update_category(self, category_id: int, fields: dict[str, Any]) -> dict[str, Any]:
-        """Patch the given fields; parent_id moves the node with its subtree."""
+        """Patch the given fields; parent_id moves the node with its subtree. A move or a cuisines
+        change recomputes the scenes of the images below the node in the same transaction; does
+        not push vector payloads (the HTTP layer does that after the commit).
+
+        {category, scene_membership: None | {images, changed_ids}}."""
         raise NotImplementedError
 
     @abstractmethod
@@ -292,6 +315,12 @@ class CatalogStorePort(ABC):
     def enqueue_image_deletion(self, image_id: UUID | str) -> dict[str, Any]:
         """Delete the image and queue its vector / file cleanup (image_deletions); returns the
         queue row. IMAGE_NOT_FOUND when there is neither an image nor a queue row."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_image_file_urls(self, image_id: UUID | str) -> dict[str, Any] | None:
+        """{original_url, thumb_url, deleted}: a stored image's, or a deleted one's whose files
+        wait for the cleanup; None when neither knows the id."""
         raise NotImplementedError
 
     # -- task center (PG only: readable while the retrieval stack is down) ------

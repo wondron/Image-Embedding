@@ -358,6 +358,56 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual(store.list_images(scene="general", out_of_sync=True)[1], 2)  # the total honours it
         self.assertEqual(ids(), sorted([synced, behind, never]))  # off by default
 
+    def test_unsynced_payload_ids_are_ledger_rows_behind_in_id_order(self):
+        store = self.store()
+        images = sorted(self.insert(store, n) for n in range(1, 6))
+        current = self.sql(
+            "INSERT INTO embedding_models (name, version, dim, distance, input_size, weights_uri, collection, status) "
+            "VALUES ('dino', 'v2', 4, 'cosine', 224, 'w', 'c_v2', 'current') RETURNING id"
+        ).scalar_one()
+        for image in images[:4]:  # images[4] was never embedded into the current model: left out
+            self.sql("INSERT INTO image_embeddings (model_id, image_id, synced_version) VALUES (:m, :i, 1)",
+                     {"m": current, "i": uuid.UUID(image)})
+        self.assertEqual(store.list_unsynced_payload_ids(), [])
+        behind = [images[0], images[2], images[3]]
+        self.sql("UPDATE images SET payload_version = 2 WHERE id = ANY(:ids)", {"ids": [uuid.UUID(i) for i in behind + [images[4]]]})
+
+        self.assertEqual(store.list_unsynced_payload_ids(), behind)
+        self.assertEqual(store.list_unsynced_payload_ids(limit=2), behind[:2])
+        self.assertEqual(store.list_unsynced_payload_ids(after=images[0]), behind[1:])
+        self.assertEqual(store.list_unsynced_payload_ids(until=images[2]), behind[:2])  # inclusive
+        self.assertEqual(store.list_unsynced_payload_ids(after=images[0], until=images[2]), [images[2]])
+        store.mark_payloads_pushed(model_id=current, versions={images[2]: 2})
+        self.assertEqual(store.list_unsynced_payload_ids(), [images[0], images[3]])
+
+    def test_file_urls_come_from_the_image_or_its_queued_deletion(self):
+        store = self.store()
+        image = self.insert(store, 1)
+        urls = {"original_url": "https://cdn/o/1.jpg", "thumb_url": "https://cdn/t/1.webp"}
+        self.assertEqual(store.get_image_file_urls(image), {**urls, "deleted": False})
+        store.enqueue_image_deletion(image)  # gone from images, files waiting for the cleanup
+        self.assertEqual(store.get_image_file_urls(image), {**urls, "deleted": True})
+        store.complete_deletion(image)
+        self.assertIsNone(store.get_image_file_urls(image))
+
+    def test_a_maintenance_lock_lets_one_process_in_at_a_time(self):
+        first, second = self.store(), self.store()  # two pools: two sessions, like two processes
+        with first.try_maintenance_lock(42) as held:
+            self.assertTrue(held)
+            with second.try_maintenance_lock(42) as other:
+                self.assertFalse(other)
+            with second.try_maintenance_lock(43) as unrelated:
+                self.assertTrue(unrelated)
+        with second.try_maintenance_lock(42) as after_release:
+            self.assertTrue(after_release)
+        # No transaction stays open while a lock is held
+        with first.try_maintenance_lock(42):
+            open_tx = self.sql(
+                "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
+                "AND state = 'idle in transaction' AND pid <> pg_backend_pid()"
+            ).scalar_one()
+            self.assertEqual(open_tx, 0)
+
     def test_a_deleted_image_stored_again_is_deleted_again(self):
         from app.core.errors import AppError
 
@@ -707,7 +757,7 @@ class PgLiveTests(unittest.TestCase):
         patched = store.update_category(pizza["id"], {
             "code": "dish.pizza_pie", "names": [self.zh("意式披萨")], "cuisines": [],
             "heating_group_id": hg, "sort_order": 7, "is_active": False,
-        })
+        })["category"]
         self.assertEqual(
             (patched["code"], patched["name"], patched["names"], patched["cuisines"]),
             ("dish.pizza_pie", "意式披萨", [self.zh("意式披萨")], []),
@@ -720,19 +770,19 @@ class PgLiveTests(unittest.TestCase):
         )
 
         # only the given fields change; null clears the heating group
-        cleared = store.update_category(pizza["id"], {"heating_group_id": None})
+        cleared = store.update_category(pizza["id"], {"heating_group_id": None})["category"]
         self.assertIsNone(cleared["heating_group"])
         self.assertEqual((cleared["code"], cleared["sort_order"], cleared["names"]), ("dish.pizza_pie", 7, [self.zh("意式披萨")]))
         # a names-only patch still touches updated_at
         self.sql("UPDATE categories SET updated_at = now() - interval '1 day' WHERE id = :id", {"id": dish["id"]})
         before = store.list_categories()[1]["updated_at"]
-        self.assertGreater(store.update_category(dish["id"], {"names": [self.zh("菜肴")]})["updated_at"], before)
+        self.assertGreater(store.update_category(dish["id"], {"names": [self.zh("菜肴")]})["category"]["updated_at"], before)
 
     def test_category_move_takes_the_subtree_and_respects_the_tree_rules(self):
         store = self.store()
         dish, ingredient, pizza, piece = self.seed_tree(store)
 
-        moved = store.update_category(pizza["id"], {"parent_id": ingredient["id"]})
+        moved = store.update_category(pizza["id"], {"parent_id": ingredient["id"]})["category"]
         self.assertEqual((moved["parent_id"], moved["path"]), (ingredient["id"], f"{ingredient['id']}.{pizza['id']}"))
         by_code = {n["code"]: n for n in store.list_categories()}
         self.assertEqual(by_code["dish.pizza.slice"]["path"], f"{ingredient['id']}.{pizza['id']}.{piece['id']}")
@@ -749,7 +799,7 @@ class PgLiveTests(unittest.TestCase):
         self.assert_category_error("VALIDATION_ERROR", update, dish["id"], {"code": "dishes"})
         # ... and a domain under another node can go back up
         dessert = create({"code": "dessert", "parent_id": dish["id"], "names": [self.zh("甜点烘焙")]})
-        self.assertEqual(update(dessert["id"], {"parent_id": None})["path"], str(dessert["id"]))
+        self.assertEqual(update(dessert["id"], {"parent_id": None})["category"]["path"], str(dessert["id"]))
         # nothing above was half-applied
         self.assertEqual(
             {n["code"]: n["parent_id"] for n in store.list_categories()},
@@ -762,7 +812,7 @@ class PgLiveTests(unittest.TestCase):
         duplicate = {"code": "dish.pizza", "parent_id": dish["id"], "names": [self.zh("重复")]}
         self.assertIn("'dish.pizza'", self.assert_category_error("CATEGORY_CODE_EXISTS", store.create_category, duplicate))
         self.assert_category_error("CATEGORY_CODE_EXISTS", store.update_category, pizza["id"], {"code": "dish"})
-        self.assertEqual(store.update_category(pizza["id"], {"code": "dish.pizza"})["code"], "dish.pizza")  # its own code is fine
+        self.assertEqual(store.update_category(pizza["id"], {"code": "dish.pizza"})["category"]["code"], "dish.pizza")  # its own code is fine
 
         self.assert_category_error("VALIDATION_ERROR", store.create_category, dict(duplicate, code="dish.x", parent_id=987654))
         self.assert_category_error("VALIDATION_ERROR", store.create_category, dict(duplicate, code="dish.x", heating_group_id=987654))
@@ -776,9 +826,9 @@ class PgLiveTests(unittest.TestCase):
         legacy = self.sql("INSERT INTO categories (code) VALUES ('legacy') RETURNING id").scalar_one()
         node = store.list_categories()[0]
         self.assertEqual((node["code"], node["name"], node["names"]), ("legacy", None, []))
-        self.assertEqual(store.update_category(legacy, {"sort_order": 9, "names": [self.zh("旧根")]})["name"], "旧根")
+        self.assertEqual(store.update_category(legacy, {"sort_order": 9, "names": [self.zh("旧根")]})["category"]["name"], "旧根")
         self.assert_category_error("VALIDATION_ERROR", store.update_category, legacy, {"code": "legacy2"})
-        self.assertEqual(store.update_category(legacy, {"code": "beverage"})["code"], "beverage")
+        self.assertEqual(store.update_category(legacy, {"code": "beverage"})["category"]["code"], "beverage")
 
     def test_category_delete_refuses_a_node_in_use_and_removes_a_free_one(self):
         store = self.store()
@@ -1084,6 +1134,51 @@ class PgLiveTests(unittest.TestCase):
         store.update_category(cat["steak"], {"parent_id": ingredient["id"]})  # no longer under dish
         store.recompute_scene_memberships(limit=10)
         self.assertEqual(store.get_effective_scene_codes(steak), ["general"])  # nor american any more
+
+    def test_a_category_move_or_cuisines_change_recomputes_the_images_below_it(self):
+        cat = self.seed_catalog()  # oven: rule on dish; dish has cuisines {american}; steak under dish
+        store = self.store()
+        store.create_scene_rule(store.get_scene_by_code("us_diet")["id"], {"cuisine": "american"})
+        steak = self.insert(store, 1, category_id=cat["steak"], label_status="auto")
+        dish_img = self.insert(store, 2, category_id=cat["dish"], label_status="auto")
+        plain = self.insert(store, 3)
+        self.assertEqual(store.get_effective_scene_codes(steak), ["general", "oven", "us_diet"])
+
+        def versions():
+            return dict(self.sql("SELECT id::text, payload_version FROM images").fetchall())
+
+        def update(category_id, fields):
+            return store.update_category(category_id, fields)["scene_membership"]
+
+        start = versions()
+        # Names, order and an unchanged set of cuisines decide no scene: nothing is recomputed
+        self.assertIsNone(update(cat["steak"], {"names": [self.zh("西冷牛排")], "sort_order": 3}))
+        self.assertIsNone(update(cat["dish"], {"cuisines": ["american", "american"]}))
+        self.assertEqual(versions(), start)
+
+        # Cuisines reach every image of the subtree that inherits them; ids in id order
+        both = sorted([steak, dish_img])
+        self.assertEqual(update(cat["dish"], {"cuisines": []}), {"images": 2, "changed_ids": both})
+        self.assertEqual(store.get_effective_scene_codes(steak), ["general", "oven"])
+        self.assertEqual(update(cat["dish"], {"cuisines": ["american"]}), {"images": 2, "changed_ids": both})
+        self.assertEqual(store.get_effective_scene_codes(dish_img), ["general", "oven", "us_diet"])
+
+        # Moving steak out of dish leaves the dish rule and the cuisine it inherited from dish
+        ingredient = store.create_category({"code": "ingredient", "names": [self.zh("食材")]})
+        result = store.update_category(cat["steak"], {"parent_id": ingredient["id"]})
+        self.assertEqual(result["category"]["parent_id"], ingredient["id"])
+        self.assertEqual(result["scene_membership"], {"images": 1, "changed_ids": [steak]})
+        self.assertEqual(store.get_effective_scene_codes(steak), ["general"])
+        self.assertEqual(update(ingredient["id"], {"cuisines": ["american"]}), {"images": 1, "changed_ids": [steak]})
+        self.assertEqual(store.get_effective_scene_codes(steak), ["general", "us_diet"])
+
+        # A manual override survives: back under dish, steak follows the oven rule but stays out of us_diet
+        store.set_manual_scene_membership(steak, "us_diet", is_member=False)
+        self.assertEqual(update(cat["steak"], {"parent_id": cat["dish"]}), {"images": 1, "changed_ids": [steak]})
+        self.assertEqual(store.get_effective_scene_codes(steak), ["general", "oven"])
+
+        # Every change bumped the image once; images outside the subtrees were left alone
+        self.assertEqual(versions(), {steak: start[steak] + 6, dish_img: start[dish_img] + 2, plain: start[plain]})
 
     def test_scene_labels_come_from_the_deepest_rule_with_an_active_label(self):
         cat = self.seed_catalog()  # oven: dish -> label steak

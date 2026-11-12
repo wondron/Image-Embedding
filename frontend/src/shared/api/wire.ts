@@ -129,6 +129,26 @@ export interface CategoryResponseWire {
   category: CategoryItemWire
 }
 
+/** schemas/categories.py CategorySceneSync: a move or a cuisines change, for the stored images below the node. */
+export interface CategorySceneSyncWire {
+  /** Images labelled with the node or one below it; their scenes were recomputed in the same transaction. */
+  images: number
+  /** Of them, whose effective scenes changed. */
+  changed: number
+  /** Of the changed, whose new payload is in the current vector collection. */
+  pushed: number
+  /** Of the changed, not yet there (the reconciler or POST /api/scenes/sync catches up). */
+  pending: number
+  vector_sync: 'pushed' | 'partial' | 'not_ready' | 'failed'
+  sync_required: boolean
+}
+
+/** PATCH /api/categories/{id}. */
+export interface CategoryUpdateResponseWire extends CategoryResponseWire {
+  /** Only after a move or a cuisines change; null for any other patch. */
+  scene_sync?: CategorySceneSyncWire | null
+}
+
 /** DELETE /api/categories/{id}. */
 export interface CategoryDeleteResponseWire {
   ok: true

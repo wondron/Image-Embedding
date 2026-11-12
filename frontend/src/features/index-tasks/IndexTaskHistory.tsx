@@ -54,7 +54,7 @@ export function IndexTaskHistory({ apiBase }: { apiBase: string }) {
       {data.items.length > 0 ? <>
         <div className="index-tasks-head" aria-hidden="true"><span>文件名</span><span>终态</span><span>是否新图</span><span>耗时</span><span>记录时间（MST）</span><span>详情</span></div>
         <div role="list">{data.items.map(task => <article className="index-tasks-row" role="listitem" key={task.id}>
-          <div className="index-tasks-file"><TaskThumbnail url={task.image?.imageUrl ?? null} /><strong title={task.filename}>{task.filename}</strong></div>
+          <div className="index-tasks-file"><TaskThumbnail url={task.image?.imageUrl ?? null} id={task.image ? task.imageId : null} /><strong title={task.filename}>{task.filename}</strong></div>
           <span className={`mg-job-status mg-job-status-${task.status === 'succeeded' ? 'success' : 'error'}`}>{task.status === 'succeeded' ? '成功' : '失败'}</span>
           <div className="index-tasks-meta">
             <span><small className="index-tasks-label">是否新图：</small>{taskNewImage(task.newImage)}</span>

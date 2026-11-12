@@ -73,6 +73,19 @@ class ManageImagesUseCase:
             raise err.image_not_found(f"image {image_id} does not exist")
         return image_detail(row)
 
+    def file_url(self, image_id: UUID | str, variant: str) -> str:
+        """Where the image's stored file is: the thumbnail (the original when it has none) or the
+        original. A deleted image's files stay readable until the cleanup removes them."""
+        row = self._catalog.get_image_file_urls(image_id)
+        if row is None:
+            raise err.image_not_found(f"image {image_id} does not exist")
+        thumb = str(row.get("thumb_url") or "").strip()
+        original = str(row.get("original_url") or "").strip()
+        url = (thumb or original) if variant == "thumb" else original
+        if not url:
+            raise err.image_file_unavailable(f"image {image_id} has no stored {variant}")
+        return url
+
     def update(self, image_id: UUID | str, fields: Mapping[str, Any]) -> dict[str, Any]:
         """Only the fields given change (image_fields); returns the image as committed."""
         return image_detail(self._catalog.patch_image(image_id, normalize_image_patch(fields)))

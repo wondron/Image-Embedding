@@ -1,14 +1,17 @@
-import { useState } from 'react'
 import { ImageIcon } from 'lucide-react'
 import { Dialog } from '../../components/Dialog'
+import { StoredImage } from '../../entities/image'
 import type { IndexTask } from '../../entities/task'
 import { taskDuration, taskNewImage, taskTime } from './presentation'
 
-export function TaskThumbnail({ url }: { url: string | null }) {
-  const [failed, setFailed] = useState<string | null>(null)
-  return url && failed !== url
-    ? <img className="mg-task-thumb" src={url} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(url)} />
-    : <span className="mg-task-thumb index-task-placeholder" aria-label="无预览"><ImageIcon size={18} aria-hidden /></span>
+/** id: the image's library id, when the API should serve it if its URL cannot be loaded. */
+export function TaskThumbnail({ url, id = null }: { url: string | null; id?: string | null }) {
+  return <StoredImage
+    id={id}
+    url={url}
+    className="mg-task-thumb"
+    placeholder={<span className="mg-task-thumb index-task-placeholder" aria-label="无预览"><ImageIcon size={18} aria-hidden /></span>}
+  />
 }
 
 export function TaskDetails({ task, readTraceId, onClose }: { task: IndexTask; readTraceId: string | null; onClose: () => void }) {

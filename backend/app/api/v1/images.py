@@ -1,14 +1,15 @@
-"""One stored image: detail (with its state in the vector store), patch, delete, payload push.
+"""One stored image: detail (with its state in the vector store), its stored files, patch, delete,
+payload push.
 
 Registered after app.api.v1.image_download, so GET /api/images/download keeps its own route.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request, Response
 
 from app.api.services import images as images_service
 from app.bootstrap.state import get_application_state
@@ -44,6 +45,32 @@ _PUSH_NOTE = (
 )
 def get_image(request: Request, image_id: UUID) -> Any:
     return images_service.get_image(get_application_state(request), image_id)
+
+
+@router.get(
+    "/{image_id}/file",
+    response_class=Response,
+    summary="Read the stored thumbnail or original",
+    description=(
+        "按图片 id 从对象存储读回缩略图（variant=thumb，默认；没有缩略图时给原图）或原图（variant=original），"
+        "供 thumb_url / original_url 在浏览器里打不开时使用（例如 mock 存储的占位域名、私有桶）。"
+        "已删除但还在等待清理的图片也能读到。按字节判断类型，只返回 JPEG / PNG / WebP / GIF / BMP，可长期缓存。"
+        "图片不存在 IMAGE_NOT_FOUND（404）；存储里读不到或不是图片 IMAGE_FILE_UNAVAILABLE（502）；"
+        "对象存储配置不可用 NOT_READY（503）。"
+    ),
+    responses={
+        200: {"content": {media: {} for media in ("image/webp", "image/jpeg", "image/png", "image/gif", "image/bmp")}},
+        **_NOT_FOUND,
+        502: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def get_image_file(
+    request: Request,
+    image_id: UUID,
+    variant: Literal["thumb", "original"] = Query(default="thumb", description="thumb 缩略图 / original 原图"),
+) -> Response:
+    return images_service.image_file(get_application_state(request), image_id, variant)
 
 
 @router.patch(

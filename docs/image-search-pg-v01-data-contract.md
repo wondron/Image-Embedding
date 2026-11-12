@@ -307,6 +307,8 @@ id = uuid_from_bytes(sha256(original_bytes)[0:16])  # RFC 4122 变体/版本位�
 **PK**：`(model_id, image_id)`。  
 **同步规则**：若 `synced_version <> images.payload_version` → 须重推该点 payload（向量可不变）。缺行 → 须（重新）embed + upsert 点。
 
+**后台对账**（2026-11-11，`app/services/retrieval/reconcile.py`）：API 进程按 `RECONCILE_CONFIG`（默认开启；每 `interval_seconds`=300 秒一轮，首轮在启动 `initial_delay_seconds`=30 秒后）在后台执行上面的规则：① 当前模型下记账落后（有记账行且 `synced_version < payload_version`）的图片补推 payload，每轮至多 `max_payloads`（2000）张，按 id 从上一轮停下的位置接着走、走完一圈再从头，一直推不上的（点已不在 collection，要重新生成向量）不会挡住其他图片；② 清理删除队列 `image_deletions`（§2.5），每轮至多 `max_deletions`（200）条，某批一条也没清掉就停（最早的几条一直失败，留给下一轮）。缺记账行的（当前模型下没有向量）推 payload 补不上，不在此列。多进程靠 PG 会话级咨询锁互斥，拿不到锁的进程跳过这一轮；停服时进行中的一轮在下一批之前结束。不开 API 或关掉后台对账时，用 `python -m app.workers.reconcile`（cron，或 `--loop`）。
+
 ---
 
 ### 2.12 `external_candidates`
@@ -443,8 +445,8 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | **Index** `POST /api/index` | 本地 path 入库、scenes JSON、BIGINT id | 收字节或可拉 URL → 算 sha256/uuid → 写 S3 → 写 `images` → embed → upsert **current** collection；场景经规则/`image_scenes`；**无 path**。**2026-11-11**：multipart / JSON 另可传 `label_status`（`auto`/`verified`，要有类别）、`source_type`、`license`（取值见 `/api/enums`，不传为 `user_upload` / `unknown`）；`indexed[].created` 为 `false` 表示相同图片此前已入库、沿用首次的标注 |
 | **Search** `POST /api/search` | `scene` 默认 `normal`；拒识；仅 normal 空→FlyB | `scene` 改为默认 **`general`**（A5）；按 payload `scenes` 过滤；场景标签投票；`outputs_heating` 附加字段；**`score_threshold` 沿用 MVP（A6）**；自建空 → **`source=empty`**；**FlyB 编排 OUT OF SCOPE（A4 / M0）** |
 | **List** `GET /api/images` | 分页、scene、title/category、仅 active | 无 soft-status：未删即在库；scene 成员过滤；返回 `original_url`/`thumb_url`、类别树字段、场景 codes；category 改 ID/code。**2026-11-11**：新增 `category_id`（正整数，这个类别及其所有下级类别，ltree 子树；未标注的图片不匹配）和 `label_status`（`unlabeled`/`auto`/`verified`，非法值 422）筛选；原 `category`（编码 / 名称 / ID，只匹配一个类别）保留 |
-| **单图** `/api/images/{image_id}`（**已落地 2026-11-11**） | 无 | `GET` 详情（全部字段 + 向量写入记录 + 当前 collection 里的向量状态 `synced`/`stale`/`missing`/`unavailable`）、`PATCH` 改类别 / 标注状态 / 描述 / 标签 / 食物标注（提交后推 payload）、`POST …/vector-sync` 重推这张图的 payload、`DELETE` 删除。见 §6.3。新错误码 `IMAGE_NOT_FOUND` 404 |
-| **类别** `/api/categories`（**已落地 2026-11-10**） | 无独立 API | `GET /api/categories` 返回整棵树（不分页）`{ ok, categories: CategoryItem[], heating_groups: [{id, code, name}], root_codes: string[] }`，节点按「父在子前、同级 `sort_order`、`id`」排好；`POST /api/categories`（201）新建；`PATCH /api/categories/{id}` 只改请求里给了的字段（`parent_id` 换父节点，整棵子树一起移动，`null` 移到根；`names` 给了就整体替换；`heating_group_id: null` 清空）；`DELETE /api/categories/{id}` 返回 `{ ok, deleted: {id, code} }`。`CategoryItem` = `{ id, code, parent_id, path, name, names: [{lang, name, kind}], cuisines, heating_group, sort_order, is_active, image_count, scene_rule_count, created_at, updated_at }`（`name` 是中文主名；`cuisines` / `heating_group` 是节点自己设的，不含沿用祖先的）。规则：`code` 匹配 `^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$`、全局唯一；根节点只能用四个域的编码（新建、移到根、给根改编码时校验）；`names` 必须含中文（`zh`）主名，每种语言至多一个主名；不能移到自己或子孙下面；还有子类别、图片或场景规则引用时不能删除（场景规则不再被级联悄悄删掉）。错误码 `CATEGORY_NOT_FOUND` 404、`CATEGORY_CODE_EXISTS` 409、`CATEGORY_IN_USE` 409、`CATEGORY_POSTGRES_FAILED` 502、`VALIDATION_ERROR` 422。成功体不带 `trace_id`（在响应头 `X-Trace-Id`）。字段和上限见 `backend/app/schemas/categories.py`、`backend/app/core/category_rules.py`。加热组只随列表只读返回，管理仍 **TBD**；移动类别或改菜系**不会**重算已入库图片的 `image_scenes`，也不重推 Qdrant payload |
+| **单图** `/api/images/{image_id}`（**已落地 2026-11-11**） | 无 | `GET` 详情（全部字段 + 向量写入记录 + 当前 collection 里的向量状态 `synced`/`stale`/`missing`/`unavailable`）、`PATCH` 改类别 / 标注状态 / 描述 / 标签 / 食物标注（提交后推 payload）、`POST …/vector-sync` 重推这张图的 payload、`DELETE` 删除、`GET …/file` 读回存储里的缩略图或原图。见 §6.3。新错误码 `IMAGE_NOT_FOUND` 404 |
+| **类别** `/api/categories`（**已落地 2026-11-10**） | 无独立 API | `GET /api/categories` 返回整棵树（不分页）`{ ok, categories: CategoryItem[], heating_groups: [{id, code, name}], root_codes: string[] }`，节点按「父在子前、同级 `sort_order`、`id`」排好；`POST /api/categories`（201）新建；`PATCH /api/categories/{id}` 只改请求里给了的字段（`parent_id` 换父节点，整棵子树一起移动，`null` 移到根；`names` 给了就整体替换；`heating_group_id: null` 清空）；`DELETE /api/categories/{id}` 返回 `{ ok, deleted: {id, code} }`。`CategoryItem` = `{ id, code, parent_id, path, name, names: [{lang, name, kind}], cuisines, heating_group, sort_order, is_active, image_count, scene_rule_count, created_at, updated_at }`（`name` 是中文主名；`cuisines` / `heating_group` 是节点自己设的，不含沿用祖先的）。规则：`code` 匹配 `^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$`、全局唯一；根节点只能用四个域的编码（新建、移到根、给根改编码时校验）；`names` 必须含中文（`zh`）主名，每种语言至多一个主名；不能移到自己或子孙下面；还有子类别、图片或场景规则引用时不能删除（场景规则不再被级联悄悄删掉）。错误码 `CATEGORY_NOT_FOUND` 404、`CATEGORY_CODE_EXISTS` 409、`CATEGORY_IN_USE` 409、`CATEGORY_POSTGRES_FAILED` 502、`VALIDATION_ERROR` 422。成功体不带 `trace_id`（在响应头 `X-Trace-Id`）。字段和上限见 `backend/app/schemas/categories.py`、`backend/app/core/category_rules.py`。加热组只随列表只读返回，管理仍 **TBD**。**2026-11-11 起**移动类别（`parent_id` 变化）或改菜系（集合有变化）时，同一事务里重算标在该节点及其子孙上的图片的 `image_scenes`，有效场景集合变化的图片 `payload_version` +1；提交后检索栈可用时把这些图片的 payload 推到当前 collection（一次请求至多 2000 张，分批），结果在 `PATCH` 成功体的 `scene_sync`：`{ images, changed, pushed, pending, vector_sync: pushed\|partial\|not_ready\|failed, sync_required }`，其余修改为 `null`；推送失败不影响 200，没推上的由后台对账补上（§2.11 同步规则下的「后台对账」） |
 | **场景** | 写死登记 | `scenes` / `scene_rules` / `scene_labels` 管理（`/api/scenes`，字段见 `backend/app/schemas/scenes.py`）；图片成员人工覆盖三接口见 §6.2（本地实现，待独立验收）。**2026-11-10 链路优化**：配置写接口的成功体除 `scene`（删除时 `deleted`）外另带 `sync_required: boolean`——`true` 表示改动要经 `POST /api/scenes/sync` 才作用到已入库图片（规则增删、规则换目标、场景 `is_active` / `include_all` 实际变化、新建启用的 `include_all` 场景、删除有成员的场景），`false` 表示已生效（场景类别、名称、描述、`outputs_heating`、只改规则映射的类别，均在请求时读取）。`PATCH /api/scenes/{id}/rules/{rule_id}` 现可原地换目标：给 `category_id` 或 `cuisine`（恰好一个非空，另一个清空）即替换，单事务、规则 id 不变；与本场景其他规则重复 `SCENE_RULE_EXISTS` 409；按菜系的规则不能带 `label_id`（换成菜系时同请求传 `label_id: null`，否则 422）。不再需要「删旧建新」两次请求 |
 | **审核候选** | 无 | `external_candidates` list/accept/reject；accept → 入库流水线 |
 | **模型** | 配置 + meta 表 | `embedding_models` 状态机；切 `current`；重建进度 **TBD** |
@@ -776,7 +778,7 @@ CREATE EXTENSION IF NOT EXISTS ltree;
   | `not_ready` | `true` | 检索栈未构建（NOT_READY），只保存了 PG；稍后 `POST /api/scenes/sync` |
   | `failed` | `true` | Qdrant / 记账失败，或推送期间图片一直被别人改（服务端日志有原因）|
 
-  幂等写也会推送（单点 payload，代价很小）。`POST /api/scenes/sync` 仍是配置改动的传播入口，也能补上 `sync_required:true` 的图片。当前部署未补角色鉴权，不宣称管理员授权已存在。
+  幂等写也会推送（单点 payload，代价很小）。`POST /api/scenes/sync` 仍是配置改动的传播入口，也能补上 `sync_required:true` 的图片；2026-11-11 起后台对账（§2.11）也会定时补推记账落后的图片（`missing` 的补不上，要重新生成向量）。当前部署未补角色鉴权，不宣称管理员授权已存在。
 - 记账只记「仍是当前版本」的 payload（2026-11-10，`mark_payloads_pushed`，sync 与写后推送共用）：读 payload 之后图片又被改（`payload_version` 变了）时不记，并重新读、重新推，最多 3 轮；所以后写入的推送总会覆盖先读到的旧 payload，账本不会声称 collection 里有它没有的版本。图片已被删除时也不记（不再因外键失败整批 502）。场景开关（`is_active`/`include_all`）改变有效集合但不改版本号，这类改动仍以全库同步为准。
 
 ---
@@ -791,8 +793,11 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | PATCH `/api/images/{image_id}` | 只传要改的字段（见下表），extra forbid、整数字段严格 | 200 `{ok, image, vector_sync, sync_required}` |
 | POST `/api/images/{image_id}/vector-sync` | 无 | 200 `{ok, image_id, payload_version, vector_sync, sync_required}` |
 | DELETE `/api/images/{image_id}` | 无 | 200 `{ok, image_id, deleted_at, cleanup:"done"\|"queued"}` |
+| GET `/api/images/{image_id}/file?variant=thumb\|original`（2026-11-11） | 无（`variant` 默认 `thumb`） | 200 图片字节 |
 
 `image_id` 为 UUID（非法 422）；图片不存在 `IMAGE_NOT_FOUND` 404。成功体不带 `trace_id`（在 `X-Trace-Id` 头）；错误沿 §6 统一信封。
+
+`…/file`：从对象存储读回这张图的缩略图（没有缩略图时给原图）或原图，供 `thumb_url` / `original_url` 在浏览器里打不开时使用（mock 存储的占位域名、私有桶）；前端先用 URL，失败再用它，并记住失败的域名、之后直接用它。检索栈可用时用它的存储实例（mock 驱动内存里的字节也读得到），否则按同一份 `IMAGE_STORAGE_CONFIG` 另建一个（mock 驱动只能读 `mock_mirror_dir`）。已删除、文件还在等清理的图片也能读（查 `image_deletions`）。按文件头判断类型，只返回 JPEG / PNG / WebP / GIF / BMP，带 `Cache-Control: public, max-age=31536000, immutable`（id 是内容哈希，字节不会变）、`X-Content-Type-Options: nosniff` 和 sandbox 的 CSP；存储里读不到或不是这些图片类型 `IMAGE_FILE_UNAVAILABLE` 502，对象存储配置不可用 `NOT_READY` 503。
 
 `image`：字段名与 List item（§6.1.2）一致，另加详情专有字段；食物字段和 `heating_group` 总带，不看场景。
 
@@ -832,7 +837,7 @@ PATCH 字段（不传 = 不变）：
 - `label_status` 不传时跟着类别走：清空类别 → `unlabeled`；设置或更换类别 → `verified`（人在图库里选的）；类别不变 → 保持。传了必须满足 unlabeled ⟺ 无类别，否则 422。
 - 单事务：catalog 共享锁 → 图片行锁（与其它图片写入同序），锁内校验类别；payload 字段**实际变化**才 bump 一次 `payload_version`（同值不 bump）；锁内读回提交后的 `image`。
 - 提交后推送同 §6.2「写后推送」（`vector_sync` / `sync_required` 四个取值含义相同）；每次 PATCH 都推一次（单点，顺带修复漂移）。`POST …/vector-sync` 只做推送。
-- DELETE：PG 单事务删 `images`（CASCADE `image_scenes` / `image_embeddings` / `image_foods`）并写 `image_deletions`，图库和检索结果立即看不到（两者都读 PG）；检索栈可用时同一请求删当前 collection 的点和原图、缩略图，再删队列行（`cleanup=done`），否则 `cleanup=queued`，由 `python -m app.workers.process_deletions` 补删。已删且仍在队列中再删：返回同一队列行。同一图片（同字节即同 id）在清理前又被入库：再删会重新删除；清理时发现已重新入库则保留点和文件、只删队列行。仍只清当前 collection（旧模型版本的点不动，同 §2.5）。
+- DELETE：PG 单事务删 `images`（CASCADE `image_scenes` / `image_embeddings` / `image_foods`）并写 `image_deletions`，图库和检索结果立即看不到（两者都读 PG）；检索栈可用时同一请求删当前 collection 的点和原图、缩略图，再删队列行（`cleanup=done`），否则 `cleanup=queued`，由后台对账（§2.11）定时补删，也可用 `python -m app.workers.process_deletions` 或任务中心「待清理图片」的「立即清理」。已删且仍在队列中再删：返回同一队列行。同一图片（同字节即同 id）在清理前又被入库：再删会重新删除；清理时发现已重新入库则保留点和文件、只删队列行。仍只清当前 collection（旧模型版本的点不动，同 §2.5）。
 - 错误：`VALIDATION_ERROR` 422（字段、类别不存在或停用、label 与类别矛盾）；`IMAGE_NOT_FOUND` 404；`SEARCH_POSTGRES_FAILED` / `INDEX_POSTGRES_FAILED` 502；catalog 未就绪 `NOT_READY` 503。未补角色鉴权（同 §6.2）。
 
 ---
@@ -868,7 +873,7 @@ PATCH 字段（不传 = 不变）：
 - 首入/重新进入/分页筛选或 baseUrl 改变读取，切筛选/页大小回 1；手动刷新保留当前页/筛选。成功后发现页越界只有限一次回合法末页重读，total=0 回第一页；持续并发空页提示刷新，不无限循环。
 - 首次加载、全空、筛选空、网络/HTTP/JSON/协议失败明确区分；刷新失败可留旧行但标旧数据，不能归零/回退成本地假历史。带取消信号及请求 token 防迟到覆盖；baseUrl 改变清旧历史/详情；无后台轮询、无页面 fetch、不继续加厚 ManagementViews。
 - 明细只读 item；选中行不在刷新返回页时关闭提示重新选择，不推断记录已删除。失败/error/filename 纯文本转义，缺图/缺字段显示占位。容器交设计，不修改受保护 Dialog/.qa。
-- 既有 `DELETE /api/index-tasks?status=...`、`GET /api/image-deletions`、`POST /api/image-deletions/process` **不纳本轮**，不展示清空/清理/删除操作；process 不是失败入库重试。无服务端 cancel/replay/retry/progress API，不造异步 job；失败可展示，重传需用户重新提供 File。
+- 既有 `DELETE /api/index-tasks?status=...` **不纳本轮**，不展示清空操作；`GET /api/image-deletions`、`POST /api/image-deletions/process` 已于 2026-11-11 接入「入库任务」的「待清理图片」页签（见变更记录）。process 不是失败入库重试。无服务端 cancel/replay/retry/progress API，不造异步 job；失败可展示，重传需用户重新提供 File。
 - 本范围**无需新增 BE API/schema**，列表已有明细；需 FE 接线及独立测试验证未提交实现/迁移部署。测试应覆盖真实分页/统计/trace/null/重复图/混合失败/best-effort 缺行、服务端和本地状态分离、刷新越界/错误/迟到请求。本刀不执行验收，不借旧 scene 测试结论。
 
 ---
@@ -944,6 +949,7 @@ PATCH 字段（不传 = 不变）：
 | 2026-11-11 | **前端「食材管理」与「类别配置」合并**（纯前端，无接口、表结构变化）：导航只保留「食材管理」，它就是类别树（`?view=categories`，深链 `&category=<id>` 不变）；原「食材管理」本地草稿页删除——它的名称 / 类别 / 属性就是类别树节点的名称、上级和属性。页面改成与图片数据页一致的列表：搜索名称 / 别名 / 编码（匹配项连同上级一起显示）、按类别域和启停筛选；按层级缩进的表格列出其他名称、菜系、加热组（沿用上级的标「沿用」）、图片与场景规则引用数和状态，行内新建下级 / 编辑 / 删除。新建类别在弹窗里选上级，编码前缀随上级变化；删除仍被引用的类别时说明引用并可直接改为停用（`PATCH is_active=false`）。前后端核对：前端客户端、解析、校验和错误映射对真实接口逐项一致（字段集合、`X-Trace-Id`、`CATEGORY_*` 错误码、字段级 422 的 `loc` 映射，以及编码 / 名称 / 语言代码 / 菜系 / 排序的边界值两边取舍相同）。仍未做：`POST /api/index` 按编码解析类别时不检查 `is_active`（`PATCH /api/images/{id}` 会拒绝停用类别），编码不存在时只记日志、图片存为未标注 |
 | 2026-11-11 | **向量库与数据库状态的展示和修改**（无表结构变化、无新迁移）：① `GET /api/images` 改由 catalog 提供（只读 PostgreSQL），编码器 / Qdrant / 对象存储未就绪时图库照常列出（此前整个接口 503）；每张图新增 `vector_status`（`synced` / `stale` / `missing` / `unavailable`，与详情 `vector.status` 同口径；一页只读一次向量库，读不到时为 `unavailable`，仍返回 200）。② `PATCH /api/images/{image_id}` 与 `POST /api/images/{image_id}/vector-sync` 的成功体新增 `vector`：推送之后重读这张图得到的向量状态（同 GET 详情的 `vector`），页面不必再读一次详情；旧字段不变。前端：图库卡片和列表行标出「待同步」「没有向量」，页脚统计本页数量，向量库读不到时状态栏提示；「图片标注」的向量库卡片用类别路径、场景名、枚举中文名列出向量库与数据库不一致的字段，「按数据库同步到向量库」一键修复并直接用响应里的状态刷新，「没有向量」给出去上传的入口（同一张图片重新上传会补上向量、沿用原标注），collection、版本和写入记录收进「技术信息」；场景管理「全量同步」改为面向使用者的说明、状态和进度（行为不变） |
 | 2026-11-11 | **向量修复与筛选**（无表结构变化、无新迁移）：① 新增 `POST /api/images/{image_id}/reembed`：从对象存储读回这张图的原图，用当前模型重新算向量，按 PostgreSQL 现在的数据写 payload 并记账 `image_embeddings`，修复 `vector.status=missing` 而不用重新上传（标注不变）；成功体 `{ ok, image_id, payload_version, vector }`。新错误码 `IMAGE_FILE_UNAVAILABLE` 502（原图读不到：对象已不在、存储失败，或 mock 存储没有配置 `mock_mirror_dir`，重启后不保留字节）；编码器 / 向量库 / 对象存储未就绪 `NOT_READY` 503。为此 `ImageStoragePort` 新增 `read_by_url_or_key`（boto3 `get_object`；mock 先读内存再读 mirror 目录）。② `GET /api/images` 新增 `out_of_sync=true`：只列当前模型写入记录缺失或 `synced_version` 落后于 `payload_version` 的图片（待同步或没有向量）；按记账判断、只读 PostgreSQL，绕过记账删掉的点要靠列表项的 `vector_status` 或全量同步发现。前端：「图片标注」的「没有向量」给出「用存储里的原图重新生成向量」（原图读不到时说明原因、保留重新上传入口）；图片数据新增「待同步或没有向量」筛选；场景管理「全量同步」结束后可对没有向量的图片批量重新生成（逐张请求，可停止，已删除的图片自动略过，失败的列出原因）；场景管理在 800px 以下改为一次只显示列表或详情（此前两栏叠在一起，列表透到详情下面） |
+| 2026-11-11 | **PostgreSQL 与 Qdrant 同步补齐 + 缩略图读回**（无表结构变化、无新迁移）：① 移动类别或改菜系时，同一事务里重算其子树图片的 `image_scenes`（有效场景变化的 `payload_version` +1），提交后推 payload；`PATCH /api/categories/{id}` 成功体新增 `scene_sync`（§6 类别行）。此前要靠手动全量同步，忘了就一直不一致、且记账也看不出来。② 后台对账（§2.11 同步规则下）：API 进程按 `RECONCILE_CONFIG` 定时补推记账落后的 payload、清理删除队列，多进程用 PG 咨询锁互斥；另有 `python -m app.workers.reconcile`。③ 前端「入库任务」新增「待清理图片」页签：列出 `GET /api/image-deletions`，「立即清理」连续调 `POST /api/image-deletions/process`（有进展才继续，失败的写明原因）。④ 新增 `GET /api/images/{image_id}/file`（§6.3）：mock 存储（`use_boto3: false`）的 URL 是占位域名，浏览器打不开，所以缩略图一直不显示；前端图库、编辑、批量、任务、检索结果的图片改为先用 URL、失败用这个接口读回，并记住失败的域名。根治仍需配置真实对象存储（`use_boto3: true`、`endpoint_url`、`public_base_url`）；已入库图片的 URL 不会因此改变（同字节重传沿用第一次的 URL），要换成真实地址需另做迁移 |
 
 ---
 

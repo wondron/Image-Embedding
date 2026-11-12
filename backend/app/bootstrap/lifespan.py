@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI
 
+from app.bootstrap.reconciler import start_reconciler
 from app.bootstrap.state import ApplicationState
 from app.core import errors
 from app.core.config.enum_store import get_enum_store
@@ -301,6 +302,7 @@ async def lifespan(app: FastAPI):
     initialize_food_service(runtime, embedder)
     initialize_catalog(runtime)  # PostgreSQL only; retrieval below borrows its store
     initialize_retrieval(runtime, embedder)
+    runtime.reconciler = start_reconciler(runtime)  # RECONCILE_CONFIG; stopped by runtime.close()
     config_provider.start_polling(lambda snapshot: apply_nacos_config_update(runtime, config_provider, snapshot))
     try:
         yield

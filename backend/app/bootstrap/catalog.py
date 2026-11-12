@@ -10,12 +10,15 @@ encoder, Qdrant or object storage are down, or when retrieval is switched off
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-from app.core.config.settings import PostgresSettings
+from app.clients.image_storage import build_image_storage
+from app.core.config.settings import ImageStorageSettings, PostgresSettings
 from app.repositories.metadata import PgMetadataStore
+from app.repositories.ports import ImageStoragePort
 from app.services.retrieval.list_images import ListImagesUseCase
 from app.services.retrieval.manage_categories import ManageCategoriesUseCase
 from app.services.retrieval.manage_images import ManageImagesUseCase
@@ -35,6 +38,17 @@ class CatalogServices:
     images_uc: ManageImagesUseCase
     tasks_uc: TaskCenterUseCase
     list_uc: ListImagesUseCase
+    config: Mapping[str, Any] = field(default_factory=dict, repr=False)
+    _file_storage: ImageStoragePort | None = field(default=None, init=False, repr=False)
+    _file_storage_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
+
+    def file_storage(self) -> ImageStoragePort:
+        """Object storage to read stored files back while the retrieval stack is not up (built
+        on first use from IMAGE_STORAGE_CONFIG; the mock driver reads its mirror dir)."""
+        with self._file_storage_lock:
+            if self._file_storage is None:
+                self._file_storage = build_image_storage(ImageStorageSettings.from_config(self.config))
+            return self._file_storage
 
     def close(self) -> None:
         self.store.close()
@@ -57,4 +71,5 @@ def build_catalog(config: Mapping[str, Any]) -> CatalogServices:
         images_uc=ManageImagesUseCase(store),
         tasks_uc=TaskCenterUseCase(store),
         list_uc=ListImagesUseCase(store),
+        config=config,
     )

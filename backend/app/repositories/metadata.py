@@ -5,7 +5,7 @@ Schema ownership: Alembic (`alembic upgrade head`); this adapter pings /
 verifies tables and supplies CRUD + model/embedding helpers for stack wiring.
 
 Split (DDD D2): connection / images / embeddings / deletions / scenes (membership) /
-categories / scene_config mixins in app.repositories; this module composes them as
+categories / scene_config / maintenance (advisory locks) mixins in app.repositories; this module composes them as
 PgMetadataStore.
 
 ASSUMPTION A7 / id policy: images.id = uuid_from_bytes(sha256(original)[0:16]);
@@ -32,6 +32,7 @@ from app.repositories.categories import PgCategoriesMixin
 from app.repositories.deletions import PgDeletionsMixin
 from app.repositories.embeddings import PgEmbeddingsMixin
 from app.repositories.images import PgImagesMixin
+from app.repositories.maintenance import PgMaintenanceMixin
 from app.repositories.ports import CatalogStorePort, MetadataStorePort
 from app.repositories.scene_config import PgSceneConfigMixin
 from app.repositories.scenes import PgScenesMixin
@@ -47,6 +48,7 @@ class PgMetadataStore(
     PgScenesMixin,
     PgCategoriesMixin,
     PgSceneConfigMixin,
+    PgMaintenanceMixin,
     MetadataStorePort,
     CatalogStorePort,
 ):

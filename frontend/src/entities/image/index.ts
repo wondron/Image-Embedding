@@ -70,3 +70,12 @@ export {
   reembedImage,
   deleteImage,
 } from './api'
+export {
+  type StoredImageVariant,
+  storedImageUrl,
+  storedImageSources,
+  markHostBroken,
+  isHostBroken,
+  forgetBrokenHosts,
+} from './imageSources'
+export { StoredImage, type StoredImageProps } from './StoredImage'

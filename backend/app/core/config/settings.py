@@ -336,6 +336,42 @@ class ImageDownloadSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class ReconcileSettings:
+    """Background reconciliation of the vector store with PostgreSQL, from RECONCILE_CONFIG.
+
+    Each round pushes the payloads the ledger says are behind and drains the deletion queue
+    (app.services.retrieval.reconcile). Read at startup.
+    """
+
+    enabled: bool = True
+    interval_seconds: float = 300.0
+    initial_delay_seconds: float = 30.0
+    max_payloads: int = 2000  # payloads pushed per round at most
+    max_deletions: int = 200  # queued deletions tried per round at most
+
+    @classmethod
+    def from_config(cls, config: Mapping[str, Any]) -> ReconcileSettings:
+        name = "RECONCILE_CONFIG"
+        section = _section(config, name)
+        defaults = cls()
+        settings = cls(
+            enabled=_flag(section, name, "enabled", defaults.enabled),
+            interval_seconds=_number(section, name, "interval_seconds", defaults.interval_seconds, float),
+            initial_delay_seconds=_number(section, name, "initial_delay_seconds", defaults.initial_delay_seconds, float),
+            max_payloads=_number(section, name, "max_payloads", defaults.max_payloads, int),
+            max_deletions=_number(section, name, "max_deletions", defaults.max_deletions, int),
+        )
+        if settings.interval_seconds < 10:
+            raise ValueError(f"{name}.interval_seconds must be at least 10, got {settings.interval_seconds!r}")
+        if settings.initial_delay_seconds < 0:
+            raise ValueError(f"{name}.initial_delay_seconds must not be negative, got {settings.initial_delay_seconds!r}")
+        for key in ("max_payloads", "max_deletions"):
+            if getattr(settings, key) < 1:
+                raise ValueError(f"{name}.{key} must be at least 1, got {getattr(settings, key)!r}")
+        return settings
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     application: ApplicationSettings = field(default_factory=ApplicationSettings)
     config: ConfigSettings = field(default_factory=ConfigSettings)

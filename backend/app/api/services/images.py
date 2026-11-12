@@ -13,6 +13,9 @@ when the retrieval stack is up and never fails a request whose PostgreSQL part s
   search results either way: both read PostgreSQL.
 - POST .../reembed writes the point again from the stored original (services.retrieval
   reembed_image): the one write here that needs the whole retrieval stack.
+- GET .../file serves the stored thumbnail or original through the configured object storage,
+  for when its URL cannot be loaded directly (the mock driver's placeholder host, a private
+  bucket): the retrieval stack's storage when it is up, else one built from the same config.
 
 Failures are AppError: IMAGE_NOT_FOUND 404, VALIDATION_ERROR 422, SEARCH_POSTGRES_FAILED /
 INDEX_POSTGRES_FAILED / IMAGE_FILE_UNAVAILABLE 502, NOT_READY 503. Routes are sync, so FastAPI
@@ -25,7 +28,7 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from fastapi import Request
+from fastapi import Request, Response
 
 from app.api.deps import require_catalog, require_retrieval
 from app.api.services.vector_sync import push_image_payload
@@ -139,3 +142,50 @@ def delete_image(runtime: ApplicationState, request: Request, image_id: UUID) ->
         "image deleted id=%s cleanup=%s | trace_id=%s", queued.get("image_id"), cleanup, get_trace_id(request)
     )
     return {"ok": True, "image_id": str(queued["image_id"]), "deleted_at": queued.get("deleted_at"), "cleanup": cleanup}
+
+
+# What a stored file may be served as: the image types the index accepts, told by their bytes
+_SIGNATURES = (
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"BM", "image/bmp"),
+)
+# The bytes of an id never change (the id is their hash), so a browser may keep them
+_FILE_HEADERS = {
+    "Cache-Control": "public, max-age=31536000, immutable",
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "default-src 'none'; sandbox",
+}
+
+
+def image_media_type(data: bytes) -> str | None:
+    """The image type of these bytes, or None when they are not one of the served types."""
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return next((media for magic, media in _SIGNATURES if data.startswith(magic)), None)
+
+
+def _file_storage(runtime: ApplicationState):
+    """The stack's storage when it is up (the instance that wrote the files: the mock driver keeps
+    them in memory too), else the catalog's."""
+    try:
+        return runtime.require_retrieval().infra.storage
+    except RuntimeError:
+        pass
+    try:
+        return require_catalog(runtime).file_storage()
+    except (ValueError, err.AppError) as exc:  # a bad IMAGE_STORAGE_CONFIG, boto3 missing
+        detail = exc.detail if isinstance(exc, err.AppError) else str(exc)
+        raise err.not_ready(f"object storage unavailable: {detail}") from exc
+
+
+def image_file(runtime: ApplicationState, image_id: UUID, variant: str) -> Response:
+    """The bytes of the image's thumbnail or original, with their image type."""
+    url = require_catalog(runtime).images_uc.file_url(image_id, variant)
+    data = _file_storage(runtime).read_by_url_or_key(url)  # IMAGE_FILE_UNAVAILABLE when it cannot
+    media_type = image_media_type(data)
+    if media_type is None:  # never hand out bytes a browser might run
+        raise err.image_file_unavailable(f"stored {variant} of {image_id} is not a served image type")
+    return Response(content=data, media_type=media_type, headers=_FILE_HEADERS)

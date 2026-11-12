@@ -5,7 +5,15 @@ import {
   type CategoryCreateRequestWire,
   type CategoryUpdateRequestWire,
 } from '../../shared/api'
-import { toCategoryDetail, toCategoryList, toDeletedCategoryId, type CategoryListResult, type CategoryNode } from './model'
+import {
+  toCategoryDetail,
+  toCategoryList,
+  toCategorySceneSync,
+  toDeletedCategoryId,
+  type CategoryListResult,
+  type CategoryNode,
+  type CategorySceneSync,
+} from './model'
 
 const LABELS: ApiLabels = { service: '类别服务', endpoint: '类别接口', action: '类别管理' }
 
@@ -20,6 +28,8 @@ export interface CategoryRequestOptions {
  */
 export interface CategoryWriteResult {
   node: CategoryNode | null
+  /** A PATCH that moved the node or changed its cuisines: what happened to the images below it. */
+  sceneSync: CategorySceneSync | null
   traceId: string | null
 }
 
@@ -30,7 +40,7 @@ function categoryPath(id: number): string {
 /** A 2xx whose body was not JSON still means the server did the write. */
 function acceptedWithoutBody(error: unknown): CategoryWriteResult | null {
   if (error instanceof ApiError && error.status !== null && error.status >= 200 && error.status < 300) {
-    return { node: null, traceId: error.traceId }
+    return { node: null, sceneSync: null, traceId: error.traceId }
   }
   return null
 }
@@ -52,7 +62,7 @@ export async function createCategory(
 ): Promise<CategoryWriteResult> {
   try {
     const result = await requestJsonResult('/api/categories', { baseUrl, method: 'POST', json: body, signal, labels: LABELS })
-    return { node: toCategoryDetail(result.body), traceId: result.traceId }
+    return { node: toCategoryDetail(result.body), sceneSync: null, traceId: result.traceId }
   } catch (error) {
     const accepted = acceptedWithoutBody(error)
     if (accepted) return accepted
@@ -60,7 +70,10 @@ export async function createCategory(
   }
 }
 
-/** PATCH /api/categories/{id} with only the fields to change. Does not retry. */
+/**
+ * PATCH /api/categories/{id} with only the fields to change. Does not retry. A move or a cuisines
+ * change also recomputes the scenes of the stored images below the node (sceneSync).
+ */
 export async function updateCategory(
   id: number,
   body: CategoryUpdateRequestWire,
@@ -68,7 +81,7 @@ export async function updateCategory(
 ): Promise<CategoryWriteResult> {
   try {
     const result = await requestJsonResult(categoryPath(id), { baseUrl, method: 'PATCH', json: body, signal, labels: LABELS })
-    return { node: toCategoryDetail(result.body), traceId: result.traceId }
+    return { node: toCategoryDetail(result.body), sceneSync: toCategorySceneSync(result.body), traceId: result.traceId }
   } catch (error) {
     const accepted = acceptedWithoutBody(error)
     if (accepted) return accepted

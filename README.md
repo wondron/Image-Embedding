@@ -42,9 +42,10 @@ Global 搜索阶段直接保留上游 `image_url`，不下载或验证候选图�
 |---|---|
 | `POSTGRES_CONFIG` | `host`、`user`、`database` 必填；`password`、`port`（默认 5432）、`connect_timeout`（默认 5 秒） |
 | `QDRANT_CONFIG` | `url`（或 `host` + `port`）必填；`api_key`、`timeout`、`prefer_grpc` 等 |
-| `IMAGE_STORAGE_CONFIG` | `use_boto3`（默认 false，即 mock 不上传）、`endpoint_url`、`bucket`、`public_base_url`、`region`、`access_key_id`、`secret_access_key`、`mock_mirror_dir`、`key_prefix`（可选对象键前缀，与 `bucket` / `public_base_url` 同层；省略或空则新写入键与现网一致，非空如 `ImageEmbedding` 时为 `ImageEmbedding/original/{id}.jpg`。`public_base_url` 仍是桶/CDN URL 根，不要再拼同一前缀。已有对象与 URL 不迁移） |
+| `IMAGE_STORAGE_CONFIG` | `use_boto3`（默认 false，即 mock 不上传）、`endpoint_url`、`bucket`、`public_base_url`、`region`、`access_key_id`、`secret_access_key`、`mock_mirror_dir`、`key_prefix`（可选对象键前缀，与 `bucket` / `public_base_url` 同层；省略或空则新写入键与现网一致，非空如 `ImageEmbedding` 时为 `ImageEmbedding/original/{id}.jpg`。`public_base_url` 仍是桶/CDN URL 根，不要再拼同一前缀。已有对象与 URL 不迁移）。mock 驱动生成的 URL 是 `public_base_url` 下的占位地址，浏览器打不开，前端改用 `GET /api/images/{id}/file` 从后端读回（字节在内存里，配了 `mock_mirror_dir` 才能在重启后读到）；要让图片 URL 本身可用，需配置真实对象存储（`use_boto3: true`、`endpoint_url`、`bucket`、`public_base_url`） |
 | `TOTAL_CONFIG.retrieval_enabled` | 设为 `false` 时只跑 predict，不初始化 PG / Qdrant |
 | `IMAGE_DOWNLOAD_CONFIG.trusted_networks` | 远程图片下载只允许公网地址；这里列出的网段也放行。生产留空，本机代理为 fake-IP 模式时填 `198.18.0.0/15`、`2001:2::/48` |
+| `RECONCILE_CONFIG` | API 进程里的后台对账：`enabled`（默认 true）、`interval_seconds`（默认 300，至少 10）、`initial_delay_seconds`（默认 30）、`max_payloads`（每轮最多补推的向量 payload，默认 2000）、`max_deletions`（每轮最多清理的删除队列条数，默认 200）。每轮把数据库里比向量库新的过滤信息补推到 Qdrant，再清理已删除图片留下的向量和文件；多个进程同时开着时只有一个在跑。关掉后可以用 `python -m app.workers.reconcile` 定时执行 |
 
 这些连接参数只在启动时读取，Nacos 里修改后需要重启服务；predict 的模型配置仍支持热更新。
 

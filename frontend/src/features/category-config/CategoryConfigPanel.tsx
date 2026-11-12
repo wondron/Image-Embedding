@@ -20,7 +20,7 @@ import { CategoryDeleteDialog } from './CategoryDeleteDialog'
 import { CategoryEditorDialog, type CategoryEditorTarget, type CategorySaveRequest } from './CategoryEditorDialog'
 import { CategoryTable, rowElementId } from './CategoryTable'
 import { NO_CATEGORY_FILTER, categoryTableView, type CategoryStatusFilter, type CategoryTableFilter } from './tableModel'
-import { deleteFailureText, loadFailureText, saveFailureText } from './messages'
+import { deleteFailureText, loadFailureText, saveFailureText, savedNotice } from './messages'
 import '../../components/ManagementViews.css'
 import './category-config.css'
 
@@ -234,7 +234,9 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
         : await updateCategory(request.id, request.body, options)
       if (!mounted.current) return null
       if (result.node) showSaved(result.node)
-      notify.success(done(result.node ? `「${categoryLabel(result.node)}」` : '类别'))
+      const notice = savedNotice(done(result.node ? `「${categoryLabel(result.node)}」` : '类别'), result.sceneSync)
+      if (notice.type === 'success') notify.success(notice.text)
+      else notify.warn(notice.text, { title: notice.title })
       void reload() // a move changes the paths below it; counts and order come from the server
       return null
     } catch (error) {
@@ -400,7 +402,7 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
       </div>}
     </section>
 
-    <div className="mg-info"><AlertTriangle size={17} /><p>这里的类别就是上传标注、图库筛选和场景规则里选用的食材类别。移动类别或修改菜系后，已入库图片的场景归属不会自动重算，需要到「场景管理」执行同步。只有没有下级类别、图片和场景规则引用的类别才能删除，仍在使用的可以改为停用；加热组不在本页管理。</p></div>
+    <div className="mg-info"><AlertTriangle size={17} /><p>这里的类别就是上传标注、图库筛选和场景规则里选用的食材类别。移动类别或修改菜系后，标在它和下级类别上的图片会随即重算场景归属，并同步到向量库。只有没有下级类别、图片和场景规则引用的类别才能删除，仍在使用的可以改为停用；加热组不在本页管理。</p></div>
 
     {editor && <CategoryEditorDialog
       target={editor}

@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.api.services import vector_sync
 from app.api.v1 import categories as routes
 from app.bootstrap.state import ApplicationState
 from app.core import errors as err
@@ -15,6 +16,7 @@ from app.core.exceptions import register_exception_handlers
 from app.core.middleware import TraceIdMiddleware
 from app.services.retrieval.category_fields import display_name, normalize_category_fields
 from app.services.retrieval.manage_categories import ManageCategoriesUseCase
+from app.services.retrieval.sync_scenes import PushResult
 
 ZH = {"lang": "zh", "name": "披萨", "kind": "primary"}
 GRILL = {"id": 2, "code": "grill", "name": "烤"}
@@ -28,6 +30,7 @@ class FakeStore:
         self.nodes = {}
         self.calls = []
         self.fail = None  # an AppError the next write raises
+        self.membership = None  # what the next update says it recomputed (a move / cuisines change)
 
     def _node(self, category_id, fields, previous=None):
         node = dict(previous or {
@@ -66,7 +69,8 @@ class FakeStore:
             raise err.category_not_found(f"category {category_id} does not exist")
         changes = normalize_category_fields(fields, partial=True)
         self.nodes[category_id] = self._node(category_id, changes, self.nodes[category_id])
-        return self.nodes[category_id]
+        membership, self.membership = self.membership, None
+        return {"category": self.nodes[category_id], "scene_membership": membership}
 
     def delete_category(self, category_id):
         self._write("delete", category_id)
@@ -191,6 +195,71 @@ class CategoryEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(self.store.calls[-1], ("update", 1, {"parent_id": None, "heating_group_id": None}))
         self.assertIsNone(response.json()["category"]["heating_group"])
+
+    # ---- PATCH: the scenes of the images below a moved category -------------
+
+    def with_retrieval(self, push):
+        """A retrieval stack whose payload push is `push(image_ids) -> PushResult`."""
+        sync = Mock()
+        sync.push_images.side_effect = push
+        self.runtime.retrieval = SimpleNamespace(scene_sync_uc=sync)
+        return sync
+
+    def move(self, changed_ids, images=None):
+        self.create()
+        self.store.membership = {"images": len(changed_ids) if images is None else images, "changed_ids": changed_ids}
+        response = self.client.patch("/api/categories/1", json={"parent_id": None})
+        self.assertEqual(response.status_code, 200, response.text)  # PostgreSQL committed: never fails for the push
+        return response.json()["scene_sync"]
+
+    def test_a_patch_that_cannot_change_scenes_says_nothing_about_them(self):
+        self.create()
+        response = self.client.patch("/api/categories/1", json={"sort_order": 5})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIsNone(response.json()["scene_sync"])
+
+    def test_a_move_pushes_the_payloads_whose_scenes_changed(self):
+        sync = self.with_retrieval(lambda ids: PushResult(pushed={i: 2 for i in ids}))
+        with self.assertLogs("svc.categories", level="INFO") as logs:
+            scene_sync = self.move(["a", "b"], images=5)
+        self.assertEqual(scene_sync, {
+            "images": 5, "changed": 2, "pushed": 2, "pending": 0, "vector_sync": "pushed", "sync_required": False,
+        })
+        sync.push_images.assert_called_once_with(["a", "b"])
+        self.assertIn("scenes: images=5 changed=2 pushed=2 pending=0 vector_sync=pushed", logs.output[-1])
+
+    def test_a_move_where_nothing_changed_pushes_nothing(self):
+        sync = self.with_retrieval(lambda ids: PushResult(pushed={i: 2 for i in ids}))
+        self.assertEqual(self.move([], images=4), {
+            "images": 4, "changed": 0, "pushed": 0, "pending": 0, "vector_sync": "pushed", "sync_required": False,
+        })
+        sync.push_images.assert_not_called()
+
+    def test_without_the_retrieval_stack_a_move_is_saved_and_left_to_the_sync(self):
+        self.assertIsNone(self.runtime.retrieval)
+        self.assertEqual(self.move(["a", "b"]), {
+            "images": 2, "changed": 2, "pushed": 0, "pending": 2, "vector_sync": "not_ready", "sync_required": True,
+        })
+
+    def test_a_failed_push_still_answers_with_the_saved_category(self):
+        self.with_retrieval(Mock(side_effect=err.index_qdrant_failed("set_payloads: timeout")))
+        with self.assertLogs("svc.vector_sync", level="WARNING"):
+            scene_sync = self.move(["a", "b"])
+        self.assertEqual((scene_sync["vector_sync"], scene_sync["pushed"], scene_sync["pending"]), ("failed", 0, 2))
+        self.assertTrue(scene_sync["sync_required"])
+
+    def test_images_without_a_vector_leave_the_push_partial(self):
+        self.with_retrieval(lambda ids: PushResult(pushed={"a": 2}, missing=["b"]))
+        scene_sync = self.move(["a", "b"])
+        self.assertEqual((scene_sync["vector_sync"], scene_sync["pushed"], scene_sync["pending"]), ("partial", 1, 1))
+
+    def test_a_big_move_pushes_a_bounded_number_now_in_chunks(self):
+        sync = self.with_retrieval(lambda ids: PushResult(pushed={i: 2 for i in ids}))
+        ids = [f"img-{n:04d}" for n in range(450)]
+        with patch.object(vector_sync, "PUSH_NOW_MAX", 420):
+            scene_sync = self.move(ids)
+        self.assertEqual((scene_sync["pushed"], scene_sync["pending"], scene_sync["vector_sync"]), (420, 30, "partial"))
+        self.assertEqual([len(call.args[0]) for call in sync.push_images.call_args_list], [200, 200, 20])
 
     def test_patch_rejects_an_empty_body_null_for_a_required_field_and_bad_ids(self):
         self.create()

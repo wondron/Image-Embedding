@@ -1,5 +1,5 @@
 import { Images } from 'lucide-react'
-import { LABEL_STATUS_TEXT, type LibraryImageItem, type VectorStatus } from '../../entities/image'
+import { LABEL_STATUS_TEXT, StoredImage, type LibraryImageItem, type VectorStatus } from '../../entities/image'
 import { formatLibraryTime } from '../../shared/lib'
 
 export type LibraryLayout = 'large' | 'small' | 'list'
@@ -85,9 +85,12 @@ export function LibraryResults({ items, layout, loading, categoryPath, sceneName
           return <div className={`mg-library-row mg-table-row${selected.has(item.id) ? ' is-selected' : ''}`} role="listitem" key={item.id}>
             <SelectBox item={item} title={title} selected={selected.has(item.id)} onToggle={onToggle} className="lib-row-check" />
             <button type="button" className="mg-library-name" onClick={() => onOpen(item)} aria-label={`标注 ${title}`}>
-              {item.imageUrl
-                ? <img src={item.imageUrl} alt="" className="mg-library-thumb" loading="lazy" />
-                : <span className="mg-library-thumb mg-library-placeholder" aria-hidden="true"><Images size={16} /></span>}
+              <StoredImage
+                id={item.id}
+                url={item.imageUrl}
+                className="mg-library-thumb"
+                placeholder={<span className="mg-library-thumb mg-library-placeholder" aria-hidden="true"><Images size={16} /></span>}
+              />
               <strong title={item.description || item.id}>{title}</strong>
             </button>
             <span className="lib-row-category"><CategoryChip item={item} {...chip} />{parents && <small title={path ?? undefined}>{parents}</small>}</span>
@@ -110,9 +113,11 @@ export function LibraryResults({ items, layout, loading, categoryPath, sceneName
       return <article className={`mg-upload-card mg-library-card${selected.has(item.id) ? ' is-selected' : ''}`} key={item.id}>
         <SelectBox item={item} title={title} selected={selected.has(item.id)} onToggle={onToggle} className="lib-card-check" />
         <button type="button" className="mg-upload-preview" onClick={() => onOpen(item)} aria-label={`标注 ${title}`}>
-          {item.imageUrl
-            ? <img src={item.imageUrl} alt="" loading="lazy" />
-            : <span className="mg-library-placeholder" aria-hidden="true"><Images size={28} strokeWidth={1.4} /></span>}
+          <StoredImage
+            id={item.id}
+            url={item.imageUrl}
+            placeholder={<span className="mg-library-placeholder" aria-hidden="true"><Images size={28} strokeWidth={1.4} /></span>}
+          />
           <span>查看与标注</span>
         </button>
         <div>

@@ -6,7 +6,7 @@ limits are app.core.category_rules; app.services.retrieval.category_fields check
 together with the rules a schema cannot say (the zh primary name, one primary per language).
 """
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -83,6 +83,33 @@ class CategoryListResponse(BaseModel):
 class CategoryResponse(BaseModel):
     ok: bool = True
     category: CategoryItem
+
+
+class CategorySceneSync(BaseModel):
+    """What a move or a cuisines change did to the stored images below the category."""
+
+    images: int = Field(..., description="标在这个类别及其子类别上、已重算场景归属的图片数")
+    changed: int = Field(..., description="其中场景归属有变化的图片数（payload_version 已递增）")
+    pushed: int = Field(..., description="其中新的向量载荷已写入当前向量库的图片数")
+    pending: int = Field(
+        ...,
+        description=(
+            "其中还没写入向量库的图片数：超出本次请求的上限、向量库失败或未就绪的，后台对账或 "
+            "POST /api/scenes/sync 会补上；当前向量库里没有向量的，要重新生成向量"
+        ),
+    )
+    vector_sync: Literal["pushed", "partial", "not_ready", "failed"] = Field(
+        ...,
+        description="pushed 全部已同步 / partial 部分待同步 / not_ready 检索服务未就绪 / failed 写入向量库失败",
+    )
+    sync_required: bool = Field(..., description="pending 大于 0")
+
+
+class CategoryUpdateResponse(CategoryResponse):
+    scene_sync: CategorySceneSync | None = Field(
+        default=None,
+        description="移动类别或改了菜系时才有：其下已入库图片的场景归属在同一事务里重算后的结果；其余修改为 null",
+    )
 
 
 class DeletedCategory(BaseModel):

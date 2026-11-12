@@ -9,6 +9,7 @@ import {
   LICENSE_ENUM,
   MAX_DESCRIPTION_LENGTH,
   SOURCE_TYPE_ENUM,
+  StoredImage,
   charLength,
   deleteImage,
   foodFieldsFilled,
@@ -241,14 +242,22 @@ export function ImageEditPanel({
     foodState: value => enumValueText(catalog, FOOD_STATE_ENUM, value),
     labelStatus: value => LABEL_TEXT[value as LabelStatus] ?? value,
   }
-  const preview = image?.originalUrl ?? image?.imageUrl ?? item.originalUrl ?? item.imageUrl
+  // The original when there is one (the API's copy when its URL cannot be loaded), else the thumbnail
+  const original = image?.originalUrl ?? item.originalUrl
+  const preview = original ?? image?.imageUrl ?? item.imageUrl
   const shownPath = image?.categoryId != null && categories.tree ? categoryPath(categories.tree, image.categoryId) : null
   const descriptionLength = draft ? charLength(draft.description.trim()) : 0
 
   return <div className="ie">
     <div className="ie-top">
       <figure className="ie-figure">
-        {preview ? <img src={preview} alt="" /> : <span className="ie-noimage">暂无预览</span>}
+        <StoredImage
+          id={item.id}
+          url={preview}
+          variant={original ? 'original' : 'thumb'}
+          loading="eager"
+          placeholder={<span className="ie-noimage">暂无预览</span>}
+        />
       </figure>
       <div className="ie-facts">
         <dl className="ie-meta">

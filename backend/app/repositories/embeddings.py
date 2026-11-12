@@ -163,3 +163,38 @@ class PgEmbeddingsMixin:
             return sorted(str(row[0]) for row in rows)
         except Exception as exc:
             raise err.index_postgres_failed(f"mark_payloads_pushed: {type(exc).__name__}: {exc}") from exc
+
+    def list_unsynced_payload_ids(
+        self, *, after: UUID | str | None = None, until: UUID | str | None = None, limit: int = 200
+    ) -> list[str]:
+        """Images whose current-model ledger row is behind their payload_version, in id order:
+        after `after` (exclusive) and up to `until` (inclusive) when given.
+
+        Only images with a ledger row: one without needs a vector, which a payload push cannot
+        give (list_images(out_of_sync=True) shows both kinds).
+        """
+        self.ensure_schema()
+        from sqlalchemy import text
+
+        try:
+            with self._get_engine().connect() as conn:
+                rows = conn.execute(
+                    text(
+                        "SELECT i.id::text FROM images i "
+                        "JOIN image_embeddings e ON e.image_id = i.id "
+                        "JOIN embedding_models m ON m.id = e.model_id AND m.status = :current "
+                        "WHERE e.synced_version < i.payload_version "
+                        "AND (CAST(:after AS uuid) IS NULL OR i.id > CAST(:after AS uuid)) "
+                        "AND (CAST(:until AS uuid) IS NULL OR i.id <= CAST(:until AS uuid)) "
+                        "ORDER BY i.id LIMIT :lim"
+                    ),
+                    {
+                        "current": ModelStatus.CURRENT.value,
+                        "after": _as_uuid(after) if after is not None else None,
+                        "until": _as_uuid(until) if until is not None else None,
+                        "lim": max(1, int(limit)),
+                    },
+                ).fetchall()
+            return [str(row[0]) for row in rows]
+        except Exception as exc:
+            raise err.index_postgres_failed(f"list_unsynced_payload_ids: {type(exc).__name__}: {exc}") from exc

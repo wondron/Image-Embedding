@@ -4,8 +4,9 @@ Field rules live in app.services.retrieval.category_fields; the checks against t
 and the writes are one transaction each in the catalog store (app.repositories.categories).
 Needs PostgreSQL only (app.bootstrap.catalog).
 
-Moving a category or changing its cuisines changes which scenes its images belong to; stored
-images follow when the memberships are recomputed (services.retrieval.sync_scenes).
+Moving a category or changing its cuisines changes which scenes the images below it belong to;
+the store recomputes them in the same transaction and says which changed, and the HTTP layer
+pushes their payloads after the commit (app.api.services.categories).
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ class ManageCategoriesUseCase:
         return self._catalog.create_category(fields)
 
     def update(self, category_id: int, fields: dict[str, Any]) -> dict[str, Any]:
+        """{category, scene_membership: None | {images, changed_ids}}."""
         return self._catalog.update_category(category_id, fields)
 
     def delete(self, category_id: int) -> dict[str, Any]:

@@ -5,6 +5,8 @@ import type {
   CategoryListResponseWire,
   CategoryNameWire,
   CategoryResponseWire,
+  CategorySceneSyncWire,
+  CategoryUpdateResponseWire,
   HeatingGroupWire,
 } from '../../shared/api'
 
@@ -134,6 +136,40 @@ export function toCategoryDetail(value: unknown): CategoryNode | null {
   const body = untrusted<CategoryResponseWire>(value)
   if (!body || body.ok !== true) return null
   return toCategoryNode(body.category)
+}
+
+export type CategoryVectorSync = CategorySceneSyncWire['vector_sync']
+const CATEGORY_VECTOR_SYNC: readonly CategoryVectorSync[] = ['pushed', 'partial', 'not_ready', 'failed']
+
+/**
+ * After a move or a cuisines change: the server recomputed the scenes of the images labelled
+ * with the node or one below it, then pushed those that changed to the vector store.
+ */
+export interface CategorySceneSync {
+  images: number
+  changed: number
+  pushed: number
+  /** Changed, but not in the vector store yet. */
+  pending: number
+  vectorSync: CategoryVectorSync
+}
+
+/** The scene_sync of a PATCH body; null when there is none (nothing could change) or it is unreadable. */
+export function toCategorySceneSync(value: unknown): CategorySceneSync | null {
+  const body = untrusted<CategoryUpdateResponseWire>(value)
+  const sync = untrusted<CategorySceneSyncWire>(body?.scene_sync)
+  if (!body || body.ok !== true || !sync) return null
+  const changed = asCount(sync.changed)
+  const pending = Math.min(asCount(sync.pending), changed)
+  const known = CATEGORY_VECTOR_SYNC.find(status => status === sync.vector_sync)
+  return {
+    images: Math.max(asCount(sync.images), changed),
+    changed,
+    pushed: Math.min(asCount(sync.pushed), changed),
+    pending,
+    // An unknown status says nothing more than the counts do
+    vectorSync: known ?? (pending ? 'partial' : 'pushed'),
+  }
 }
 
 /** The id of a DELETE body; null when the body is not the contract's shape. */

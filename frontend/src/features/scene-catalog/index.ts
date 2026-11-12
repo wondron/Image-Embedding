@@ -1,6 +1,8 @@
-﻿import { createContext, useContext, useEffect, useSyncExternalStore } from 'react'
+﻿import { useContext, useEffect, useSyncExternalStore } from 'react'
 import { listScenes, sceneError, toApiSceneCode, type Scene, type SceneCatalog } from '../../entities/scene'
-export const SceneApiContext = createContext('')
+import { ApiBaseContext } from '../../shared/api'
+/** The API base (shared/api ApiBaseContext; the root provides it under this name too). */
+export const SceneApiContext = ApiBaseContext
 type State = { data: SceneCatalog | null; loading: boolean; error: string | null; revision: number; pendingSync: boolean }
 type Entry = { state: State; generation: number; promise: Promise<void> | null; listeners: Set<() => void> }
 const entries = new Map<string, Entry>()

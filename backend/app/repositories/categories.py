@@ -10,8 +10,10 @@ database stays the last guard for writers that bypass this store: unique code, R
 children and images, and the path trigger (migration 0001), which rebuilds the paths of the
 subtree whenever parent_id changes.
 
-Moving a category or changing its cuisines changes which scenes its images belong to; that
-reaches stored images when the memberships are recomputed (POST /api/scenes/sync).
+Moving a category or changing its cuisines changes which scenes the images below it belong to.
+The same transaction recomputes their image_scenes and bumps payload_version where the effective
+set changed, so PostgreSQL never disagrees with its own rules and the vector ledger shows what
+still has to be pushed (the caller pushes right after the commit; the reconciler catches up).
 
 Deleting refuses a category that is still used. scene_rules would go silently (ON DELETE
 CASCADE) and leave image_scenes stale, so a rule counts as a use too.
@@ -29,6 +31,7 @@ from app.core.category_rules import CATEGORY_DISPLAY_LANG
 from app.core.enums import NameKind
 from app.db.common import _row_to_dict
 from app.repositories.catalog_lock import lock_catalog_for_write
+from app.repositories.scenes import _recompute_subtree
 from app.services.retrieval.category_fields import (
     check_root_code,
     display_name,
@@ -180,10 +183,14 @@ class PgCategoriesMixin:
             raise err.category_postgres_failed(f"create_category: {type(exc).__name__}: {exc}") from exc
 
     def update_category(self, category_id: int, fields: dict[str, Any]) -> dict[str, Any]:
-        """Patch the given fields and return the node. names, when given, replaces every name.
+        """Patch the given fields. names, when given, replaces every name.
 
-        Changing parent_id moves the node with its whole subtree. This does not recompute
-        image_scenes of the images under it (nor does a change of cuisines).
+        Changing parent_id moves the node with its whole subtree. A move or a change of cuisines
+        recomputes, in the same transaction, the scene memberships of every image labelled with
+        the node or one below it (repositories.scenes._recompute_subtree).
+
+        Returns {category: the node, scene_membership: None when no membership could change,
+        else {images: how many were recomputed, changed_ids: whose effective scenes changed}}.
         """
         cid = normalize_category_id(category_id)
         changes = normalize_category_fields(fields, partial=True)
@@ -194,7 +201,7 @@ class PgCategoriesMixin:
                 lock_catalog_for_write(conn)
                 current = conn.execute(
                     text(
-                        "SELECT code, parent_id, path::text AS path FROM categories "
+                        "SELECT code, parent_id, path::text AS path, cuisines FROM categories "
                         "WHERE id = :id FOR UPDATE"
                     ),
                     {"id": cid},
@@ -205,6 +212,8 @@ class PgCategoriesMixin:
                 parent_id = changes["parent_id"] if "parent_id" in changes else current["parent_id"]
                 renamed = code != current["code"]
                 moved = parent_id != current["parent_id"]
+                # Rules match a cuisine by membership, so only the set matters
+                recuisined = "cuisines" in changes and set(changes["cuisines"]) != set(current["cuisines"] or [])
                 if moved and parent_id is not None:
                     parent = conn.execute(
                         text(
@@ -238,7 +247,11 @@ class PgCategoriesMixin:
                         text("DELETE FROM category_names WHERE category_id = :id"), {"id": cid}
                     )
                     _write_names(conn, cid, changes["names"])
-                return _read_node(conn, cid)
+                membership = None
+                if moved or recuisined:
+                    images, changed_ids = _recompute_subtree(conn, cid)
+                    membership = {"images": images, "changed_ids": changed_ids}
+                return {"category": _read_node(conn, cid), "scene_membership": membership}
         except err.AppError:
             raise
         except IntegrityError as exc:

@@ -50,6 +50,8 @@ class Backend {
   calls: Call[] = []
   /** While set, every GET /api/categories gets this answer instead of the list. */
   listFailure: { status: number; json: unknown } | null = null
+  /** The scene_sync the next PATCH answers with (a move or a cuisines change recomputes the images below). */
+  sceneSync: unknown = null
 
   constructor(rows: Row[]) {
     this.rows = rows
@@ -105,7 +107,9 @@ class Backend {
     if (!target) return route.fulfill({ status: 404, json: errorBody('CATEGORY_NOT_FOUND', 'category does not exist') })
     if (method === 'PATCH') {
       Object.assign(target, body)
-      return route.fulfill({ json: { ok: true, category: this.item(target) } })
+      const sceneSync = this.sceneSync
+      this.sceneSync = null
+      return route.fulfill({ json: { ok: true, category: this.item(target), scene_sync: sceneSync } })
     }
     if (method === 'DELETE') {
       if (this.rows.some(r => r.parent_id === target.id) || target.image_count > 0 || target.scene_rule_count > 0) {
@@ -289,6 +293,34 @@ test('编辑只提交改过的字段；换上级时下级类别一起移动', as
   await expect(ingredient.getByRole('button', { name: /^披萨\s*(停用\s*)?dish\.pizza$/ })).toBeVisible()
   await page.getByRole('button', { name: '展开「披萨」' }).click()
   await expect(ingredient.getByRole('button', { name: /^披萨切片\s*dish\.pizza\.slice$/ })).toBeVisible()
+})
+
+test('移动类别或改菜系后，说明其下图片的场景归属；没能同步到向量库的说明原因', async ({ page }) => {
+  const backend = await open(page, seededRows())
+  const dialog = page.getByRole('dialog', { name: '编辑类别' })
+
+  backend.sceneSync = { images: 3, changed: 2, pushed: 2, pending: 0, vector_sync: 'pushed', sync_required: false }
+  await page.getByRole('button', { name: '编辑「面条」' }).click()
+  await dialog.locator('#category-form-parentId').selectOption('5')
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  await expectToast(page, '已保存「面条」。其下 2 张图片的场景归属已随之更新，并已同步到向量库。', 'success')
+
+  // Saved, but the vector store is behind: that is worth reading before going on
+  backend.sceneSync = { images: 3, changed: 3, pushed: 1, pending: 2, vector_sync: 'not_ready', sync_required: true }
+  await page.getByRole('button', { name: '编辑「面条」' }).click()
+  await dialog.locator('#category-form-cuisines').fill('chinese')
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  await acknowledgeNotice(page, '其下 3 张图片的场景归属已随之更新，其中 2 张还没同步到向量库：检索服务未就绪，恢复后后台会自动补上。', 'warn')
+  expect(backend.writes().map(call => call.body)).toEqual([{ parent_id: 5 }, { cuisines: ['chinese'] }])
+
+  // Nothing below changed scenes: the plain save
+  backend.sceneSync = { images: 3, changed: 0, pushed: 0, pending: 0, vector_sync: 'pushed', sync_required: false }
+  await page.getByRole('button', { name: '编辑「面条」' }).click()
+  await dialog.locator('#category-form-parentId').selectOption('1')
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expectToast(page, /^已保存「面条」。$/, 'success')
 })
 
 test('表单在发请求前校验，服务端拒绝时把原因显示在对应字段', async ({ page }) => {

@@ -8,8 +8,10 @@ overrides come back when it is enabled again).
 Rule rows are rewritten from the current rules whenever images are recomputed:
 
 - recompute_image_scenes: one image (after an insert, a manual override, a metadata change);
-- recompute_scene_memberships: a batch of images in id order, after the scenes, their rules or
-  the category tree changed (POST /api/scenes/sync, app.workers.sync_scenes).
+- recompute_scene_memberships: a batch of images in id order, after the scenes or their rules
+  changed (POST /api/scenes/sync, app.workers.sync_scenes);
+- _recompute_subtree: the images below one category, inside the transaction that moves it or
+  changes its cuisines (app.repositories.categories.update_category).
 
 Both plan with the pure rules in app.services.retrieval.scene_membership, bump
 images.payload_version only for images whose effective scene set changed, and read the catalog
@@ -260,6 +262,37 @@ def _recompute(
     ]
     _apply_plans(conn, plans, bump=bump)
     return catalog, plans
+
+
+def _recompute_subtree(conn: Any, category_id: int, *, chunk: int = 500) -> tuple[int, list[str]]:
+    """Recompute every image labelled with this category or one below it, in id order, chunk
+    by chunk in the caller's transaction (which holds the catalog lock). The category tree must
+    already be as it will be committed: a move has rebuilt the subtree's paths (trigger).
+
+    Returns (images recomputed, ids whose effective scene set changed - payload_version bumped).
+    """
+    total = 0
+    changed: list[str] = []
+    after: UUID | None = None
+    while True:
+        images = conn.execute(
+            text(
+                "SELECT i.id, i.category_id, i.payload_version FROM images i "
+                "JOIN categories c ON c.id = i.category_id "
+                "WHERE c.path <@ (SELECT path FROM categories WHERE id = :cid) "
+                "AND (CAST(:after AS uuid) IS NULL OR i.id > CAST(:after AS uuid)) "
+                "ORDER BY i.id LIMIT :lim FOR UPDATE OF i"
+            ),
+            {"cid": int(category_id), "after": after, "lim": int(chunk)},
+        ).mappings().fetchall()
+        if not images:
+            return total, changed
+        _, plans = _recompute(conn, images, bump=True)
+        total += len(plans)
+        changed.extend(p.image_id for p in plans if p.changed)
+        if len(images) < chunk:
+            return total, changed
+        after = _as_uuid(images[-1]["id"])
 
 
 def _lock_image(conn: Any, image_id: str) -> Mapping[str, Any]:

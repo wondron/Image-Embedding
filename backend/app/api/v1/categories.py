@@ -14,6 +14,7 @@ from app.schemas.categories import (
     CategoryListResponse,
     CategoryResponse,
     CategoryUpdateRequest,
+    CategoryUpdateResponse,
 )
 from app.schemas.common import ErrorResponse
 
@@ -54,11 +55,12 @@ def create_category(request: Request, body: CategoryCreateRequest) -> Any:
 
 @router.patch(
     "/{category_id}",
-    response_model=CategoryResponse,
+    response_model=CategoryUpdateResponse,
     summary="Update a category",
     description=(
         "只改请求里给了的字段。改 parent_id 会把整棵子树一起移过去（不能移到自己或自己的子孙下面）；"
-        "names 给了就整体替换。移动类别或改菜系不会重算已入库图片的场景归属。"
+        "names 给了就整体替换。移动类别或改菜系时，同一事务里重算标在它和它子类别上的图片的场景归属，"
+        "提交后把有变化的图片同步到向量库（scene_sync 给出结果；一次最多同步 2000 张，其余由后台对账补上）。"
     ),
     responses={**_NOT_FOUND, **_CONFLICT},
 )

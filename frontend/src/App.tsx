@@ -14,6 +14,7 @@ import { DownloadDialog } from './components/DownloadDialog'
 import { ImageFilePicker } from './components/ImageFilePicker'
 import { downloadImage } from './lib/downloads'
 import { EnumCatalogProvider } from './entities/enum'
+import { markHostBroken, storedImageSources } from './entities/image'
 import { DEFAULT_SCENE, unknownScene, sceneError } from './entities/scene'
 import { SceneApiContext, useSceneSelection } from './features/scene-catalog'
 import { SceneConfigPage } from './pages/scenes/SceneConfigPage'
@@ -22,7 +23,7 @@ import {
   SourceBadge, displayCategoryLabel, getImageSources, searchGlobalImages, searchLocalImages,
   type SearchImage, type SearchResponse,
 } from './entities/search-result'
-import { pingApi } from './shared/api'
+import { pingApi, useApiBase } from './shared/api'
 import { safeHttpUrl } from './shared/lib'
 import { StatusOverlay, notify } from './shared/ui'
 import { SceneSelect } from './features/scene-select'
@@ -55,12 +56,16 @@ function loadBaseUrl() {
 }
 
 function ResultImage({ item, className = '' }: { item: SearchImage; className?: string }) {
-  const sources = getImageSources(item)
+  const apiBase = useApiBase()
+  // A hit from our own library can also be read back through the API (GET /api/images/{id}/file)
+  const direct = getImageSources(item)
+  const sources = item.source === 'self' ? storedImageSources(direct, item.id, 'original', apiBase) : direct
   const sourceKey = sources.join('\n')
   const [index, setIndex] = useState(0)
   useEffect(() => setIndex(0), [item.id, sourceKey])
   return sources[index]
-    ? <img className={className} src={sources[index]} alt={item.title} loading="lazy" referrerPolicy="no-referrer" onError={() => setIndex(i => i + 1)} />
+    ? <img className={className} src={sources[index]} alt={item.title} loading="lazy" referrerPolicy="no-referrer" onError={() => setIndex(i => i + 1)}
+      onLoad={() => { if (item.source === 'self' && index > 0 && index === sources.length - 1) direct.forEach(markHostBroken) }} />
     : <div className={`image-unavailable ${className}`}><ImageIcon size={32} strokeWidth={1.3} /><span>图片暂不可用</span></div>
 }
 

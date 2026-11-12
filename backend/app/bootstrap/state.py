@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import os
 import platform
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
     from app.core.config.nacos import NacosConfigProvider
     from app.services.predict.food_service import FoodService
     from app.bootstrap.catalog import CatalogServices
+    from app.bootstrap.reconciler import BackgroundReconciler
     from app.bootstrap.retrieval_stack import RetrievalStack
 
 
@@ -40,6 +42,8 @@ class ApplicationState:
     # Category / scene admin: PostgreSQL only; the retrieval stack borrows its store
     catalog: Optional["CatalogServices"] = None
     catalog_error: str | None = None
+    # RECONCILE_CONFIG: pushes ledger-behind payloads and drains the deletion queue in the background
+    reconciler: Optional["BackgroundReconciler"] = None
     stopping: bool = False
     config_provider: NacosConfigProvider | None = None
     configuration_lock: threading.RLock = field(
@@ -124,6 +128,9 @@ class ApplicationState:
         """Release all resources owned by the application state."""
         with self.configuration_lock:
             self.stopping = True
+        reconciler, self.reconciler = self.reconciler, None
+        if reconciler is not None:  # before the stack it works on is closed
+            await asyncio.to_thread(reconciler.stop)
         if self.config_provider is not None:
             self.config_provider.close()
         service = self.food_service

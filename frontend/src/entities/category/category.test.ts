@@ -13,6 +13,7 @@ import {
   toCategoryDetail,
   toCategoryList,
   toCategoryNode,
+  toCategorySceneSync,
   toDeletedCategoryId,
   type CategoryNode,
 } from './model'
@@ -142,6 +143,20 @@ describe('category parsers', () => {
     expect(toCategoryDetail({ ok: true })).toBeNull()
     expect(toDeletedCategoryId({ ok: true, deleted: { id: 4, code: 'x' } })).toBe(4)
     expect(toDeletedCategoryId({ ok: true })).toBeNull()
+  })
+
+  it('reads what a move did to the images below the node', () => {
+    const body = (sceneSync: unknown) => ({ ok: true, category: wire(2, 'dish.pizza', 5), scene_sync: sceneSync })
+    expect(toCategorySceneSync(body({ images: 9, changed: 4, pushed: 3, pending: 1, vector_sync: 'partial', sync_required: true })))
+      .toEqual({ images: 9, changed: 4, pushed: 3, pending: 1, vectorSync: 'partial' })
+    // Nothing could change (any other patch), or no body: nothing to say
+    expect(toCategorySceneSync(body(null))).toBeNull()
+    expect(toCategorySceneSync({ ok: true, category: wire(2, 'dish.pizza', 5) })).toBeNull()
+    expect(toCategorySceneSync({ ok: false, scene_sync: { changed: 1 } })).toBeNull()
+    // Counts never contradict each other; an unknown status falls back on them
+    expect(toCategorySceneSync(body({ images: 1, changed: 2, pushed: 5, pending: 7, vector_sync: 'later' })))
+      .toEqual({ images: 2, changed: 2, pushed: 2, pending: 2, vectorSync: 'partial' })
+    expect(toCategorySceneSync(body({ changed: 'x' }))).toEqual({ images: 0, changed: 0, pushed: 0, pending: 0, vectorSync: 'pushed' })
   })
 })
 
@@ -372,7 +387,7 @@ describe('category api', () => {
       code: 'dish.pizza', parent_id: 1, names: [zh('披萨')], cuisines: [], heating_group_id: null, sort_order: 0, is_active: true,
     }
     await expect(createCategory(createBody)).resolves.toMatchObject({ node: { id: 2, parentId: 1 }, traceId: 'trace-c' })
-    await expect(updateCategory(2, { parent_id: 5 })).resolves.toMatchObject({ node: { parentId: 5 }, traceId: 'trace-u' })
+    await expect(updateCategory(2, { parent_id: 5 })).resolves.toMatchObject({ node: { parentId: 5 }, sceneSync: null, traceId: 'trace-u' })
     await expect(deleteCategory(2)).resolves.toEqual({ deletedId: 2, traceId: 'trace-d' })
 
     const calls = fetchMock.mock.calls.map(([url, init]) => [init.method, url, init.body ? JSON.parse(init.body) : undefined])
@@ -388,8 +403,8 @@ describe('category api', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('not-json', { status: 201, headers: { 'X-Trace-Id': 'trace-x' } })))
     await expect(createCategory({
       code: 'dish', parent_id: null, names: [zh('菜品')], cuisines: [], heating_group_id: null, sort_order: 0, is_active: true,
-    })).resolves.toEqual({ node: null, traceId: 'trace-x' })
-    await expect(updateCategory(1, { sort_order: 1 })).resolves.toEqual({ node: null, traceId: 'trace-x' })
+    })).resolves.toEqual({ node: null, sceneSync: null, traceId: 'trace-x' })
+    await expect(updateCategory(1, { sort_order: 1 })).resolves.toEqual({ node: null, sceneSync: null, traceId: 'trace-x' })
     await expect(deleteCategory(1)).resolves.toEqual({ deletedId: null, traceId: 'trace-x' })
   })
 

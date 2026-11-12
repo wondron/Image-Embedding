@@ -468,6 +468,27 @@ class PgImagesMixin:
         row["scenes"] = codes
         return row
 
+    def get_image_file_urls(self, image_id: UUID | str) -> dict[str, Any] | None:
+        """{original_url, thumb_url, deleted} of a stored image, or of one deleted whose files wait
+        in image_deletions for the cleanup (deleted=True); None when neither knows the id."""
+        self.ensure_schema()
+        from sqlalchemy import text
+
+        try:
+            with self._get_engine().connect() as conn:
+                row = conn.execute(
+                    text(
+                        "SELECT original_url, thumb_url, false AS deleted FROM images WHERE id = CAST(:id AS uuid) "
+                        "UNION ALL "
+                        "SELECT original_url, thumb_url, true FROM image_deletions WHERE image_id = CAST(:id AS uuid) "
+                        "ORDER BY deleted LIMIT 1"
+                    ),
+                    {"id": str(_as_uuid(image_id))},
+                ).mappings().fetchone()
+            return dict(row) if row else None
+        except Exception as exc:
+            raise err.index_postgres_failed(f"get_image_file_urls: {type(exc).__name__}: {exc}") from exc
+
     def get_image_by_uuid(self, image_id: UUID | str) -> dict[str, Any] | None:
         self.ensure_schema()
         from sqlalchemy import text

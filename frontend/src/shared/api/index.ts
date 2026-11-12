@@ -9,4 +9,5 @@ export {
   type JsonResult,
 } from './client'
 export { ApiError, readableApiError, apiErrorFromResponse } from './errors'
+export { ApiBaseContext, useApiBase } from './apiBase'
 export type * from './wire'

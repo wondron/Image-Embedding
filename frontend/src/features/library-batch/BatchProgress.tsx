@@ -1,5 +1,5 @@
 import { Images, LoaderCircle } from 'lucide-react'
-import type { LibraryImageItem } from '../../entities/image'
+import { StoredImage, type LibraryImageItem } from '../../entities/image'
 import { libraryTitle } from '../library-list'
 import { tallyOutcomes } from './runBatch'
 import type { BatchRun } from './useBatchRun'
@@ -10,7 +10,7 @@ const STRIP_SHOWN = 12
 export function SelectionStrip({ items }: { items: readonly LibraryImageItem[] }) {
   return <ul className="lb-strip" aria-label={`选中的 ${items.length} 张图片`}>
     {items.slice(0, STRIP_SHOWN).map(item => <li key={item.id} title={libraryTitle(item)}>
-      {item.imageUrl ? <img src={item.imageUrl} alt="" loading="lazy" /> : <Images size={16} aria-hidden="true" />}
+      <StoredImage id={item.id} url={item.imageUrl} placeholder={<Images size={16} aria-hidden="true" />} />
     </li>)}
     {items.length > STRIP_SHOWN && <li className="lb-strip-more">+{items.length - STRIP_SHOWN}</li>}
   </ul>
@@ -53,7 +53,7 @@ export function BatchProgress({ run, verb }: { run: BatchRun; verb: string }) {
     </p>
     {rows.length > 0 && <ul className="lb-results" aria-label="需要留意的图片">
       {rows.map(({ item, outcome, text }) => <li key={item.id} className={`is-${outcome.status}`}>
-        {item.imageUrl ? <img src={item.imageUrl} alt="" loading="lazy" /> : <span className="lb-thumb-empty"><Images size={14} /></span>}
+        <StoredImage id={item.id} url={item.imageUrl} placeholder={<span className="lb-thumb-empty"><Images size={14} /></span>} />
         <span><strong title={item.id}>{libraryTitle(item)}</strong><small>{outcome.status === 'failed' ? '失败' : outcome.status === 'skipped' ? '跳过' : '备注'}：{text}</small></span>
       </li>)}
     </ul>}
