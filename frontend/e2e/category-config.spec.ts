@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test'
-import { acknowledgeNotice } from './notice'
+import { acknowledgeNotice, expectToast } from './notice'
 
 // Fixtures only: every API request is answered by the in-memory backend below.
 // It follows backend/app/schemas/categories.py closely enough to drive the page.
@@ -169,7 +169,7 @@ test('空库：先建类别域，再在它下面建下级类别', async ({ page 
   await expect(rootDialog.locator('#category-form-zhName')).toHaveValue('菜品')
   await rootDialog.getByRole('button', { name: '创建', exact: true }).click()
   await expect(rootDialog).toBeHidden()
-  await acknowledgeNotice(page, '已创建「菜品」。', 'success')
+  await expectToast(page, '已创建「菜品」。', 'success')
   await expect(nodeButton(page, '菜品', 'dish')).toHaveAttribute('aria-current', 'true')
   expect(backend.writes()[0]).toEqual({
     method: 'POST',
@@ -268,7 +268,7 @@ test('编辑只提交改过的字段；换上级时下级类别一起移动', as
   // A node cannot move under itself or its own subtree: those are not offered.
   await expect(dialog.locator('#category-form-parentId option')).toHaveText(['菜品（dish）', '　面条（dish.noodle）', '食材（ingredient）'])
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
-  await acknowledgeNotice(page, '没有改动，无需保存。', 'info')
+  await expectToast(page, '没有改动，无需保存。', 'info')
   expect(backend.writes()).toEqual([])
 
   await dialog.locator('#category-form-sortOrder').fill('5')
@@ -330,7 +330,7 @@ test('删除：在用的类别说明原因并可改为停用；空类别确认�
   await confirm.getByRole('button', { name: '改为停用' }).click()
   await expect(confirm).toBeHidden()
   expect(backend.writes()).toEqual([{ method: 'PATCH', path: '/api/categories/3', body: { is_active: false } }])
-  await acknowledgeNotice(page, '已停用「面条」。', 'success')
+  await expectToast(page, '已停用「面条」。', 'success')
   await expect(rowOf(page, 3).locator('.ct-col-status')).toHaveText('停用')
 
   await page.getByRole('button', { name: '删除「披萨」' }).click()
@@ -348,7 +348,7 @@ test('删除：在用的类别说明原因并可改为停用；空类别确认�
   await confirm.getByRole('button', { name: '删除', exact: true }).click()
   await expect(confirm).toBeHidden()
   expect(backend.writes()[1]).toEqual({ method: 'DELETE', path: '/api/categories/4', body: undefined })
-  await acknowledgeNotice(page, '已删除「披萨切片」。', 'success')
+  await expectToast(page, '已删除「披萨切片」。', 'success')
   await expect(nodeButton(page, '披萨切片', 'dish.pizza.slice')).toHaveCount(0)
   // The parent is highlighted next, and without children it can now be deleted too.
   await expect(nodeButton(page, '披萨', 'dish.pizza')).toHaveAttribute('aria-current', 'true')

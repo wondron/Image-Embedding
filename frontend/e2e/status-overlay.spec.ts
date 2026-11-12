@@ -1,5 +1,5 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
-import { acknowledgeNotice, noticePopup } from './notice'
+import { acknowledgeNotice, noticePopup, toast } from './notice'
 
 // Fixtures only: every API and remote image request is answered below.
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
@@ -57,26 +57,43 @@ test('错误弹窗一直留到看过为止，给出补救的链接；Esc 关闭�
   await expect(page.locator('dialog.status-overlay')).toHaveCount(1)
 })
 
-test('成功提示自己关闭；鼠标停在上面时先不关', async ({ page }, info) => {
+test('成功提示是不挡操作的轻提示：不抢焦点，自己关闭，鼠标停在上面时先不关', async ({ page }, info) => {
   await mockBackend(page)
   await searchOnce(page)
   const download = page.getByRole('button', { name: '下载图片：番茄' })
   await download.click()
-  const popup = noticePopup(page)
-  await expect(popup).toContainText('已发起图片下载')
-  await expect(popup).toHaveClass(/\bis-success\b/)
-  await expect(page.getByRole('dialog', { name: '操作成功' })).toBeVisible()
-  await screenshot(page, info, 'notice-success')
-  await expect(popup).toHaveCount(0, { timeout: 4000 })  // closes on its own after about 2 s
-  await expect(download).toBeFocused()
+  const item = toast(page, '已发起图片下载')
+  await expect(item).toBeVisible()
+  await expect(item).toHaveClass(/\bis-success\b/)
+  await expect(noticePopup(page)).toHaveCount(0)  // no popup, nothing modal
+  expect(await item.evaluate(element => element.contains(document.activeElement))).toBe(false)  // it never takes the focus
+  await screenshot(page, info, 'notice-toast')
+  // The page stays usable while it shows
+  await page.getByRole('button', { name: '列表展示结果', exact: true }).click()
+  await expect(page.locator('.result-table tbody tr')).toHaveCount(1)
+  await expect(item).toHaveCount(0, { timeout: 5000 })  // closes on its own
 
-  await download.click()
-  await expect(popup).toContainText('已发起图片下载')
-  await popup.locator('.so-panel').hover()
-  await page.waitForTimeout(2600)
-  await expect(popup).toBeVisible()  // held while the pointer is on it
-  await page.mouse.move(4, 4)
-  await expect(popup).toHaveCount(0, { timeout: 4000 })
+  await page.getByRole('button', { name: '下载图片：番茄' }).click()
+  await item.hover()
+  await page.waitForTimeout(3200)
+  await expect(item).toBeVisible()  // held while the pointer is on it
+  await item.getByRole('button', { name: '关闭提示' }).click()
+  await expect(item).toHaveCount(0)
+})
+
+test('对话框打开时轻提示显示在它上面，可以关掉，对话框不受影响', async ({ page }) => {
+  await mockBackend(page)
+  await searchOnce(page)
+  await page.getByRole('button', { name: '查看图片详情：番茄' }).click()
+  const detail = page.getByRole('dialog', { name: '图片详情' })
+  await detail.getByRole('button', { name: '下载图片', exact: true }).click()
+  // Inside the open dialog: above its backdrop and usable, not inert behind it
+  const item = detail.locator('.so-toast').filter({ hasText: '已发起图片下载' })
+  await expect(item).toBeVisible()
+  await expect(item).toBeInViewport()
+  await item.getByRole('button', { name: '关闭提示' }).click()
+  await expect(item).toHaveCount(0)
+  await expect(detail).toBeVisible()
 })
 
 test('上传时不合格的图片逐条列在弹窗里，点空白处关闭', async ({ page }, info) => {

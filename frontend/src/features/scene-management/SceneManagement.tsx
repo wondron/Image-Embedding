@@ -48,8 +48,7 @@ export function SceneManagement({ apiBase }: { apiBase: string }) {
       const reason = sceneError(e)
       setCodeTaken(reason.includes('SCENE_CODE_EXISTS') || (e instanceof ApiError && e.code === 'SCENE_CODE_EXISTS'))
       if (uncertainWrite(e)) {
-        notify.warn(`${reason}
-写入结果不确定，已先刷新目录对账。不会自动重放，请核对后再决定手动操作。`, { title: '写入结果不确定' })
+        notify.warn(`${reason}\n写入结果不确定，已先刷新目录对账。不会自动重放，请核对后再决定手动操作。`, { title: '写入结果不确定' })
         await refreshSceneCatalog(apiBase, true)
       } else notify.error(reason)
       return false

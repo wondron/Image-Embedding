@@ -1,13 +1,20 @@
 /*
- * The app's popup (StatusOverlay): a frosted panel with a status bar on its left edge and a soft
- * glow in its corner, tinted by type. A modal <dialog>, so it stacks above any open dialog.
+ * The app's feedback (StatusOverlay). Warnings and errors: a frosted modal panel with a status bar on
+ * its left edge and a soft glow in its corner, above any open dialog. Success and info: light toasts
+ * at the top that never block. Both tinted by type.
  */
-.status-overlay {
+.status-overlay, .so-toast {
   --so-accent: #3b82f6;
   --so-accent-2: #60a5fa;
   --so-ink: #1d4ed8;
   --so-soft: rgba(59, 130, 246, .12);
   --so-glow: rgba(59, 130, 246, .24);
+}
+.is-success:is(.status-overlay, .so-toast) { --so-accent: #10b981; --so-accent-2: #34d399; --so-ink: #0f766e; --so-soft: rgba(16, 185, 129, .14); --so-glow: rgba(16, 185, 129, .28); }
+.is-warn:is(.status-overlay, .so-toast) { --so-accent: #f59e0b; --so-accent-2: #fbbf24; --so-ink: #b45309; --so-soft: rgba(245, 158, 11, .15); --so-glow: rgba(245, 158, 11, .22); }
+.is-error:is(.status-overlay, .so-toast) { --so-accent: #ef4444; --so-accent-2: #fb7185; --so-ink: #b42318; --so-soft: rgba(239, 68, 68, .12); --so-glow: rgba(239, 68, 68, .22); }
+
+.status-overlay {
   width: min(460px, calc(100vw - 32px));
   max-height: min(80dvh, 640px);
   padding: 0;
@@ -20,9 +27,6 @@
 }
 .status-overlay[open] { display: flex; animation: so-panel-in 190ms cubic-bezier(.2, .9, .2, 1); }
 .status-overlay::backdrop { background: rgba(15, 23, 42, .26); backdrop-filter: blur(6px); animation: so-mask-in 160ms ease-out; }
-.status-overlay.is-success { --so-accent: #10b981; --so-accent-2: #34d399; --so-ink: #0f766e; --so-soft: rgba(16, 185, 129, .14); --so-glow: rgba(16, 185, 129, .28); }
-.status-overlay.is-warn { --so-accent: #f59e0b; --so-accent-2: #fbbf24; --so-ink: #b45309; --so-soft: rgba(245, 158, 11, .15); --so-glow: rgba(245, 158, 11, .22); }
-.status-overlay.is-error { --so-accent: #ef4444; --so-accent-2: #fb7185; --so-ink: #b42318; --so-soft: rgba(239, 68, 68, .12); --so-glow: rgba(239, 68, 68, .22); }
 
 .so-panel { position: relative; display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
 .so-fx { position: absolute; inset: 0; pointer-events: none; overflow: hidden; border-radius: inherit; }
@@ -66,6 +70,51 @@
 .so-countdown { position: absolute; left: 6px; right: 0; bottom: 0; height: 3px; background: var(--so-accent); opacity: .55; transform-origin: left center; animation: so-countdown var(--so-duration, 2000ms) linear forwards; }
 .so-countdown.is-paused { animation-play-state: paused; }
 
+/* Toasts: top centre, newest last; only the toasts take the pointer, the gaps never block the page */
+.so-toasts {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  z-index: 2147483000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: min(440px, calc(100vw - 24px));
+  margin: 0;
+  padding: 0;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.so-toast {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  width: 100%;
+  padding: 10px 8px 11px 16px;
+  overflow: hidden;
+  border: 1px solid rgba(22, 26, 29, .08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .97);
+  color: #2b3544;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, .14), 0 3px 8px rgba(15, 23, 42, .06);
+  pointer-events: auto;
+  animation: so-toast-in 180ms cubic-bezier(.2, .9, .2, 1);
+}
+.so-toast::before { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 4px; background: linear-gradient(180deg, var(--so-accent-2), var(--so-accent)); }
+.so-toast-icon { display: grid; place-items: center; flex-shrink: 0; width: 22px; height: 22px; color: var(--so-ink); }
+.so-toast-text { display: flex; flex: 1; flex-direction: column; min-width: 0; margin: 1px 0 0; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.so-toast-text strong { color: #161a1d; font-weight: 700; }
+.so-toast-text small { color: #64748b; font-size: 12px; }
+.so-toast-action { display: inline-flex; flex-shrink: 0; align-items: center; gap: 4px; height: 26px; padding: 0 8px; border-radius: 7px; background: var(--so-soft); color: var(--so-ink); font-size: 13px; font-weight: 600; text-decoration: none; cursor: pointer; }
+.so-toast-action:hover { filter: brightness(.96); color: var(--so-ink); }
+.so-toast-close { display: grid; place-items: center; flex-shrink: 0; width: 24px; height: 24px; border-radius: 50%; color: #94a3b8; }
+.so-toast-close:hover { background: rgba(15, 23, 42, .06); color: #334155; }
+.so-toast .so-countdown { left: 4px; height: 2px; }
+.so-toast :focus-visible { outline: 2px solid #85a8e2; outline-offset: 2px; }
+
+@keyframes so-toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
 @keyframes so-panel-in { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: none; } }
 @keyframes so-mask-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes so-countdown { from { transform: scaleX(1); } to { transform: scaleX(0); } }
@@ -78,6 +127,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .status-overlay[open], .status-overlay::backdrop { animation: none; }
+  .status-overlay[open], .status-overlay::backdrop, .so-toast { animation: none; }
   .so-countdown { display: none; }
 }

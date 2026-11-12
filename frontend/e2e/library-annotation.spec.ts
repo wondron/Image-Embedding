@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test'
-import { acknowledgeNotice } from './notice'
+import { acknowledgeNotice, expectToast } from './notice'
 
 // Fixtures only: every API request is answered below; nothing reaches a real backend.
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
@@ -202,7 +202,7 @@ test('图库：类别与标注状态筛选取自数据库；单张图片可查�
   await screenshot(page, info, 'library-editor')
   const detailReads = calls.details
   await dialog.getByRole('button', { name: '按数据库同步到向量库' }).click()
-  await acknowledgeNotice(page, '已同步，向量库和数据库一致了。', 'success')
+  await expectToast(page, '已同步，向量库和数据库一致了。', 'success')
   await expect(dialog.locator('.ie-vector')).toContainText('已同步')
   expect(calls.pushes).toBe(1)
   expect(calls.details).toBe(detailReads)  // the push answered the new state itself
@@ -225,7 +225,7 @@ test('图库：类别与标注状态筛选取自数据库；单张图片可查�
   const listsBefore = calls.list.length
   const readsBeforeSave = calls.details
   await dialog.getByRole('button', { name: '保存修改' }).click()
-  await acknowledgeNotice(page, '已保存，向量库已同步，检索已生效。', 'success')
+  await expectToast(page, '已保存，向量库已同步，检索已生效。', 'success')
   expect(calls.patches).toEqual([{ category_id: 4, label_status: 'verified', tags: ['带骨', '红烧'], food_state: 'cooked', total_mass_g: 300 }])
   await expect(dialog.locator('.ie-vector')).toContainText('已同步')
   expect(calls.details).toBe(readsBeforeSave)  // the PATCH answered the vector state
@@ -237,7 +237,7 @@ test('图库：类别与标注状态筛选取自数据库；单张图片可查�
   await dialog.getByRole('button', { name: '删除图片' }).click()
   await dialog.getByRole('button', { name: '确认删除' }).click()
   await expect(dialog).toBeHidden()
-  await acknowledgeNotice(page, '已删除图片，向量和原图、缩略图已清理。', 'success')
+  await expectToast(page, '已删除图片，向量和原图、缩略图已清理。', 'success')
   expect(calls.deletes).toEqual([STEAK_IMAGE])
   await expect(page.locator('.mg-library-card')).toHaveCount(1)
 })
@@ -282,7 +282,7 @@ test('图库：没有向量的图片用存储里的原图重新生成，不用�
   await expect(vector.getByRole('button', { name: /或去「上传与导入」重新上传/ })).toBeVisible()  // the fallback stays offered
   const reads = calls.details
   await vector.getByRole('button', { name: '用存储里的原图重新生成向量' }).click()
-  await acknowledgeNotice(page, '已用原图重新生成向量，检索可以查到这张图了。', 'success')
+  await expectToast(page, '已用原图重新生成向量，检索可以查到这张图了。', 'success')
   await expect(vector).toContainText('已同步')
   expect(calls.reembeds).toBe(1)
   expect(calls.details).toBe(reads)  // the answer carried the new state
@@ -333,7 +333,7 @@ test('图库：点卡片上的类别、标签直接筛选；「未标注」和�
   await filters.getByRole('radiogroup', { name: '标注状态' }).getByRole('radio', { name: '未标注' }).check()
   await expect.poll(() => calls.list.at(-1)).toMatchObject({ label_status: 'unlabeled', tag: '带骨' })
   expect(calls.list.at(-1)).not.toHaveProperty('category_id')
-  await acknowledgeNotice(page, '已清除类别筛选：「未标注」的图片没有类别。', 'info')
+  await expectToast(page, '已清除类别筛选：「未标注」的图片没有类别。', 'info')
 
   await active.getByRole('button', { name: '清除标签筛选' }).click()
   await expect.poll(() => calls.list.at(-1)).not.toHaveProperty('tag')
