@@ -121,7 +121,7 @@ class CategoryEndpointTests(unittest.TestCase):
         self.assertEqual(set(body), {"ok", "categories", "heating_groups", "root_codes"})  # trace id: header only
         self.assertTrue(response.headers["X-Trace-Id"])
         self.assertEqual(body["heating_groups"], [GRILL])
-        self.assertEqual(body["root_codes"], ["ingredient", "dish", "dessert", "beverage", "mixed"])
+        self.assertEqual(body["root_codes"], ["ingredient", "dish", "dessert", "beverage"])
         self.assertEqual(body["categories"], [{
             "id": 1, "code": "dish", "parent_id": None, "path": "1", "name": "披萨", "names": [ZH],
             "cuisines": [], "heating_group": None, "sort_order": 0, "is_active": True,

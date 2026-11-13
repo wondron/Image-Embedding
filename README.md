@@ -19,7 +19,7 @@ npm.cmd run dev
 
 Global 搜索阶段直接保留上游 `image_url`，不下载或验证候选图片。开启 `GLOBAL_FILTER.switch` 后，embedding 计算时才通过 `image_utils.resolve_image_bgr(item)` 获取 `(可用 URL, BGR 图像)`，按原图、large、medium、small、其他缩略图依次尝试；全部失败返回 `(None, None)`，工具不修改输入 item。关闭过滤时由前端在加载或下载图片时回退。
 
-目录选择需要支持该功能的 Chrome、Edge 等浏览器及 HTTPS 或本机 localhost 页面，页面只显示目录名称，不显示完整本地路径；普通 HTTP 局域网访问可使用 ZIP。「食物管理」就是类别树（`/api/categories`，原「类别配置」页已并入），上传标注、图库筛选和场景规则都从这里选类别。
+目录选择需要支持该功能的 Chrome、Edge 等浏览器及 HTTPS 或本机 localhost 页面，页面只显示目录名称，不显示完整本地路径；普通 HTTP 局域网访问可使用 ZIP。「食材管理」就是类别树（`/api/categories`，原「类别配置」页已并入），上传标注、图库筛选和场景规则都从这里选类别。
 
 本次新增 `GET /api/images/download?url=…`，用于第三方图片跨域读取失败时的下载回退。接口仅访问公网 HTTP(S) 图片、80/443 端口，逐次校验重定向，限制单图 15 MB 并验证图片格式。**需要重启包含本次代码的后端；Docker 部署需使用重新构建或已包含新代码的镜像。** 该接口不提供图片入库功能。
 

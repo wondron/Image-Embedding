@@ -42,8 +42,8 @@ const navigation = [
   { key: 'library' as const, name: '图片数据', icon: Images, description: '管理你的食材图库' },
   { key: 'import' as const, name: '上传与导入', icon: UploadCloud, description: '整理图片，准备入库' },
   { key: 'tasks' as const, name: '入库任务', icon: Workflow, description: '任务进度与失败记录' },
-  // The category tree: every food item is a category under one of the five domains (?view=categories)
-  { key: 'categories' as const, name: '食物管理', icon: Tags, description: '类别树：名称、别名与属性' },
+  // The category tree: every food item is a category under one of the four domains (?view=categories)
+  { key: 'categories' as const, name: '食材管理', icon: Tags, description: '类别树：名称、别名与属性' },
   { key: 'scenes' as const, name: '场景管理', icon: Layers3, description: '目录、标签、规则与全量同步' },
   { key: 'enums' as const, name: '枚举配置', icon: ListTree, description: '查看取值并追加' },
   // Embedding model versions: register the configured model, build its vectors, switch, roll back (?view=models)
@@ -454,7 +454,7 @@ export default function App() {
     </Dialog>}
     {downloadItems && <DownloadDialog items={downloadItems} apiBase={apiBase} onClose={() => setDownloadItems(null)} />}
     {settingsOpen && <Dialog title="搜索服务连接" onClose={() => setSettingsOpen(false)}><div className="settings-content"><p>连接现有的图像搜索服务。留空时使用当前站点的接口。</p><label htmlFor="api-base">服务地址</label><input className="input" id="api-base" type="url" placeholder="默认使用站点 /api" value={apiDraft} onChange={event => setApiDraft(event.target.value)} /><small>例如 http://127.0.0.1:8320，不包含 /api 路径。跨域连接需服务端允许访问。</small>{apiDraft.trim() && !safeHttpUrl(apiDraft.trim()) && <p className="inline-error">请输入 HTTP 或 HTTPS 地址。</p>}<div className="connection-info"><span className={`status-dot ${connection}`} />{connection === 'online' ? '接口可连接' : connection === 'checking' ? '正在检查连接…' : '当前未连接，请检查服务地址与后端运行状态'}<button className="text-button" onClick={() => void checkConnection()}>重新检查</button></div><div className="dialog-actions"><button className="btn btn-secondary" onClick={() => setSettingsOpen(false)}>取消</button><button className="btn btn-primary" disabled={Boolean(apiDraft.trim() && !safeHttpUrl(apiDraft.trim()))} onClick={saveSettings}><Check size={16} />保存连接</button></div></div></Dialog>}
-    {helpOpen && <Dialog title="开始使用食图" onClose={() => setHelpOpen(false)}><div className="help-content"><div><Search size={21} /><section><h3>以图搜图</h3><p>上传图片或输入可公开访问的图片直链，在自建库中检索。默认场景为「通用」（general）；可切换场景与拒识阈值后点「开始搜索」。切到「现网 Global」或批量搜索时，可设置返回数量（1–20 条）。空库时请先去「上传与导入」入库（PG + S3），不以 FlyB 外搜兜底为完成标准。</p></section></div><div><ArrowDownToLine size={21} /><section><h3>查看与下载</h3><p>点击结果打开详情，勾选图片后可「批量下载」。一体机场景下结果会展示加热组与食物状态（缺字段显示「—」）。</p></section></div><div><FolderOpen size={21} /><section><h3>图库与入库</h3><p>图库按场景筛选（默认 general），缩略图使用 S3 https 地址。入库时可设置类别（取自「食物管理」的类别树）、标签、描述、食物标注、来源与许可；场景按所选类别的规则预览，和规则不同的勾选入库后写成人工纳入 / 排除。单张图片可单独标注。</p></section></div><div className="help-note">相似度仅在服务返回分数时展示；类别优先展示 scene_label，否则回落通用类别。</div></div></Dialog>}
+    {helpOpen && <Dialog title="开始使用食图" onClose={() => setHelpOpen(false)}><div className="help-content"><div><Search size={21} /><section><h3>以图搜图</h3><p>上传图片或输入可公开访问的图片直链，在自建库中检索。默认场景为「通用」（general）；可切换场景与拒识阈值后点「开始搜索」。切到「现网 Global」或批量搜索时，可设置返回数量（1–20 条）。空库时请先去「上传与导入」入库（PG + S3），不以 FlyB 外搜兜底为完成标准。</p></section></div><div><ArrowDownToLine size={21} /><section><h3>查看与下载</h3><p>点击结果打开详情，勾选图片后可「批量下载」。一体机场景下结果会展示加热组与食物状态（缺字段显示「—」）。</p></section></div><div><FolderOpen size={21} /><section><h3>图库与入库</h3><p>图库按场景筛选（默认 general），缩略图使用 S3 https 地址。入库时可设置类别（取自「食材管理」的类别树）、标签、描述、食物标注、来源与许可；场景按所选类别的规则预览，和规则不同的勾选入库后写成人工纳入 / 排除。单张图片可单独标注。</p></section></div><div className="help-note">相似度仅在服务返回分数时展示；类别优先展示 scene_label，否则回落通用类别。</div></div></Dialog>}
     {/* The one popup every page signals through notify() */}
     <StatusOverlay />
   </div></EnumCatalogProvider></SceneApiContext.Provider>

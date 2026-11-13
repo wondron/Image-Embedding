@@ -119,7 +119,7 @@ export interface CategoryListResponseWire {
   ok: true
   categories: CategoryItemWire[]
   heating_groups: HeatingGroupWire[]
-  /** The codes a root may use (the five domains). */
+  /** The codes a root may use (the four domains). */
   root_codes: string[]
 }
 

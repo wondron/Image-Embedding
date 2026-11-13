@@ -118,7 +118,7 @@ erDiagram
 
 ### 2.2 `categories`
 
-类别树节点。根节点是五个域：食材、菜品、甜点烘焙、饮品、混合（最多只有这五个根节点）；形态大类是菜品下的一层节点。层级深度、是否叶子、所属的域不单独存，查询时由 `path` 算出。`path` 由数据库维护（初始迁移启用 ltree 扩展，并用触发器在插入或移动节点时重算整棵子树，不手动写）。
+类别树节点。根节点是四个域：食材、菜品、甜点烘焙、饮品；形态大类是菜品下的一层节点。层级深度、是否叶子、所属的域不单独存，查询时由 `path` 算出。`path` 由数据库维护（初始迁移启用 ltree 扩展，并用触发器在插入或移动节点时重算整棵子树，不手动写）。
 
 混入 `created_at`、`updated_at`。
 
@@ -135,7 +135,7 @@ erDiagram
 | `created_at` | 时间戳 | 创建时间 |
 | `updated_at` | 时间戳 | 更新时间 |
 
-五个根节点（域）的编码约定（根节点最多只有这五个，编码唯一）：
+四个根节点（域）的编码约定：
 
 | 编码 | 含义 |
 | --- | --- |
@@ -143,7 +143,6 @@ erDiagram
 | `dish` | 菜品 |
 | `dessert` | 甜点烘焙 |
 | `beverage` | 饮品 |
-| `mixed` | 混合：多食材、多菜品、饮品等混合在一起的场景 |
 
 ### 2.3 `category_names`
 
@@ -309,7 +308,7 @@ erDiagram
 | `model_status` | `embedding_models.status` | 系统，CHECK | `building` 正在写入向量；`ready` 已补齐，可以切换；`current` 当前使用；`retired` 已下线 |
 | `review_status` | `external_candidates.review_status` | 系统，CHECK | `pending`；`accepted`；`rejected` |
 
-`category_domain`（类别树的五个根节点：食材、菜品、甜点烘焙、饮品、混合）也在文件里，不对应数据库字段。
+`category_domain`（类别树的四个根节点：食材、菜品、甜点烘焙、饮品）也在文件里，不对应数据库字段。
 
 ---
 

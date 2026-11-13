@@ -44,7 +44,7 @@ def list_categories(request: Request) -> Any:
     status_code=201,
     summary="Create a category",
     description=(
-        "新建一个节点和它的名称，path 由数据库生成。parent_id 为空时是根节点，编码只能是五个域之一。"
+        "新建一个节点和它的名称，path 由数据库生成。parent_id 为空时是根节点，编码只能是四个域之一。"
         "编码已被占用返回 CATEGORY_CODE_EXISTS（409）；父节点或加热组不存在返回 VALIDATION_ERROR（422）。"
     ),
     responses=_CONFLICT,
