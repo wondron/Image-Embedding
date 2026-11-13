@@ -55,7 +55,7 @@ Global 搜索阶段直接保留上游 `image_url`，不下载或验证候选图�
 
 模型权重随镜像发布（不挂载目录），所以换模型时镜像里要同时带新旧两个版本：
 
-1. 把新导出的模型打包成独立目录：`cd backend && python scripts/package_embedding_model.py /path/to/导出的.onnx`，得到 `config/model/embedding/embeddingcls-<hash>/`（.onnx 和外部权重文件原样放在里面，目录名是权重内容的 hash），脚本打印要填的 `EMBEDDING_CONFIG.model_path`。旧版本的目录保留在镜像里。
+1. 把新导出的模型打包成独立目录：`cd backend && python scripts/package_embedding_model.py /path/to/导出的.onnx`，得到 `config/model/embedding/embeddingcls-<hash>/`（.onnx 和外部权重文件原样放在里面，目录名是权重内容的 hash），脚本打印要填的 `EMBEDDING_CONFIG.model_path`。旧版本的目录保留在镜像里。现在在用的模型已经按这个规则放在 `config/model/embedding/embeddingcls-7c11052d2dc4/`（用 `--move` 从原来的 `config/model/dino/` 搬过来，只留一份；`dino/` 里仍是分割模型）。
 2. 构建镜像、把 `EMBEDDING_CONFIG.model_path` 改成新目录、部署。predict 立即用新模型；自建库检索继续用旧版本自己的权重（从镜像里旧目录加载）查旧向量库，不会拿新模型去查旧向量。
 3. 前端「模型版本」页（或 `/api/embedding-models`）：登记为新版本（新建它自己的 collection）→ 生成向量（服务端后台从存储里的原图生成，可停止、续做）→ 切换（不用重启；切换时入库请求排队几秒，生成之后新入库的图片会先补上；原版本保留，可以切回，切回前它缺的图片也能先补齐）。
 4. 确定不再回滚后「下线」旧版本（删除它的 collection）；下一次构建镜像才能去掉旧目录。页面上「镜像里没有它的权重」的版本不能再切换过去。

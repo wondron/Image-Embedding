@@ -14,8 +14,12 @@ Changing the model with no volume mounted (both versions travel in the image):
   4. after retiring the old version, the next image may leave its folder out.
 Search keeps using the old version's weights from its own folder until the switch.
 
+--move moves the files instead of copying them (one copy of the weights, e.g. to put the model
+already in use into this layout); the hashes are checked again at the new place.
+
 Usage (from backend/):
   python scripts/package_embedding_model.py /path/to/export/multitask_cls.onnx
+  python scripts/package_embedding_model.py config/model/dino/multitask_cls.onnx --move
   python scripts/package_embedding_model.py model.onnx --dest config/model/embedding --dry-run
 """
 
@@ -36,10 +40,12 @@ PREFIX = "embeddingcls-"
 HASH_CHARS = 12
 
 
-def package(source: Path, dest_root: Path, *, dry_run: bool = False) -> Path:
-    """Copy the model's files into dest_root/embeddingcls-<hash>/; returns the .onnx there.
-    An existing folder of that name must hold the same files (then nothing is copied)."""
+def package(source: Path, dest_root: Path, *, dry_run: bool = False, move: bool = False) -> Path:
+    """Copy (or move) the model's files into dest_root/embeddingcls-<hash>/; returns the .onnx
+    there. An existing folder of that name must hold the same files (then nothing is copied;
+    with move, the source files are removed so one copy is left)."""
     files = model_files(str(source))
+    want = {f["name"]: f["sha256"] for f in files}
     artifact = artifact_hash(files)
     folder = dest_root / f"{PREFIX}{artifact[:HASH_CHARS]}"
     target = folder / source.name
@@ -48,23 +54,37 @@ def package(source: Path, dest_root: Path, *, dry_run: bool = False) -> Path:
     print(f"folder       {folder}")
     if folder.exists():
         have = {f["name"]: f["sha256"] for f in model_files(str(target))} if target.exists() else {}
-        want = {f["name"]: f["sha256"] for f in files}
         if have != want:
             raise SystemExit(f"{folder} exists with other files; remove it or check the export")
-        print("already packaged: nothing copied")
+        if move and not dry_run and source.resolve() != target.resolve():
+            for entry in files:
+                os.remove(source.parent / entry["name"])
+            print("already packaged: the source files were removed (one copy left)")
+        else:
+            print("already packaged: nothing copied")
         return target
     if dry_run:
-        print("dry run: nothing copied")
+        print(f"dry run: nothing {'moved' if move else 'copied'}")
         return target
     tmp = folder.with_name(folder.name + ".partial")
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
-    for entry in files:
-        shutil.copy2(source.parent / entry["name"], tmp / entry["name"])
-    copied = {f["name"]: f["sha256"] for f in model_files(str(tmp / source.name))}
-    if copied != {f["name"]: f["sha256"] for f in files}:
+    moved: list[str] = []
+    try:
+        for entry in files:
+            if move:
+                os.replace(source.parent / entry["name"], tmp / entry["name"])
+                moved.append(entry["name"])
+            else:
+                shutil.copy2(source.parent / entry["name"], tmp / entry["name"])
+        placed = {f["name"]: f["sha256"] for f in model_files(str(tmp / source.name))}
+        if placed != want:
+            raise SystemExit(f"the {'moved' if move else 'copied'} files do not match the source; nothing was packaged")
+    except BaseException:
+        for name in moved:  # put moved files back where they were
+            os.replace(tmp / name, source.parent / name)
         shutil.rmtree(tmp, ignore_errors=True)
-        raise SystemExit("the copy does not match the source; nothing was packaged")
+        raise
     os.replace(tmp, folder)
     return target
 
@@ -74,10 +94,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("onnx", type=Path, help="the exported .onnx (its external data next to it)")
     parser.add_argument("--dest", type=Path, default=BACKEND_ROOT / "config/model/embedding", help="where the version folders live")
     parser.add_argument("--dry-run", action="store_true", help="hash and print, copy nothing")
+    parser.add_argument("--move", action="store_true", help="move the files instead of copying them (one copy left)")
     args = parser.parse_args(argv)
     if not args.onnx.is_file():
         parser.error(f"{args.onnx} is not a file")
-    target = package(args.onnx.resolve(), args.dest.resolve(), dry_run=args.dry_run)
+    target = package(args.onnx.resolve(), args.dest.resolve(), dry_run=args.dry_run, move=args.move)
     try:
         shown = target.relative_to(BACKEND_ROOT).as_posix()
     except ValueError:

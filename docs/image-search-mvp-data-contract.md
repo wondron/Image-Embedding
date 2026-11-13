@@ -2,7 +2,7 @@
 
 > **状态**：契约终稿（文档 only；含 scenes / embedding_space_id / 图库 list；不改业务代码、不 commit）  
 > **仓**：`D:\python\Image-Embedding`  
-> **权重（权威）**：`backend/config/model/dino/multitask_cls.onnx`（`EMBEDDING_CONFIG.output_name=cls_emb`，L2 归一化）  
+> **权重（权威）**：`backend/config/model/embedding/embeddingcls-7c11052d2dc4/multitask_cls.onnx`（`EMBEDDING_CONFIG.output_name=cls_emb`，L2 归一化）  
 > **不改语义**：自建 embed → Qdrant → MySQL 为主路径；**仅当 scene=normal（或缺省）且自建 top-k 为空**才兜底 FlyB。  
 > **编码**：UTF-8（无 BOM）  
 > **范围**：本地 Docker Compose（Qdrant + MySQL）；不 push；实现方不自测验收、不 commit（PM 测 PASS 后统一 commit）
@@ -52,7 +52,7 @@
 
 **已锁定**：`VECTOR_DIM = 1024`。
 
-算法实测确认：`backend/config/model/dino/multitask_cls.onnx` → 输出 `cls_emb` → L2 归一化后形状 `(1024,)`；distance=**Cosine**（与 L2 归一化点积等价）。**禁止**换 dinov3_machine 预训练。后端配置建议键：`QDRANT_CONFIG.vector_dim: 1024`。
+算法实测确认：`backend/config/model/embedding/embeddingcls-7c11052d2dc4/multitask_cls.onnx` → 输出 `cls_emb` → L2 归一化后形状 `(1024,)`；distance=**Cosine**（与 L2 归一化点积等价）。**禁止**换 dinov3_machine 预训练。后端配置建议键：`QDRANT_CONFIG.vector_dim: 1024`。
 
 **运行时校验（后端必须实现）**：
 
@@ -375,7 +375,7 @@ MVP 聚合检查（**不**替代现有 `healthz`/`readyz`；二者可继续给�
   "ts": "2026-10-27T10:00:00",
   "components": {
     "api": { "ok": true },
-    "embedding": { "ok": true, "model_path": "config/model/dino/multitask_cls.onnx", "vector_dim": 1024, "embedding_space_id": "es_a1b2c3d4e5f6" },
+    "embedding": { "ok": true, "model_path": "config/model/embedding/embeddingcls-7c11052d2dc4/multitask_cls.onnx", "vector_dim": 1024, "embedding_space_id": "es_a1b2c3d4e5f6" },
     "qdrant": { "ok": true, "collection": "image_embeddings", "points_count": 0, "embedding_space_id": "es_a1b2c3d4e5f6" },
     "postgres": { "ok": true },
     "flyb": { "ok": true, "optional": true }

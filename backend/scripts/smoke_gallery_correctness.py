@@ -72,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--qdrant-url", default="http://127.0.0.1:6333", help='":memory:" = in-process')
     parser.add_argument("--collection", default="image_embeddings_smoke")
     parser.add_argument("--score-threshold", type=float, default=0.55)
-    parser.add_argument("--model-path", default="config/model/dino/multitask_cls.onnx")
+    parser.add_argument("--model-path", default="config/model/embedding/embeddingcls-7c11052d2dc4/multitask_cls.onnx")
     parser.add_argument("--cpu", action="store_true", help="force CPU inference")
     args = parser.parse_args(argv)
 
