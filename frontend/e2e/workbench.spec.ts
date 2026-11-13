@@ -501,7 +501,7 @@ test('390px 窄屏搜索与管理页面不横向溢出', async ({ page }, info) 
   await expect(page.locator('.result-table tbody tr')).toHaveCount(12)
   await noHorizontalOverflow(page)
   await screenshot(page, info, 'mobile-list')
-  for (const name of ['图片数据', '上传与导入', '入库任务', '食材管理']) {
+  for (const name of ['图片数据', '上传与导入', '入库任务', '食物管理']) {
     await navigate(page, name)
     await noHorizontalOverflow(page)
   }

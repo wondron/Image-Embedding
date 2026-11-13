@@ -197,7 +197,7 @@ export function CategoryNavigator({ tree, loading, error, onRetry, value, onChan
       ? '没有匹配的类别'
       : tree && tree.byId.size > 0
         ? '没有可显示的类别：取消「隐藏没有图片的」或勾选「显示停用的」试试'
-        : '还没有类别，可在「食材管理」里新建'
+        : '还没有类别，可在「食物管理」里新建'
 
   return <section className="lf-category" aria-labelledby={`${id}-title`}>
     <div className="lf-category-head">

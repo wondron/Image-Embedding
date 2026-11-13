@@ -50,13 +50,14 @@ food_processing:
 
 category_domain:
   label: 类别域
-  description: 类别树的四个根节点
+  description: 类别树的五个根节点（根节点最多只有这五个）
   editable: false
   values:
   - {value: ingredient, label: 食材}
   - {value: dish, label: 菜品}
   - {value: dessert, label: 甜点烘焙}
   - {value: beverage, label: 饮品}
+  - {value: mixed, label: 混合, description: 多食材、多菜品、饮品等混合在一起的场景}
 
 name_kind:
   label: 名称种类

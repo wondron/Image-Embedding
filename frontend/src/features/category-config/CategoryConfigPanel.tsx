@@ -57,9 +57,9 @@ function ancestorIds(nodes: readonly CategoryNode[], id: number): number[] {
 }
 
 /**
- * 食材管理: the category tree (categories + category_names) as one table, the way the other
+ * 食物管理: the category tree (categories + category_names) as one table, the way the other
  * management pages list their data. Every food item is a node of this tree, under one of the
- * four domains; uploads, the gallery and scene rules pick from it.
+ * five domains; uploads, the gallery and scene rules pick from it.
  */
 export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
   const { catalog } = useEnumCatalog()
@@ -372,7 +372,7 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
       {loadedOnce && nodes.length === 0 && !listFailure && <EmptyState
         icon={FolderTree}
         title="还没有类别"
-        description="先建立类别域（食材、菜品、甜点烘焙、饮品），再在它们下面逐级添加食材类别。"
+        description="先建立类别域（食材、菜品、甜点烘焙、饮品、混合），再在它们下面逐级添加类别。"
       >
         <button type="button" className="mg-btn mg-secondary" onClick={openCreate}><Plus size={16} />新建类别域</button>
       </EmptyState>}
@@ -402,7 +402,7 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
       </div>}
     </section>
 
-    <div className="mg-info"><AlertTriangle size={17} /><p>这里的类别就是上传标注、图库筛选和场景规则里选用的食材类别。移动类别或修改菜系后，标在它和下级类别上的图片会随即重算场景归属，并同步到向量库。只有没有下级类别、图片和场景规则引用的类别才能删除，仍在使用的可以改为停用；加热组不在本页管理。</p></div>
+    <div className="mg-info"><AlertTriangle size={17} /><p>这里的类别就是上传标注、图库筛选和场景规则里选用的类别。移动类别或修改菜系后，标在它和下级类别上的图片会随即重算场景归属，并同步到向量库。只有没有下级类别、图片和场景规则引用的类别才能删除，仍在使用的可以改为停用；加热组不在本页管理。</p></div>
 
     {editor && <CategoryEditorDialog
       target={editor}

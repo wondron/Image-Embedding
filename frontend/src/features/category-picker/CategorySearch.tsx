@@ -166,7 +166,7 @@ export function CategorySearch({
         <span>{entry.label}</span>
         {entry.code && <small>{entry.path ? `${entry.path} · ` : ''}<code>{entry.code}</code></small>}
       </li>)}
-      {!matches.length && !unavailable && <li className="cp-empty" role="presentation">{options.some(option => option.isActive) ? '没有匹配的启用类别' : '还没有启用的类别，可在「食材管理」里新建'}</li>}
+      {!matches.length && !unavailable && <li className="cp-empty" role="presentation">{options.some(option => option.isActive) ? '没有匹配的启用类别' : '还没有启用的类别，可在「食物管理」里新建'}</li>}
       {matches.length > SHOWN && <li className="cp-more" role="presentation">还有 {matches.length - SHOWN} 个，继续输入以缩小范围</li>}
     </ul>}
   </div>

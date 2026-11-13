@@ -65,7 +65,7 @@ const nodes = [
   node(3, 'dish.noodle', 1),
   node(4, 'dish.pizza.slice', 2),
 ]
-const ROOT_CODES = ['ingredient', 'dish', 'dessert', 'beverage']
+const ROOT_CODES = ['ingredient', 'dish', 'dessert', 'beverage', 'mixed']
 const context = (extra: Partial<CategoryDraftContext> = {}): CategoryDraftContext => ({
   rootCodes: ROOT_CODES,
   takenCodes: new Set(['dish', 'dish.pizza']),
@@ -284,7 +284,7 @@ describe('category draft', () => {
     expect(validateCategoryDraft(rootDraft('dessert'), context()).ok).toBe(true)
     const snack = validateCategoryDraft(rootDraft('snack'), context())
     expect(snack.ok).toBe(false)
-    if (!snack.ok) expect(snack.fieldErrors.code).toContain('ingredient、dish、dessert、beverage')
+    if (!snack.ok) expect(snack.fieldErrors.code).toContain('ingredient、dish、dessert、beverage、mixed')
     // a root stored before the rule keeps its code while it is not renamed or moved
     const legacy = { id: 9, code: 'legacy', parentId: null }
     expect(validateCategoryDraft(rootDraft('legacy'), context({ original: legacy })).ok).toBe(true)

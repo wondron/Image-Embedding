@@ -19,7 +19,7 @@ interface Row {
 }
 interface Call { method: string; path: string; body: unknown }
 
-const ROOT_CODES = ['ingredient', 'dish', 'dessert', 'beverage']
+const ROOT_CODES = ['ingredient', 'dish', 'dessert', 'beverage', 'mixed']
 const HEATING_GROUPS = [{ id: 2, code: 'grill', name: '烤' }]
 const DOMAIN_ENUM = {
   name: 'category_domain', label: '类别域', description: '', editable: false,
@@ -28,6 +28,7 @@ const DOMAIN_ENUM = {
     { value: 'dish', label: '菜品', description: '' },
     { value: 'dessert', label: '甜点烘焙', description: '' },
     { value: 'beverage', label: '饮品', description: '' },
+    { value: 'mixed', label: '混合', description: '' },
   ],
 }
 const zh = (name: string): Name => ({ lang: 'zh', name, kind: 'primary' })
@@ -149,13 +150,13 @@ const rowOf = (page: Page, id: number) => page.locator(`#category-row-${id}`)
 const createButton = (page: Page) => page.getByRole('button', { name: '新建类别', exact: true })
 const noHorizontalOverflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)
 
-test('导航只有「食材管理」一个入口，它就是类别树', async ({ page }) => {
+test('导航只有「食物管理」一个入口，它就是类别树', async ({ page }) => {
   await open(page, seededRows(), '/')
   const nav = page.getByRole('navigation', { name: '主导航' })
   await expect(nav.getByRole('button', { name: '类别配置' })).toHaveCount(0)
-  await nav.getByRole('button', { name: '食材管理' }).click()
+  await nav.getByRole('button', { name: '食物管理' }).click()
   await expect(page).toHaveURL(/[?&]view=categories/)
-  await expect(page.getByRole('heading', { level: 1, name: '食材管理' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: '食物管理' })).toBeVisible()
   await expect(nodeButton(page, '披萨', 'dish.pizza')).toBeVisible() // roots are open after the first load
 })
 
@@ -167,7 +168,7 @@ test('空库：先建类别域，再在它下面建下级类别', async ({ page 
   const rootDialog = page.getByRole('dialog', { name: '新建类别' })
   await expect(rootDialog.locator('#category-form-parentId')).toHaveValue('root')
   // The root codes come from the API; their Chinese names from the category_domain enum.
-  await expect(rootDialog.locator('#category-form-code option')).toHaveText(['食材（ingredient）', '菜品（dish）', '甜点烘焙（dessert）', '饮品（beverage）'])
+  await expect(rootDialog.locator('#category-form-code option')).toHaveText(['食材（ingredient）', '菜品（dish）', '甜点烘焙（dessert）', '饮品（beverage）', '混合（mixed）'])
   await expect(rootDialog.locator('#category-form-zhName')).toHaveValue('食材')
   await rootDialog.locator('#category-form-code').selectOption('dish')
   await expect(rootDialog.locator('#category-form-zhName')).toHaveValue('菜品')
@@ -239,9 +240,9 @@ test('工具栏新建：先选上级，编码随上级前缀变化', async ({ pa
   await parent.selectOption('5') // 食材: what was typed moves under the new prefix
   await expect(code).toHaveValue('ingredient.calzone')
 
-  // Only dessert / beverage are still free for a root; the name follows the domain.
+  // Only dessert / beverage / mixed are still free for a root; the name follows the domain.
   await parent.selectOption('root')
-  await expect(code.locator('option')).toHaveText(['甜点烘焙（dessert）', '饮品（beverage）'])
+  await expect(code.locator('option')).toHaveText(['甜点烘焙（dessert）', '饮品（beverage）', '混合（mixed）'])
   await expect(dialog.locator('#category-form-zhName')).toHaveValue('甜点烘焙')
   await parent.selectOption('3') // 面条
   await expect(code).toHaveValue('dish.noodle.')
