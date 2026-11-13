@@ -108,10 +108,24 @@ class Backend {
     const target = this.rows.find(r => `/api/categories/${r.id}` === path)
     if (!target) return route.fulfill({ status: 404, json: errorBody('CATEGORY_NOT_FOUND', 'category does not exist') })
     if (method === 'PATCH') {
-      if (typeof body.code === 'string' && this.rows.some(r => r.id !== target.id && r.code.toLowerCase() === body.code.toLowerCase())) {
-        return route.fulfill({ status: 409, json: errorBody('CATEGORY_CODE_EXISTS', `another category already uses the code '${body.code}'`) })
+      const moved = 'parent_id' in body && body.parent_id !== target.parent_id
+      const parent = this.rows.find(r => r.id === body.parent_id)
+      const local = (body.code ?? target.code).split('.').at(-1)
+      const code = moved ? (parent ? `${parent.code}.${local}` : local) : body.code ?? target.code
+      const plan = new Map<number, string>()
+      if (moved || code !== target.code) {
+        const walk = (item: Row, next: string) => {
+          plan.set(item.id, next)
+          for (const child of this.rows.filter(r => r.parent_id === item.id)) walk(child, `${next}.${child.code.split('.').at(-1)}`)
+        }
+        walk(target, code)
+      }
+      const codes = this.rows.map(item => plan.get(item.id) ?? item.code).map(value => value.toLowerCase())
+      if (new Set(codes).size !== codes.length) {
+        return route.fulfill({ status: 409, json: errorBody('CATEGORY_CODE_EXISTS', 'another category already uses a planned subtree code') })
       }
       Object.assign(target, body)
+      for (const item of this.rows) if (plan.has(item.id)) item.code = plan.get(item.id)!
       const sceneSync = this.sceneSync
       this.sceneSync = null
       return route.fulfill({ json: { ok: true, category: this.item(target), scene_sync: sceneSync } })
@@ -325,13 +339,13 @@ test('编辑只提交改过的字段；换上级时下级类别一起移动', as
   await dialog.locator('#category-form-parentId').selectOption('5')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(dialog).toBeHidden()
-  expect(backend.writes()[1]).toEqual({ method: 'PATCH', path: '/api/categories/2', body: { parent_id: 5 } })
+  expect(backend.writes()[1]).toEqual({ method: 'PATCH', path: '/api/categories/2', body: { parent_id: 5, code: 'ingredient.pizza' } })
   // 披萨 now sits under 食材 (opened to show it) and brought 披萨切片 with it.
   // (a `has` locator is resolved inside the list item, so it must not start from the region)
   const ingredient = table(page).getByRole('listitem').filter({ has: page.getByRole('button', { name: /^食材\s*ingredient$/ }) })
-  await expect(ingredient.getByRole('button', { name: /^披萨\s*(停用\s*)?dish\.pizza$/ })).toBeVisible()
+  await expect(ingredient.getByRole('button', { name: /^披萨\s*(停用\s*)?ingredient\.pizza$/ })).toBeVisible()
   await page.getByRole('button', { name: '展开「披萨」' }).click()
-  await expect(ingredient.getByRole('button', { name: /^披萨切片\s*dish\.pizza\.slice$/ })).toBeVisible()
+  await expect(ingredient.getByRole('button', { name: /^披萨切片\s*ingredient\.pizza\.slice$/ })).toBeVisible()
 })
 
 test('移动类别或改菜系后，说明其下图片的场景归属；没能同步到向量库的说明原因', async ({ page }) => {
@@ -352,7 +366,7 @@ test('移动类别或改菜系后，说明其下图片的场景归属；没能�
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(dialog).toBeHidden()
   await acknowledgeNotice(page, '其下 3 张图片的场景归属已随之更新，其中 2 张还没同步到向量库：检索服务未就绪，恢复后后台会自动补上。', 'warn')
-  expect(backend.writes().map(call => call.body)).toEqual([{ parent_id: 5 }, { cuisines: ['chinese'] }])
+  expect(backend.writes().map(call => call.body)).toEqual([{ parent_id: 5, code: 'ingredient.noodle' }, { cuisines: ['chinese'] }])
 
   // Nothing below changed scenes: the plain save
   backend.sceneSync = { images: 3, changed: 0, pushed: 0, pending: 0, vector_sync: 'pushed', sync_required: false }
@@ -360,6 +374,63 @@ test('移动类别或改菜系后，说明其下图片的场景归属；没能�
   await dialog.locator('#category-form-parentId').selectOption('1')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expectToast(page, /^已保存「面条」。$/, 'success')
+})
+
+test('换父级或修改节点编码时，预览并以一个请求更新所有后代编码', async ({ page }) => {
+  const rows = seededRows()
+  rows.find(item => item.id === 2)!.code = 'dish.PiZza'
+  rows.find(item => item.id === 4)!.code = 'legacy.SliCe'
+  rows.push(row(6, 'legacy.TipPart', 4, '切片尖角'))
+  const backend = await open(page, rows)
+  await page.getByRole('button', { name: '编辑「披萨」' }).click()
+  const dialog = page.getByRole('dialog', { name: '编辑类别' })
+  await dialog.locator('#category-form-parentId').selectOption('5')
+  await expect(dialog.locator('#category-form-code')).toHaveValue('ingredient.PiZza')
+  const preview = dialog.getByRole('status', { name: '编码更新预览' })
+  await expect(preview).toContainText('一起更新 3 个节点')
+  await expect(preview).toContainText('ingredient.PiZza.SliCe.TipPart')
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  expect(backend.writes()).toEqual([{ method: 'PATCH', path: '/api/categories/2', body: { parent_id: 5, code: 'ingredient.PiZza' } }])
+  expect(backend.rows.filter(item => [2, 4, 6].includes(item.id)).map(item => [item.id, item.code])).toEqual([
+    [2, 'ingredient.PiZza'], [4, 'ingredient.PiZza.SliCe'], [6, 'ingredient.PiZza.SliCe.TipPart'],
+  ])
+  await page.getByRole('button', { name: '展开「披萨」' }).click()
+  await page.getByRole('button', { name: '展开「披萨切片」' }).click()
+  await expect(nodeButton(page, '切片尖角', 'ingredient.PiZza.SliCe.TipPart')).toBeVisible()
+
+  await page.getByRole('button', { name: '编辑「披萨」' }).click()
+  await dialog.locator('#category-form-code').fill('ingredient.PIZZA')
+  await expect(preview).toContainText('ingredient.PIZZA.SliCe.TipPart')
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  expect(backend.writes()[1]).toEqual({ method: 'PATCH', path: '/api/categories/2', body: { code: 'ingredient.PIZZA' } })
+  expect(backend.rows.find(item => item.id === 6)?.code).toBe('ingredient.PIZZA.SliCe.TipPart')
+})
+
+test('后代编码与外部类别冲突时，在发请求前阻止整棵子树的移动', async ({ page }) => {
+  const backend = await open(page, [...seededRows(), row(9, 'Ingredient.PIZZA.SLICE', 5, '外部切片')])
+  await page.getByRole('button', { name: '编辑「披萨」' }).click()
+  const dialog = page.getByRole('dialog', { name: '编辑类别' })
+  await dialog.locator('#category-form-parentId').selectOption('5')
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(dialog.locator('#category-form-code-error')).toContainText('披萨切片')
+  await expect(dialog.locator('#category-form-code-error')).toContainText('ingredient.pizza.slice')
+  expect(backend.writes()).toHaveLength(0)
+  expect(backend.rows.find(item => item.id === 2)?.parent_id).toBe(1)
+})
+
+test('后代编码超长时不能保存，也不会发送部分更新', async ({ page }) => {
+  const parentCode = `ingredient.${'A'.repeat(106)}`
+  const backend = await open(page, [...seededRows(), row(8, parentCode, 5, '长编码父类')])
+  await page.getByRole('button', { name: '编辑「披萨」' }).click()
+  const dialog = page.getByRole('dialog', { name: '编辑类别' })
+  await dialog.locator('#category-form-parentId').selectOption('8')
+  await expect(dialog.locator('#category-form-code')).toHaveValue(`${parentCode}.pizza`)
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(dialog.locator('#category-form-code-error')).toContainText('披萨切片')
+  await expect(dialog.locator('#category-form-code-error')).toContainText('128')
+  expect(backend.writes()).toHaveLength(0)
 })
 
 test('大小写编码会保留；仅修改自身大小写可保存，其他类别不能重复使用', async ({ page }) => {

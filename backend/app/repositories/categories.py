@@ -21,6 +21,7 @@ CASCADE) and leave image_scenes stale, so a rule counts as a use too.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from sqlalchemy import text
@@ -35,9 +36,11 @@ from app.repositories.scenes import _recompute_subtree
 from app.core.rules.category_fields import (
     check_root_code,
     display_name,
+    normalize_category_code,
     normalize_category_fields,
     normalize_category_id,
 )
+from app.core.rules.category_paths import plan_subtree_codes
 
 # One node as the API returns it. names: the display language first, then by language; in a
 # language the primary name first. Binds :display_lang and :primary_kind.
@@ -68,6 +71,39 @@ def _check_root_capacity(conn: Any) -> None:
     count = conn.execute(text("SELECT count(*) FROM categories WHERE parent_id IS NULL")).scalar_one()
     if count >= CATEGORY_MAX_ROOTS:
         raise err.validation_error(f"at most {CATEGORY_MAX_ROOTS} root categories are allowed")
+
+
+def _rewrite_subtree_codes(conn: Any, category_id: int, path: str, root_code: str) -> None:
+    """Preflight and write all codes in the caller's locked catalog transaction."""
+    nodes = conn.execute(
+        text("SELECT id, parent_id, code FROM categories WHERE path <@ CAST(:path AS ltree) "
+             "ORDER BY nlevel(path), id FOR UPDATE"),
+        {"path": path},
+    ).mappings().fetchall()
+    planned = plan_subtree_codes(nodes, category_id, root_code)
+    conflict = conn.execute(
+        text("SELECT id, code FROM categories "
+             "WHERE lower(code) = ANY(CAST(:codes AS text[])) "
+             "AND NOT (id = ANY(CAST(:ids AS bigint[]))) LIMIT 1"),
+        {"codes": [code.lower() for code in planned.values()], "ids": list(planned)},
+    ).mappings().fetchone()
+    if conflict is not None:
+        raise err.category_code_exists(
+            f"subtree code conflicts with category {conflict['id']}: {conflict['code']!r} (ignoring case)"
+        )
+    changed = [{"node_id": int(node["id"]), "code": planned[int(node["id"])]}
+               for node in nodes if str(node["code"]) != planned[int(node["id"])]]
+    if not changed:
+        return
+    # Non-deferrable unique indexes can reject a valid final plan if a target
+    # temporarily belongs to another node of this subtree. Stage only code values;
+    # the ltree parent trigger is not fired until the actual parent update below.
+    token = uuid.uuid4().hex
+    conn.execute(
+        text("UPDATE categories SET code = :code WHERE id = :node_id"),
+        [{"node_id": row["node_id"], "code": f"__category_recode_{token}_{row['node_id']}"} for row in changed],
+    )
+    conn.execute(text("UPDATE categories SET code = :code, updated_at = now() WHERE id = :node_id"), changed)
 
 
 def _node(row: Any) -> dict[str, Any]:
@@ -203,7 +239,9 @@ class PgCategoriesMixin:
     def update_category(self, category_id: int, fields: dict[str, Any]) -> dict[str, Any]:
         """Patch the given fields. names, when given, replaces every name.
 
-        Changing parent_id moves the node with its whole subtree. A move or a change of cuisines
+        Changing parent_id moves the node with its whole subtree and rebuilds every code
+        under the new parent. Editing code alone also updates descendant codes atomically.
+        A move or a change of cuisines
         recomputes, in the same transaction, the scene memberships of every image labelled with
         the node or one below it (repositories.scenes._recompute_subtree).
 
@@ -235,7 +273,7 @@ class PgCategoriesMixin:
                 if moved and parent_id is not None:
                     parent = conn.execute(
                         text(
-                            "SELECT path <@ CAST(:own AS ltree) AS inside FROM categories WHERE id = :id"
+                            "SELECT code, path <@ CAST(:own AS ltree) AS inside FROM categories WHERE id = :id"
                         ),
                         {"id": parent_id, "own": current["path"]},
                     ).mappings().fetchone()
@@ -245,14 +283,20 @@ class PgCategoriesMixin:
                         raise err.validation_error(
                             "a category cannot move under itself or one of its descendants"
                         )
+                if moved:
+                    segment = str(code).rsplit(".", 1)[-1]
+                    code = normalize_category_code(f"{parent['code']}.{segment}" if parent_id is not None else segment)
+                    changes["code"] = code
+                    renamed = code != current["code"]
                 # Only when the code or the position changes: an older root keeps whatever code it has
                 if parent_id is None and (renamed or moved):
                     check_root_code(code)
-                if renamed:
-                    _check_code_free(conn, code, exclude_id=cid)
                 _check_heating_group(conn, changes.get("heating_group_id"))
                 if moved and parent_id is None:
                     _check_root_capacity(conn)
+
+                if moved or renamed:
+                    _rewrite_subtree_codes(conn, cid, current["path"], code)
 
                 assignments = [f"{column} = :{column}" for column in _PLAIN_COLUMNS if column in changes]
                 if "cuisines" in changes:

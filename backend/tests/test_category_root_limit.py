@@ -31,6 +31,9 @@ class Result:
     def mappings(self):
         return self
 
+    def fetchall(self):
+        return self.value
+
 
 class Connection:
     def __init__(self, root_count=6, *, current=None, duplicate=False):
@@ -60,8 +63,12 @@ class Connection:
             return Result((1,))
         if sql.startswith("SELECT code, parent_id, path::text AS path, cuisines"):
             return Result(self.current)
-        if sql.startswith("SELECT path <@"):
-            return Result({"inside": False})
+        if sql.startswith(("SELECT path <@", "SELECT code, path <@")):
+            return Result({"inside": False, "code": "ingredient"})
+        if sql.startswith("SELECT id, parent_id, code FROM categories WHERE path <@"):
+            return Result([{"id": 99, "parent_id": self.current["parent_id"], "code": self.current["code"]}])
+        if sql.startswith("SELECT id, code FROM categories WHERE lower(code) = ANY"):
+            return Result(None)
         if sql.startswith(("INSERT ", "UPDATE ", "DELETE ")):
             self.events.append("write")
             self.writes.append((sql, params))
@@ -188,7 +195,8 @@ class CategoryRootLimitTests(unittest.TestCase):
         conn = Connection(root_count=6, current=self.current(parent_id=None))
         Store(conn).update_category(99, {"parent_id": 1})
         self.assertNotIn("count", conn.events)
-        self.assertEqual(conn.writes[0][1]["parent_id"], 1)
+        self.assertEqual(conn.writes[-1][1]["parent_id"], 1)
+        self.assertEqual(conn.writes[-1][1]["code"], "ingredient.other")
         self.recompute.assert_called_once_with(conn, 99)
 
 

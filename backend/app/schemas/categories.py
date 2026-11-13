@@ -155,9 +155,9 @@ class CategoryUpdateRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    code: str | None = Field(default=None, **_CODE)
+    code: str | None = Field(default=None, description="修改后递归更新后代编码；同时移动时以最后一段作为本地编码", **_CODE)
     parent_id: int | None = Field(
-        default=None, gt=0, strict=True, description="换父节点：整棵子树一起移动；null 移到根"
+        default=None, gt=0, strict=True, description="换父节点：整棵子树一起移动，节点及后代编码随新父级重建；null 移到根"
     )
     names: list[CategoryName] | None = Field(
         default=None, min_length=1, max_length=CATEGORY_MAX_NAMES, description="给了就整体替换全部名称"

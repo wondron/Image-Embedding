@@ -107,6 +107,10 @@
 }
 .cat-check { display: inline-flex; align-items: center; gap: 8px; padding-top: 7px; color: #223046; font-size: 14px; cursor: pointer; }
 .cat-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--primary); }
+.mg-editor-note.cat-code-preview { display: block; color: #51627b; }
+.cat-code-preview p { margin: 6px 0; }
+.cat-code-preview ul { margin: 6px 0; padding-left: 20px; }
+.cat-code-preview li { margin: 4px 0; overflow-wrap: anywhere; }
 
 /* -- narrower screens: columns drop out from the least needed ------------------------- */
 @media (max-width: 1360px) {

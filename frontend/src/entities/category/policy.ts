@@ -4,7 +4,7 @@
  * request is sent; the server checks everything again.
  */
 import type { CategoryCreateRequestWire, CategoryUpdateRequestWire } from '../../shared/api'
-import type { CategoryName, CategoryNameKind, CategoryNode } from './model'
+import type { CategoryName, CategoryNameKind, CategoryNode, CategoryTree } from './model'
 
 export const CATEGORY_CODE_MAX_LEN = 128
 export const CATEGORY_CODE_PATTERN = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)*$/
@@ -62,6 +62,51 @@ export interface CategoryDraftContext {
   original?: Pick<CategoryNode, 'id' | 'code' | 'parentId'>
   /** Ids the node must not move under: itself and its descendants. */
   forbiddenParentIds?: ReadonlySet<number>
+  /** Complete predicted subtree; takenCodes excludes these node ids when present. */
+  codePlan?: readonly CategoryCodeChange[]
+}
+
+export interface CategoryCodeChange {
+  id: number
+  name: string
+  from: string
+  to: string
+}
+
+/** Preserve the local segment while attaching a node to its new parent's full code. */
+export function categoryCodeUnderParent(code: string, parentCode: string | null): string {
+  const segment = code.trim().split('.').at(-1) ?? ''
+  return parentCode === null ? segment : `${parentCode}.${segment}`
+}
+
+/** Rebuild from actual parent ids, including legacy descendants whose old prefixes differ. */
+export function planCategoryCodeChanges(tree: CategoryTree, id: number, rootCode: string): CategoryCodeChange[] {
+  const changes: CategoryCodeChange[] = []
+  const root = tree.byId.get(id)
+  if (!root) return changes
+  const walk = (entry: typeof root, code: string) => {
+    changes.push({ id: entry.node.id, name: entry.node.name ?? entry.node.code, from: entry.node.code, to: code })
+    for (const child of entry.children) walk(child, categoryCodeUnderParent(child.node.code, code))
+  }
+  walk(root, rootCode.trim())
+  return changes
+}
+
+function codePlanError(plan: readonly CategoryCodeChange[], takenCodes: ReadonlySet<string>): string | null {
+  const taken = new Set([...takenCodes].map(code => code.toLowerCase()))
+  const planned = new Map<string, CategoryCodeChange>()
+  for (const change of plan) {
+    if (charLength(change.to) > CATEGORY_CODE_MAX_LEN) {
+      return `「${change.name}」更新后的编码超过 ${CATEGORY_CODE_MAX_LEN} 个字符，无法保存整棵子树。`
+    }
+    if (!CATEGORY_CODE_PATTERN.test(change.to)) return `「${change.name}」更新后的编码格式不正确。`
+    const key = change.to.toLowerCase()
+    if (taken.has(key)) return `「${change.name}」更新后的编码 ${change.to} 已被其他类别使用。`
+    const duplicate = planned.get(key)
+    if (duplicate) return `「${duplicate.name}」与「${change.name}」更新后的编码重复（不区分大小写）。`
+    planned.set(key, change)
+  }
+  return null
 }
 
 export function charLength(value: string): number {
@@ -195,6 +240,8 @@ export function validateCategoryDraft(draft: CategoryDraft, context: CategoryDra
   }
   const badCode = codeError(code, draft, context)
   if (badCode) fieldErrors.code = badCode
+  const badPlan = context.codePlan ? codePlanError(context.codePlan, context.takenCodes) : null
+  if (!fieldErrors.code && badPlan) fieldErrors.code = badPlan
   if (!zhName) fieldErrors.zhName = '请填写中文名称。'
   else if (charLength(zhName) > CATEGORY_NAME_MAX_LEN) fieldErrors.zhName = `名称最长 ${CATEGORY_NAME_MAX_LEN} 个字符。`
   const badNames = otherNamesError(zhName, otherNames)

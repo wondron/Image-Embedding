@@ -237,7 +237,7 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
       const notice = savedNotice(done(result.node ? `「${categoryLabel(result.node)}」` : '类别'), result.sceneSync)
       if (notice.type === 'success') notify.success(notice.text)
       else notify.warn(notice.text, { title: notice.title })
-      void reload() // a move changes the paths below it; counts and order come from the server
+      void reload() // moves/renames change descendant codes too; refresh the complete server tree
       return null
     } catch (error) {
       if (!mounted.current) return null

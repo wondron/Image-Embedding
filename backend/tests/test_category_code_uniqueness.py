@@ -19,6 +19,12 @@ class CodeConnection(Connection):
 
     def execute(self, statement, params=None):
         sql = " ".join(str(statement).split())
+        if sql.startswith("SELECT id, code FROM categories WHERE lower(code) = ANY"):
+            self.queries.append(sql)
+            self.code_checks.append(dict(params))
+            match = next(({"id": cid, "code": code} for cid, code in self.codes.items()
+                          if code.lower() in params["codes"] and cid not in params["ids"]), None)
+            return Result(match)
         if sql.startswith("SELECT 1 FROM categories WHERE lower(code)"):
             self.queries.append(sql)
             self.code_checks.append(dict(params))
@@ -56,8 +62,8 @@ class CategoryCodeUniquenessTests(unittest.TestCase):
         current = {"code": "ingredient.HongSu", "parent_id": 1, "path": "1.99", "cuisines": []}
         conn = CodeConnection({99: current["code"]}, current=current)
         Store(conn).update_category(99, {"code": "Ingredient.hONGsU"})
-        self.assertEqual(conn.code_checks, [{"code": "Ingredient.hONGsU", "exclude_id": 99}])
-        self.assertEqual(conn.writes[0][1]["code"], "Ingredient.hONGsU")
+        self.assertEqual(conn.code_checks, [{"codes": ["ingredient.hongsu"], "ids": [99]}])
+        self.assertEqual(conn.writes[-1][1]["code"], "Ingredient.hONGsU")
         self.assertEqual(conn.events[-1], "commit")
 
     def test_update_excludes_itself_but_still_rejects_another_node(self):
@@ -65,7 +71,7 @@ class CategoryCodeUniquenessTests(unittest.TestCase):
         conn = CodeConnection({99: current["code"], 12: "ingredient.HongSu"}, current=current)
         self.assert_code_conflict(Store(conn).update_category, 99, {"code": "Ingredient.hONGsU"})
         self.assertEqual(conn.writes, [])
-        self.assertEqual(conn.code_checks[0]["exclude_id"], 99)
+        self.assertEqual(conn.code_checks[0]["ids"], [99])
 
     def test_unique_constraint_and_expression_index_have_the_same_conflict_error(self):
         for constraint in ("uq_categories_code", "uq_categories_code_lower"):

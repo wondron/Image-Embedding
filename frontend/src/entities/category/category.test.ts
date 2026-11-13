@@ -19,6 +19,8 @@ import {
 } from './model'
 import {
   categoryDraftFromNode,
+  categoryCodeUnderParent,
+  planCategoryCodeChanges,
   emptyCategoryDraft,
   parseCuisines,
   toCategoryCreateBody,
@@ -77,6 +79,47 @@ const draft = (extra: Partial<CategoryDraft> = {}): CategoryDraft => ({
   code: 'dish.rice',
   zhName: '米饭',
   ...extra,
+})
+
+describe('category subtree code changes', () => {
+  const tree = () => buildCategoryTree([
+    ...nodes,
+    node(6, 'legacy.TipPart', 4),
+  ])
+
+  it('uses a new parent and each node local segment through grandchildren', () => {
+    expect(categoryCodeUnderParent('dish.Pizza', 'Ingredient')).toBe('Ingredient.Pizza')
+    expect(categoryCodeUnderParent('ingredient.OtHeR', null)).toBe('OtHeR')
+    const plan = planCategoryCodeChanges(tree(), 2, 'Ingredient.Pizza')
+    expect(plan.map(change => [change.id, change.to])).toEqual([
+      [2, 'Ingredient.Pizza'], [4, 'Ingredient.Pizza.slice'], [6, 'Ingredient.Pizza.slice.TipPart'],
+    ])
+  })
+
+  it('allows the subtree to reuse its old codes while rejecting outside collisions', () => {
+    const plan = planCategoryCodeChanges(tree(), 2, 'dish.pizza.slice')
+    const input = draft({ parentId: 1, code: 'dish.pizza.slice' })
+    const ctx = context({ original: nodes[2], takenCodes: new Set(['dish', 'ingredient']), codePlan: plan })
+    expect(validateCategoryDraft(input, ctx).ok).toBe(true)
+    const collision = validateCategoryDraft(input, { ...ctx, takenCodes: new Set(['DISH.PIZZA.SLICE.SLICE']) })
+    expect(collision.ok).toBe(false)
+    if (!collision.ok) expect(collision.fieldErrors.code).toContain('dish.pizza.slice.slice')
+  })
+
+  it('rejects internal case-insensitive collisions and a too-long descendant code', () => {
+    const conflicting = buildCategoryTree([...nodes, node(6, 'legacy.SLICE', 2)])
+    const collision = validateCategoryDraft(draft({ code: 'ingredient.pizza', parentId: 5 }), context({
+      original: nodes[2], takenCodes: new Set(), codePlan: planCategoryCodeChanges(conflicting, 2, 'ingredient.pizza'),
+    }))
+    expect(collision.ok).toBe(false)
+    if (!collision.ok) expect(collision.fieldErrors.code).toContain('重复')
+    const code = `ingredient.${'A'.repeat(115)}`
+    const overlong = validateCategoryDraft(draft({ code, parentId: 5 }), context({
+      original: nodes[2], takenCodes: new Set(), codePlan: planCategoryCodeChanges(tree(), 2, code),
+    }))
+    expect(overlong.ok).toBe(false)
+    if (!overlong.ok) expect(overlong.fieldErrors.code).toContain('128')
+  })
 })
 
 afterEach(() => {

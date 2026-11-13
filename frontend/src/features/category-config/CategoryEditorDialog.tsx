@@ -3,6 +3,8 @@ import { LoaderCircle, Plus, X } from 'lucide-react'
 import { Dialog } from '../../components/Dialog'
 import {
   CATEGORY_ROOT_LIMIT,
+  categoryCodeUnderParent,
+  planCategoryCodeChanges,
   categoryDraftFromNode,
   categoryLabel,
   effectiveCuisines,
@@ -88,7 +90,7 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
   const rootCapacityAvailable = tree.roots.length < CATEGORY_ROOT_LIMIT
   // Only a domain may sit at the top: an existing root, or a node whose code is a domain's.
   const rootOffered = node
-    ? node.parentId === null || (rootCapacityAvailable && rootCodes.some(code => code.toLowerCase() === node.code.toLowerCase()))
+    ? node.parentId === null || (rootCapacityAvailable && rootCodes.some(code => code.toLowerCase() === categoryCodeUnderParent(node.code, null).toLowerCase()))
     : rootCapacityAvailable && freeRootCodes.length > 0
 
   const prefixOf = (parentId: number | null) => {
@@ -149,11 +151,26 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
   }
 
   const rootMode = parentPicked && draft.parentId === null
+  const moving = node !== null && draft.parentId !== node.parentId
+  const codeForSave = moving
+    ? categoryCodeUnderParent(draft.code, draft.parentId === null ? null : tree.byId.get(draft.parentId)?.node.code ?? '')
+    : draft.code.trim()
+  const rewritingCodes = node !== null && (moving || codeForSave !== node.code)
+  const codePlan = useMemo(
+    () => node && rewritingCodes ? planCategoryCodeChanges(tree, node.id, codeForSave) : [],
+    [tree, node, rewritingCodes, codeForSave],
+  )
+  const changedCodes = codePlan.filter(change => change.from !== change.to)
+  const validationTakenCodes = useMemo(() => new Set(
+    entries.filter(entry => entry.node.id !== node?.id && !(rewritingCodes && forbiddenParentIds.has(entry.node.id)))
+      .map(entry => entry.node.code),
+  ), [entries, node, rewritingCodes, forbiddenParentIds])
 
   function chooseParent(value: string) {
     const parentId = value === ROOT ? null : Number(value)
     if (node) {
-      edit(['parentId'], { parentId })
+      const code = categoryCodeUnderParent(draft.code, parentId === null ? null : tree.byId.get(parentId)?.node.code ?? '')
+      edit(['parentId', 'code'], { parentId, code })
       return
     }
     const wasRoot = rootMode
@@ -201,12 +218,13 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
       showFieldErrors({ parentId: '请选择上级类别。' })
       return
     }
-    const validated = validateCategoryDraft(draft, {
+    const validated = validateCategoryDraft({ ...draft, code: codeForSave }, {
       rootCodes,
       rootCount: tree.roots.length,
-      takenCodes,
+      takenCodes: validationTakenCodes,
       original: node ?? undefined,
       forbiddenParentIds,
+      codePlan,
     })
     if (!validated.ok) {
       showFieldErrors(validated.fieldErrors)
@@ -281,7 +299,7 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
               </option>)}
             </select>
             <small id="category-form-parentId-hint">{node
-              ? '换上级会把它下面的下级类别一起移过去。'
+              ? '换上级会移动整棵子树，并按新父级的完整编码更新当前节点及所有下级编码。'
               : rootCapacityAvailable
                 ? '新类别放在哪个类别下面；只有类别域（食材、菜品等）可以放在最顶层。'
                 : '已达到六个根类别的上限，请在现有类别下添加。'}</small>
@@ -314,6 +332,7 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
                 aria-invalid={Boolean(fieldErrors.code)}
                 aria-describedby={describedBy('code', 'category-form-code-hint')}
                 onFocus={event => keepPrefix(event.currentTarget)}
+                onBlur={() => { if (moving && codeForSave !== draft.code) edit(['code'], { code: codeForSave }) }}
                 onChange={event => edit(['code'], { code: event.target.value })}
               />}
             <small id="category-form-code-hint">{rootMode || rootCodeFixed
@@ -321,6 +340,13 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
               : '大小写字母、数字和下划线，用点分段，例如 ingredient.HongSu。保留大小写，重复检查不区分大小写。'}</small>
             <FieldError field="code" errors={fieldErrors} />
           </label>
+          {changedCodes.length > 0 && <div className="mg-editor-note cat-code-preview" role="status" aria-label="编码更新预览">
+            <p>保存后将一起更新 {changedCodes.length} 个节点的编码，保留每个节点最后一段的大小写。</p>
+            <ul>{changedCodes.slice(0, 5).map(change => <li key={change.id}>
+              {change.name}：<code>{change.from}</code> → <code>{change.to}</code>
+            </li>)}</ul>
+            {changedCodes.length > 5 && <p>另有 {changedCodes.length - 5} 个下级节点会按同样规则更新。</p>}
+          </div>}
         </section>
 
         <section className="mg-editor-section" aria-labelledby="category-form-names-title">

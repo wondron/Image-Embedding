@@ -883,7 +883,7 @@ class PgLiveTests(unittest.TestCase):
 
     def test_category_patch_renames_relabels_and_replaces_names(self):
         store = self.store()
-        dish, _, pizza, _ = self.seed_tree(store)
+        dish, _, pizza, piece = self.seed_tree(store)
         hg = self.sql("INSERT INTO heating_groups (code, name) VALUES ('grill', '烤') RETURNING id").scalar_one()
         self.assertEqual(store.list_heating_groups(), [{"id": hg, "code": "grill", "name": "烤"}])
         self.sql("UPDATE categories SET updated_at = now() - interval '1 day' WHERE id = :id", {"id": pizza["id"]})
@@ -899,6 +899,8 @@ class PgLiveTests(unittest.TestCase):
         )
         self.assertEqual(patched["heating_group"], {"id": hg, "code": "grill", "name": "烤"})
         self.assertEqual((patched["sort_order"], patched["is_active"], patched["path"]), (7, False, pizza["path"]))
+        by_id = {node["id"]: node for node in store.list_categories()}
+        self.assertEqual(by_id[piece["id"]]["code"], "dish.pizza_pie.slice")
         self.assertGreater(patched["updated_at"], stale)  # raw SQL has to set it itself
         self.assertEqual(
             self.sql("SELECT count(*) FROM category_names WHERE category_id = :c", {"c": pizza["id"]}).scalar_one(), 1
@@ -919,9 +921,10 @@ class PgLiveTests(unittest.TestCase):
 
         moved = store.update_category(pizza["id"], {"parent_id": ingredient["id"]})["category"]
         self.assertEqual((moved["parent_id"], moved["path"]), (ingredient["id"], f"{ingredient['id']}.{pizza['id']}"))
+        self.assertEqual(moved["code"], "ingredient.pizza")
         by_code = {n["code"]: n for n in store.list_categories()}
-        self.assertEqual(by_code["dish.pizza.slice"]["path"], f"{ingredient['id']}.{pizza['id']}.{piece['id']}")
-        self.assertEqual(by_code["dish.pizza.slice"]["parent_id"], pizza["id"])
+        self.assertEqual(by_code["ingredient.pizza.slice"]["path"], f"{ingredient['id']}.{pizza['id']}.{piece['id']}")
+        self.assertEqual(by_code["ingredient.pizza.slice"]["parent_id"], pizza["id"])
 
         update = store.update_category
         self.assertIn("descendants", self.assert_category_error("VALIDATION_ERROR", update, pizza["id"], {"parent_id": piece["id"]}))
@@ -938,8 +941,29 @@ class PgLiveTests(unittest.TestCase):
         # nothing above was half-applied
         self.assertEqual(
             {n["code"]: n["parent_id"] for n in store.list_categories()},
-            {"ingredient": None, "dish": None, "dessert": None, "dish.pizza": ingredient["id"], "dish.pizza.slice": pizza["id"]},
+            {"ingredient": None, "dish": None, "dessert": None, "ingredient.pizza": ingredient["id"], "ingredient.pizza.slice": pizza["id"]},
         )
+
+    def test_category_subtree_move_conflict_keeps_all_codes_paths_and_parents(self):
+        store = self.store()
+        _, ingredient, pizza, _ = self.seed_tree(store)
+        store.create_category({
+            "code": "INGREDIENT.PIZZA.SLICE", "parent_id": ingredient["id"], "names": [self.zh("冲突节点")],
+        })
+        before = self.sql("SELECT id, code, parent_id, path::text FROM categories ORDER BY id").fetchall()
+        self.assert_category_error("CATEGORY_CODE_EXISTS", store.update_category, pizza["id"], {"parent_id": ingredient["id"]})
+        self.assertEqual(self.sql("SELECT id, code, parent_id, path::text FROM categories ORDER BY id").fetchall(), before)
+
+    def test_category_subtree_recode_can_reuse_a_descendants_previous_code(self):
+        store = self.store()
+        _, _, pizza, piece = self.seed_tree(store)
+        # A single UPDATE order would hit the immediate unique index on the old child code.
+        store.update_category(pizza["id"], {"code": "dish.pizza.slice"})
+        nodes = {node["id"]: node for node in store.list_categories()}
+        self.assertEqual(nodes[pizza["id"]]["code"], "dish.pizza.slice")
+        self.assertEqual(nodes[piece["id"]]["code"], "dish.pizza.slice.slice")
+        self.assertEqual(nodes[pizza["id"]]["path"], pizza["path"])
+        self.assertEqual(nodes[piece["id"]]["path"], piece["path"])
 
     def test_category_codes_are_unique_and_references_must_exist(self):
         store = self.store()
