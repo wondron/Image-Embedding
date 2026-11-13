@@ -194,6 +194,8 @@
 .lf-tree-options { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; color: #64748b; font-size: 12px; }
 .lf-tree-options label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
 .lf-tree-options input { width: 14px; height: 14px; margin: 0; accent-color: var(--primary); }
+.lf-tree-options label:has(input:disabled) { color: #a5afbd; cursor: default; }
+.lf-option-count { padding: 0 5px; border-radius: 999px; background: #f1f3f6; color: #7b8899; font-size: 11px; line-height: 16px; font-variant-numeric: tabular-nums; }
 
 /* The virtual tree: rows are absolutely placed in a box as tall as all of them */
 .lf-tree {

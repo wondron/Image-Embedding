@@ -5,12 +5,12 @@ export type CategoryStatusFilter = 'all' | 'active' | 'inactive'
 export interface CategoryTableFilter {
   /** Words matched against the name, every other name and the code. */
   query: string
-  /** A root's id: only that domain's subtree; null: every root. */
-  domainId: number | null
+  /** A node's id: only that node and what is below it (a domain, or a group inside one); null: the whole tree. */
+  scopeId: number | null
   status: CategoryStatusFilter
 }
 
-export const NO_CATEGORY_FILTER: CategoryTableFilter = { query: '', domainId: null, status: 'all' }
+export const NO_CATEGORY_FILTER: CategoryTableFilter = { query: '', scopeId: null, status: 'all' }
 
 export interface CategoryTableRow {
   entry: CategoryTreeNode
@@ -24,7 +24,7 @@ export interface CategoryTableRow {
 
 export interface CategoryTableView {
   rows: CategoryTableRow[]
-  /** Nodes in scope: the chosen domain's subtree, else the whole tree. */
+  /** Nodes in scope: the chosen node's subtree, else the whole tree. */
   total: number
   /** Nodes the search and the status filter match; total when neither is set. */
   matched: number
@@ -39,14 +39,16 @@ function searchText({ node }: CategoryTreeNode): string {
 /**
  * The rows the table lists, in tree order. Without a search or status filter, a node's children
  * follow it only when it is expanded. With one, every match is listed together with its
- * ancestors (marked as context), and nothing else; the ancestors are shown open.
+ * ancestors (marked as context), and nothing else; the ancestors are shown open. A scope makes
+ * its node the only top row (depth 0): the nodes above it are not listed.
  */
 export function categoryTableView(
   tree: CategoryTree,
   filter: CategoryTableFilter,
   expanded: ReadonlySet<number>,
 ): CategoryTableView {
-  const roots = filter.domainId === null ? tree.roots : tree.roots.filter(root => root.node.id === filter.domainId)
+  const scope = filter.scopeId === null ? undefined : tree.byId.get(filter.scopeId)
+  const roots = filter.scopeId === null ? tree.roots : scope ? [scope] : []
   const words = filter.query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
   const filtering = words.length > 0 || filter.status !== 'all'
   const matches = new Set<number>()
@@ -77,6 +79,29 @@ export function categoryTableView(
   roots.forEach(root => walk(root, 0))
 
   return { rows, total, matched: filtering ? matches.size : total, filtering }
+}
+
+export interface CategoryScopeOption {
+  id: number
+  label: string
+  /** 0: a domain (a root); 1: a group right below one. */
+  depth: 0 | 1
+}
+
+/**
+ * What the table can be narrowed to: each domain, and below it the groups that hold categories of
+ * their own (谷物, 水产, …). With everything under one or two domains, the domains alone no longer
+ * narrow anything; a leaf right below a domain is not a scope worth offering.
+ */
+export function categoryScopeOptions(tree: CategoryTree): CategoryScopeOption[] {
+  const options: CategoryScopeOption[] = []
+  for (const root of tree.roots) {
+    options.push({ id: root.node.id, label: categoryLabel(root.node), depth: 0 })
+    for (const child of root.children) {
+      if (child.children.length > 0) options.push({ id: child.node.id, label: categoryLabel(child.node), depth: 1 })
+    }
+  }
+  return options
 }
 
 /** Every name but the zh primary one (that one is the label): aliases and other languages. */

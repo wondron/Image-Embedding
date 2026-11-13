@@ -1,8 +1,9 @@
-import { useEffect, useState, type FormEvent } from 'react'
-import { listCategories, type CategoryNode } from '../../entities/category'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { buildCategoryTree, listCategories, type CategoryNode } from '../../entities/category'
 import type { RuleInput, Scene, SceneRule } from '../../entities/scene'
 import { sceneError } from '../../entities/scene'
 import { Dialog } from '../../components/Dialog'
+import { CategoryPicker } from '../category-picker'
 
 type Kind = 'category' | 'cuisine'
 const cuisinePattern = /^[a-z][a-z0-9_]*$/
@@ -19,6 +20,8 @@ export function RuleEditor({ scene, rule, apiBase, busy, onClose, onSave }: { sc
   const [categories, setCategories] = useState<CategoryNode[]>([]); const [categoryError, setCategoryError] = useState(''); const [categoryReady, setCategoryReady] = useState(false); const [reload, setReload] = useState(0)
   const [invalid, setInvalid] = useState('')
   useEffect(() => { const controller = new AbortController(); setCategoryReady(false); listCategories({ baseUrl: apiBase, signal: controller.signal }).then(r => { if (!controller.signal.aborted) { setCategories(r.categories); setCategoryReady(true); setCategoryError('') } }).catch(e => { if (!controller.signal.aborted) setCategoryError(sceneError(e)) }); return () => controller.abort() }, [apiBase, reload])
+  // The whole tree, searched or opened level by level (a flat select of hundreds of names says nothing about where each sits)
+  const categoryTree = useMemo(() => (categoryReady ? buildCategoryTree(categories) : null), [categories, categoryReady])
 
   const input: RuleInput = kind === 'category'
     ? { categoryId, cuisine: null, labelId }
@@ -48,12 +51,20 @@ export function RuleEditor({ scene, rule, apiBase, busy, onClose, onSave }: { sc
         <label><input type="radio" name="rule-kind" checked={kind === 'cuisine'} onChange={() => { setKind('cuisine'); setLabelId(null) }} />按菜系</label>
       </div>
       {kind === 'category' ? <>
-        <label>类别<select data-dialog-initial-focus value={categoryId ?? ''} onChange={e => setCategoryId(e.target.value ? Number(e.target.value) : null)}>
-          <option value="">请选择类别</option>
-          {rule?.category && !categories.some(c => c.id === rule.category!.id) && <option value={rule.category.id}>{rule.category.name ?? rule.category.code}（已保存引用）</option>}
-          {categories.map(c => <option key={c.id} value={c.id}>{c.name ?? c.code}（{c.code}）{c.isActive ? '' : ' · 停用'}</option>)}
-        </select></label>
-        <label>映射标签<select value={labelId ?? ''} onChange={e => setLabelId(e.target.value ? Number(e.target.value) : null)}>
+        <CategoryPicker
+          id="scene-rule-category"
+          label="类别"
+          tree={categoryTree}
+          loading={!categoryReady && !categoryError}
+          value={categoryId}
+          onChange={setCategoryId}
+          disabled={busy}
+          includeInactive
+          recentKey={null}
+          missingLabel={rule?.category && rule.category.id === categoryId ? `${rule.category.name ?? rule.category.code}（已保存引用）` : undefined}
+          dialogInitialFocus={!rule}
+        />
+        <label>映射标签<select data-dialog-initial-focus={rule ? true : undefined} value={labelId ?? ''} onChange={e => setLabelId(e.target.value ? Number(e.target.value) : null)}>
           <option value="">不映射</option>
           {scene.labels.map(l => <option key={l.id} value={l.id}>{l.name}（{l.code}）{l.isActive ? '' : ' · 停用'}</option>)}
         </select></label>

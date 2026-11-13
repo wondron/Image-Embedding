@@ -1,20 +1,7 @@
 import { categoryLabel, type CategoryNode, type CategoryTree, type CategoryTreeNode } from '../../entities/category'
 
-/**
- * Images labelled with each category or any category below it: GET /api/categories counts the
- * images on the node itself (image_count, every scene), this sums them up the tree.
- */
-export function subtreeImageCounts(tree: CategoryTree): Map<number, number> {
-  const counts = new Map<number, number>()
-  const visit = (entry: CategoryTreeNode): number => {
-    let total = entry.node.imageCount
-    for (const child of entry.children) total += visit(child)
-    counts.set(entry.node.id, total)
-    return total
-  }
-  tree.roots.forEach(visit)
-  return counts
-}
+// The navigator's counts; the category table shows the same ones (entities/category)
+export { subtreeImageCounts } from '../../entities/category'
 
 export interface CategoryNavOptions {
   /** Whitespace-separated words, matched against names, codes and aliases (see categoryNavView). */

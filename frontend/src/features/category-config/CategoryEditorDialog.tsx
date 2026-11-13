@@ -27,8 +27,10 @@ import {
 import type { CategoryCreateRequestWire, CategoryUpdateRequestWire } from '../../shared/api'
 import { formatLibraryTime } from '../../shared/lib'
 import { notify } from '../../shared/ui'
+import { CategorySearch, categoryPath } from '../category-picker'
 import { retargetCode } from './tableModel'
 import { saveFailureText } from './messages'
+import { sameNameCategories } from './sameName'
 
 export type CategoryEditorTarget =
   /** parentId null: a root (a domain); undefined: the parent is chosen in the form. */
@@ -48,15 +50,18 @@ interface Props {
   /** The Chinese name of a root code, when the enum catalog has one. */
   domainName: (code: string) => string | null
   /**
-   * Sends the request. Resolves null once the server accepted it (the caller then unmounts this
-   * dialog), otherwise the failure to show here.
+   * Sends the request. Resolves null once the server accepted it, otherwise the failure to show
+   * here. The caller then unmounts this dialog, unless `keepOpen` asks to stay for the next
+   * category under the same parent.
    */
-  save: (request: CategorySaveRequest) => Promise<CategoryFailureView | null>
+  save: (request: CategorySaveRequest, keepOpen?: boolean) => Promise<CategoryFailureView | null>
   onClose: () => void
 }
 
-/** The parent select's value for "no parent". */
-const ROOT = 'root'
+/** What the parent picker calls "no parent". */
+const ROOT_LABEL = '（根节点 · 类别域）'
+/** Same-name categories listed under the name field before 「等 N 个」. */
+const SAME_NAME_SHOWN = 3
 
 const FIELD_ORDER: readonly CategoryFieldName[] = [
   'parentId', 'code', 'zhName', 'otherNames', 'cuisines', 'heatingGroupId', 'sortOrder',
@@ -80,12 +85,8 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
     () => new Set(entries.filter(entry => entry.node.id !== node?.id).map(entry => entry.node.code.toLowerCase())),
     [entries, node],
   )
-  // A node cannot move under itself or its own subtree.
+  // A node cannot move under itself or its own subtree: the parent picker leaves those out.
   const forbiddenParentIds = useMemo(() => (node ? subtreeIds(tree, node.id) : new Set<number>()), [tree, node])
-  const parentOptions = useMemo(
-    () => entries.filter(entry => !forbiddenParentIds.has(entry.node.id)),
-    [entries, forbiddenParentIds],
-  )
   const freeRootCodes = useMemo(() => rootCodes.filter(code => !takenCodes.has(code.toLowerCase())), [rootCodes, takenCodes])
   const rootCapacityAvailable = tree.roots.length < CATEGORY_ROOT_LIMIT
   // Only a domain may sit at the top: an existing root, or a node whose code is a domain's.
@@ -109,6 +110,8 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
   })
   const [fieldErrors, setFieldErrors] = useState<CategoryFieldErrors>({})
   const [submitting, setSubmitting] = useState(false)
+  /** Categories created with 「创建并继续」 while this dialog stayed open. */
+  const [createdCount, setCreatedCount] = useState(0)
   const [focusField, setFocusField] = useState<CategoryFieldName | null>(null)
   const submitLock = useRef(false)
   const mounted = useRef(true)
@@ -166,8 +169,8 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
       .map(entry => entry.node.code),
   ), [entries, node, rewritingCodes, forbiddenParentIds])
 
-  function chooseParent(value: string) {
-    const parentId = value === ROOT ? null : Number(value)
+  /** parentId null: the top level (a domain). */
+  function chooseParent(parentId: number | null) {
     if (node) {
       const code = categoryCodeUnderParent(draft.code, parentId === null ? null : tree.byId.get(parentId)?.node.code ?? '')
       edit(['parentId', 'code'], { parentId, code })
@@ -211,8 +214,18 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
     else notify.error(saveFailureText(failure), { title: '没有保存' })
   }
 
-  async function submit(event: FormEvent) {
-    event.preventDefault()
+  /** After 「创建并继续」: the same parent, everything else blank again, ready for the next code. */
+  function startNext() {
+    const parent = draft.parentId === null ? null : tree.byId.get(draft.parentId)?.node ?? null
+    setDraft(emptyCategoryDraft(parent))
+    setFieldErrors({})
+    setCreatedCount(count => count + 1)
+    setFocusField('code')
+  }
+
+  /** keepOpen (creating only): once created, stay open for the next category under the same parent. */
+  async function submit(event: FormEvent | null, keepOpen = false) {
+    event?.preventDefault()
     if (submitLock.current) return
     if (!parentPicked) {
       showFieldErrors({ parentId: '请选择上级类别。' })
@@ -246,8 +259,10 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
     setSubmitting(true)
     setFieldErrors({})
     try {
-      const failure = await save(request)
-      if (failure && mounted.current) showFailure(failure)
+      const failure = await save(request, keepOpen)
+      if (!mounted.current) return
+      if (failure) showFailure(failure)
+      else if (keepOpen) startNext()
     } finally {
       submitLock.current = false
       if (mounted.current) setSubmitting(false)
@@ -259,7 +274,10 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
   )
   // A root keeps its domain code; so does a node moved to the top (only a domain-coded one may be)
   const rootCodeFixed = node !== null && draft.parentId === null
-  const parentValue = !parentPicked ? '' : draft.parentId === null ? ROOT : String(draft.parentId)
+  const pickedParent = parentPicked && draft.parentId !== null ? tree.byId.get(draft.parentId)?.node ?? null : null
+  const pickedParentPath = pickedParent ? categoryPath(tree, pickedParent.id) : null
+  // With hundreds of categories it is easy to add one that exists elsewhere, or as somebody's alias
+  const sameName = useMemo(() => sameNameCategories(tree, draft.zhName, node?.id), [tree, draft.zhName, node])
 
   // What an empty cuisines / heating group field falls back to: the new parent's own, else its ancestors'
   const parentNode = draft.parentId === null ? undefined : tree.byId.get(draft.parentId)?.node
@@ -282,29 +300,43 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
         </p>}
         <section className="mg-editor-section" aria-labelledby="category-form-place-title">
           <h3 id="category-form-place-title">位置与编码</h3>
-          <label className="mg-field" htmlFor="category-form-parentId"><span className="mg-field-label">上级类别{!node && <span aria-hidden="true"> *</span>}</span>
-            <select
-              id="category-form-parentId"
-              data-dialog-initial-focus={!node && !parentPicked ? true : undefined}
-              value={parentValue}
-              disabled={submitting}
-              aria-invalid={Boolean(fieldErrors.parentId)}
-              aria-describedby={describedBy('parentId', 'category-form-parentId-hint')}
-              onChange={event => chooseParent(event.target.value)}
-            >
-              {!parentPicked && <option value="" disabled>请选择上级类别</option>}
-              {rootOffered && <option value={ROOT}>（根节点 · 类别域）</option>}
-              {parentOptions.map(entry => <option key={entry.node.id} value={entry.node.id}>
-                {`${'　'.repeat(entry.depth)}${categoryLabel(entry.node)}（${entry.node.code}）${entry.node.isActive ? '' : ' · 停用'}`}
-              </option>)}
-            </select>
+          <div className="mg-field">
+            <label className="mg-field-label" htmlFor="category-form-parentId">上级类别{!node && <span aria-hidden="true"> *</span>}</label>
+            <div className={`cat-parent${fieldErrors.parentId ? ' is-invalid' : ''}`}>
+              {parentPicked && <div className="cp-selected cat-parent-current">
+                {draft.parentId === null
+                  ? <div><strong>根节点 · 类别域</strong><small>最顶层，没有上级</small></div>
+                  : <div>
+                    <strong>{pickedParent ? categoryLabel(pickedParent) : `类别 #${draft.parentId}`}</strong>
+                    {pickedParent && pickedParentPath !== categoryLabel(pickedParent) && <small>{pickedParentPath}</small>}
+                    {pickedParent && <code>{pickedParent.code}</code>}
+                    {pickedParent && !pickedParent.isActive && <small className="cp-inactive">已停用</small>}
+                  </div>}
+              </div>}
+              {/* The whole tree, searchable and folded by level; the node itself and what is below it are left out */}
+              <CategorySearch
+                id="category-form-parentId"
+                label="上级类别"
+                tree={tree}
+                value={parentPicked ? draft.parentId : undefined}
+                onPick={chooseParent}
+                disabled={submitting}
+                includeInactive
+                excludeIds={forbiddenParentIds}
+                nullOption={rootOffered ? ROOT_LABEL : undefined}
+                placeholder={parentPicked ? '搜索以更换上级类别' : '搜索名称、编码或别名，或在下面逐级展开'}
+                describedBy={describedBy('parentId', 'category-form-parentId-hint')}
+                invalid={Boolean(fieldErrors.parentId)}
+                dialogInitialFocus={!node && !parentPicked}
+              />
+            </div>
             <small id="category-form-parentId-hint">{node
               ? '换上级会移动整棵子树，并按新父级的完整编码更新当前节点及所有下级编码。'
               : rootCapacityAvailable
                 ? '新类别放在哪个类别下面；只有类别域（食材、菜品等）可以放在最顶层。'
                 : '已达到六个根类别的上限，请在现有类别下添加。'}</small>
             <FieldError field="parentId" errors={fieldErrors} />
-          </label>
+          </div>
 
           <label className="mg-field" htmlFor="category-form-code"><span className="mg-field-label">编码<span aria-hidden="true"> *</span></span>
             {!node && rootMode
@@ -363,6 +395,11 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
               onChange={event => edit(['zhName'], { zhName: event.target.value })}
             />
             <small id="category-form-zhName-hint">检索结果和图库里显示的类别名。</small>
+            {sameName.length > 0 && <p className="cat-same-name" role="status">
+              已有同名的类别：{sameName.slice(0, SAME_NAME_SHOWN).map(match => (
+                `${match.path}${match.alias === null ? '' : `（别名「${match.alias}」）`}`
+              )).join('；')}{sameName.length > SAME_NAME_SHOWN ? ` 等 ${sameName.length} 个` : ''}。名称可以重复，确认不是同一种再保存。
+            </p>}
             <FieldError field="zhName" errors={fieldErrors} />
           </label>
           <div className="mg-field" role="group" aria-labelledby="category-form-otherNames-label">
@@ -479,7 +516,16 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
         </section>
       </div>
       <div className="mg-editor-actions">
-        <button type="button" className="mg-btn mg-secondary" onClick={onClose} disabled={submitting}>取消</button>
+        {createdCount > 0 && <span className="cat-created" role="status">本次已创建 {createdCount} 个</span>}
+        <button type="button" className="mg-btn mg-secondary" onClick={onClose} disabled={submitting}>{createdCount > 0 ? '完成' : '取消'}</button>
+        {/* Several categories under one parent: no need to reopen the dialog and find the parent again */}
+        {!node && parentPicked && !rootMode && <button
+          type="button"
+          className="mg-btn mg-secondary"
+          disabled={submitting}
+          title="创建后留在这里，继续在同一个上级下面新建"
+          onClick={() => void submit(null, true)}
+        >创建并继续</button>}
         <button type="submit" className="mg-btn mg-primary" disabled={submitting || (!node && rootMode && freeRootCodes.length === 0)}>
           {submitting && <LoaderCircle size={14} className="spin" />}
           {submitting ? '保存中…' : node ? '保存' : '创建'}

@@ -18,6 +18,7 @@ export {
   buildCategoryTree,
   flattenCategoryTree,
   subtreeIds,
+  subtreeImageCounts,
   categoryAncestors,
   effectiveCuisines,
   effectiveHeatingGroup,

@@ -252,6 +252,22 @@ export function subtreeIds(tree: CategoryTree, id: number): Set<number> {
   return ids
 }
 
+/**
+ * Images labelled with each category or any category below it: GET /api/categories counts the
+ * images on the node itself (image_count, every scene), this sums them up the tree.
+ */
+export function subtreeImageCounts(tree: CategoryTree): Map<number, number> {
+  const counts = new Map<number, number>()
+  const visit = (entry: CategoryTreeNode): number => {
+    let total = entry.node.imageCount
+    for (const child of entry.children) total += visit(child)
+    counts.set(entry.node.id, total)
+    return total
+  }
+  tree.roots.forEach(visit)
+  return counts
+}
+
 /** The nodes above `id`, root first (the node itself is not included). */
 export function categoryAncestors(tree: CategoryTree, id: number): CategoryNode[] {
   const chain: CategoryNode[] = []

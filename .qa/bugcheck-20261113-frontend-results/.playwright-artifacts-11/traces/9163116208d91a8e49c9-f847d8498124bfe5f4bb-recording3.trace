@@ -1,0 +1,1 @@
+{"version":10,"type":"context-options","origin":"library","browserName":"","playwrightVersion":"1.64.1","options":{},"platform":"win32","wallTime":1794614197597,"monotonicTime":21559.536,"sdkLanguage":"javascript","title":"category-config.spec.ts:572 › 列表加载失败时显示错误码和追踪号，重试后恢复；链接可以直接打开某个类别"}

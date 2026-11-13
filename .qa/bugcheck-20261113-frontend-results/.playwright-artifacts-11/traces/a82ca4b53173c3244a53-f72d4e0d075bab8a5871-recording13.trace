@@ -1,0 +1,1 @@
+{"version":10,"type":"context-options","origin":"library","browserName":"","playwrightVersion":"1.64.1","options":{},"platform":"win32","wallTime":1794614202384,"monotonicTime":26346.725,"sdkLanguage":"javascript","title":"deletion-queue.spec.ts:85 › 待清理图片：检索服务未就绪时不能清理，并说明原因"}

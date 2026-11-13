@@ -14,6 +14,10 @@
 .scene-form label:has(input[type=checkbox]), .scene-form label:has(input[type=radio]) { display: flex; align-items: center; gap: 8px; }
 .scene-form input:not([type=checkbox]):not([type=radio]), .scene-form select, .scene-form textarea { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font: inherit; color: inherit; background: var(--surface); }
 .scene-form legend { padding: 0; margin-bottom: 4px; font-weight: 600; }
+/* The rule's category picker (category-picker) keeps its own field look inside the form */
+.scene-form .cp { margin-top: 0; }
+.scene-form .cp-label { color: inherit; font-size: inherit; line-height: inherit; }
+.scene-form .cp-combo input:not([type=checkbox]):not([type=radio]) { width: auto; padding: 0; border: 0; border-radius: 0; background: transparent; }
 .rule-kind { display: flex; flex-wrap: wrap; gap: 8px 20px; }
 .scene-membership-panel { margin-top: 20px; }
 .scene-membership-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }

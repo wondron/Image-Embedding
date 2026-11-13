@@ -12,10 +12,15 @@ const MAX_INDENT_DEPTH = 7
 const RECENT_KEY = 'food-atlas-library-recent-categories'
 const RECENT_KEPT = 8
 const RECENT_SHOWN = 5
-const OPTIONS_KEY = 'food-atlas-library-category-options'
+// v2: the options start from the new default (hideEmpty on), whatever an earlier visit stored
+const OPTIONS_KEY = 'food-atlas-library-category-options-v2'
 
 interface NavPreferences { hideEmpty: boolean; showInactive: boolean }
-const DEFAULT_PREFERENCES: NavPreferences = { hideEmpty: false, showInactive: false }
+/**
+ * A filter by a category without images finds nothing, and in a catalog of hundreds most
+ * categories have none yet: they are left out until asked for.
+ */
+const DEFAULT_PREFERENCES: NavPreferences = { hideEmpty: true, showInactive: false }
 
 function isNavPreferences(value: unknown): value is NavPreferences {
   const stored = value as Partial<NavPreferences> | null
@@ -58,9 +63,14 @@ export function CategoryNavigator({ tree, loading, error, onRetry, value, onChan
   const revealed = useRef<number | null>(null)
 
   const counts = useMemo(() => (tree ? subtreeImageCounts(tree) : new Map<number, number>()), [tree])
+  /** Categories without any image on them or below them. */
+  const emptyCount = useMemo(() => (tree ? [...tree.byId.keys()].filter(nodeId => !counts.get(nodeId)).length : 0), [tree, counts])
+  // No category has an image yet (a new library): hiding the empty ones would hide them all, so the option rests
+  const canHideEmpty = tree !== null && emptyCount < tree.byId.size
+  const hideEmpty = preferences.hideEmpty && canHideEmpty
   const view = useMemo(
-    () => (tree ? categoryNavView(tree, counts, { query, expanded, ...preferences }) : null),
-    [tree, counts, query, expanded, preferences],
+    () => (tree ? categoryNavView(tree, counts, { query, expanded, hideEmpty, showInactive: preferences.showInactive }) : null),
+    [tree, counts, query, expanded, hideEmpty, preferences.showInactive],
   )
   const rows = useMemo(() => view?.rows ?? [], [view])
   const words = useMemo(() => searchWords(query), [query])
@@ -123,6 +133,14 @@ export function CategoryNavigator({ tree, loading, error, onRetry, value, onChan
     const ancestors = categoryAncestors(tree, value).map(node => node.id)
     setExpanded(current => (ancestors.every(ancestor => current.has(ancestor)) ? current : new Set([...current, ...ancestors])))
   }, [value, tree])
+
+  // The first tree read: the domains start open, so their groups show without a click
+  const openedRoots = useRef(false)
+  useEffect(() => {
+    if (openedRoots.current || !tree || tree.roots.length === 0) return
+    openedRoots.current = true
+    setExpanded(current => new Set([...current, ...tree.roots.map(root => root.node.id)]))
+  }, [tree])
 
   useEffect(() => {
     if (value === null || recent[0] === value) return
@@ -255,7 +273,10 @@ export function CategoryNavigator({ tree, loading, error, onRetry, value, onChan
     </div>
 
     <div className="lf-tree-options">
-      <label><input type="checkbox" checked={preferences.hideEmpty} onChange={event => setPreferences({ ...preferences, hideEmpty: event.target.checked })} />隐藏没有图片的</label>
+      <label title={canHideEmpty ? `${emptyCount} 个类别还没有图片（含下级也没有）` : '还没有类别带图片，所以全部列出'}>
+        <input type="checkbox" checked={hideEmpty} disabled={!canHideEmpty} onChange={event => setPreferences({ ...preferences, hideEmpty: event.target.checked })} />
+        隐藏没有图片的{canHideEmpty && emptyCount > 0 && <span className="lf-option-count">{emptyCount}</span>}
+      </label>
       <label><input type="checkbox" checked={preferences.showInactive} onChange={event => setPreferences({ ...preferences, showInactive: event.target.checked })} />显示停用的</label>
     </div>
 

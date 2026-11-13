@@ -1,0 +1,13 @@
+{
+  "before": {
+    "input": "菜",
+    "code": "",
+    "expanded": "true"
+  },
+  "after": {
+    "input": "",
+    "code": "dish.",
+    "expanded": "false"
+  },
+  "bug": true
+}

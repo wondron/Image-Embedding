@@ -6,6 +6,7 @@ import {
   createCategory,
   deleteCategory,
   listCategories,
+  subtreeImageCounts,
   toCategoryFailure,
   updateCategory,
   type CategoryFailureView,
@@ -19,7 +20,7 @@ import { EmptyState, notify } from '../../shared/ui'
 import { CategoryDeleteDialog } from './CategoryDeleteDialog'
 import { CategoryEditorDialog, type CategoryEditorTarget, type CategorySaveRequest } from './CategoryEditorDialog'
 import { CategoryTable, rowElementId } from './CategoryTable'
-import { NO_CATEGORY_FILTER, categoryTableView, type CategoryStatusFilter, type CategoryTableFilter } from './tableModel'
+import { NO_CATEGORY_FILTER, categoryScopeOptions, categoryTableView, type CategoryStatusFilter, type CategoryTableFilter } from './tableModel'
 import { deleteFailureText, loadFailureText, saveFailureText, savedNotice } from './messages'
 import '../../components/ManagementViews.css'
 import './category-config.css'
@@ -89,6 +90,8 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
 
   const tree = useMemo(() => buildCategoryTree(nodes), [nodes])
   const view = useMemo(() => categoryTableView(tree, filter, expanded), [tree, filter, expanded])
+  const counts = useMemo(() => subtreeImageCounts(tree), [tree])
+  const scopeOptions = useMemo(() => categoryScopeOptions(tree), [tree])
   const domainName = useCallback((code: string) => enumValueLabel(catalog, DOMAIN_ENUM, code.toLowerCase()), [catalog])
   const inactiveCount = useMemo(() => nodes.filter(node => !node.isActive).length, [nodes])
   const busy = Boolean(removing?.submitting)
@@ -167,11 +170,17 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
       return
     }
     const path = ancestorIds(nodes, reveal)
-    const root = path.length > 0 ? path[path.length - 1] : reveal
-    if (view.filtering || (filter.domainId !== null && filter.domainId !== root)) setFilter(NO_CATEGORY_FILTER)
+    const outsideScope = filter.scopeId !== null && filter.scopeId !== reveal && !path.includes(filter.scopeId)
+    if (view.filtering || outsideScope) setFilter(NO_CATEGORY_FILTER)
     else if (path.some(id => !expanded.has(id))) setExpanded(current => new Set([...current, ...path]))
     else setReveal(null)
-  }, [reveal, view, filter.domainId, tree, nodes, expanded, loadedOnce, loading, listFailure, selectedId])
+  }, [reveal, view, filter.scopeId, tree, nodes, expanded, loadedOnce, loading, listFailure, selectedId])
+
+  // The node the table is narrowed to is gone (deleted here or elsewhere): back to the whole tree
+  useEffect(() => {
+    if (filter.scopeId === null || !loadedOnce || loading || tree.byId.has(filter.scopeId)) return
+    setFilter(current => ({ ...current, scopeId: null }))
+  }, [filter.scopeId, tree, loadedOnce, loading])
 
   useEffect(() => {
     try {
@@ -207,9 +216,18 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
     setEditor(target)
   }
 
-  /** 新建类别 from the toolbar: a domain when the tree is empty, else the parent is chosen in the form. */
+  /** Narrow the table to one domain or group (null: the whole tree), opened so its children show. */
+  function chooseScope(scopeId: number | null) {
+    setFilter(current => ({ ...current, scopeId }))
+    if (scopeId !== null) setExpanded(current => (current.has(scopeId) ? current : new Set([...current, scopeId])))
+  }
+
+  /**
+   * 新建类别 from the toolbar: a domain when the tree is empty; under the group the table is
+   * narrowed to; else the parent is chosen in the form.
+   */
   function openCreate() {
-    openEditor({ mode: 'create', parentId: nodes.length === 0 ? null : undefined })
+    openEditor({ mode: 'create', parentId: nodes.length === 0 ? null : filter.scopeId ?? undefined })
   }
 
   /** Show a node the server just returned before the reload confirms it. */
@@ -249,9 +267,10 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
     }
   }
 
-  async function save(request: CategorySaveRequest): Promise<CategoryFailureView | null> {
+  /** keepOpen: the editor stays for the next category under the same parent (「创建并继续」). */
+  async function save(request: CategorySaveRequest, keepOpen = false): Promise<CategoryFailureView | null> {
     const failure = await write(request, name => (request.mode === 'create' ? `已创建${name}。` : `已保存${name}。`))
-    if (!failure && mounted.current) setEditor(null)
+    if (!failure && mounted.current && !keepOpen) setEditor(null)
     return failure
   }
 
@@ -330,15 +349,17 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
         />
         {filter.query && <button type="button" aria-label="清空搜索" onClick={() => setFilter(current => ({ ...current, query: '' }))}><X size={15} /></button>}
       </label>
+      {/* The domains, and the groups right below them: with everything under 食材 a domain alone narrows nothing */}
       <select
-        className="mg-select"
-        aria-label="类别域筛选"
-        value={filter.domainId ?? ''}
+        className={`mg-select${filter.scopeId !== null ? ' is-set' : ''}`}
+        aria-label="范围筛选"
+        title="只看一个类别域，或其中的一个分组"
+        value={filter.scopeId ?? ''}
         disabled={tree.roots.length === 0}
-        onChange={event => setFilter(current => ({ ...current, domainId: event.target.value === '' ? null : Number(event.target.value) }))}
+        onChange={event => chooseScope(event.target.value === '' ? null : Number(event.target.value))}
       >
-        <option value="">全部类别域</option>
-        {tree.roots.map(root => <option key={root.node.id} value={root.node.id}>{categoryLabel(root.node)}</option>)}
+        <option value="">全部类别</option>
+        {scopeOptions.map(option => <option key={option.id} value={option.id}>{`${option.depth ? '　' : ''}${option.label}`}</option>)}
       </select>
       <select
         className="mg-select"
@@ -380,6 +401,7 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
         ? <CategoryTable
           tree={tree}
           view={view}
+          counts={counts}
           selectedId={selectedId}
           busy={busy}
           onToggle={toggle}
@@ -393,7 +415,7 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
       {nodes.length > 0 && <div className="mg-pagination ct-footer">
         <span>{view.filtering
           ? `匹配 ${view.matched} 个 · 共 ${view.total} 个类别`
-          : `共 ${view.total} 个类别${filter.domainId === null && inactiveCount > 0 ? ` · 停用 ${inactiveCount} 个` : ''}`}</span>
+          : `共 ${view.total} 个类别${filter.scopeId === null && inactiveCount > 0 ? ` · 停用 ${inactiveCount} 个` : ''}`}</span>
         <div>
           <button type="button" className="mg-text-button" disabled={view.filtering} onClick={() => setExpanded(new Set(nodes.map(node => node.id)))}>全部展开</button>
           <button type="button" className="mg-text-button" disabled={view.filtering} onClick={() => setExpanded(new Set())}>全部收起</button>

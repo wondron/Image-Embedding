@@ -23,7 +23,8 @@
 }
 .ct-head { border-top: 0; }
 .ct-list { margin: 0; padding: 0; list-style: none; }
-.ct-row { min-height: 52px; padding: 5px 18px; border-bottom: 1px solid #edf0f5; font-size: 14px; }
+/* One line per category: the row height decides how much of a group fits on the screen */
+.ct-row { min-height: 38px; padding: 1px 18px; border-bottom: 1px solid #edf0f5; font-size: 14px; scroll-margin-top: 46px; }
 .ct-row.is-odd { background: #fafbfe; }
 .ct-row:hover { background: #f4f8fe; }
 .ct-row.is-last { border-bottom: 0; }
@@ -36,22 +37,27 @@
 .ct-toggle-static { color: #b6c0cd; pointer-events: none; }
 .ct-icon { display: grid; place-items: center; flex-shrink: 0; width: 25px; height: 25px; color: #64748b; }
 .ct-row.is-inactive .ct-icon { color: #a8b2bf; }
-.ct-label { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; max-width: 100%; padding: 3px 6px; border-radius: 6px; text-align: left; }
+.ct-label { display: flex; flex: 1 1 auto; align-items: center; gap: 10px; min-width: 0; padding: 3px 6px; border-radius: 6px; text-align: left; }
 .ct-label:hover strong { color: var(--primary); }
-.ct-label-line { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.ct-label-line { display: flex; flex: 0 1 auto; align-items: center; gap: 6px; min-width: 0; }
 .ct-label strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 14px; font-weight: 500; }
-.ct-label code { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #7b8899; font-size: 12px; }
+/* The code takes what the name leaves; right-to-left so a long one loses its front (the parents'
+   segments) and keeps its own last segment in view */
+.ct-code { flex: 1 1 0; min-width: 0; overflow: hidden; direction: rtl; text-align: left; text-overflow: ellipsis; white-space: nowrap; color: #94a3b8; font-size: 12px; }
 .ct-row.is-inactive .ct-label strong { color: #64748b; }
 .ct-row.is-context .ct-label strong { color: #7b8899; font-weight: 400; }
 .ct-count { flex-shrink: 0; padding: 0 6px; border-radius: 999px; background: #eef2f6; color: #64748b; font-size: 11px; line-height: 18px; }
 .ct-label:focus-visible { outline-offset: 0; }
 
 .ct-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
+.ct-row .ct-chips { flex-wrap: nowrap; overflow: hidden; }
+.ct-row .ct-chip { flex-shrink: 0; }
+.ct-row .ct-chip:first-child { flex-shrink: 1; min-width: 0; }
 .ct-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 0 7px; border: 1px solid #e5eaf2; border-radius: 6px; background: #f6f7f8; color: #475569; font-size: 12px; line-height: 22px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ct-chip i { color: #94a3b8; font-size: 11px; font-style: normal; }
 .ct-more { color: var(--muted); font-size: 12px; }
 .ct-none { color: #a8b2bf; }
-.ct-heating, .ct-usage { color: #475569; font-size: 13px; overflow-wrap: anywhere; }
+.ct-heating, .ct-usage { display: block; overflow: hidden; color: #475569; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .ct-inherited { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; color: #7b8899; font-size: 13px; }
 .ct-inherited-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ct-inherited small { flex-shrink: 0; padding: 0 5px; border: 1px dashed #d5dce6; border-radius: 4px; color: #94a3b8; font-size: 11px; line-height: 16px; }
@@ -64,7 +70,21 @@
 .ct-state-inline { display: none; }
 
 .ct-row .mg-row-actions { gap: 4px; }
+.ct-row .mg-row-actions button { width: 32px; height: 32px; }
 .ct-head .ct-col-actions { padding-left: 4px; }
+
+/* A wide screen: the page keeps its height; the rows scroll inside the panel under a table head
+   that stays, with the toolbar above and the counts below always in view */
+@media (min-width: 901px) and (min-height: 560px) {
+  main.management-page:has(> .ct-page) { display: flex; flex-direction: column; overflow: hidden; }
+  .mg-page.ct-page { display: flex; flex: 1; flex-direction: column; min-height: 0; padding: 0; }
+  .ct-page > * { flex-shrink: 0; }
+  .ct-page > .ct-panel { display: flex; flex: 1 1 0; flex-direction: column; min-height: 0; }
+  .ct-panel > * { flex-shrink: 0; }
+  .ct-panel > .ct-table { flex: 1 1 0; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #d5dde8 transparent; }
+  .ct-head { position: sticky; top: 0; z-index: 2; }
+  .ct-page > .mg-info { margin-top: 8px; }
+}
 
 .ct-footer > div { gap: 14px; }
 /* .mg-pagination styles its buttons as page arrows; these are text buttons */
@@ -89,6 +109,15 @@
 .cat-form select[aria-invalid='true'] { border-color: #e2b4b4; background: #fff8f7; }
 .cat-form .mg-field > input:disabled,
 .cat-form .mg-field > select:disabled { background: #f3f5f8; color: #64748b; }
+/* 上级类别: the picked parent above the searchable tree (category-picker) */
+.cat-parent { min-width: 0; }
+.cat-parent .cp-selected, .cat-parent .cp-combo { margin-top: 0; }
+.cat-parent .cp-selected + .cp-search .cp-combo { margin-top: 6px; }
+.cat-parent-current code { font-size: 11px; }
+.cat-parent.is-invalid .cp-combo, .cat-parent.is-invalid .cp-selected { border-color: #e2b4b4; }
+.cat-form .cp-combo input[aria-invalid='true'] { background: transparent; }
+.cat-same-name { grid-column: 2; margin: 0; padding: 6px 10px; border: 1px solid #f1e3b4; border-radius: 8px; background: #fffaf0; color: #7a5b00; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.cat-created { margin-right: auto; align-self: center; color: #4b8b63; font-size: 13px; }
 .cat-names { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
 .cat-name-row { display: grid; grid-template-columns: 68px minmax(0, 1fr) 84px 28px; align-items: center; gap: 6px; width: 100%; }
 .cat-name-row input,
@@ -136,6 +165,6 @@
   .ct-row .mg-row-actions { gap: 2px; }
   .ct-row .mg-row-actions button { width: 32px; height: 32px; }
   .ct-alert { margin: 12px; }
-  .cat-form .mg-field > .cat-field-error { grid-column: 1; }
+  .cat-form .mg-field > .cat-field-error, .cat-same-name { grid-column: 1; }
   .cat-name-row { grid-template-columns: 56px minmax(0, 1fr) 76px 28px; }
 }

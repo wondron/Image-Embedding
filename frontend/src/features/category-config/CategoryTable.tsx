@@ -22,6 +22,8 @@ interface RowActions {
 
 interface Context extends RowActions {
   tree: CategoryTree
+  /** Images on each node or below it (subtreeImageCounts). */
+  counts: ReadonlyMap<number, number>
   rows: ReadonlyMap<number, { row: CategoryTableRow; index: number }>
   last: number
   filtering: boolean
@@ -66,12 +68,17 @@ function HeatingCell({ tree, node }: { tree: CategoryTree; node: CategoryNode })
   return <span className="ct-heating" title={group.value.code}>{group.value.name}</span>
 }
 
-function UsageCell({ node }: { node: CategoryNode }) {
+/** What uses the node itself, then the images on the categories below it (a group has few of its own). */
+function UsageCell({ node, total }: { node: CategoryNode; total: number }) {
+  const below = Math.max(0, total - node.imageCount)
   const uses = [
     node.imageCount > 0 ? `${node.imageCount} 张图片` : null,
     node.sceneRuleCount > 0 ? `${node.sceneRuleCount} 条规则` : null,
+    below > 0 ? `下级 ${below} 张` : null,
   ].filter((text): text is string => text !== null)
-  return uses.length > 0 ? <span className="ct-usage">{uses.join(' · ')}</span> : <span className="ct-none">—</span>
+  if (uses.length === 0) return <span className="ct-none">—</span>
+  const text = uses.join(' · ')
+  return <span className="ct-usage" title={below > 0 ? `${text}（下级类别上的图片合计，不分场景）` : text}>{text}</span>
 }
 
 function StateBadge({ active, inline = false }: { active: boolean; inline?: boolean }) {
@@ -118,13 +125,14 @@ function Row({ entry, ctx }: { entry: CategoryTreeNode; ctx: Context }) {
             {children.length > 0 && <span className="ct-count" aria-hidden="true">{children.length}</span>}
             {!node.isActive && <StateBadge active={false} inline />}
           </span>
-          <code>{node.code}</code>
+          {/* Cut at the front when the cell is narrow: the last segment is the node's own (bdo keeps the code left-to-right) */}
+          <code className="ct-code" title={node.code}><bdo dir="ltr">{node.code}</bdo></code>
         </button>
       </div>
       <div className="ct-cell ct-col-names"><NamesCell node={node} /></div>
       <div className="ct-cell ct-col-cuisines"><CuisinesCell tree={ctx.tree} node={node} /></div>
       <div className="ct-cell ct-col-heating"><HeatingCell tree={ctx.tree} node={node} /></div>
-      <div className="ct-cell ct-col-usage"><UsageCell node={node} /></div>
+      <div className="ct-cell ct-col-usage"><UsageCell node={node} total={ctx.counts.get(node.id) ?? node.imageCount} /></div>
       <div className="ct-cell ct-col-status"><StateBadge active={node.isActive} /></div>
       <div className="ct-cell ct-col-actions mg-row-actions">
         <button type="button" aria-label={`新建「${label}」的下级类别`} title="新建下级类别" disabled={ctx.busy} onClick={() => ctx.onAddChild(node)}><Plus size={16} /></button>
@@ -147,17 +155,20 @@ function RowList({ entries, ctx }: { entries: readonly CategoryTreeNode[]; ctx: 
 
 /**
  * The category tree as a table: one row per listed node, nested lists for the levels, so the
- * columns line up while assistive technology still hears the hierarchy.
+ * columns line up while assistive technology still hears the hierarchy. One line per row: with
+ * hundreds of categories the height of a row decides how much of a group fits on the screen.
  */
-export function CategoryTable({ tree, view, selectedId, busy, ...actions }: RowActions & {
+export function CategoryTable({ tree, view, counts, selectedId, busy, ...actions }: RowActions & {
   tree: CategoryTree
   view: CategoryTableView
+  counts: ReadonlyMap<number, number>
   selectedId: number | null
   busy: boolean
 }) {
   const ctx: Context = {
     ...actions,
     tree,
+    counts,
     rows: new Map(view.rows.map((row, index) => [row.entry.node.id, { row, index }])),
     last: view.rows.length - 1,
     filtering: view.filtering,

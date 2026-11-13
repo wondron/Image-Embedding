@@ -1,0 +1,1 @@
+{"version":10,"type":"context-options","origin":"library","browserName":"","playwrightVersion":"1.64.1","options":{},"platform":"win32","wallTime":1794614200466,"monotonicTime":24429.059,"sdkLanguage":"javascript","title":"deletion-queue.spec.ts:60 › 待清理图片：列出队列，立即清理后说明结果，失败的留在队列里并写明原因"}
