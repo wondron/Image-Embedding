@@ -1,1 +1,0 @@
-{"version":10,"type":"context-options","origin":"library","browserName":"","playwrightVersion":"1.64.1","options":{},"platform":"win32","wallTime":1794614203169,"monotonicTime":27131.28,"sdkLanguage":"javascript","title":"downloads.spec.ts:52 › ZIP 包保留真实图片、来源清单与失败项，并可只重试失败图片"}
