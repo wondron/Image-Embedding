@@ -27,7 +27,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from app.core import errors as err
-from app.core.category_rules import CATEGORY_DISPLAY_LANG
+from app.core.category_rules import CATEGORY_DISPLAY_LANG, CATEGORY_MAX_ROOTS
 from app.core.enums import NameKind
 from app.db.common import _row_to_dict
 from app.repositories.catalog_lock import lock_catalog_for_write
@@ -57,6 +57,17 @@ _NODE_SELECT = (
 _NODE_PARAMS = {"display_lang": CATEGORY_DISPLAY_LANG, "primary_kind": NameKind.PRIMARY.value}
 # Columns a patch sets with a plain bind (cuisines needs a cast; names is another table)
 _PLAIN_COLUMNS = ("code", "parent_id", "heating_group_id", "sort_order", "is_active")
+
+
+def _check_root_capacity(conn: Any) -> None:
+    """Run under the exclusive catalog lock, before adding a root (including a move).
+
+    Count inactive and legacy roots too; the domain whitelist alone cannot bound
+    the total when older roots with other codes are already stored.
+    """
+    count = conn.execute(text("SELECT count(*) FROM categories WHERE parent_id IS NULL")).scalar_one()
+    if count >= CATEGORY_MAX_ROOTS:
+        raise err.validation_error(f"at most {CATEGORY_MAX_ROOTS} root categories are allowed")
 
 
 def _node(row: Any) -> dict[str, Any]:
@@ -164,6 +175,8 @@ class PgCategoriesMixin:
                     raise err.validation_error(f"parent_id {parent_id} does not exist")
                 _check_code_free(conn, new["code"])
                 _check_heating_group(conn, new["heating_group_id"])
+                if parent_id is None:
+                    _check_root_capacity(conn)
                 category_id = conn.execute(
                     text(
                         "INSERT INTO categories "
@@ -233,6 +246,8 @@ class PgCategoriesMixin:
                 if renamed:
                     _check_code_free(conn, code)
                 _check_heating_group(conn, changes.get("heating_group_id"))
+                if moved and parent_id is None:
+                    _check_root_capacity(conn)
 
                 assignments = [f"{column} = :{column}" for column in _PLAIN_COLUMNS if column in changes]
                 if "cuisines" in changes:

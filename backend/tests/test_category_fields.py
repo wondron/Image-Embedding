@@ -127,6 +127,9 @@ class CategoryFieldsTests(unittest.TestCase):
                     self.assert_invalid(normalize_category_fields, {field: bad}, partial=True)
 
     def test_only_the_domains_may_be_roots(self):
+        from app.core.category_rules import CATEGORY_MAX_ROOTS
+        self.assertEqual(ROOT_CODES, ("ingredient", "dish", "dessert", "beverage", "mixed", "other"))
+        self.assertEqual(len(ROOT_CODES), CATEGORY_MAX_ROOTS)
         self.assertEqual(set(ROOT_CODES), {member.value for member in CategoryDomain})
         for code in ROOT_CODES:
             check_root_code(code)

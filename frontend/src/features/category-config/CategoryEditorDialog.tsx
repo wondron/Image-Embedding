@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { LoaderCircle, Plus, X } from 'lucide-react'
 import { Dialog } from '../../components/Dialog'
 import {
+  CATEGORY_ROOT_LIMIT,
   categoryDraftFromNode,
   categoryLabel,
   effectiveCuisines,
@@ -84,8 +85,11 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
     [entries, forbiddenParentIds],
   )
   const freeRootCodes = useMemo(() => rootCodes.filter(code => !takenCodes.has(code)), [rootCodes, takenCodes])
+  const rootCapacityAvailable = tree.roots.length < CATEGORY_ROOT_LIMIT
   // Only a domain may sit at the top: an existing root, or a node whose code is a domain's.
-  const rootOffered = node ? node.parentId === null || rootCodes.includes(node.code) : freeRootCodes.length > 0
+  const rootOffered = node
+    ? node.parentId === null || (rootCapacityAvailable && rootCodes.includes(node.code))
+    : rootCapacityAvailable && freeRootCodes.length > 0
 
   const prefixOf = (parentId: number | null) => {
     const parent = parentId === null ? undefined : tree.byId.get(parentId)?.node
@@ -199,6 +203,7 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
     }
     const validated = validateCategoryDraft(draft, {
       rootCodes,
+      rootCount: tree.roots.length,
       takenCodes,
       original: node ?? undefined,
       forbiddenParentIds,
@@ -277,7 +282,9 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
             </select>
             <small id="category-form-parentId-hint">{node
               ? '换上级会把它下面的下级类别一起移过去。'
-              : '新类别放在哪个类别下面；只有类别域（食材、菜品等）可以放在最顶层。'}</small>
+              : rootCapacityAvailable
+                ? '新类别放在哪个类别下面；只有类别域（食材、菜品等）可以放在最顶层。'
+                : '已达到六个根类别的上限，请在现有类别下添加。'}</small>
             <FieldError field="parentId" errors={fieldErrors} />
           </label>
 

@@ -19,7 +19,7 @@ interface Row {
 }
 interface Call { method: string; path: string; body: unknown }
 
-const ROOT_CODES = ['ingredient', 'dish', 'dessert', 'beverage']
+const ROOT_CODES = ['ingredient', 'dish', 'dessert', 'beverage', 'mixed', 'other']
 const HEATING_GROUPS = [{ id: 2, code: 'grill', name: '烤' }]
 const DOMAIN_ENUM = {
   name: 'category_domain', label: '类别域', description: '', editable: false,
@@ -28,6 +28,8 @@ const DOMAIN_ENUM = {
     { value: 'dish', label: '菜品', description: '' },
     { value: 'dessert', label: '甜点烘焙', description: '' },
     { value: 'beverage', label: '饮品', description: '' },
+    { value: 'mixed', label: '混合', description: '' },
+    { value: 'other', label: '其他', description: '' },
   ],
 }
 const zh = (name: string): Name => ({ lang: 'zh', name, kind: 'primary' })
@@ -159,6 +161,40 @@ test('导航只有「食材管理」一个入口，它就是类别树', async ({
   await expect(nodeButton(page, '披萨', 'dish.pizza')).toBeVisible() // roots are open after the first load
 })
 
+test('五个根类别后可以添加「其他」，满六个后只允许添加下级类别', async ({ page }) => {
+  const roots = DOMAIN_ENUM.values.filter(value => value.value !== 'other')
+    .map((value, index) => row(index + 1, value.value, null, value.label))
+  const backend = await open(page, roots)
+  await expect(nodeButton(page, '混合', 'mixed')).toBeVisible()
+  await createButton(page).click()
+  const dialog = page.getByRole('dialog', { name: '新建类别' })
+  await dialog.locator('#category-form-parentId').selectOption('root')
+  await expect(dialog.locator('#category-form-code option')).toHaveText(['其他（other）'])
+  await expect(dialog.locator('#category-form-zhName')).toHaveValue('其他')
+  await dialog.getByRole('button', { name: '创建', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  await expect(nodeButton(page, '其他', 'other')).toBeVisible()
+  expect(backend.rows.filter(item => item.parent_id === null)).toHaveLength(6)
+  expect(backend.writes()).toHaveLength(1)
+  expect(backend.writes()[0].body).toMatchObject({ code: 'other', parent_id: null, names: [zh('其他')] })
+
+  await createButton(page).click()
+  await expect(dialog.locator('#category-form-parentId option[value="root"]')).toHaveCount(0)
+  await expect(dialog.locator('#category-form-parentId-hint')).toContainText('已达到六个根类别的上限')
+  await dialog.locator('#category-form-parentId').selectOption('6')
+  await expect(dialog.locator('#category-form-code')).toHaveValue('other.')
+})
+
+test('已有六个根类别包含旧编码时，也不再提供第七个根类别', async ({ page }) => {
+  const roots = DOMAIN_ENUM.values.filter(value => value.value !== 'other')
+    .map((value, index) => row(index + 1, value.value, null, value.label))
+  await open(page, [...roots, row(6, 'legacy', null, '旧类别域')])
+  await createButton(page).click()
+  const dialog = page.getByRole('dialog', { name: '新建类别' })
+  await expect(dialog.locator('#category-form-parentId option[value="root"]')).toHaveCount(0)
+  await expect(dialog.locator('#category-form-parentId-hint')).toContainText('已达到六个根类别的上限')
+})
+
 test('空库：先建类别域，再在它下面建下级类别', async ({ page }) => {
   const backend = await open(page, [])
   await expect(table(page).getByRole('heading', { name: '还没有类别' })).toBeVisible()
@@ -167,7 +203,7 @@ test('空库：先建类别域，再在它下面建下级类别', async ({ page 
   const rootDialog = page.getByRole('dialog', { name: '新建类别' })
   await expect(rootDialog.locator('#category-form-parentId')).toHaveValue('root')
   // The root codes come from the API; their Chinese names from the category_domain enum.
-  await expect(rootDialog.locator('#category-form-code option')).toHaveText(['食材（ingredient）', '菜品（dish）', '甜点烘焙（dessert）', '饮品（beverage）'])
+  await expect(rootDialog.locator('#category-form-code option')).toHaveText(['食材（ingredient）', '菜品（dish）', '甜点烘焙（dessert）', '饮品（beverage）', '混合（mixed）', '其他（other）'])
   await expect(rootDialog.locator('#category-form-zhName')).toHaveValue('食材')
   await rootDialog.locator('#category-form-code').selectOption('dish')
   await expect(rootDialog.locator('#category-form-zhName')).toHaveValue('菜品')
@@ -239,9 +275,9 @@ test('工具栏新建：先选上级，编码随上级前缀变化', async ({ pa
   await parent.selectOption('5') // 食材: what was typed moves under the new prefix
   await expect(code).toHaveValue('ingredient.calzone')
 
-  // Only dessert / beverage are still free for a root; the name follows the domain.
+  // The four unused domain codes are still free for a root; the name follows the domain.
   await parent.selectOption('root')
-  await expect(code.locator('option')).toHaveText(['甜点烘焙（dessert）', '饮品（beverage）'])
+  await expect(code.locator('option')).toHaveText(['甜点烘焙（dessert）', '饮品（beverage）', '混合（mixed）', '其他（other）'])
   await expect(dialog.locator('#category-form-zhName')).toHaveValue('甜点烘焙')
   await parent.selectOption('3') // 面条
   await expect(code).toHaveValue('dish.noodle.')

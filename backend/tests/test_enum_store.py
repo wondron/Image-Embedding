@@ -35,6 +35,12 @@ def write_and_touch(path: Path, text: str) -> None:
 
 
 class ShippedFileTests(unittest.TestCase):
+    def test_category_domains_include_mixed_and_other(self):
+        domain = read_catalog(SHIPPED).get("category_domain")
+        self.assertEqual(domain.value_list(), ["ingredient", "dish", "dessert", "beverage", "mixed", "other"])
+        self.assertEqual({item.value: item.label for item in domain.values}["mixed"], "混合")
+        self.assertEqual({item.value: item.label for item in domain.values}["other"], "其他")
+
     def test_shipped_file_passes_every_rule(self):
         catalog = read_catalog(SHIPPED)  # also checks system values against app.core.enums
         self.assertEqual(set(catalog.names()), set(enums.SYSTEM_ENUMS) | set(enums.EDITABLE_ENUMS))

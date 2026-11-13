@@ -23,6 +23,7 @@ export {
   effectiveHeatingGroup,
 } from './model'
 export {
+  CATEGORY_ROOT_LIMIT,
   type CategoryFieldName,
   type CategoryFieldErrors,
   type CategoryDraft,

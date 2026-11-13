@@ -77,7 +77,7 @@ class CategoryListResponse(BaseModel):
         ..., description="整棵树的全部节点：父节点一定在子节点之前，同级按 sort_order、id 排"
     )
     heating_groups: list[HeatingGroup] = Field(..., description="可选的加热组（heating_groups 表）")
-    root_codes: list[str] = Field(..., description="根节点允许使用的编码（四个域）")
+    root_codes: list[str] = Field(..., description="根节点允许使用的编码（六个域，根节点最多六个）")
 
 
 class CategoryResponse(BaseModel):
@@ -137,7 +137,7 @@ class CategoryCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     code: str = Field(
-        ..., description="小写字母、数字、下划线，用点分段，字母开头。根节点只能用四个域的编码", **_CODE
+        ..., description="小写字母、数字、下划线，用点分段，字母开头。根节点只能用六个域的编码", **_CODE
     )
     parent_id: int | None = Field(default=None, gt=0, strict=True, description="父节点；不传或 null 为根节点")
     names: list[CategoryName] = Field(

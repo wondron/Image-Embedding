@@ -12,6 +12,7 @@ export const CATEGORY_NAME_MAX_LEN = 128
 export const CATEGORY_LANG_MAX_LEN = 16
 export const CATEGORY_LANG_PATTERN = /^[a-z]{2,3}(-[a-z0-9]{2,8})*$/
 export const CATEGORY_MAX_NAMES = 50
+export const CATEGORY_ROOT_LIMIT = 6
 /** Search hits and the gallery show this language's primary name, so every category needs one. */
 export const CATEGORY_DISPLAY_LANG = 'zh'
 export const CATEGORY_CUISINE_MAX_LEN = 32
@@ -53,6 +54,8 @@ export interface CategoryPayload {
 export interface CategoryDraftContext {
   /** Codes a root may use (GET /api/categories root_codes). */
   rootCodes: readonly string[]
+  /** Existing roots, including any categories created before the domain restriction. */
+  rootCount: number
   /** Codes of every other node. */
   takenCodes: ReadonlySet<string>
   /** The node being edited; omit when creating. */
@@ -185,6 +188,9 @@ export function validateCategoryDraft(draft: CategoryDraft, context: CategoryDra
 
   if (draft.parentId !== null && context.forbiddenParentIds?.has(draft.parentId)) {
     fieldErrors.parentId = '不能移动到自己或自己的下级类别下面。'
+  }
+  if (draft.parentId === null && context.original?.parentId !== null && context.rootCount >= CATEGORY_ROOT_LIMIT) {
+    fieldErrors.parentId = `根类别最多只能有 ${CATEGORY_ROOT_LIMIT} 个，请选择上级类别。`
   }
   const badCode = codeError(code, draft, context)
   if (badCode) fieldErrors.code = badCode

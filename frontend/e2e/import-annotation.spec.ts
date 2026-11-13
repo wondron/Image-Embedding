@@ -18,7 +18,7 @@ const CATEGORIES = {
     category(5, 'dish.retired', 1, '停用类别', [], false),
   ],
   heating_groups: [],
-  root_codes: ['ingredient', 'dish', 'dessert', 'beverage'],
+  root_codes: ['ingredient', 'dish', 'dessert', 'beverage', 'mixed', 'other'],
 }
 const scene = (id: number, code: string, name: string, rules: unknown[], includeAll = false) => ({
   id, code, name, description: null, include_all: includeAll, outputs_heating: false, is_active: true,

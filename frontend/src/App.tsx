@@ -42,7 +42,7 @@ const navigation = [
   { key: 'library' as const, name: '图片数据', icon: Images, description: '管理你的食材图库' },
   { key: 'import' as const, name: '上传与导入', icon: UploadCloud, description: '整理图片，准备入库' },
   { key: 'tasks' as const, name: '入库任务', icon: Workflow, description: '任务进度与失败记录' },
-  // The category tree: every food item is a category under one of the four domains (?view=categories)
+  // The category tree: every food item is a category under one of the six domains (?view=categories)
   { key: 'categories' as const, name: '食材管理', icon: Tags, description: '类别树：名称、别名与属性' },
   { key: 'scenes' as const, name: '场景管理', icon: Layers3, description: '目录、标签、规则与全量同步' },
   { key: 'enums' as const, name: '枚举配置', icon: ListTree, description: '查看取值并追加' },

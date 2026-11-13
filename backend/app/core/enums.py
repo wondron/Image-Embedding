@@ -28,12 +28,14 @@ ENUM_MAX_VALUES = 100  # 每个枚举最多多少个取值，防止接口被刷
 
 
 class CategoryDomain(StrEnum):
-    """类别树的四个根节点（域）。"""
+    """类别树的六个根节点（域）；每个编码唯一，最多六个根节点。"""
 
     INGREDIENT = "ingredient"  # 食材
     DISH = "dish"  # 菜品
     DESSERT = "dessert"  # 甜点烘焙
     BEVERAGE = "beverage"  # 饮品
+    MIXED = "mixed"  # 混合：多食材、多菜品、饮品等混合在一起
+    OTHER = "other"  # 其他：不属于其余类别域的内容
 
 
 class NameKind(StrEnum):

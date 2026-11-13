@@ -65,9 +65,10 @@ const nodes = [
   node(3, 'dish.noodle', 1),
   node(4, 'dish.pizza.slice', 2),
 ]
-const ROOT_CODES = ['ingredient', 'dish', 'dessert', 'beverage']
+const ROOT_CODES = ['ingredient', 'dish', 'dessert', 'beverage', 'mixed', 'other']
 const context = (extra: Partial<CategoryDraftContext> = {}): CategoryDraftContext => ({
   rootCodes: ROOT_CODES,
+  rootCount: 2,
   takenCodes: new Set(['dish', 'dish.pizza']),
   ...extra,
 })
@@ -282,14 +283,27 @@ describe('category draft', () => {
   it('lets only a domain code be a root, and only checks that when the code or the place changes', () => {
     const rootDraft = (code: string) => draft({ parentId: null, code })
     expect(validateCategoryDraft(rootDraft('dessert'), context()).ok).toBe(true)
+    expect(validateCategoryDraft(rootDraft('mixed'), context()).ok).toBe(true)
+    expect(validateCategoryDraft(rootDraft('other'), context()).ok).toBe(true)
     const snack = validateCategoryDraft(rootDraft('snack'), context())
     expect(snack.ok).toBe(false)
-    if (!snack.ok) expect(snack.fieldErrors.code).toContain('ingredient、dish、dessert、beverage')
+    if (!snack.ok) expect(snack.fieldErrors.code).toContain('ingredient、dish、dessert、beverage、mixed、other')
     // a root stored before the rule keeps its code while it is not renamed or moved
     const legacy = { id: 9, code: 'legacy', parentId: null }
     expect(validateCategoryDraft(rootDraft('legacy'), context({ original: legacy })).ok).toBe(true)
     expect(validateCategoryDraft(rootDraft('legacy2'), context({ original: legacy })).ok).toBe(false)
     expect(validateCategoryDraft(rootDraft('dish.rice'), context({ original: { id: 7, code: 'dish.rice', parentId: 1 } })).ok).toBe(false)
+  })
+
+  it('limits roots to six, including legacy roots, while allowing edits and children', () => {
+    const root = draft({ parentId: null, code: 'other', zhName: '其他' })
+    expect(validateCategoryDraft(root, context({ rootCount: 5 })).ok).toBe(true)
+    const seventh = validateCategoryDraft(root, context({ rootCount: 6 }))
+    expect(seventh.ok).toBe(false)
+    if (!seventh.ok) expect(seventh.fieldErrors.parentId).toContain('最多只能有 6 个')
+    expect(validateCategoryDraft(root, context({ rootCount: 6, original: { id: 9, code: 'other', parentId: null } })).ok).toBe(true)
+    expect(validateCategoryDraft(root, context({ rootCount: 6, original: { id: 9, code: 'other', parentId: 1 } })).ok).toBe(false)
+    expect(validateCategoryDraft(draft(), context({ rootCount: 6 })).ok).toBe(true)
   })
 
   it('patches only what differs from the node as loaded', () => {

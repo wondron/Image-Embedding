@@ -965,6 +965,37 @@ class PgLiveTests(unittest.TestCase):
         self.assert_category_error("VALIDATION_ERROR", store.update_category, legacy, {"code": "legacy2"})
         self.assertEqual(store.update_category(legacy, {"code": "beverage"})["category"]["code"], "beverage")
 
+    def test_category_root_cap_counts_legacy_and_inactive_roots_and_allows_freeing_a_slot(self):
+        store = self.store()
+        self.sql("INSERT INTO categories (code) VALUES ('legacy')")
+        roots = {
+            code: store.create_category({"code": code, "names": [self.zh(code)]})
+            for code in ("ingredient", "dish", "dessert", "beverage", "mixed")
+        }
+        self.assertEqual(self.sql("SELECT count(*) FROM categories WHERE parent_id IS NULL").scalar_one(), 6)
+        # A legacy code consumes a slot even though it is outside the six allowed codes.
+        other_fields = {"code": "other", "names": [self.zh("其他")]}
+        self.assertIn("at most 6", self.assert_category_error("VALIDATION_ERROR", store.create_category, other_fields))
+        store.update_category(roots["mixed"]["id"], {"is_active": False})
+        # Deactivation does not free a root slot; duplicate codes keep their conflict error.
+        self.assertIn("at most 6", self.assert_category_error("VALIDATION_ERROR", store.create_category, other_fields))
+        self.assert_category_error(
+            "CATEGORY_CODE_EXISTS", store.create_category, {"code": "mixed", "names": [self.zh("重复")]}
+        )
+        other = store.create_category({**other_fields, "parent_id": roots["ingredient"]["id"]})
+        self.assertIn(
+            "at most 6", self.assert_category_error("VALIDATION_ERROR", store.update_category, other["id"], {"parent_id": None})
+        )
+        self.assertEqual(
+            next(n for n in store.list_categories() if n["id"] == other["id"])["parent_id"],
+            roots["ingredient"]["id"],
+        )
+        # Moving an existing root beneath another category frees exactly one slot.
+        store.update_category(roots["mixed"]["id"], {"parent_id": roots["ingredient"]["id"]})
+        promoted = store.update_category(other["id"], {"parent_id": None})["category"]
+        self.assertEqual((promoted["parent_id"], promoted["path"]), (None, str(other["id"])))
+        self.assertEqual(self.sql("SELECT count(*) FROM categories WHERE parent_id IS NULL").scalar_one(), 6)
+
     def test_category_delete_refuses_a_node_in_use_and_removes_a_free_one(self):
         store = self.store()
         dish, ingredient, pizza, piece = self.seed_tree(store)
