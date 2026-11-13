@@ -25,7 +25,7 @@ import { markScenePending, useSceneCatalog } from '../features/scene-catalog'
 import { beginSceneWrite, endSceneWrite } from '../features/scene-sync'
 import './ManagementViews.css'
 
-export type ManagementView = 'library' | 'import' | 'tasks' | 'categories' | 'enums' | 'scenes'
+export type ManagementView = 'library' | 'import' | 'tasks' | 'categories' | 'enums' | 'scenes' | 'models'
 type Props = { view: ManagementView; onNavigate: (view: ManagementView) => void; apiBase?: string }
 type IndexJobStatus = 'pending' | 'running' | 'success' | 'error' | 'cancelled'
 /** What the server stored for a job, and what is worth telling about it. */

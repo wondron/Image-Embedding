@@ -51,6 +51,10 @@ Global 搜索阶段直接保留上游 `image_url`，不下载或验证候选图�
 
 这些连接参数只在启动时读取，Nacos 里修改后需要重启服务；predict 的模型配置仍支持热更新。
 
+### 换 embedding 模型
+
+`EMBEDDING_CONFIG` 换成新模型后（热更新或重启都行），predict 立即用新模型；自建库检索继续用当前版本的编码器查当前版本的向量库，不会拿新模型去查旧向量。在前端「模型版本」页（或 `/api/embedding-models`）按三步换过去：登记为新版本（新建它自己的 collection）→ 生成向量（服务端后台从存储里的原图生成，可停止、续做）→ 切换（不用重启；原版本保留，可以切回）。确定不用的旧版本再「下线」，才会删它的 collection。重启时如果当前版本的旧权重已经不在（比如原地覆盖了模型文件），检索会暂停并报 `EMBEDDING_MODEL_MISMATCH`，同样在这个页面登记、生成、切换即可恢复。升级到这一版先执行 `alembic upgrade head`（迁移 `0009` 加 `embedding_models.fingerprint`），首次启动会核对并记录当前版本的编码器指纹。细节见契约 §6.5。
+
 Alembic 和 workers 也按 `NACOS_ENV` 取库，而它默认是 prod：本机执行 `alembic upgrade head` 前先设
 `NACOS_ENV=test`，或用 `NACOS_ENABLED=0` 只读本地 YAML。Alembic 会在日志里打印目标库（密码已隐去）。
 

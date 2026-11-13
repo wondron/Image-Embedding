@@ -76,6 +76,9 @@ class BackgroundReconciler:
         except RuntimeError as exc:
             self._record({"skipped": "not_ready", "detail": str(exc)})
             return None
+        followed = self._follow_current(stack)
+        if followed is not None:
+            stack = followed
         if stack is not self._stack:  # a new stack (new collection): start the lap over
             self._stack, self._cursor = stack, None
         use_case = ReconcileUseCase(
@@ -90,6 +93,31 @@ class BackgroundReconciler:
         self._cursor = result.cursor
         self._record(result.as_dict())
         return result
+
+    def _follow_current(self, stack: Any) -> Any:
+        """The current model version was switched by another process (or by hand in PostgreSQL):
+        rebuild this process's stack on it, so it stops searching and indexing the old collection.
+        Returns the new stack, or None when nothing changed or the switch could not be followed."""
+        models = self._runtime.models
+        if models is None:
+            return None
+        try:
+            current = stack.infra.metadata.get_current_embedding_model()
+        except Exception:
+            return None  # the round itself reports a database that cannot be read
+        current_id = int(current["id"])
+        if current_id == stack.model.id:
+            return None
+        logger.warning(
+            "当前模型版本已在别处切换为 %s:%s（id=%s），本进程原来用 %s；跟随切换",
+            current.get("name"), current.get("version"), current_id, stack.model.space_id,
+        )
+        try:
+            models.activate(current_id, allow_missing=True)
+        except Exception:
+            logger.exception("跟随切换模型版本失败；本进程仍用 %s，下一轮再试", stack.model.space_id)
+            return None
+        return self._runtime.retrieval
 
     def _record(self, outcome: dict[str, Any]) -> None:
         self.last_round = {"at": datetime.now().astimezone().isoformat(), **outcome}

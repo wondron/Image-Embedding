@@ -33,7 +33,7 @@ from app.repositories.deletions import PgDeletionsMixin
 from app.repositories.embeddings import PgEmbeddingsMixin
 from app.repositories.images import PgImagesMixin
 from app.repositories.maintenance import PgMaintenanceMixin
-from app.repositories.ports import CatalogStorePort, MetadataStorePort
+from app.repositories.ports import CatalogStorePort, EmbeddingModelStorePort, MetadataStorePort
 from app.repositories.scene_config import PgSceneConfigMixin
 from app.repositories.scenes import PgScenesMixin
 from app.repositories.tasks import PgIndexTasksMixin
@@ -51,11 +51,13 @@ class PgMetadataStore(
     PgMaintenanceMixin,
     MetadataStorePort,
     CatalogStorePort,
+    EmbeddingModelStorePort,
 ):
     """Real PostgreSQL via SQLAlchemy 2 + psycopg3; schema via Alembic.
 
-    One store, two ports: MetadataStorePort for the retrieval use cases, CatalogStorePort for
-    the category / scene admin. SQL lives in the mixins.
+    One store, three ports: MetadataStorePort for the retrieval use cases, CatalogStorePort for
+    the category / scene admin, EmbeddingModelStorePort for the model versions. SQL lives in
+    the mixins.
     """
 
     pass

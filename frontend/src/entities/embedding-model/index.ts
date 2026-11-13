@@ -1,0 +1,28 @@
+export {
+  type EmbeddingModel,
+  type EmbeddingModelStatus,
+  type EncoderSource,
+  type BuildState,
+  type BuildFailure,
+  type ModelBuild,
+  type ConfiguredEncoder,
+  type RetrievalPairing,
+  type ModelOverview,
+  EMBEDDING_MODEL_STATUSES,
+  toEmbeddingModel,
+  toModelBuild,
+  toModelOverview,
+  buildActive,
+} from './model'
+export {
+  type ModelRequestOptions,
+  type ActivateResult,
+  type RetireResult,
+  MODEL_LABEL_PATTERN,
+  listEmbeddingModels,
+  registerEmbeddingModel,
+  startModelBuild,
+  stopModelBuild,
+  activateEmbeddingModel,
+  retireEmbeddingModel,
+} from './api'

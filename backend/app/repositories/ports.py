@@ -209,10 +209,16 @@ class MetadataStorePort(ABC):
 
     @abstractmethod
     def list_unsynced_payload_ids(
-        self, *, after: UUID | str | None = None, until: UUID | str | None = None, limit: int = 200
+        self,
+        *,
+        after: UUID | str | None = None,
+        until: UUID | str | None = None,
+        limit: int = 200,
+        model_id: int | None = None,
     ) -> list[str]:
-        """Images whose current-model ledger row is behind their payload_version, in id order,
-        after `after` and up to `until` (inclusive). Images without a ledger row are left out."""
+        """Images whose current-model ledger row (model_id's when given) is behind their
+        payload_version, in id order, after `after` and up to `until` (inclusive). Images
+        without a ledger row are left out."""
         raise NotImplementedError
 
     @abstractmethod
@@ -255,6 +261,73 @@ class MetadataStorePort(ABC):
 
     def close(self) -> None:
         """Release the connection pool (idempotent)."""
+
+
+class EmbeddingModelStorePort(ABC):
+    """The model versions (embedding_models) and their ledger, for /api/embedding-models and the
+    vector builds (services.retrieval.model_versions / build_embeddings)."""
+
+    @abstractmethod
+    def list_embedding_models(self) -> dict[str, Any]:
+        """{images, models: [row + embedded + behind]}, oldest version first."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_embedding_model_rows(self, *, statuses: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
+        """The version rows without counts (only these statuses when given)."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_embedding_model(self, model_id: int) -> dict[str, Any] | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def register_embedding_model(self, fields: dict[str, Any]) -> dict[str, Any]:
+        """A new version, status building (EMBEDDING_MODEL_EXISTS when name + version or the
+        collection is taken)."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def record_model_fingerprint(self, model_id: int, fingerprint: dict[str, Any]) -> bool:
+        """Fill a missing fingerprint; never overwrites one."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def set_embedding_model_status(self, model_id: int, status: str, *, expected: tuple[str, ...]) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
+    def activate_embedding_model(self, model_id: int) -> dict[str, Any]:
+        """{model, previous_id}: the version is current, the previous current one ready."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def retire_embedding_model(self, model_id: int) -> dict[str, Any]:
+        """{model, ledger_rows}: status retired, its ledger rows deleted (not the current one)."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def count_embedding_backlog(self, model_id: int) -> int:
+        """Stored images with no vector in the version's collection."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_embedding_backlog(
+        self, model_id: int, *, after: UUID | str | None = None, limit: int = 16, exclude: list[str] | None = None
+    ) -> list[dict[str, Any]]:
+        """[{id, original_url}] of images with no vector in the version's collection, id order."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def record_embeddings(self, *, model_id: int, versions: dict[str, int]) -> list[str]:
+        """Ledger rows for points just written ({image id: payload_version}); returns the ids
+        recorded (an image deleted meanwhile is left out)."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def sample_embedded_images(self, model_id: int, *, limit: int = 3) -> list[dict[str, Any]]:
+        """[{id, original_url}] of images last recorded in the version's collection."""
+        raise NotImplementedError
 
 
 class CatalogStorePort(ABC):

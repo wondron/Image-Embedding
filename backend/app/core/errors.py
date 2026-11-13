@@ -89,6 +89,14 @@ ERROR_CODES: dict[str, ErrorSpec] = {
     "SCENE_IN_USE": ErrorSpec(409),
     "SCENE_PROTECTED": ErrorSpec(403),
     "SCENE_POSTGRES_FAILED": ErrorSpec(502, "scene database error"),
+    # embedding model versions (/api/embedding-models)
+    "EMBEDDING_MODEL_NOT_FOUND": ErrorSpec(404),
+    "EMBEDDING_MODEL_EXISTS": ErrorSpec(409),
+    "EMBEDDING_MODEL_STATE": ErrorSpec(409),
+    "EMBEDDING_MODEL_INCOMPLETE": ErrorSpec(409),
+    "EMBEDDING_ENCODER_UNAVAILABLE": ErrorSpec(409),
+    "EMBEDDING_BUILD_RUNNING": ErrorSpec(409),
+    "EMBEDDING_MODEL_MISMATCH": ErrorSpec(503),
 }
 
 _UNREGISTERED_5XX = ERROR_CODES["INTERNAL_ERROR"].public_detail or "internal server error"
@@ -345,6 +353,41 @@ def scene_protected(detail: str) -> AppError:
 
 def scene_postgres_failed(detail: str) -> AppError:
     return AppError("SCENE_POSTGRES_FAILED", detail)
+
+
+# -- embedding model versions ------------------------------------------------------
+
+def embedding_model_not_found(detail: str) -> AppError:
+    return AppError("EMBEDDING_MODEL_NOT_FOUND", detail)
+
+
+def embedding_model_exists(detail: str) -> AppError:
+    """The configured encoder, or the name + version, is already registered."""
+    return AppError("EMBEDDING_MODEL_EXISTS", detail)
+
+
+def embedding_model_state(detail: str) -> AppError:
+    """The version's status does not allow the action (e.g. retiring the current one)."""
+    return AppError("EMBEDDING_MODEL_STATE", detail)
+
+
+def embedding_model_incomplete(detail: str) -> AppError:
+    """Switching to a version that lacks vectors for some stored images, without allow_missing."""
+    return AppError("EMBEDDING_MODEL_INCOMPLETE", detail)
+
+
+def embedding_encoder_unavailable(detail: str) -> AppError:
+    """No encoder of this version is loaded (or can be loaded) in this process."""
+    return AppError("EMBEDDING_ENCODER_UNAVAILABLE", detail)
+
+
+def embedding_build_running(detail: str) -> AppError:
+    return AppError("EMBEDDING_BUILD_RUNNING", detail)
+
+
+def embedding_model_mismatch(detail: str) -> AppError:
+    """The encoder would write or query a collection made by another model: retrieval refuses to pair them."""
+    return AppError("EMBEDDING_MODEL_MISMATCH", detail)
 
 
 # Codes for HTTPExceptions raised by the framework itself (404 route, 405 method, ...)

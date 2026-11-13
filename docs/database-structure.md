@@ -235,7 +235,7 @@ erDiagram
 
 模型注册表：一个模型版本一行，对应一个 Qdrant collection。
 
-切换方式：新版本补齐后改为 `ready`，再设为 `current`，旧版本退回 `ready`；回滚就是把旧版本设回 `current`。查询编码器和 collection 必须成对切换。同一时间只能有一个 `current`。
+切换方式：新版本补齐后改为 `ready`，再设为 `current`，旧版本退回 `ready`；回滚就是把旧版本设回 `current`。查询编码器和 collection 必须成对切换（按 `fingerprint` 判断编码器是不是这个版本的）。同一时间只能有一个 `current`。这些操作由接口 `/api/embedding-models` 和前端「模型版本」页完成，见契约 §6.5。
 
 混入 `created_at`。`name` + `version` 唯一；`collection` 唯一；`dim` 和 `input_size` 必须大于 0。
 
@@ -252,6 +252,7 @@ erDiagram
 | `collection` | 文本，唯一 | 对应的 Qdrant collection 名 |
 | `status` | 枚举，默认 `building` | `building` / `ready` / `current` / `retired` |
 | `activated_at` | 时间戳，可空 | 切换为当前的时间 |
+| `fingerprint` | `jsonb`，可空 | 编码器指纹：预处理参数、权重位置和固定测试图的输出向量，用来认出写这个 collection 的编码器；为空表示还没记录 |
 | `created_at` | 时间戳 | 创建时间 |
 
 ### 4.2 `image_embeddings`

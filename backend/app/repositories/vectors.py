@@ -41,6 +41,10 @@ class QdrantVectorStore(VectorStorePort):
     def collection(self) -> str:
         return self._store.collection
 
+    def sibling(self, *, collection: str, dim: int, distance: str) -> "QdrantVectorStore":
+        """The collection of another model version over the same client (never close it)."""
+        return QdrantVectorStore(self._store.sibling(collection=collection, vector_dim=dim, distance=distance))
+
     def ensure_collection(self, *, recreate: bool = False) -> None:
         try:
             self._store.ensure_collection(recreate=recreate, payload_indexes=PAYLOAD_INDEXES)
@@ -48,6 +52,28 @@ class QdrantVectorStore(VectorStorePort):
             raise err.vector_dim_mismatch(str(exc)) from exc
         except Exception as exc:
             raise err.not_ready(f"qdrant ensure_collection: {type(exc).__name__}: {exc}") from exc
+
+    def collection_exists(self) -> bool:
+        try:
+            return self._store.collection_exists()
+        except Exception as exc:
+            raise err.index_qdrant_failed(f"collection_exists: {type(exc).__name__}: {exc}") from exc
+
+    def drop_collection(self) -> bool:
+        """Delete the whole collection (a retired model version); False when it was not there."""
+        try:
+            return self._store.drop_collection()
+        except Exception as exc:
+            raise err.index_qdrant_failed(f"drop_collection: {type(exc).__name__}: {exc}") from exc
+
+    def get_vectors(self, point_ids: list[UUID | str]) -> dict[str, list[float]]:
+        """{image id: vector} of the images that have a point in this collection."""
+        ids = [_image_point_id(pid) for pid in point_ids]
+        try:
+            found = self._store.get_vectors(ids)
+        except Exception as exc:
+            raise err.search_qdrant_failed(f"get_vectors: {type(exc).__name__}: {exc}") from exc
+        return {str(pid): vector for pid, vector in found.items()}
 
     def upsert(self, point_id: UUID | str, vector: list[float], payload: dict[str, Any]) -> None:
         pid = _image_point_id(point_id)

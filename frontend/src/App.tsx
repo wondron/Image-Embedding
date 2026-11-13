@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Layers3, ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUpRight, Check,
-  CircleHelp, Database, FolderOpen, ImageIcon, Images, LayoutGrid, List, Link2, PanelLeftClose, PanelLeftOpen,
+  CircleHelp, Cpu, Database, FolderOpen, ImageIcon, Images, LayoutGrid, List, Link2, PanelLeftClose, PanelLeftOpen,
   ListFilter, ListTree, LoaderCircle, Menu, ScanLine, Search, Settings2, SlidersHorizontal,
   Tags, Upload, UploadCloud, Workflow, X,
 } from 'lucide-react'
 import { ManagementViews, type ManagementView } from './components/ManagementViews'
 import { EnumConfigPage } from './pages/enums'
 import { CategoryConfigPage } from './pages/categories'
+import { ModelVersionsPage } from './pages/models'
 import { Dialog } from './components/Dialog'
 import { BatchSearchPanel, type BatchSearchResult } from './components/BatchSearchPanel'
 import { DownloadDialog } from './components/DownloadDialog'
@@ -45,9 +46,11 @@ const navigation = [
   { key: 'categories' as const, name: '食材管理', icon: Tags, description: '类别树：名称、别名与属性' },
   { key: 'scenes' as const, name: '场景管理', icon: Layers3, description: '目录、标签、规则与全量同步' },
   { key: 'enums' as const, name: '枚举配置', icon: ListTree, description: '查看取值并追加' },
+  // Embedding model versions: register the configured model, build its vectors, switch, roll back (?view=models)
+  { key: 'models' as const, name: '模型版本', icon: Cpu, description: '换模型：生成向量、切换与回滚' },
 ]
 /** Views that are wired to the API and can be opened by URL (?view=<key>) → the parameter that selects an item in them. */
-const linkedViews: Readonly<Record<string, string>> = { enums: 'enum', categories: 'category', scenes: 'scene' }
+const linkedViews: Readonly<Record<string, string>> = { enums: 'enum', categories: 'category', scenes: 'scene', models: 'model' }
 const pageSize = 12
 const maxBytes = 15 * 1024 * 1024
 
@@ -122,7 +125,7 @@ function ResultTable({ items, onDetail, onDownload, downloading, selected, onTog
 function initialView(): View {
   try {
     const requested = new URLSearchParams(window.location.search).get('view')
-    if (requested === 'enums' || requested === 'categories' || requested === 'scenes') return requested // the keys of linkedViews
+    if (requested === 'enums' || requested === 'categories' || requested === 'scenes' || requested === 'models') return requested // the keys of linkedViews
   } catch { /* keep the default view */ }
   return 'search'
 }
@@ -324,8 +327,9 @@ export default function App() {
 
     <div className="main-shell"><header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" aria-label="展开导航" onClick={() => setMobileNav(true)}><Menu size={20} /></button><div className="topbar-title"><h1>{pageInfo.name}</h1><span>食材图像管理 / {pageInfo.description}</span></div></div><div className="topbar-actions"><button className="icon-button" title="使用说明" aria-label="使用说明" onClick={() => setHelpOpen(true)}><CircleHelp size={17} /></button><button className="icon-button" title="连接设置" aria-label="连接设置" disabled={batchRunning} onClick={() => { setApiDraft(apiBase); setSettingsOpen(true) }}><Settings2 size={17} /></button></div></header>
     <main className={view === 'search' ? 'search-page' : view === 'library' ? 'management-page library-page' : view === 'import' ? 'management-page import-page' : 'management-page'}>
-      {view !== 'search' && view !== 'enums' && view !== 'categories' && view !== 'scenes' && <ManagementViews view={view} onNavigate={navigate} apiBase={apiBase} />}
+      {view !== 'search' && view !== 'enums' && view !== 'categories' && view !== 'scenes' && view !== 'models' && <ManagementViews view={view} onNavigate={navigate} apiBase={apiBase} />}
       {view === 'enums' && <EnumConfigPage apiBase={apiBase} />}
+      {view === 'models' && <ModelVersionsPage apiBase={apiBase} />}
       {view === 'categories' && <CategoryConfigPage apiBase={apiBase} />}
       {view === 'scenes' && <SceneConfigPage apiBase={apiBase} />}
       <div className="search-view" hidden={view !== 'search'}>

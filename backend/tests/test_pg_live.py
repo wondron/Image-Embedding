@@ -393,6 +393,89 @@ class PgLiveTests(unittest.TestCase):
         store.mark_payloads_pushed(model_id=current, versions={images[2]: 2})
         self.assertEqual(store.list_unsynced_payload_ids(), [images[0], images[3]])
 
+    def test_model_versions_register_fill_switch_and_retire(self):
+        from app.core.errors import AppError
+
+        store = self.store()
+        images = sorted(self.insert(store, n) for n in range(1, 5))
+        old_fp = {"spec": {"model_path": "old.onnx"}, "probe": [1.0, 0.0, 0.0, 0.0]}
+        current = self.current_model("c_old")  # registered by hand, before fingerprints (0009)
+        self.assertIsNone(store.get_current_embedding_model()["fingerprint"])
+        self.assertTrue(store.record_model_fingerprint(current, old_fp))
+        self.assertFalse(store.record_model_fingerprint(current, {"spec": {}, "probe": [0.5]}))  # never overwritten
+        self.assertEqual(store.get_current_embedding_model()["fingerprint"], old_fp)
+        self.assertEqual(store.record_embeddings(model_id=current, versions={i: 1 for i in images}), images)
+
+        fields = {"name": "dino", "version": "v2", "dim": 4, "distance": "cosine", "input_size": 224,
+                  "preprocess": {"scale": [224, 224]}, "weights_uri": "new.onnx", "collection": "c_new",
+                  "fingerprint": {"spec": {"model_path": "new.onnx"}, "probe": [0.0, 1.0, 0.0, 0.0]}}
+        new = store.register_embedding_model(fields)
+        self.assertEqual((new["status"], new["collection"], new["preprocess"]), ("building", "c_new", {"scale": [224, 224]}))
+        self.assertEqual(new["fingerprint"], fields["fingerprint"])
+        for clash in ({"collection": "c_other"}, {"version": "v3"}):  # name + version taken, collection taken
+            with self.subTest(clash=clash), self.assertRaises(AppError) as ctx:
+                store.register_embedding_model({**fields, **clash})
+            self.assertEqual(ctx.exception.code, "EMBEDDING_MODEL_EXISTS")
+
+        overview = store.list_embedding_models()
+        self.assertEqual(overview["images"], 4)
+        self.assertEqual({m["id"]: (m["status"], m["embedded"], m["behind"]) for m in overview["models"]},
+                         {current: ("current", 4, 0), new["id"]: ("building", 0, 0)})
+        self.assertEqual([r["id"] for r in store.list_embedding_model_rows(statuses=("building", "ready"))], [new["id"]])
+        self.assertEqual(len(store.list_embedding_model_rows()), 2)
+
+        # The backlog: images without a vector in the version, in id order, after a cursor, minus the tried ones
+        self.assertEqual(store.count_embedding_backlog(new["id"]), 4)
+        self.assertEqual([r["id"] for r in store.list_embedding_backlog(new["id"], limit=2)], images[:2])
+        self.assertEqual([r["id"] for r in store.list_embedding_backlog(new["id"], after=images[1])], images[2:])
+        self.assertEqual([r["id"] for r in store.list_embedding_backlog(new["id"], exclude=[images[0], images[2]])],
+                         [images[1], images[3]])
+        self.assertTrue(store.list_embedding_backlog(new["id"])[0]["original_url"].startswith("https://cdn/o/"))
+        # Recording leaves out an image deleted meanwhile (its ledger rows go with it)
+        store.enqueue_image_deletion(images[3])
+        self.assertEqual(store.record_embeddings(model_id=new["id"], versions={images[0]: 1, images[1]: 1, images[3]: 1}),
+                         images[:2])
+        self.assertEqual(store.count_embedding_backlog(new["id"]), 1)
+        self.assertEqual([s["id"] for s in store.sample_embedded_images(new["id"], limit=5)], images[:2])
+        # A payload that moved on after its vector was written: behind in that version's ledger
+        self.sql("UPDATE images SET payload_version = 3 WHERE id = :i", {"i": uuid.UUID(images[1])})
+        self.assertEqual(store.list_unsynced_payload_ids(model_id=new["id"]), [images[1]])
+        self.assertEqual({m["id"]: m["behind"] for m in store.list_embedding_models()["models"]}, {current: 1, new["id"]: 1})
+        store.record_embeddings(model_id=new["id"], versions={images[1]: 3})  # embedded again: up to date
+        self.assertEqual(store.list_unsynced_payload_ids(model_id=new["id"]), [])
+
+        # Switch: one current at a time, the previous one ready for a roll back
+        result = store.activate_embedding_model(new["id"])
+        self.assertEqual((result["previous_id"], result["model"]["status"]), (current, "current"))
+        self.assertIsNotNone(result["model"]["activated_at"])
+        self.assertEqual(store.get_embedding_model(current)["status"], "ready")
+        self.assertEqual(store.get_current_embedding_model()["id"], new["id"])
+        self.assertIsNone(store.activate_embedding_model(new["id"])["previous_id"])  # already current
+        self.assertEqual(store.activate_embedding_model(current)["previous_id"], new["id"])  # roll back
+        store.activate_embedding_model(new["id"])
+
+        # building -> ready only from the expected status
+        third = store.register_embedding_model({**fields, "version": "v3", "collection": "c3"})
+        self.assertFalse(store.set_embedding_model_status(third["id"], "ready", expected=("ready",)))
+        self.assertTrue(store.set_embedding_model_status(third["id"], "ready", expected=("building",)))
+        self.assertEqual(store.get_embedding_model(third["id"])["status"], "ready")
+
+        # Retire: never the current one; its ledger rows go, the row stays as retired
+        with self.assertRaises(AppError) as ctx:
+            store.retire_embedding_model(new["id"])
+        self.assertEqual(ctx.exception.code, "EMBEDDING_MODEL_STATE")
+        out = store.retire_embedding_model(current)
+        self.assertEqual((out["model"]["status"], out["ledger_rows"]), ("retired", 3))  # images[3] is deleted
+        self.assertEqual(self.sql("SELECT count(*) FROM image_embeddings WHERE model_id = :m", {"m": current}).scalar_one(), 0)
+        for call, code in ((lambda: store.activate_embedding_model(current), "EMBEDDING_MODEL_STATE"),
+                           (lambda: store.activate_embedding_model(9999), "EMBEDDING_MODEL_NOT_FOUND"),
+                           (lambda: store.retire_embedding_model(9999), "EMBEDDING_MODEL_NOT_FOUND")):
+            with self.subTest(code=code), self.assertRaises(AppError) as ctx:
+                call()
+            self.assertEqual(ctx.exception.code, code)
+        self.assertIsNone(store.get_embedding_model(9999))
+        self.assertEqual(self.sql("SELECT count(*) FROM embedding_models WHERE status = 'current'").scalar_one(), 1)
+
     def test_file_urls_come_from_the_image_or_its_queued_deletion(self):
         store = self.store()
         image = self.insert(store, 1)

@@ -35,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
 
     infra = build_retrieval_infra(load_worker_config())
     try:
-        worker = DeletionWorker(infra.metadata, infra.vectors, infra.storage)
+        worker = DeletionWorker(infra.metadata, infra.vectors, infra.storage, others=infra.other_vectors)
         result = worker.run_once(limit=args.limit)
     finally:
         infra.close()

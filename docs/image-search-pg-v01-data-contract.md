@@ -287,11 +287,12 @@ id = uuid_from_bytes(sha256(original_bytes)[0:16])  # RFC 4122 变体/版本位�
 | `status` | `text` | NO | CHECK ∈ `building`/`ready`/`current`/`retired` | **同一时间只有一个 `current`** |
 | `created_at` | `timestamptz` | NO | 默认 `now()` | |
 | `activated_at` | `timestamptz` | YES | — | 切为 current 的时间 |
+| `fingerprint` | `jsonb` | YES | — | 编码器指纹 `{spec, probe}`（2026-11-12 · 迁移 `0009`）：写这个 collection 的编码器的预处理、权重位置，以及它对固定测试图的向量；为空表示还没记录（0009 之前登记的，启动时核对后记录）。规则见 §6.5 |
 
 **约束**：`UNIQUE (name, version)`；`UNIQUE (collection)`；部分唯一 `UNIQUE (status) WHERE status = 'current'`（或等价应用门禁）。  
-**切换**：新版本补齐 → `ready` → `current`；旧 `current` → `ready`；回滚即旧版再设 `current`。
+**切换**：新版本补齐 → `ready` → `current`；旧 `current` → `ready`；回滚即旧版再设 `current`。2026-11-12 起由 `/api/embedding-models` 完成（登记 → 后台生成向量 → 切换 / 回滚 → 下线），见 §6.5。
 
-**相对 MVP**：取代 `embedding_collection_meta` 单行 + 配置里写死单 collection；`embedding_space_id` 语义由 **`(name, version, dim, preprocess, weights_uri/fingerprint)`** 表达——是否另增 `embedding_space_id` 列 **TBD**（建议可派生，不强制与 MVP 同名列）。
+**相对 MVP**：取代 `embedding_collection_meta` 单行 + 配置里写死单 collection；`embedding_space_id` 语义由 **`(name, version, dim, preprocess, weights_uri/fingerprint)`** 表达——不另增 `embedding_space_id` 列：哪个编码器写的由 `fingerprint` 判断，接口里的 `embedding_space_id` 仍是 `name:version`。
 
 ---
 
@@ -411,7 +412,7 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 
 - Upsert 点成功后写/更新 `image_embeddings (model_id, image_id, synced_version=images.payload_version)`。
 - 元数据变 → `payload_version++` → worker 重推 payload。
-- 删图 → 各 collection 删同 uuid 点（由 `image_deletions` 驱动）。
+- 删图 → 各 collection 删同 uuid 点（由 `image_deletions` 驱动）：2026-11-12 起清理当前版本和所有 `building` / `ready` 版本的 collection（§6.5），`retired` 的 collection 已删除。
 
 ---
 
@@ -449,7 +450,7 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | **类别** `/api/categories`（**已落地 2026-11-10**） | 无独立 API | `GET /api/categories` 返回整棵树（不分页）`{ ok, categories: CategoryItem[], heating_groups: [{id, code, name}], root_codes: string[] }`，节点按「父在子前、同级 `sort_order`、`id`」排好；`POST /api/categories`（201）新建；`PATCH /api/categories/{id}` 只改请求里给了的字段（`parent_id` 换父节点，整棵子树一起移动，`null` 移到根；`names` 给了就整体替换；`heating_group_id: null` 清空）；`DELETE /api/categories/{id}` 返回 `{ ok, deleted: {id, code} }`。`CategoryItem` = `{ id, code, parent_id, path, name, names: [{lang, name, kind}], cuisines, heating_group, sort_order, is_active, image_count, scene_rule_count, created_at, updated_at }`（`name` 是中文主名；`cuisines` / `heating_group` 是节点自己设的，不含沿用祖先的）。规则：`code` 匹配 `^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$`、全局唯一；根节点只能用四个域的编码（新建、移到根、给根改编码时校验）；`names` 必须含中文（`zh`）主名，每种语言至多一个主名；不能移到自己或子孙下面；还有子类别、图片或场景规则引用时不能删除（场景规则不再被级联悄悄删掉）。错误码 `CATEGORY_NOT_FOUND` 404、`CATEGORY_CODE_EXISTS` 409、`CATEGORY_IN_USE` 409、`CATEGORY_POSTGRES_FAILED` 502、`VALIDATION_ERROR` 422。成功体不带 `trace_id`（在响应头 `X-Trace-Id`）。字段和上限见 `backend/app/schemas/categories.py`、`backend/app/core/category_rules.py`。加热组只随列表只读返回，管理仍 **TBD**。**2026-11-11 起**移动类别（`parent_id` 变化）或改菜系（集合有变化）时，同一事务里重算标在该节点及其子孙上的图片的 `image_scenes`，有效场景集合变化的图片 `payload_version` +1；提交后检索栈可用时把这些图片的 payload 推到当前 collection（一次请求至多 2000 张，分批），结果在 `PATCH` 成功体的 `scene_sync`：`{ images, changed, pushed, pending, vector_sync: pushed\|partial\|not_ready\|failed, sync_required }`，其余修改为 `null`；推送失败不影响 200，没推上的由后台对账补上（§2.11 同步规则下的「后台对账」） |
 | **场景** | 写死登记 | `scenes` / `scene_rules` / `scene_labels` 管理（`/api/scenes`，字段见 `backend/app/schemas/scenes.py`）；图片成员人工覆盖三接口见 §6.2（本地实现，待独立验收）。**2026-11-10 链路优化**：配置写接口的成功体除 `scene`（删除时 `deleted`）外另带 `sync_required: boolean`——`true` 表示改动要经 `POST /api/scenes/sync` 才作用到已入库图片（规则增删、规则换目标、场景 `is_active` / `include_all` 实际变化、新建启用的 `include_all` 场景、删除有成员的场景），`false` 表示已生效（场景类别、名称、描述、`outputs_heating`、只改规则映射的类别，均在请求时读取）。`PATCH /api/scenes/{id}/rules/{rule_id}` 现可原地换目标：给 `category_id` 或 `cuisine`（恰好一个非空，另一个清空）即替换，单事务、规则 id 不变；与本场景其他规则重复 `SCENE_RULE_EXISTS` 409；按菜系的规则不能带 `label_id`（换成菜系时同请求传 `label_id: null`，否则 422）。不再需要「删旧建新」两次请求 |
 | **审核候选** | 无 | `external_candidates` list/accept/reject；accept → 入库流水线 |
-| **模型** | 配置 + meta 表 | `embedding_models` 状态机；切 `current`；重建进度 **TBD** |
+| **模型**（**已落地 2026-11-12**） | 配置 + meta 表 | `embedding_models` 状态机 + 编码器指纹；`/api/embedding-models` 登记 / 后台生成向量（进度、停止、续做）/ 切换（回滚）/ 下线；启动按指纹配对编码器与 collection。见 §6.5。新错误码 `EMBEDDING_MODEL_NOT_FOUND` 404、`EMBEDDING_MODEL_EXISTS` / `EMBEDDING_MODEL_STATE` / `EMBEDDING_MODEL_INCOMPLETE` / `EMBEDDING_ENCODER_UNAVAILABLE` / `EMBEDDING_BUILD_RUNNING` 409、`EMBEDDING_MODEL_MISMATCH` 503 |
 | **删除** | 软删 status | `DELETE /api/images/{image_id}`（**已落地 2026-11-11**，§6.3）→ `image_deletions` 流水线；检索栈可用时同一请求里清掉当前 collection 的点和两个文件 |
 | **Health** | 聚合 Qdrant+MySQL | 改探 PG + Qdrant(current collection) +（可选）S3；回报 current model/collection |
 | **枚举** `/api/enums`（**已落地 2026-11-09**） | 写死在代码 | `GET /api/enums`、`GET /api/enums/{name}` 返回取值 + 中文名 + `editable`；`POST /api/enums/{name}/values` `{value, label, description?}` 给可编辑枚举追加取值（201，返回整个枚举），写回 `backend/config/param/enums.yaml`。错误码 `ENUM_NOT_FOUND` 404、`ENUM_NOT_EDITABLE` 403（系统枚举）、`ENUM_VALUE_EXISTS` 409、`ENUM_FILE_INVALID` 503、`VALIDATION_ERROR` 422。字段见 `backend/app/schemas/enums.py` |
@@ -896,6 +897,33 @@ PATCH 字段（不传 = 不变）：
 - ~~既有 `DELETE /api/index-tasks?status=...` 不纳本轮，不展示清空操作~~（2026-11-12 起已接入：「清理图片已删除的记录」`?image_state=deleted`、「清空失败记录」`?status=failed`、详情「删除这条记录」`DELETE /{id}`，均先确认，按钮在对应计数为 0 时不可用）；`GET /api/image-deletions`、`POST /api/image-deletions/process` 已于 2026-11-11 接入「入库任务」的「待清理图片」页签（见变更记录）。process 不是失败入库重试。无服务端 cancel/replay/retry/progress API，不造异步 job；失败可展示，重传需用户重新提供 File。
 - 本范围**无需新增 BE API/schema**，列表已有明细；需 FE 接线及独立测试验证未提交实现/迁移部署。测试应覆盖真实分页/统计/trace/null/重复图/混合失败/best-effort 缺行、服务端和本地状态分离、刷新越界/错误/迟到请求。本刀不执行验收，不借旧 scene 测试结论。
 
+## 6.5 模型版本：换 embedding 模型（2026-11-12 · 本地实现，待独立验收）
+
+**为什么**：每个模型版本的向量只能和同一个编码器的查询向量比较。此前启动时只比向量维度：EMBEDDING_CONFIG 换成同维度的新模型后，检索会拿新编码器查旧模型写的向量，新入库的图也写进同一个 collection，结果悄悄变差；而且没有工具为新模型补齐向量、切换、回滚（只能手写 SQL、在场景管理里由浏览器逐张重新生成，补齐前检索查不到东西）。
+
+**编码器指纹**（`embedding_models.fingerprint`，迁移 `0009`，§2.10）：`{spec, probe}`。`spec` 是预处理（实际输入尺寸、均值方差、插值、输出节点）和权重路径；`probe` 是编码器对一张固定测试图（公式生成，`app/clients/inference.py` `probe_image`）的 L2 归一化向量。两个编码器「是同一个」= 预处理相同且两个测试向量余弦 ≥ `0.9999`（`services/retrieval/model_versions.py` `same_encoder`；权重路径不比较，挪文件不算换模型）。生产编码器实测：同一模型 GPU 对 CPU 0.9999998，只把 cubic 换成 linear 插值 0.99907。
+
+**启动配对**（`bootstrap/retrieval_stack.py` `pair_encoder`）：当前版本有指纹时，配置的编码器与它一致就直接用；不一致说明 EMBEDDING_CONFIG 换了模型，按指纹里的 `spec` 加载这个版本自己的编码器继续检索（GPU / io-binding / 设备号用本进程的配置）；权重读不到或已被覆盖时**检索不启动**，`retrieval_error_code=EMBEDDING_MODEL_MISMATCH`（503），不会错配。当前版本还没有指纹（0009 之前登记的）：先用配置的编码器重新算最近写入的至多 3 张原图，与 collection 里的向量比较，一致才把它的指纹记上；不一致 `EMBEDDING_MODEL_MISMATCH`；原图或向量读不到时照旧启动但不记录，下次启动再核对；collection 为空则直接记录。Nacos 热更新 EMBEDDING_CONFIG：predict（含 FlyB 相似度过滤）立即用新编码器，检索保持原配对，直到在模型版本里切换。
+
+**接口**（`/api/embedding-models`，`app/api/v1/embedding_models.py`，wire 见 `app/schemas/embedding_models.py`；成功体不带 `trace_id`）：
+
+| 方法与路径 | 作用 |
+|---|---|
+| `GET /api/embedding-models` | `{ok, images, configured: {loaded, model_path, dim, model_id, detail}, retrieval: {ready, model_id, encoder: configured\|own\|null, code, detail}, build, models[]}`。`models[]` 每个版本：`id, name, version, status, collection, dim, distance, weights_uri, created_at, activated_at, embedded`（写入记录行数）`, missing`（图库里没有它向量的图片数；retired 为 0）`, behind`（payload 落后）`, fingerprint`（是否已记录）`, configured`（就是配置的编码器）`, serving`（本进程检索在用）`, encoder`（`configured` / `serving` 已加载；`recorded` 未加载、切换时按指纹加载；`null` 没有指纹）。`configured.model_id` 为 null：配置的是还没登记的新模型 |
+| `POST /api/embedding-models` `{name?, version?}` | 201。把配置的编码器登记为新版本（`building`），新建它自己的空 collection（`{name}_{version}` 小写、非 `[a-z0-9_]` 换 `_`，被行或 Qdrant 里已有的 collection 占用时加 `_2`…，绝不复用别人的点）。`name` 默认权重文件名，`version` 默认 `YYYYMMDD-HHMM`；只允许字母数字 `. _ -`、字母数字开头、≤64。配置的编码器已是某个未下线版本 / 名称加版本已占用：`EMBEDDING_MODEL_EXISTS` 409；编码器没加载 `NOT_READY` 503。PG 写入失败时删掉刚建的空 collection |
+| `POST /api/embedding-models/{id}/build` | 后台线程为这个版本补向量：按 id 顺序取没有它写入记录的图片，从对象存储读原图 → 这个版本的编码器 → 按 PostgreSQL 现在的数据写 payload → 记账（`record_embeddings`，记下读到的 `payload_version`）。每批 16 张；单张失败（`IMAGE_FILE_UNAVAILABLE` / `INDEX_BAD_IMAGE` / `INDEX_BAD_EMBEDDING`）记下继续，本次不再重试；同一错误连续 25 张即中止（对象存储多半不可用）；Qdrant / PG 失败中止。一遍走完后再走一遍补上期间新入库的（至多 3 遍）；处理中被删的图片会删掉刚写的点。非当前版本结束时再补推期间改过的 payload（`list_unsynced_payload_ids(model_id=)`）。没有图片落下时 `building` → `ready`。编码器须已在内存（配置的或检索在用的），否则 `EMBEDDING_ENCODER_UNAVAILABLE` 409；同一时间一个（`EMBEDDING_BUILD_RUNNING` 409），多进程用 PG 咨询锁（键 `0x454D4200 + id`）。进度在 `GET` 的 `build`：`{model_id, state: running\|stopping\|done\|stopped\|failed, started_at, finished_at, embedded, failed, gone, payloads, passes, remaining, error, failures[≤50]}`；写入记录就是进度，停止后再开始接着做。也可用来补齐当前版本缺的向量 |
+| `POST /api/embedding-models/{id}/build/stop` | 当前这一批之后停下；没有在做时原样返回 |
+| `POST /api/embedding-models/{id}/activate` `{allow_missing?}` | 先建好这个版本的检索栈（编码器：配置的、检索在用的，或按指纹加载），再在一个事务里设为 `current`（原当前版本 → `ready`、`activated_at` 更新），然后替换本进程的检索栈（旧栈 30 秒后关闭，留给进行中的请求）；后台对账没在跑时启动它。回滚就是对旧版本调同一个接口。还有图片没有向量：`EMBEDDING_MODEL_INCOMPLETE` 409，除非 `allow_missing=true`（它们在补齐前检索不到）；正在为它生成向量 `EMBEDDING_BUILD_RUNNING`；编码器加载不了 `EMBEDDING_ENCODER_UNAVAILABLE`；retired `EMBEDDING_MODEL_STATE`。已是当前且检索在用时 `switched=false`。检索栈因 `EMBEDDING_MODEL_MISMATCH` 没起来时，对当前版本调用即「重新启用」 |
+| `POST /api/embedding-models/{id}/retire` | 非当前版本：先删它的 collection，再删写入记录、状态改 `retired`（行保留作历史，不能再切换，要用须重新登记）。当前版本 `EMBEDDING_MODEL_STATE` 409；已下线原样返回 |
+
+**期间的其他写入**：入库、改标注只写当前版本；新版本缺的由生成补上（同一次生成的后几遍、或再点一次），改过的 payload 在生成结束或切换后由后台对账补推。**删图**清理当前 collection 和所有 `building` / `ready` 版本的 collection（`RetrievalInfra.other_vectors`，Qdrant 里已不存在的 collection 跳过；API、`process_deletions`、`reconcile` worker 一致），切换或回滚后不会冒出已删的图。
+
+**多进程**：切换只替换本进程的检索栈；其他进程的后台对账每轮开始前核对 PG 的当前版本，不一致就跟随切换（默认 5 分钟内）。关掉后台对账的进程需要重启。`python -m app.workers.*` 每次启动读当前版本。
+
+**部署**：先 `alembic upgrade head`（`0009` 只加一个可空列）。第一次启动会为当前版本核对并记录指纹（日志「已记录 … 的编码器指纹」）；如果此前已经在原地换过模型，这一步会报 `EMBEDDING_MODEL_MISMATCH`，按页面提示登记新版本、生成向量、切换即可。
+
+**前端**：数据管理「模型版本」页（`?view=models`）：指标（检索在用 / 配置的模型 / 图库图片）、按状态给出下一步（登记 → 生成向量 → 切换，检索因编码器对不上暂停时红色说明）、生成进度（2 秒轮询，可停止，没生成的图片列出原因）、版本列表（覆盖率、标记、生成 / 继续 / 补齐、切换为当前 / 切回、下线），切换和下线都有确认弹窗（缺向量时要勾选「仍然切换」）。
+
 ---
 
 ## 7. 明确不作本刀范围（含 M0 OUT OF SCOPE）
@@ -973,6 +1001,7 @@ PATCH 字段（不传 = 不变）：
 | 2026-11-12 | **前端图片加载顺序**（纯前端，无接口变化）：搜索结果的网格和列表只加载缩略图（自建库 `thumb_url`，即 512px WebP；现网结果按 large → medium → small，缩略图都失败才用原图），此前先加载原图、失败才退到缩略图，每页 12 张都是原图。点开详情才加载 `original_url`：先显示已缓存的缩略图，原图加载完原位替换，加载失败保留缩略图并提示；详情预览区加高以显示原图清晰度。图片数据的「图片标注」同样处理。下载仍是原图优先 |
 | 2026-11-12 | **自建检索与 FlyB 结果卡统一**（无表结构变化、无新迁移；**破坏性 wire 变化**，BE 与 FE 同发）：`POST /api/search` 的 `items[]` 与 `POST /api/predict/searchImage_*` 的 `result[]` 改为同一张结果卡（`backend/app/schemas/search_hit.py`）：顶层只有 `tags` / `description` / `original_url` / `similarity`，其余放进 `details`。自建：`tags` 由 `string[]` 改为「、」连接的字符串；`id`、类别、场景、`scene_label`、标注状态、食物字段、`heating_group` 进 `details`（`exclude_unset` 对嵌套同样生效），原图 / 缩略图 / 宽高进 `details.images[0]`（键名与 FlyB 相同）。FlyB：`title` → `tags`，`details.text_snippets` 并入 `description`，`image_url` → `original_url`（总是 URL 字符串，没有原图时取最大缩略图），`similiar` → `similarity`（相似度过滤写回同一个键，过滤时下载比对的那张写回 `original_url`）；predict 响应改为带类型的 `PredictResponse`（顶层多余的键不再输出）。Index / List / 单图的 `tags` 仍是 `string[]`。FE 两个通道共用一套卡片字段读法，详情新增「标签」，「描述」两个通道都显示。另按日志里的真实 FlyB 返回修正两处读法：缩略图尺寸名实际是 `Large/Medium/Small/Tiny`，BE `iter_image_urls` 与 FE 排序此前只认小写，落到「其他尺寸」按字典顺序先取了 112px 的 Tiny（网格显示最小图、原图下载失败时也用它算相似度），改为不区分大小写；站点名读 `HostInfo.Hostname`（此前退回成网页域名）。见 §6.1.1 / §6.1.2 / §6.1.4 / §6.1.5 |
 | 2026-11-12 | **入库记录与删图的平衡**（无表结构变化、无新迁移）：删图仍不删记录（追溯用），但记录不再显示为普通「成功」。BE：`GET /api/index-tasks` 每条加 `image_state`（`present`/`deleted`，LEFT JOIN 现算），`counts` 加 `image_deleted`，新增 `image_state` 筛选；`DELETE /api/index-tasks` 改为 `status` / `image_state` 至少一个（删的正是同筛选下列出的记录）；新增 `DELETE /api/index-tasks/{id}` 删单条（幂等）。均只删记录。FE「服务端入库记录」：指标改为 成功（图片在库）/ 图片已删除 / 失败，筛选 全部 / 成功 / 图片已删除 / 失败（带数量），行内「图片已删除」灰色标记；「清理图片已删除的记录」「清空失败记录」和详情「删除这条记录」都先确认；图库单张、批量删除的确认文案提示记录会保留、可到入库任务清理。自动过期未做（需记录删除时间），见 §6.4.2 |
+| 2026-11-12 | **embedding 模型更新流程**（迁移 `0009`：`embedding_models.fingerprint`，可空列）：① 编码器指纹（预处理 + 固定测试图向量）记在每个版本上，启动时按指纹配对：配置的编码器不是当前版本的，就按记录加载当前版本自己的编码器继续检索，加载不了则检索不启动（`EMBEDDING_MODEL_MISMATCH`），不再只比维度、不再新旧向量混用；没有指纹的当前版本先抽查至多 3 张原图再记录。② 新接口 `/api/embedding-models`：列版本与覆盖率、登记配置的编码器为新版本（独立 collection）、后台生成向量（服务端线程、进度、停止 / 续做、失败列出原因、补推期间的 payload）、切换 / 回滚（先建新检索栈再改 PG，进程内替换，不用重启）、下线（删 collection 和写入记录）。③ 删图清理所有 `building` / `ready` 版本的 collection（API 与两个 worker）。④ 后台对账每轮核对 PG 当前版本，其他进程切换后跟随。⑤ Nacos 热更新日志改为中文提示去「模型版本」。FE：数据管理新增「模型版本」页（§6.5）。见 §2.10 / §4.4 / §6.5 |
 
 ---
 

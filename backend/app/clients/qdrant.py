@@ -132,10 +132,25 @@ class QdrantStore:
             self._client = self.connection.create_client()
         return self._client
 
+    def sibling(self, *, collection: str, vector_dim: int, distance: str) -> "QdrantStore":
+        """Another collection over this store's client (one connection for several model
+        versions). Never close a sibling: closing either one closes the shared client."""
+        return QdrantStore(
+            self.connection, collection=collection, vector_dim=vector_dim, distance=distance, client=self.client
+        )
+
     # -- collection ------------------------------------------------------------
 
     def collection_exists(self) -> bool:
         return self.collection in {c.name for c in self.client.get_collections().collections}
+
+    def drop_collection(self) -> bool:
+        """Delete the collection with every point; False when it did not exist."""
+        if not self.collection_exists():
+            return False
+        self.client.delete_collection(self.collection)
+        logger.info("已删除 Qdrant collection=%s", self.collection)
+        return True
 
     def ensure_collection(
         self,
@@ -317,6 +332,23 @@ class QdrantStore:
             with_vectors=False,
         )
         return {_point_id(record.id): dict(record.payload or {}) for record in records}
+
+    def get_vectors(self, point_ids: Sequence[PointId]) -> Dict[Union[int, str], List[float]]:
+        """{id: vector} of the given ids that are points of the collection (the named vector)."""
+        if not point_ids:
+            return {}
+        records = self.client.retrieve(
+            collection_name=self.collection,
+            ids=[_point_id(p) for p in point_ids],
+            with_payload=False,
+            with_vectors=[NAMED_VECTOR],
+        )
+        out: Dict[Union[int, str], List[float]] = {}
+        for record in records:
+            vector = record.vector.get(NAMED_VECTOR) if isinstance(record.vector, dict) else record.vector
+            if vector is not None:
+                out[_point_id(record.id)] = [float(v) for v in vector]
+        return out
 
     def set_payloads(self, payloads: Mapping[PointId, Mapping[str, Any]]) -> int:
         """Set payload fields per point in one request (other fields and vectors stay).

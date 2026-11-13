@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from fastapi.responses import RedirectResponse
 
 from app.api.v1.categories import router as categories_router
+from app.api.v1.embedding_models import router as embedding_models_router
 from app.api.v1.enums import router as enums_router
 from app.api.v1.health import router as health_router
 from app.api.v1.image_download import router as image_download_router
@@ -30,6 +31,7 @@ for sub_router in (
     scene_memberships_router,
     images_router,  # after image_download_router: /api/images/{image_id} must not take /download
     tasks_router,
+    embedding_models_router,
 ):
     router.include_router(sub_router, responses=ERROR_RESPONSES)
 

@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from app.core.config.nacos import NacosConfigProvider
     from app.services.predict.food_service import FoodService
     from app.bootstrap.catalog import CatalogServices
+    from app.bootstrap.model_registry import ModelRegistry
     from app.bootstrap.reconciler import BackgroundReconciler
     from app.bootstrap.retrieval_stack import RetrievalStack
 
@@ -34,6 +35,9 @@ class ApplicationState:
     started_at: datetime = field(default_factory=lambda: datetime.now().astimezone())
     started_monotonic: float = field(default_factory=time.monotonic)
     food_service: FoodService | None = None
+    # The configured encoder (EMBEDDING_CONFIG): predict uses it, and a new model version is
+    # registered and built from it. Retrieval may hold another one (its version's own).
+    embedder: Any = None
     initialization_error: str | None = None
     warmup_error: str | None = None
     retrieval: Optional["RetrievalStack"] = None
@@ -44,6 +48,8 @@ class ApplicationState:
     catalog_error: str | None = None
     # RECONCILE_CONFIG: pushes ledger-behind payloads and drains the deletion queue in the background
     reconciler: Optional["BackgroundReconciler"] = None
+    # /api/embedding-models: register, build, switch and retire model versions
+    models: Optional["ModelRegistry"] = None
     stopping: bool = False
     config_provider: NacosConfigProvider | None = None
     configuration_lock: threading.RLock = field(
@@ -95,14 +101,26 @@ class ApplicationState:
         config: dict[str, Any],
         config_info: dict[str, Any],
         food_service: FoodService,
+        embedder: Any = None,
     ) -> None:
-        """Atomically expose a fully initialized configuration and service."""
+        """Atomically expose a fully initialized configuration and service (and its encoder)."""
         with self.configuration_lock:
             self.config = config
             self.config_info = config_info
             self.food_service = food_service
+            if embedder is not None:
+                self.embedder = embedder
             self.initialization_error = None
             self.warmup_error = None
+
+    def replace_retrieval(self, stack: "RetrievalStack") -> Optional["RetrievalStack"]:
+        """Expose another retrieval stack (a model version switch); returns the one it replaced,
+        which requests that took it before still use: the caller closes it once they are done."""
+        with self.configuration_lock:
+            old, self.retrieval = self.retrieval, stack
+            self.retrieval_error = None
+            self.retrieval_error_code = None
+            return old
 
     def record_config_reload_error(self, error: str) -> None:
         with self.configuration_lock:
@@ -131,6 +149,9 @@ class ApplicationState:
         reconciler, self.reconciler = self.reconciler, None
         if reconciler is not None:  # before the stack it works on is closed
             await asyncio.to_thread(reconciler.stop)
+        models, self.models = self.models, None
+        if models is not None:  # a running build ends at its next batch
+            await asyncio.to_thread(models.close)
         if self.config_provider is not None:
             self.config_provider.close()
         service = self.food_service

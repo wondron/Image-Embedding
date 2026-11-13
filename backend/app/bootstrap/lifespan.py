@@ -82,6 +82,7 @@ def initialize_embedder(runtime: ApplicationState):
     except Exception as exc:
         runtime.warmup_error = f"{type(exc).__name__}: {exc}"
         logger.exception("预热失败：%s", exc)
+    runtime.embedder = embedder
     return embedder
 
 
@@ -93,6 +94,7 @@ def _loaded_embedder_for(runtime: ApplicationState, config: dict):
     if spec is None:
         return None
     holders = (
+        runtime.embedder,
         getattr(runtime.food_service, "embeddingTool", None),
         getattr(runtime.retrieval, "embedding", None),
     )
@@ -237,6 +239,17 @@ def initialize_retrieval(runtime: ApplicationState, embedder) -> None:
     logger.info("Retrieval 栈已就绪 | collection=%s | model=%s", model.collection, model.space_id)
 
 
+def initialize_models(runtime: ApplicationState) -> None:
+    """The model versions (/api/embedding-models): built whenever retrieval is enabled, also when
+    its stack is down, since switching to the configured encoder's version is how a stack that
+    cannot pair its encoder is fixed."""
+    if runtime.retrieval_error_code == "RETRIEVAL_DISABLED":
+        return
+    from app.bootstrap.model_registry import ModelRegistry
+
+    runtime.models = ModelRegistry(runtime)
+
+
 def initialize_food_service(runtime: ApplicationState, embedder) -> None:
     if embedder is None:
         return  # initialization_error already says why
@@ -252,7 +265,8 @@ def apply_nacos_config_update(runtime: ApplicationState, provider: NacosConfigPr
 
     The encoder is reused when EMBEDDING_CONFIG describes an already-loaded model,
     so ordinary config changes never reload ONNX. A different model is loaded for
-    predict only: retrieval stays on the encoder paired with its Qdrant collection.
+    predict only: retrieval stays on the encoder paired with its Qdrant collection, and
+    the new one can be registered and built as a new model version (/api/embedding-models).
     """
     if runtime.stopping:
         return False
@@ -262,7 +276,7 @@ def apply_nacos_config_update(runtime: ApplicationState, provider: NacosConfigPr
             embedder = create_embedder(snapshot.config)
             warmup_embedder(embedder, runtime.settings)
             if runtime.retrieval is not None:
-                logger.warning("EMBEDDING_CONFIG changed: predict switches to %s; retrieval stays on %s (collection %s) until the current embedding model is switched and the service restarts",
+                logger.warning("EMBEDDING_CONFIG 换了模型：predict 改用 %s；检索仍用 %s（collection %s），到「模型版本」登记新版本、生成向量后再切换",
                     embedder.model_path, runtime.retrieval.model.space_id, runtime.retrieval.model.collection)
         service = create_food_service(snapshot.config, embedder)
     except Exception as exc:
@@ -277,7 +291,7 @@ def apply_nacos_config_update(runtime: ApplicationState, provider: NacosConfigPr
         "loaded": True,
         **provider.source_info(snapshot),
     }
-    runtime.replace_configuration(snapshot.config, config_info, service)
+    runtime.replace_configuration(snapshot.config, config_info, service, embedder)
     logger.info("Nacos配置重读成功| profile=%s | data_ids=%s", snapshot.profile["profile"], snapshot.profile["data_id_list"],)
     return True
 
@@ -302,6 +316,7 @@ async def lifespan(app: FastAPI):
     initialize_food_service(runtime, embedder)
     initialize_catalog(runtime)  # PostgreSQL only; retrieval below borrows its store
     initialize_retrieval(runtime, embedder)
+    initialize_models(runtime)
     runtime.reconciler = start_reconciler(runtime)  # RECONCILE_CONFIG; stopped by runtime.close()
     config_provider.start_polling(lambda snapshot: apply_nacos_config_update(runtime, config_provider, snapshot))
     try:

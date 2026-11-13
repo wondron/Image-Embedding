@@ -1,8 +1,9 @@
 """The embedding model retrieval runs against (embedding_models row, status='current').
 
 One model version = one Qdrant collection. The query/index encoder and the
-collection must switch together (app.models.embedding.EmbeddingModel), so the
-stack refuses to start when the loaded encoder's output dim differs from the row.
+collection must switch together (app.models.embedding.EmbeddingModel): the stack
+pairs them by the row's fingerprint (services.retrieval.model_versions.same_encoder),
+and refuses to start when the loaded encoder's output dim differs from the row.
 """
 
 from __future__ import annotations
@@ -25,6 +26,9 @@ class ActiveModel:
     input_size: int | None = None
     weights_uri: str | None = None
     preprocess: Mapping[str, Any] = field(default_factory=dict)
+    # {spec, probe} of the encoder that writes this collection (clients.inference.Embedder
+    # .fingerprint); None for a version registered before fingerprints were recorded
+    fingerprint: Mapping[str, Any] | None = field(default=None, compare=False, repr=False)
 
     @property
     def space_id(self) -> str:
@@ -45,6 +49,7 @@ class ActiveModel:
                 input_size=int(row["input_size"]) if row.get("input_size") is not None else None,
                 weights_uri=row.get("weights_uri"),
                 preprocess=dict(row.get("preprocess") or {}),
+                fingerprint=dict(row["fingerprint"]) if isinstance(row.get("fingerprint"), Mapping) else None,
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise err.not_ready(f"invalid embedding_models current row: {exc}") from exc

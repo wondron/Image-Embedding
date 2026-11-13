@@ -576,6 +576,114 @@ export interface ImageDeletionProcessResponseWire {
   remaining: number
 }
 
+// -- model versions: /api/embedding-models (schemas/embedding_models.py) --------------------
+
+/** building 生成向量中 / ready 可切换 / current 当前 / retired 已下线 */
+export type EmbeddingModelStatusWire = 'building' | 'ready' | 'current' | 'retired'
+/** configured: the EMBEDDING_CONFIG encoder; serving: the one retrieval holds; recorded: loadable from its fingerprint. */
+export type EmbeddingEncoderSourceWire = 'configured' | 'serving' | 'recorded'
+export type EmbeddingBuildStateWire = 'running' | 'stopping' | 'done' | 'stopped' | 'failed'
+
+export interface EmbeddingModelWire {
+  id: number
+  name: string
+  version: string
+  status: EmbeddingModelStatusWire
+  collection: string
+  dim: number
+  distance: string
+  weights_uri: string
+  created_at: string | null
+  activated_at: string | null
+  /** Images with a vector in its collection. */
+  embedded: number
+  /** Images without one (0 once retired). */
+  missing: number
+  /** Images whose filter payload lags behind the database. */
+  behind: number
+  /** Whether its encoder fingerprint is recorded. */
+  fingerprint: boolean
+  configured: boolean
+  serving: boolean
+  encoder: EmbeddingEncoderSourceWire | null
+}
+
+export interface EmbeddingConfiguredWire {
+  loaded: boolean
+  model_path: string | null
+  dim: number | null
+  /** The version it is; null: not registered yet. */
+  model_id: number | null
+  detail: string | null
+}
+
+export interface EmbeddingRetrievalWire {
+  ready: boolean
+  model_id: number | null
+  encoder: 'configured' | 'own' | null
+  code: string | null
+  detail: string | null
+}
+
+export interface EmbeddingBuildFailureWire {
+  image_id: string
+  code: string
+  detail: string
+}
+
+export interface EmbeddingBuildWire {
+  model_id: number
+  state: EmbeddingBuildStateWire
+  started_at: string
+  finished_at: string | null
+  embedded: number
+  failed: number
+  gone: number
+  payloads: number
+  passes: number
+  remaining: number | null
+  error: string | null
+  failures: EmbeddingBuildFailureWire[]
+}
+
+/** GET /api/embedding-models */
+export interface EmbeddingModelsResponseWire {
+  ok: true
+  images: number
+  configured: EmbeddingConfiguredWire
+  retrieval: EmbeddingRetrievalWire
+  build: EmbeddingBuildWire | null
+  models: EmbeddingModelWire[]
+}
+
+/** POST /api/embedding-models {name?, version?} (201) */
+export interface EmbeddingModelResponseWire {
+  ok: true
+  model: EmbeddingModelWire
+}
+
+/** POST /api/embedding-models/{id}/activate {allow_missing?} */
+export interface EmbeddingModelActivateResponseWire {
+  ok: true
+  model: EmbeddingModelWire
+  previous_id: number | null
+  switched: boolean
+}
+
+/** POST /api/embedding-models/{id}/retire */
+export interface EmbeddingModelRetireResponseWire {
+  ok: true
+  model: EmbeddingModelWire
+  dropped: boolean
+  ledger_rows: number
+}
+
+/** POST /api/embedding-models/{id}/build and …/build/stop */
+export interface EmbeddingBuildResponseWire {
+  ok: true
+  build: EmbeddingBuildWire | null
+}
+
 // -- GET /api/ping ------------------------------------------------------------------------
 
 /** schemas/predict.py PingResponse. */

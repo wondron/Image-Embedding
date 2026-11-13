@@ -6,13 +6,16 @@
    what fails there stays queued for `python -m app.workers.process_deletions` or
    POST /api/image-deletions/process, the task center's 「立即清理」)
 
-Qdrant choice (M4): delete by uuid on the **current** collection via VectorStorePort.
-Multi-collection sweep (all embedding_models.collection) deferred — document for later.
+Qdrant: the point goes from the current collection and from the collection of every other
+version still in use (building / ready: a new model being filled, the previous one kept for a
+roll back), so a switch or a roll back never brings a deleted image back into the results.
+Retired versions have no collection any more.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 from uuid import UUID
 
@@ -41,21 +44,28 @@ class DeleteImageUseCase:
         }
 
 
+def _no_other_collections() -> list[VectorStorePort]:
+    return []
+
+
 def _clean_up(
     metadata: MetadataStorePort,
     vectors: VectorStorePort,
     storage: ImageStoragePort,
     row: dict[str, Any],
+    others: Callable[[], list[VectorStorePort]] = _no_other_collections,
 ) -> None:
-    """Delete one queued image's point (current collection) and its two files, then its queue row.
+    """Delete one queued image's point (current collection and the other versions' in use) and
+    its two files, then its queue row.
 
     Raises on failure, leaving the row for a retry. An image stored again since it was deleted
     (same bytes: same id, point and object keys) keeps its point and files; only the row goes.
     """
     image_id = row.get("image_id")
     if metadata.get_by_id(image_id) is None:
-        # Current collection only (VectorStorePort wired to embedding_models.current).
         vectors.delete(image_id)
+        for other in others():
+            other.delete(image_id)
         for url_field in ("original_url", "thumb_url"):
             url = str(row.get(url_field) or "").strip()
             if url:
@@ -81,6 +91,7 @@ def process_deletion_queue(
     storage: ImageStoragePort,
     *,
     limit: int = 50,
+    others: Callable[[], list[VectorStorePort]] = _no_other_collections,
 ) -> dict[str, Any]:
     """Drain up to `limit` image_deletions rows.
 
@@ -95,7 +106,7 @@ def process_deletion_queue(
     for row in pending:
         image_id = row.get("image_id")
         try:
-            _clean_up(metadata, vectors, storage, row)
+            _clean_up(metadata, vectors, storage, row, others)
             processed.append(str(image_id))
             logger.info("deletion queue completed id=%s", image_id)
         except Exception as exc:
@@ -106,8 +117,6 @@ def process_deletion_queue(
         "scanned": len(pending),
         "processed": processed,
         "failed": failed,
-        # ASSUMPTION: only current collection; multi-collection delete TBD
-        "qdrant_scope": "current_collection_only",
     }
 
 
@@ -119,10 +128,15 @@ class DeletionWorker:
         metadata: MetadataStorePort,
         vectors: VectorStorePort,
         storage: ImageStoragePort,
+        *,
+        others: Callable[[], list[VectorStorePort]] = _no_other_collections,
     ) -> None:
+        """others: the collections of the other versions in use, read when a deletion is cleaned
+        (bootstrap.retrieval_stack.RetrievalInfra.other_vectors)."""
         self._metadata = metadata
         self._vectors = vectors
         self._storage = storage
+        self._others = others
 
     def run_once(self, *, limit: int = 50) -> dict[str, Any]:
         return process_deletion_queue(
@@ -130,13 +144,14 @@ class DeletionWorker:
             self._vectors,
             self._storage,
             limit=limit,
+            others=self._others,
         )
 
     def clean_up(self, row: dict[str, Any]) -> bool:
         """Clean one just-queued deletion now (DELETE /api/images/{image_id}). False leaves the
         row queued for run_once (the cause is logged)."""
         try:
-            _clean_up(self._metadata, self._vectors, self._storage, row)
+            _clean_up(self._metadata, self._vectors, self._storage, row, self._others)
         except Exception:
             logger.exception("deletion cleanup failed id=%s; left queued in image_deletions", row.get("image_id"))
             return False

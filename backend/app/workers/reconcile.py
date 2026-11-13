@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
         use_case = ReconcileUseCase(
             infra.metadata,
             sync=SyncSceneMembershipsUseCase(infra.metadata, infra.vectors, model=infra.model),
-            deletions=DeletionWorker(infra.metadata, infra.vectors, infra.storage),
+            deletions=DeletionWorker(infra.metadata, infra.vectors, infra.storage, others=infra.other_vectors),
             limits=ReconcileLimits(max_payloads=settings.max_payloads, max_deletions=settings.max_deletions),
         )
         cursor = None

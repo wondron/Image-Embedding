@@ -56,6 +56,10 @@ class EmbeddingModel(CreatedAtMixin, Base):
         comment="building / ready / current / retired",
     )
     activated_at: Mapped[datetime | None] = mapped_column(comment="切换为当前的时间")
+    fingerprint: Mapped[dict[str, Any] | None] = mapped_column(
+        comment="编码器指纹：预处理参数和固定测试图的输出向量，用来认出写这个 collection 的编码器；"
+        "为空表示还没记录"
+    )
 
 
 class ImageEmbedding(Base):

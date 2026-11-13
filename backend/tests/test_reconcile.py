@@ -206,6 +206,41 @@ class BackgroundReconcilerTests(unittest.TestCase):
         reconciler.run_round()
         self.assertEqual(runtime.retrieval.scene_sync_uc.calls, [ids(1, 2)])  # from the first image again
 
+    def test_a_switch_made_by_another_process_is_followed_before_the_round(self):
+        old = fake_stack(behind=ids(1))
+        old.model = SimpleNamespace(id=1, space_id="dino:v1")
+        old.infra.metadata.get_current_embedding_model = Mock(return_value={"id": 2, "name": "dino", "version": "v2"})
+        new = fake_stack(behind=ids(1, 2))
+        new.model = SimpleNamespace(id=2, space_id="dino:v2")
+        runtime = runtime_with(old)
+
+        def activate(model_id, *, allow_missing):
+            runtime.retrieval = new
+            return {"switched": True}
+
+        runtime.models = SimpleNamespace(activate=Mock(side_effect=activate))
+        reconciler = BackgroundReconciler(runtime, ReconcileSettings())
+        with self.assertLogs("reconciler", level="WARNING"):
+            reconciler.run_round()
+        runtime.models.activate.assert_called_once_with(2, allow_missing=True)
+        self.assertEqual(new.scene_sync_uc.calls, [ids(1, 2)])  # the round ran on the followed stack
+        self.assertEqual(old.scene_sync_uc.calls, [])
+        # in step with PostgreSQL: nothing to follow
+        new.infra.metadata.get_current_embedding_model = Mock(return_value={"id": 2})
+        reconciler.run_round()
+        runtime.models.activate.assert_called_once()
+
+    def test_a_switch_that_cannot_be_followed_leaves_the_round_on_the_old_stack(self):
+        old = fake_stack(behind=ids(1))
+        old.model = SimpleNamespace(id=1, space_id="dino:v1")
+        old.infra.metadata.get_current_embedding_model = Mock(return_value={"id": 2})
+        runtime = runtime_with(old)
+        runtime.models = SimpleNamespace(activate=Mock(side_effect=RuntimeError("weights gone")))
+        reconciler = BackgroundReconciler(runtime, ReconcileSettings())
+        with self.assertLogs("reconciler", level="ERROR"):
+            reconciler.run_round()
+        self.assertEqual(old.scene_sync_uc.calls, [ids(1)])
+
     def test_a_failing_round_is_logged_and_the_next_one_tries_again(self):
         stack = fake_stack(behind=ids(1))
         stack.scene_sync_uc.push_images = Mock(side_effect=RuntimeError("qdrant gone"))

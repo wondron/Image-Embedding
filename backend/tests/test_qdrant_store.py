@@ -125,6 +125,22 @@ class QdrantVectorStoreTests(unittest.TestCase):
             self.vectors.get_payloads(["not-a-uuid"])
         self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
 
+    def test_another_version_collection_shares_the_client_and_can_be_dropped(self):
+        a, b = uuid.uuid4(), uuid.uuid4()
+        self.vectors.upsert(a, unit(1, 0, 0, 0), {"scenes": ["general"]})
+        other = self.vectors.sibling(collection="c_v2", dim=DIM, distance="cosine")
+        self.assertFalse(other.collection_exists())
+        other.ensure_collection()
+        other.upsert(b, unit(0, 1, 0, 0), {"scenes": ["general"]})
+        self.assertIs(other._store.client, self.store.client)  # one connection for every version
+        self.assertEqual(self.vectors.get_payloads([b]), {})  # each version has its own points
+        np.testing.assert_allclose(other.get_vectors([a, b])[str(b)], unit(0, 1, 0, 0), rtol=1e-6)
+        self.assertEqual(list(other.get_vectors([a, b])), [str(b)])
+        self.assertTrue(other.drop_collection())
+        self.assertFalse(other.collection_exists())
+        self.assertFalse(other.drop_collection())  # gone already
+        self.assertEqual(self.store.count(), 1)  # the current collection is untouched
+
     def test_shape_mismatch_is_vector_dim_mismatch(self):
         wrong = QdrantVectorStore(QdrantStore(MEMORY, collection="c", vector_dim=8, client=self.store.client))
         with self.assertRaises(AppError) as ctx:
