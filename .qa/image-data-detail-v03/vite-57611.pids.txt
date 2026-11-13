@@ -1,0 +1,6 @@
+wrapper=27880
+npx=38928
+vite_cmd=18512
+vite=40808
+port=57611
+proxy_target=http://127.0.0.1:57612

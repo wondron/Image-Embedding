@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import { Check, LoaderCircle, RotateCcw, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { Check, Copy, ExternalLink, LoaderCircle, Maximize2, RotateCcw, Trash2 } from 'lucide-react'
+import { Dialog } from '../../components/Dialog'
 import { ApiError } from '../../shared/api'
 import { notify } from '../../shared/ui'
 import { formatLibraryTime } from '../../shared/lib'
@@ -34,6 +35,8 @@ import type { PayloadNames } from './vectorView'
 import './image-edit.css'
 
 const LABEL_TEXT: Record<LabelStatus, string> = { unlabeled: '未标注', auto: '自动标注', verified: '已核验' }
+/** The editor shows the thumbnail only; the original is loaded when the large view opens. */
+const NO_SOURCES: readonly string[] = []
 
 /** What a write's vector_sync means for the person (same wording as the scene membership panel). */
 const SAVED: Record<VectorSyncOutcome, string> = {
@@ -104,7 +107,9 @@ export function ImageEditPanel({
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [membershipKey, setMembershipKey] = useState(0)
   const [foodOpen, setFoodOpen] = useState(false)
+  const [zoom, setZoom] = useState(false)  // the large view of the photo
   const generation = useRef(0)
+  const descriptionRef = useRef<HTMLTextAreaElement>(null)
   // The parent's callbacks may change on every render: reading them through refs keeps load stable
   const onChangedRef = useRef(onChanged)
   const onDeletedRef = useRef(onDeleted)
@@ -121,6 +126,31 @@ export function ImageEditPanel({
   const dirty = Boolean(image && draft && isDirty(image, draft))
   const patch = image && draft && !invalid ? toImagePatch(image, draft) : {}
   const changes = describePatch(patch)
+
+  // Size before paint for loaded values, typing and undo; width changes are observed
+  // separately from height so our own sizing cannot create a resize feedback loop.
+  useLayoutEffect(() => {
+    const field = descriptionRef.current
+    if (!field) return
+    const resize = () => {
+      if (field.clientWidth === 0) return
+      field.style.height = 'auto' // reset first so deleting content can shrink it
+      const style = getComputedStyle(field)
+      // Shared textarea styles use border-box; scrollHeight already includes padding.
+      field.style.height = `${field.scrollHeight + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth)}px`
+    }
+    resize()
+    let width = -1
+    let frame = 0
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry || entry.contentRect.width === width) return
+      width = entry.contentRect.width
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(resize)
+    })
+    observer.observe(field)
+    return () => { observer.disconnect(); cancelAnimationFrame(frame) }
+  }, [draft?.description, item.id])
 
   /** reset: also start the draft over from what is stored. */
   const load = useCallback(async (reset: boolean) => {
@@ -145,7 +175,7 @@ export function ImageEditPanel({
   }, [apiBase, item.id, gone])
 
   useEffect(() => {
-    setDetail(null); setDraft(null); setConfirmDelete(false); setLoadError(null)
+    setDetail(null); setDraft(null); setConfirmDelete(false); setLoadError(null); setZoom(false)
     void load(true)
     return () => { generation.current++ }
   }, [load])
@@ -236,6 +266,15 @@ export function ImageEditPanel({
     }
   }
 
+  async function copyId() {
+    try {
+      await navigator.clipboard.writeText(item.id)
+      notify.success('已复制图片 ID。')
+    } catch {
+      notify.error('复制失败：浏览器不允许访问剪贴板，请手动选中 ID 复制。', { title: '没有复制' })
+    }
+  }
+
   const sceneName = (code: string) => scenes.data?.scenes.find(scene => scene.code === code)?.name ?? code
   const payloadNames: PayloadNames = {
     category: id => categories.tree ? categoryPath(categories.tree, id) : null,
@@ -248,28 +287,37 @@ export function ImageEditPanel({
   const thumbSources = storedImageSources([image?.imageUrl ?? item.imageUrl], item.id, 'thumb', apiBase)
   const originalSources = storedImageSources([image?.originalUrl ?? item.originalUrl], item.id, 'original', apiBase)
   const shownPath = image?.categoryId != null && categories.tree ? categoryPath(categories.tree, image.categoryId) : null
+  // The preview box takes the photo's own proportions, so a 4:3 photo is not letterboxed in a square
+  const width = image?.width ?? item.width
+  const height = image?.height ?? item.height
+  const ratio = width && height ? `${width} / ${height}` : undefined
+  const originalHref = originalSources[0] ?? null  // the stored original, or read back through the API
+  const labelStatus = image?.labelStatus ?? null
+  const shownScenes = image?.scenes ?? item.scenes
+  const sourceText = image ? enumValueText(catalog, SOURCE_TYPE_ENUM, image.sourceType) : '—'
+  const licenseText = image ? enumValueText(catalog, LICENSE_ENUM, image.license) : '—'
   const descriptionLength = draft ? charLength(draft.description.trim()) : 0
+  const selectedDraftCategory = draft?.categoryId != null ? categories.tree?.byId.get(draft.categoryId)?.node : undefined
+  const selectedDraftCategoryTitle = selectedDraftCategory && categories.tree && draft?.categoryId != null
+    ? [selectedDraftCategory.name ?? selectedDraftCategory.code, categoryPath(categories.tree, draft.categoryId), selectedDraftCategory.code].filter(Boolean).join('\n')
+    : undefined
 
-  return <div className="ie">
-    <div className="ie-top">
-      <figure className="ie-figure">
-        <ProgressiveImage
-          previewSources={thumbSources}
-          fullSources={originalSources}
-          alt={item.description || item.category || '图片'}
-          placeholder={<span className="ie-noimage">暂无预览</span>}
-        />
-      </figure>
-      <div className="ie-facts">
-        <dl className="ie-meta">
-          <div><dt>类别</dt><dd>{image ? (image.categoryId === null ? '未标注' : shownPath ?? image.category ?? image.categoryCode ?? `#${image.categoryId}`) : item.category ?? '—'}</dd></div>
-          <div><dt>标注状态</dt><dd>{image?.labelStatus ? LABEL_TEXT[image.labelStatus] : '—'}</dd></div>
-          <div><dt>所属场景</dt><dd>{(image?.scenes ?? item.scenes).map(sceneName).join('、') || '—'}</dd></div>
-          <div><dt>尺寸</dt><dd>{image?.width && image.height ? `${image.width} × ${image.height}` : '—'}</dd></div>
-          <div><dt>来源 · 许可</dt><dd>{image ? `${enumValueText(catalog, SOURCE_TYPE_ENUM, image.sourceType)} · ${enumValueText(catalog, LICENSE_ENUM, image.license)}` : '—'}</dd></div>
-          <div><dt>入库时间</dt><dd>{formatLibraryTime(image?.createdAt ?? item.createdAt)}</dd></div>
-          <div className="ie-meta-wide"><dt>图片 ID</dt><dd className="monospace">{item.id}</dd></div>
-        </dl>
+  return <><div className="ie">
+    <div className="ie-main">
+      <aside className="ie-rail" aria-label="已保存信息">
+        <figure className="ie-figure" style={ratio ? { aspectRatio: ratio } : undefined}>
+          <button type="button" className="ie-figure-open" onClick={() => setZoom(true)} aria-label="查看大图" title="点击查看大图">
+            <ProgressiveImage
+              previewSources={thumbSources}
+              fullSources={NO_SOURCES}
+              alt={item.description || item.category || '图片'}
+              placeholder={<span className="ie-noimage">暂无预览</span>}
+            />
+            <span className="ie-zoom-hint" aria-hidden><Maximize2 size={12} />查看大图</span>
+          </button>
+        </figure>
+
+        {/* Whether search sees this image as stored: right under the photo, with its fix */}
         {detail && <VectorCard
           vector={detail.vector}
           ledger={detail.image.embeddings}
@@ -282,59 +330,89 @@ export function ImageEditPanel({
           onReload={() => void load(false)}
           onUpload={onUpload}
         />}
+
+        <section className="ie-facts">
+          <h3>已保存信息</h3>
+          <dl className="ie-meta">
+            <div><dt>类别</dt><dd>{image ? (image.categoryId === null ? <span className="ie-muted">未标注</span> : shownPath ?? image.category ?? image.categoryCode ?? `#${image.categoryId}`) : item.category ?? '—'}</dd></div>
+            <div><dt>标注</dt><dd>{labelStatus ? <span className={`ie-chip is-${labelStatus}`}>{LABEL_TEXT[labelStatus]}</span> : '—'}</dd></div>
+            <div><dt>场景</dt><dd>{shownScenes.length
+              ? <span className="ie-chips">{shownScenes.map(code => <span className="ie-chip" key={code}>{sceneName(code)}</span>)}</span>
+              : '—'}</dd></div>
+            <div><dt>尺寸</dt><dd>{width && height ? `${width} × ${height}` : '—'}</dd></div>
+            <div><dt>来源</dt><dd>{sourceText}</dd></div>
+            <div><dt>许可</dt><dd>{licenseText}</dd></div>
+            <div><dt>入库</dt><dd>{formatLibraryTime(image?.createdAt ?? item.createdAt)}</dd></div>
+            {(image?.updatedAt ?? item.updatedAt) && <div><dt>更新</dt><dd>{formatLibraryTime(image?.updatedAt ?? item.updatedAt)}</dd></div>}
+            <div className="ie-meta-wide"><dt>图片 ID</dt><dd className="ie-id">
+              <code title={item.id}>{item.id}</code>
+              <button type="button" className="ie-copy" onClick={() => void copyId()} aria-label="复制图片 ID" title="复制图片 ID"><Copy size={13} /></button>
+            </dd></div>
+          </dl>
+        </section>
+      </aside>
+
+      <div className="ie-scroll">
+        {loading && !detail && <p className="ie-status" role="status"><LoaderCircle size={15} className="spin" />正在读取图片详情…</p>}
+        {loadError && <p className="ie-alert" role="alert">读取图片详情失败：{loadError} <button type="button" className="mg-text-button" onClick={() => void load(!draft)}><RotateCcw size={13} />重试</button></p>}
+
+        {image && draft && <form className="ia-form ie-form" onSubmit={event => { event.preventDefault(); void save() }} aria-label="编辑标注">
+          <section className="ia-section" aria-labelledby={`${base}-category-title`}>
+            <h3 id={`${base}-category-title`}>类别与标注状态</h3>
+            <div className="ie-field-rows">
+              <div className="ie-category-picker" title={selectedDraftCategoryTitle}>
+                <CategoryPicker
+                  id={`${base}-category`}
+                  label="类别"
+                  tree={categories.tree}
+                  loading={categories.loading}
+                  loadError={categories.error}
+                  onRetry={categories.refresh}
+                  value={draft.categoryId}
+                  onChange={categoryId => setDraft(withCategory(draft, image, categoryId))}
+                  disabled={busy !== null}
+                  error={errors.category}
+                  hint={draft.categoryId === null ? '没有类别时图片为「未标注」。' : undefined}
+                />
+              </div>
+              {draft.categoryId !== null && <fieldset className="ia-choice ie-status-row" disabled={busy !== null}>
+                <legend>标注状态</legend>
+                <div className="ie-status-control">
+                  <label><input type="radio" name={`${base}-label`} checked={draft.labelStatus === 'auto'} onChange={() => setDraft({ ...draft, labelStatus: 'auto' })} />自动标注</label>
+                  <label><input type="radio" name={`${base}-label`} checked={draft.labelStatus === 'verified'} onChange={() => setDraft({ ...draft, labelStatus: 'verified' })} />已核验</label>
+                  <small>换了类别默认记为「已核验」：是人在图库里选的。</small>
+                </div>
+              </fieldset>}
+            </div>
+          </section>
+
+          <section className="ia-section" aria-labelledby={`${base}-text-title`}>
+            <h3 id={`${base}-text-title`}>标签与描述</h3>
+            <div className="ie-field-rows">
+              <div className="ia-field ie-line-field">
+                <label htmlFor={`${base}-tags`}>标签</label>
+                <TagInput id={`${base}-tags`} tags={draft.tags} onChange={tags => setDraft({ ...draft, tags })} disabled={busy !== null} error={errors.tags} />
+                {errors.tags && <small className="ia-field-error" role="alert">{errors.tags}</small>}
+              </div>
+              <div className="ia-field ie-line-field">
+                <label htmlFor={`${base}-description`}>描述</label>
+                <textarea ref={descriptionRef} className="ie-description" id={`${base}-description`} rows={1} disabled={busy !== null} value={draft.description} aria-invalid={errors.description ? true : undefined} onChange={event => setDraft({ ...draft, description: event.target.value })} />
+                <small className={`ia-counter${errors.description ? ' is-over' : ''}`}>{errors.description ?? `${descriptionLength} / ${MAX_DESCRIPTION_LENGTH}`}</small>
+              </div>
+            </div>
+          </section>
+
+          <details className="ia-section ia-collapsible" open={foodOpen} onToggle={event => setFoodOpen(event.currentTarget.open)}>
+            <summary><h3>食物标注</h3><small>{foodFieldsFilled(draft) ? `已填 ${foodFieldsFilled(draft)} 项 · ${enumValueText(catalog, FOOD_STATE_ENUM, draft.foodState || null)}` : '未填写'}</small></summary>
+            <FoodFields idBase={base} value={draft} onChange={change => setDraft({ ...draft, ...change })} errors={errors} disabled={busy !== null} />
+            <p className="ia-muted">食物状态参与检索过滤，改了会同步到向量库；其余字段只存在数据库里。</p>
+          </details>
+        </form>}
+
+        <div className="ie-memberships">
+          <SceneMembershipPanel key={membershipKey} imageId={item.id} apiBase={apiBase} onSaved={() => { onChangedRef.current(); void load(false) }} onManage={onManage} />
+        </div>
       </div>
-    </div>
-
-    {loading && !detail && <p className="ie-status" role="status"><LoaderCircle size={15} className="spin" />正在读取图片详情…</p>}
-    {loadError && <p className="ie-alert" role="alert">读取图片详情失败：{loadError} <button type="button" className="mg-text-button" onClick={() => void load(!draft)}><RotateCcw size={13} />重试</button></p>}
-
-    {image && draft && <form className="ia-form ie-form" onSubmit={event => { event.preventDefault(); void save() }} aria-label="编辑标注">
-      <section className="ia-section" aria-labelledby={`${base}-category-title`}>
-        <h3 id={`${base}-category-title`}>类别与标注状态</h3>
-        <CategoryPicker
-          id={`${base}-category`}
-          label="类别"
-          tree={categories.tree}
-          loading={categories.loading}
-          loadError={categories.error}
-          onRetry={categories.refresh}
-          value={draft.categoryId}
-          onChange={categoryId => setDraft(withCategory(draft, image, categoryId))}
-          disabled={busy !== null}
-          error={errors.category}
-          hint={draft.categoryId === null ? '没有类别时图片为「未标注」。' : undefined}
-        />
-        {draft.categoryId !== null && <fieldset className="ia-choice" disabled={busy !== null}>
-          <legend>标注状态</legend>
-          <label><input type="radio" name={`${base}-label`} checked={draft.labelStatus === 'auto'} onChange={() => setDraft({ ...draft, labelStatus: 'auto' })} />自动标注</label>
-          <label><input type="radio" name={`${base}-label`} checked={draft.labelStatus === 'verified'} onChange={() => setDraft({ ...draft, labelStatus: 'verified' })} />已核验</label>
-          <small>换了类别默认记为「已核验」：是人在图库里选的。</small>
-        </fieldset>}
-      </section>
-
-      <section className="ia-section" aria-labelledby={`${base}-text-title`}>
-        <h3 id={`${base}-text-title`}>标签与描述</h3>
-        <div className="ia-field">
-          <label htmlFor={`${base}-tags`}>标签</label>
-          <TagInput id={`${base}-tags`} tags={draft.tags} onChange={tags => setDraft({ ...draft, tags })} disabled={busy !== null} error={errors.tags} />
-          {errors.tags && <small className="ia-field-error" role="alert">{errors.tags}</small>}
-        </div>
-        <div className="ia-field">
-          <label htmlFor={`${base}-description`}>描述</label>
-          <textarea id={`${base}-description`} rows={3} disabled={busy !== null} value={draft.description} aria-invalid={errors.description ? true : undefined} onChange={event => setDraft({ ...draft, description: event.target.value })} />
-          <small className={`ia-counter${errors.description ? ' is-over' : ''}`}>{errors.description ?? `${descriptionLength} / ${MAX_DESCRIPTION_LENGTH}`}</small>
-        </div>
-      </section>
-
-      <details className="ia-section ia-collapsible" open={foodOpen} onToggle={event => setFoodOpen(event.currentTarget.open)}>
-        <summary><h3>食物标注</h3><small>{foodFieldsFilled(draft) ? `已填 ${foodFieldsFilled(draft)} 项 · ${enumValueText(catalog, FOOD_STATE_ENUM, draft.foodState || null)}` : '未填写'}</small></summary>
-        <FoodFields idBase={base} value={draft} onChange={change => setDraft({ ...draft, ...change })} errors={errors} disabled={busy !== null} />
-        <p className="ia-muted">食物状态参与检索过滤，改了会同步到向量库；其余字段只存在数据库里。</p>
-      </details>
-    </form>}
-
-    <div className="ie-memberships">
-      <SceneMembershipPanel key={membershipKey} imageId={item.id} apiBase={apiBase} onSaved={() => { onChangedRef.current(); void load(false) }} onManage={onManage} />
     </div>
 
     <div className="ie-bar">
@@ -351,5 +429,22 @@ export function ImageEditPanel({
         </div>}
     </div>
   </div>
+
+  {/* The large view: the thumbnail at once, the original over it once loaded */}
+  {zoom && <Dialog title="查看大图" size="lg" onClose={() => setZoom(false)}>
+    <div className="ie-zoom" style={{ aspectRatio: ratio ?? '4 / 3' }}>
+      <ProgressiveImage
+        previewSources={thumbSources}
+        fullSources={originalSources}
+        alt={item.description || item.category || '图片'}
+        placeholder={<span className="ie-noimage">暂无图片</span>}
+      />
+    </div>
+    <div className="ie-zoom-bar">
+      <span>{width && height ? `原图 ${width} × ${height}` : '原图'}</span>
+      {originalHref && <a href={originalHref} target="_blank" rel="noopener noreferrer"><ExternalLink size={13} aria-hidden />在新标签页打开原图</a>}
+    </div>
+  </Dialog>}
+  </>
 }
 

@@ -78,16 +78,26 @@ test('存储地址打不开的缩略图改由后端读出；之后同一地址�
   expect(calls.direct.length).toBe(tried)
 })
 
-test('图片编辑：先显示缩略图，原图加载完再换上；存储地址打不开时两者都从后端读', async ({ page }) => {
+test('图片编辑：只显示缩略图，点开大图才加载原图；存储地址打不开时两者都从后端读', async ({ page }) => {
   const calls = await mockApi(page, 1, { holdOriginals: true })
   await page.route(url => /\/api\/images\/[^/]+$/.test(url.pathname), route => route.fulfill({ status: 503, json: { ok: false, error: 'NOT_READY', detail: 'down', trace_id: 't' } }))
   await openLibrary(page)
   await page.getByRole('button', { name: /^标注 / }).first().click()
   const figure = page.locator('.ie-figure')
   await expect(figure.locator('.progressive-image-preview')).toHaveAttribute('src', `/api/images/${imageId(1)}/file?variant=thumb`)
-  await expect(figure.getByText('正在加载原图')).toBeVisible()
-  calls.releaseOriginals()
-  await expect(figure.locator('.progressive-image-full.is-loaded')).toHaveAttribute('src', `/api/images/${imageId(1)}/file?variant=original`)
   await expect(figure.locator('img')).toHaveCount(1)
+  await expect(figure.getByText('正在加载原图')).toHaveCount(0)
+  expect(calls.files.filter(file => file.endsWith(':original'))).toEqual([])  // the editor never fetches the original
+
+  await figure.getByRole('button', { name: '查看大图' }).click()
+  const zoom = page.getByRole('dialog', { name: '查看大图' })
+  await expect(zoom.locator('.progressive-image-preview')).toHaveAttribute('src', `/api/images/${imageId(1)}/file?variant=thumb`)
+  await expect(zoom.getByText('正在加载原图')).toBeVisible()
+  calls.releaseOriginals()
+  await expect(zoom.locator('.progressive-image-full.is-loaded')).toHaveAttribute('src', `/api/images/${imageId(1)}/file?variant=original`)
+  await expect(zoom.locator('img')).toHaveCount(1)
   expect(calls.files.filter(file => file.endsWith(':original'))).toEqual([`${imageId(1)}:original`])
+  await zoom.getByRole('button', { name: '关闭弹窗' }).click()
+  await expect(zoom).toHaveCount(0)
+  await expect(page.getByRole('dialog', { name: '图片标注' })).toBeVisible()  // back in the editor
 })

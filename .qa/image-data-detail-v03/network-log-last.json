@@ -1,0 +1,257 @@
+{
+  "count": 203,
+  "unhandled": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/api/images/00000000-0000-4000-8000-00000000000d/file?variant=thumb",
+      "resource": "image",
+      "time": 1794541621761,
+      "kind": "unhandled-api"
+    }
+  ],
+  "sample": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/",
+      "resource": "document",
+      "time": 1794541621013
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/@vite/client",
+      "resource": "script",
+      "time": 1794541621034
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/main.tsx",
+      "resource": "script",
+      "time": 1794541621035
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/@react-refresh",
+      "resource": "script",
+      "time": 1794541621035
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=d6cc7658",
+      "resource": "script",
+      "time": 1794541621042
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/node_modules/.vite/deps/react.js?v=d6cc7658",
+      "resource": "script",
+      "time": 1794541621044
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/node_modules/.vite/deps/react-dom_client.js?v=d6cc7658",
+      "resource": "script",
+      "time": 1794541621044
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/App.tsx",
+      "resource": "script",
+      "time": 1794541621045
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/styles.css",
+      "resource": "script",
+      "time": 1794541621045
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/node_modules/.vite/deps/chunk-XG5U26FK.js?v=d6cc7658",
+      "resource": "script",
+      "time": 1794541621050
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/node_modules/.vite/deps/chunk-G3PMV62Z.js?v=d6cc7658",
+      "resource": "script",
+      "time": 1794541621051
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/node_modules/.vite/deps/chunk-6QHJW7VW.js?v=d6cc7658",
+      "resource": "script",
+      "time": 1794541621075
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/node_modules/.vite/deps/lucide-react.js?v=d6cc7658",
+      "resource": "script",
+      "time": 1794541621082
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/components/ManagementViews.tsx",
+      "resource": "script",
+      "time": 1794541621084
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/pages/enums/index.ts",
+      "resource": "script",
+      "time": 1794541621084
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/pages/categories/index.ts",
+      "resource": "script",
+      "time": 1794541621085
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/pages/models/index.ts",
+      "resource": "script",
+      "time": 1794541621086
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/components/Dialog.tsx",
+      "resource": "script",
+      "time": 1794541621086
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/components/BatchSearchPanel.tsx",
+      "resource": "script",
+      "time": 1794541621088
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/components/DownloadDialog.tsx",
+      "resource": "script",
+      "time": 1794541621089
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/components/ImageFilePicker.tsx",
+      "resource": "script",
+      "time": 1794541621090
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/lib/downloads.ts",
+      "resource": "script",
+      "time": 1794541621091
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/entities/enum/index.ts",
+      "resource": "script",
+      "time": 1794541621091
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/entities/image/index.ts",
+      "resource": "script",
+      "time": 1794541621092
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/entities/scene/index.ts",
+      "resource": "script",
+      "time": 1794541621093
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/features/scene-catalog/index.ts",
+      "resource": "script",
+      "time": 1794541621094
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/pages/scenes/SceneConfigPage.tsx",
+      "resource": "script",
+      "time": 1794541621094
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/features/scene-memberships/SceneMembershipPanel.tsx",
+      "resource": "script",
+      "time": 1794541621095
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/entities/search-result/index.ts",
+      "resource": "script",
+      "time": 1794541621095
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/shared/api/index.ts",
+      "resource": "script",
+      "time": 1794541621096
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/shared/lib/index.ts",
+      "resource": "script",
+      "time": 1794541621096
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/shared/ui/index.ts",
+      "resource": "script",
+      "time": 1794541621097
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/features/scene-select/index.ts",
+      "resource": "script",
+      "time": 1794541621098
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/features/score-threshold/index.ts",
+      "resource": "script",
+      "time": 1794541621098
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/features/search/index.ts",
+      "resource": "script",
+      "time": 1794541621099
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/features/search-num/index.ts",
+      "resource": "script",
+      "time": 1794541621099
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/node_modules/vite/dist/client/env.mjs",
+      "resource": "script",
+      "time": 1794541621100
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/pages/tasks/index.ts",
+      "resource": "script",
+      "time": 1794541621121
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/pages/library/index.ts",
+      "resource": "script",
+      "time": 1794541621123
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:57611/src/entities/category/index.ts",
+      "resource": "script",
+      "time": 1794541621124
+    }
+  ],
+  "unhandledApi": [
+    "GET /api/images/00000000-0000-4000-8000-00000000000d/file"
+  ]
+}

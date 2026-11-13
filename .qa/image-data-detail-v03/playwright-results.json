@@ -1,0 +1,213 @@
+{
+  "config": {
+    "argv": [
+      "D:\\98-softwaredata\\nodejs\\node.exe",
+      "C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "--config",
+      "playwright.config.ts",
+      "-g",
+      "P0:"
+    ],
+    "configFile": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\image-data-detail-v03\\playwright.config.ts",
+    "rootDir": "C:/Users/47202/PROJECT/Image-Embedding/.qa/image-data-detail-v03",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "C:/Users/47202/PROJECT/Image-Embedding/.qa/image-data-detail-v03/playwright-output",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "C:/Users/47202/PROJECT/Image-Embedding/.qa/image-data-detail-v03",
+        "testIgnore": [],
+        "testMatch": [
+          "image-data-detail-v03.spec.ts"
+        ],
+        "timeout": 240000
+      }
+    ],
+    "filteredProjects": [
+      {
+        "grep": {},
+        "grepInvert": null,
+        "outputDir": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\image-data-detail-v03\\playwright-output",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "name": "chromium",
+        "testDir": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\image-data-detail-v03",
+        "snapshotDir": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\image-data-detail-v03",
+        "testIgnore": [],
+        "testMatch": "image-data-detail-v03.spec.ts",
+        "timeout": 240000,
+        "use": {
+          "baseURL": "http://127.0.0.1:57611",
+          "locale": "zh-CN",
+          "timezoneId": "America/Denver",
+          "colorScheme": "light",
+          "screenshot": "off",
+          "video": "off",
+          "trace": "off",
+          "actionTimeout": 12000,
+          "headless": false,
+          "browserName": "chromium"
+        },
+        "dependencies": [],
+        "ignoreSnapshots": false,
+        "__projectId": "chromium"
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "playwright-results.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "default",
+    "updateSourceMethod": "patch",
+    "version": "1.64.1",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "image-data-detail-v03.spec.ts",
+      "file": "image-data-detail-v03.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "image-data-detail v0.3 isolated acceptance",
+          "file": "image-data-detail-v03.spec.ts",
+          "line": 421,
+          "column": 6,
+          "specs": [
+            {
+              "title": "P0: 类别与标注状态横排/裁切/对齐与选中值",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 240000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\image-data-detail-v03\\image-data-detail-v03.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 20295,
+                      "error": {
+                        "message": "TimeoutError: locator.fill: Timeout 12000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('dialog', { name: '图片标注' }).getByRole('combobox', { name: '类别' })\u001b[22m\n\u001b[2m    - locator resolved to <input value=\"\" role=\"combobox\" autocomplete=\"off\" id=\"_r_7_-category\" aria-expanded=\"false\" aria-controls=\"_r_9_\" placeholder=\"搜索以更换类别\" aria-autocomplete=\"list\"/>\u001b[22m\n\u001b[2m    - fill(\"红烧\")\u001b[22m\n\u001b[2m  - attempting fill action\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and editable\u001b[22m\n\u001b[2m      - element is not visible\u001b[22m\n\u001b[2m    - retrying fill action\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and editable\u001b[22m\n\u001b[2m      - element is not visible\u001b[22m\n\u001b[2m    - retrying fill action\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    23 × waiting for element to be visible, enabled and editable\u001b[22m\n\u001b[2m       - element is not visible\u001b[22m\n\u001b[2m     - retrying fill action\u001b[22m\n\u001b[2m       - waiting 500ms\u001b[22m\n",
+                        "stack": "TimeoutError: locator.fill: Timeout 12000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('dialog', { name: '图片标注' }).getByRole('combobox', { name: '类别' })\u001b[22m\n\u001b[2m    - locator resolved to <input value=\"\" role=\"combobox\" autocomplete=\"off\" id=\"_r_7_-category\" aria-expanded=\"false\" aria-controls=\"_r_9_\" placeholder=\"搜索以更换类别\" aria-autocomplete=\"list\"/>\u001b[22m\n\u001b[2m    - fill(\"红烧\")\u001b[22m\n\u001b[2m  - attempting fill action\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and editable\u001b[22m\n\u001b[2m      - element is not visible\u001b[22m\n\u001b[2m    - retrying fill action\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and editable\u001b[22m\n\u001b[2m      - element is not visible\u001b[22m\n\u001b[2m    - retrying fill action\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    23 × waiting for element to be visible, enabled and editable\u001b[22m\n\u001b[2m       - element is not visible\u001b[22m\n\u001b[2m     - retrying fill action\u001b[22m\n\u001b[2m       - waiting 500ms\u001b[22m\n\n    at C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\image-data-detail-v03\\image-data-detail-v03.spec.ts:492:56",
+                        "location": {
+                          "file": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\image-data-detail-v03\\image-data-detail-v03.spec.ts",
+                          "column": 56,
+                          "line": 492
+                        },
+                        "snippet": "  490 |     const leftCategoryBefore = (before as any).savedRail.find((row: any) => row.dt === '类别')?.dd\n  491 |     const leftStatusBefore = (before as any).savedRail.find((row: any) => row.dt === '标注状态')?.dd\n> 492 |     await dialog.getByRole('combobox', { name: '类别' }).fill('红烧')\n      |                                                        ^\n  493 |     await dialog.getByRole('option', { name: /^红烧肉/ }).click()\n  494 |     await expect(dialog.getByRole('radio', { name: '已核验' })).toBeChecked()\n  495 |     const afterPick = await capture('1280x900-after-pick-hongshao')"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\image-data-detail-v03\\image-data-detail-v03.spec.ts",
+                            "column": 56,
+                            "line": 492
+                          },
+                          "message": "TimeoutError: locator.fill: Timeout 12000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('dialog', { name: '图片标注' }).getByRole('combobox', { name: '类别' })\u001b[22m\n\u001b[2m    - locator resolved to <input value=\"\" role=\"combobox\" autocomplete=\"off\" id=\"_r_7_-category\" aria-expanded=\"false\" aria-controls=\"_r_9_\" placeholder=\"搜索以更换类别\" aria-autocomplete=\"list\"/>\u001b[22m\n\u001b[2m    - fill(\"红烧\")\u001b[22m\n\u001b[2m  - attempting fill action\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and editable\u001b[22m\n\u001b[2m      - element is not visible\u001b[22m\n\u001b[2m    - retrying fill action\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible, enabled and editable\u001b[22m\n\u001b[2m      - element is not visible\u001b[22m\n\u001b[2m    - retrying fill action\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    23 × waiting for element to be visible, enabled and editable\u001b[22m\n\u001b[2m       - element is not visible\u001b[22m\n\u001b[2m     - retrying fill action\u001b[22m\n\u001b[2m       - waiting 500ms\u001b[22m\n\n\n  490 |     const leftCategoryBefore = (before as any).savedRail.find((row: any) => row.dt === '类别')?.dd\n  491 |     const leftStatusBefore = (before as any).savedRail.find((row: any) => row.dt === '标注状态')?.dd\n> 492 |     await dialog.getByRole('combobox', { name: '类别' }).fill('红烧')\n      |                                                        ^\n  493 |     await dialog.getByRole('option', { name: /^红烧肉/ }).click()\n  494 |     await expect(dialog.getByRole('radio', { name: '已核验' })).toBeChecked()\n  495 |     const afterPick = await capture('1280x900-after-pick-hongshao')\n    at C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\image-data-detail-v03\\image-data-detail-v03.spec.ts:492:56"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-13T03:46:59.584Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\image-data-detail-v03\\image-data-detail-v03.spec.ts",
+                            "line": 0,
+                            "column": 0
+                          }
+                        }
+                      ],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\image-data-detail-v03\\playwright-output\\image-data-detail-v03-imag-54133-ance-P0-类别与标注状态横排-裁切-对齐与选中值-chromium\\error-context.md"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\image-data-detail-v03\\image-data-detail-v03.spec.ts",
+                        "column": 56,
+                        "line": 492
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "be2a579334eadcde59a4-34b8f8dea03725de8b6f",
+              "file": "image-data-detail-v03.spec.ts",
+              "line": 435,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-11-13T03:46:58.898Z",
+    "duration": 22722.653,
+    "expected": 0,
+    "skipped": 0,
+    "unexpected": 1,
+    "flaky": 0
+  }
+}

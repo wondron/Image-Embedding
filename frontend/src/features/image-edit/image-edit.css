@@ -1,17 +1,128 @@
 /* Gallery image editor (inside the 「图片标注」 dialog). Field styles: features/annotation-fields. */
-.ie { display: flex; flex-direction: column; gap: 12px; padding: 12px 12px 0; }
-.ie-top { display: grid; grid-template-columns: 200px minmax(0, 1fr); align-items: start; gap: 14px; }
-.ie-figure { display: grid; place-items: center; margin: 0; aspect-ratio: 1; overflow: hidden; border: 1px solid #e5e9f0; border-radius: 10px; background: #f2f4f8; }
+/* Only LibraryPage's ImageEditPanel uses .ie in a Dialog. Do not reuse this root
+   for other dialogs: the explicit border-box block-size is gallery-specific. */
+.dialog.dialog-wide:has(.ie) {
+  width: min(840px, calc(100vw - 30px));
+  block-size: min(720px, 90dvh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.dialog-body:has(.ie) {
+  flex: 1;
+  min-block-size: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ie { display: flex; flex: 1; flex-direction: column; min-block-size: 0; min-inline-size: 0; gap: 0; padding: 0; }
+/* Single-column default: only main scrolls; the inner content is not a second scroller. */
+.ie-main { flex: 1; min-block-size: 0; min-inline-size: 0; overflow: auto; overscroll-behavior: contain; }
+.ie-rail { min-inline-size: 0; min-block-size: auto; overflow: visible; padding: 12px 16px 16px; }
+.ie-scroll { display: flex; flex-direction: column; gap: 10px; min-inline-size: 0; min-block-size: auto; overflow: visible; padding: 12px 16px 16px; container: ie-editor / inline-size; }
+/* The photo at its own proportions (inline aspect-ratio from its width / height; 4:3 until
+   known), never taller than the cap: no grey bars around a landscape photo. */
+.ie-figure { position: relative; display: grid; place-items: center; margin: 0; inline-size: 100%; aspect-ratio: 4 / 3; max-block-size: min(34dvh, 260px); min-block-size: 120px; min-inline-size: 0; overflow: hidden; border: 1px solid #e5e9f0; border-radius: 10px; background: #f2f4f8; }
 .ie-figure img { width: 100%; height: 100%; object-fit: contain; }
 .ie-figure > .progressive-image { width: 100%; height: 100%; }
 .ie-noimage { color: #94a3b8; font-size: 13px; }
-.ie-facts { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.ie-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px; margin: 0; }
-.ie-meta > div { min-width: 0; }
+/* The thumbnail is a button: a click opens the large view (the original loads only there) */
+.ie-figure-open { position: relative; display: grid; place-items: center; inline-size: 100%; block-size: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: zoom-in; }
+.ie-figure-open:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; border-radius: 10px; }
+.ie-zoom-hint { position: absolute; inset-block-end: 8px; inset-inline-end: 8px; display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 999px; background: rgba(15, 23, 42, .58); color: #fff; font-size: 12px; line-height: 20px; opacity: .88; transition: opacity .15s, background .15s; pointer-events: none; }
+.ie-figure-open:hover .ie-zoom-hint, .ie-figure-open:focus-visible .ie-zoom-hint { background: rgba(15, 23, 42, .78); opacity: 1; }
+
+/* The large view (a dialog of its own next to the editor). Only the dialog whose own body holds
+   it: the editor's dialog contains this one, so a plain :has(.ie-zoom) would resize it too. */
+.dialog.dialog-wide:has(> .dialog-body > .ie-zoom) { width: min(1100px, calc(100vw - 30px)); }
+/* The photo's own proportions (inline aspect-ratio), capped in height: a landscape photo gets
+   no tall dark bands, a portrait one is letterboxed at the sides */
+.ie-zoom { display: grid; place-items: center; inline-size: 100%; max-block-size: min(76dvh, 860px); background: #111827; }
+.ie-zoom > .progressive-image { width: 100%; height: 100%; }
+.ie-zoom img { width: 100%; height: 100%; object-fit: contain; }
+.ie-zoom .ie-noimage { color: #94a3b8; }
+.ie-zoom-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; padding: 8px 14px; border-top: 1px solid #e6ebf3; color: #64748b; font-size: 13px; }
+.ie-zoom-bar a { display: inline-flex; align-items: center; gap: 4px; color: var(--primary); text-decoration: none; }
+.ie-zoom-bar a:hover { text-decoration: underline; }
+@media (max-width: 500px) {
+  .ie-zoom { max-block-size: min(64dvh, 560px); }
+}
+.ie-facts { min-width: 0; margin-block-start: 12px; padding: 10px 12px 12px; border: 1px solid #e5eaf2; border-radius: 10px; background: #fcfdff; container: ie-saved / inline-size; }
+.ie-facts > h3 { margin: 0 0 8px; color: #1f2a3a; font-size: 13px; font-weight: 800; }
+.ie-meta { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px 16px; margin: 0; }
+.ie-meta > div { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 8px; align-items: baseline; min-width: 0; }
 .ie-meta dt { color: #7b8899; font-size: 12px; line-height: 1.6; }
 .ie-meta dd { margin: 0; color: #223046; font-size: 13px; font-weight: 600; line-height: 1.6; overflow-wrap: anywhere; }
-.ie-meta .monospace { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; font-weight: 400; }
 .ie-meta-wide { grid-column: 1 / -1; }
+.ie-muted { color: #94a3b8; font-weight: 400; }
+.ie-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.ie-chip { display: inline-block; padding: 0 8px; border-radius: 999px; background: #eef2f7; color: #475569; font-size: 12px; font-weight: 500; line-height: 20px; white-space: nowrap; }
+.ie-chip.is-auto { background: #eaf2ff; color: #1d4ed8; }
+.ie-chip.is-verified { background: #eaf5ee; color: #2f7d4a; }
+.ie-chip.is-unlabeled { background: #f3f4f6; color: #6b7280; }
+/* One line: the id is copied with the button, not read off the screen */
+.ie-id { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.ie-id code { min-width: 0; overflow: hidden; color: #475569; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.ie-copy { display: inline-grid; place-items: center; flex-shrink: 0; inline-size: 24px; block-size: 24px; padding: 0; border: 0; border-radius: 6px; background: none; color: #7b8899; cursor: pointer; }
+.ie-copy:hover, .ie-copy:focus-visible { background: #eef2f7; color: var(--primary); }
+/* Only the saved-information content box controls metadata columns. The 300px rail
+   never reaches 664px; wide single-column layouts may fit two label/value fields. */
+@container ie-saved (min-width: 664px) {
+  .ie-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* v0.4: four independent rows, never pair unlike compound controls side by side.
+   Only this gallery form owns the label rail; shared field semantics stay intact. */
+.ie .ia-section { padding: 10px 12px 12px; }
+.ie .ia-field { margin-top: 8px; }
+.ie-field-rows { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; min-inline-size: 0; }
+.ie-category-picker { min-inline-size: 0; }
+.ie .ie-category-picker > .cp,
+.ie .ie-line-field { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px 12px; min-inline-size: 0; margin: 0; }
+.ie .ie-category-picker > .cp { row-gap: 6px; }
+.ie .ie-category-picker > .cp > .cp-label { font-size: 13px; line-height: 1.6; }
+.ie .ie-category-picker > .cp > .cp-selected,
+.ie .ie-line-field > .ia-tags,
+.ie .ie-line-field > textarea { margin-top: 0; }
+.ie .ie-field-rows .cp-combo { margin-top: 0; }
+.ie .ie-category-picker > .cp > .cp-hint,
+.ie .ie-category-picker > .cp > .cp-error { margin: 0; }
+/* Keep the real name/path/code nodes, but share one bounded text line. The
+   clear button remains outside this shrinking text box with its native 24px size. */
+.ie .ie-category-picker .cp-selected { align-items: center; min-inline-size: 0; }
+.ie .ie-category-picker .cp-selected > div { flex: 1; flex-direction: row; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; }
+.ie .ie-category-picker .cp-selected > div > :not(.cp-inactive) { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ie .ie-category-picker .cp-selected strong { flex: 0 1 auto; max-inline-size: 30%; }
+.ie .ie-category-picker .cp-selected small:not(.cp-inactive),
+.ie .ie-category-picker .cp-selected code { flex: 1 1 0; }
+.ie .ie-category-picker .cp-inactive { flex: 0 0 auto; align-self: center; white-space: nowrap; }
+.ie .ie-line-field > small { margin-top: 0; }
+/* Only this description grows with its value; keep all other textarea behavior. */
+.ie .ie-line-field > .ie-description { min-height: 0; overflow-y: hidden; resize: none; }
+/* Keep a real fieldset/legend. Only the legend is positioned in the wide label rail;
+   the radios and their full help text remain in normal, wrapping document flow. */
+.ie .ie-status-row { position: relative; display: block; margin: 0; padding: 0; min-inline-size: 0; }
+.ie .ie-status-row > legend { float: none; width: auto; margin: 0 0 6px; padding: 0; }
+.ie-status-control { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; min-inline-size: 0; }
+.ie-status-control > label { min-block-size: 36px; }
+/* Narrow content: labels above. Wide content: one shared 80px label rail and a
+   full remaining control column, not a second independently-sized field. */
+@container ie-editor (min-width: 420px) {
+  .ie .ie-category-picker > .cp,
+  .ie .ie-line-field { grid-template-columns: 80px minmax(0, 1fr); }
+  .ie .ie-category-picker > .cp > label,
+  .ie .ie-line-field > label { grid-column: 1; grid-row: 1; padding-block-start: 7px; }
+  .ie .ie-category-picker > .cp > :not(label),
+  .ie .ie-line-field > :not(label) { grid-column: 2; min-inline-size: 0; }
+  .ie .ie-status-row { padding-inline-start: 92px; }
+  .ie .ie-status-row > legend { position: absolute; inset-block-start: 0; inset-inline-start: 0; inline-size: 80px; margin: 0; padding-block-start: 7px; }
+}
+/* Preserve the existing food-field content-width guard; v0.4 replaces ONLY the
+   category/status and tags/description pairings, not FoodFields layout. */
+.ie .ia-grid { grid-template-columns: minmax(0, 1fr); }
+@container ie-editor (min-width: 460px) {
+  .ie .ia-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 .ie-vector { padding: 9px 12px 10px; border: 1px solid #e5eaf2; border-radius: 10px; background: #fcfdff; }
 .ie-vector-head { display: flex; align-items: center; gap: 8px; }
@@ -53,13 +164,46 @@
 .ie-tech-ledger { display: block; }
 .ie-tech-raw { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
+/* Vector sync sits right under the photo in the scrolling rail (what search sees comes first).
+   Keep every field/action; wrap long identifiers and let buttons grow if needed. */
+.ie-rail > .ie-vector { margin-block-start: 12px; padding: 8px 10px 10px; }
+.ie-rail .ie-vector-head { flex-wrap: wrap; gap: 6px; }
+.ie-rail .ie-diff th, .ie-rail .ie-diff td { padding: 4px 5px; }
+.ie-rail .ie-diff thead th:first-child { width: 64px; }
+.ie-rail .ie-tech dl { grid-template-columns: 56px minmax(0, 1fr); gap: 3px 8px; }
+.ie .ie-rail .ie-vector-action { max-inline-size: 100%; height: auto; min-height: 32px; padding: 6px 8px; white-space: normal; }
+.ie .ie-rail .ie-vector-link { max-inline-size: 100%; white-space: normal; text-align: left; }
+.ie-rail .ie-vector-action svg, .ie-rail .ie-vector-link svg { flex-shrink: 0; }
+
 .ie-status { display: flex; align-items: center; gap: 6px; margin: 0; color: #64748b; font-size: 13px; }
 .ie-alert { margin: 0; padding: 8px 10px; border: 1px solid #f0c2bc; border-radius: 8px; background: #fffafa; color: #b42318; font-size: 13px; line-height: 1.6; }
 .ie-alert .mg-text-button { font-size: 13px; }
-.ie-memberships .scene-membership-panel { margin: 0; }
+/* A card like the form sections above it */
+.ie-memberships { min-inline-size: 0; padding: 10px 12px 12px; border: 1px solid #edf1f7; border-radius: 10px; background: #fcfdff; }
+.ie-memberships .scene-membership-panel { margin: 0; min-inline-size: 0; }
+.ie-memberships .scene-table-scroll { max-inline-size: 100%; overflow-x: auto; }
+.ie-memberships .scene-table th, .ie-memberships .scene-table td { padding: 8px 10px; }
+.ie .ie-vector { min-inline-size: 0; overflow-wrap: anywhere; }
+.ie-figure .progressive-image-status { overflow-wrap: anywhere; }
 
-/* Actions stay at the bottom of the dialog while the form scrolls */
-.ie-bar { position: sticky; bottom: 0; z-index: 2; display: flex; flex-direction: column; gap: 8px; margin: 0 -12px; padding: 10px 12px; border-top: 1px solid rgba(148, 163, 184, .22); background: rgba(252, 253, 255, .97); }
+/* Typography only inside this gallery editor. Paragraph/status colors are NOT reset:
+   alerts retain their existing semantic classes/colors from the shared panel. */
+.ie .scene-membership-panel { font-family: inherit; font-size: 13px; line-height: 1.6; color: #223046; }
+.ie .scene-membership-head h4 { margin: 0; font-size: 14px; font-weight: 800; line-height: 1.6; color: #1f2a3a; }
+.ie .scene-membership-panel .text-button { font-family: inherit; font-size: 13px; font-weight: 400; line-height: 1.6; }
+.ie .scene-membership-panel > p { font-size: 13px; line-height: 1.6; }
+.ie-memberships .scene-table th { font-size: 12px; font-weight: 600; line-height: 1.6; color: #7b8899; }
+.ie-memberships .scene-membership-table th small { font-size: 12px; font-weight: 400; color: #7b8899; }
+.ie-memberships .scene-table td { font-size: 13px; font-weight: 400; line-height: 1.6; color: #223046; }
+.ie .scene-membership-source.is-manual { font-weight: 600; }
+.ie .scene-membership-panel .mg-help { font-size: 12px !important; font-weight: 400; line-height: 1.8 !important; color: #7b8899 !important; }
+.ie .scene-membership-panel > small { font-size: 12px; font-weight: 400; line-height: 1.8; color: #7b8899; }
+.ie .scene-inactive-tag { font-size: 12px; font-weight: 400; }
+.ie .scene-membership-panel code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+
+/* A non-sticky last flex row in this explicitly sized dialog. Confirmation may scroll
+   inside the footer; 40% is relative to the filled .ie, not the viewport. */
+.ie-bar { position: static; flex-shrink: 0; min-block-size: 0; max-block-size: min(220px, 40%); overflow: auto; overscroll-behavior: contain; z-index: 2; display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 10px 12px; border-top: 1px solid rgba(148, 163, 184, .22); background: rgba(252, 253, 255, .97); }
 .ie-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .ie-changes { flex: 1; min-width: 0; color: #7b8899; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ie-delete { color: #b42318; }
@@ -70,11 +214,29 @@
 .ie-danger { color: #fff; background: #c2412f; border-color: #c2412f; }
 .ie-danger:hover:not(:disabled) { background: #a8382a; border-color: #a8382a; }
 
-@media (max-width: 640px) {
-  .ie-top { grid-template-columns: 1fr; }
-  .ie-figure { max-width: 160px; }
-  .ie-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* The entire rail (preview AND saved fields) scrolls independently, inset like the form
+   column. Never make the preview sticky: it must not cover the saved values below it. */
+@media (min-width: 900px) and (min-height: 640px) {
+  .ie-main {
+    display: grid;
+    grid-template-columns: 292px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    gap: 4px;
+    overflow: hidden;
+  }
+  .ie-rail { min-block-size: 0; overflow: auto; overscroll-behavior: contain; padding: 12px 0 16px 16px; scrollbar-width: thin; }
+  .ie-rail .ie-figure { max-block-size: 200px; }
+  .ie-scroll { min-block-size: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 }
-@media (max-width: 380px) {
-  .ie-meta { grid-template-columns: 1fr; }
+@media (min-width: 900px) and (min-height: 760px) {
+  .ie-rail .ie-figure { max-block-size: 240px; }
+}
+@media (max-width: 640px) {
+  .ie-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .ie-actions > .mg-btn { min-block-size: 36px; block-size: auto; padding-block: 8px; }
+  .ie-ask .mg-btn { min-block-size: 36px; block-size: auto; padding-block: 8px; }
+  .ie-ask > div { margin-inline-start: auto; }
+}
+@media (max-width: 500px) {
+  .dialog.dialog-wide:has(.ie) { width: calc(100vw - 22px); block-size: min(820px, 90dvh); }
 }
