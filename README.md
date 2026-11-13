@@ -47,13 +47,20 @@ Global 搜索阶段直接保留上游 `image_url`，不下载或验证候选图�
 | `IMAGE_STORAGE_CONFIG` | `use_boto3`（默认 false，即 mock 不上传）、`endpoint_url`、`bucket`、`public_base_url`、`region`、`access_key_id`、`secret_access_key`、`mock_mirror_dir`、`key_prefix`（可选对象键前缀，与 `bucket` / `public_base_url` 同层；省略或空则新写入键与现网一致，非空如 `ImageEmbedding` 时为 `ImageEmbedding/original/{id}.jpg`。`public_base_url` 仍是桶/CDN URL 根，不要再拼同一前缀。已有对象与 URL 不迁移）。mock 驱动生成的 URL 是 `public_base_url` 下的占位地址，浏览器打不开，前端改用 `GET /api/images/{id}/file` 从后端读回（字节在内存里，配了 `mock_mirror_dir` 才能在重启后读到）；要让图片 URL 本身可用，需配置真实对象存储（`use_boto3: true`、`endpoint_url`、`bucket`、`public_base_url`） |
 | `TOTAL_CONFIG.retrieval_enabled` | 设为 `false` 时只跑 predict，不初始化 PG / Qdrant |
 | `IMAGE_DOWNLOAD_CONFIG.trusted_networks` | 远程图片下载只允许公网地址；这里列出的网段也放行。生产留空，本机代理为 fake-IP 模式时填 `198.18.0.0/15`、`2001:2::/48` |
-| `RECONCILE_CONFIG` | API 进程里的后台对账：`enabled`（默认 true）、`interval_seconds`（默认 300，至少 10）、`initial_delay_seconds`（默认 30）、`max_payloads`（每轮最多补推的向量 payload，默认 2000）、`max_deletions`（每轮最多清理的删除队列条数，默认 200）。每轮把数据库里比向量库新的过滤信息补推到 Qdrant，再清理已删除图片留下的向量和文件；多个进程同时开着时只有一个在跑。关掉后可以用 `python -m app.workers.reconcile` 定时执行 |
+| `RECONCILE_CONFIG` | API 进程里的后台对账：`enabled`（默认 true）、`interval_seconds`（默认 300，至少 10）、`initial_delay_seconds`（默认 30）、`max_payloads`（每轮最多补推的向量 payload，默认 2000）、`max_deletions`（每轮最多清理的删除队列条数，默认 200）、`max_verifications`（每轮对照向量库核对的写入记录条数，默认 2000，0 关闭）、`max_embeddings`（每轮为当前模型版本补上的缺向量图片数，默认 100，0 关闭）。每轮把数据库里比向量库新的过滤信息补推到 Qdrant，核对一段写入记录（向量库里点已不在的作废），为没有向量的图片生成向量，再清理已删除图片留下的向量和文件；多个进程同时开着时只有一个在跑。关掉后可以用 `python -m app.workers.reconcile` 定时执行（没有编码器，只核对不补向量） |
 
 这些连接参数只在启动时读取，Nacos 里修改后需要重启服务；predict 的模型配置仍支持热更新。
 
 ### 换 embedding 模型
 
-`EMBEDDING_CONFIG` 换成新模型后（热更新或重启都行），predict 立即用新模型；自建库检索继续用当前版本的编码器查当前版本的向量库，不会拿新模型去查旧向量。在前端「模型版本」页（或 `/api/embedding-models`）按三步换过去：登记为新版本（新建它自己的 collection）→ 生成向量（服务端后台从存储里的原图生成，可停止、续做）→ 切换（不用重启；原版本保留，可以切回）。确定不用的旧版本再「下线」，才会删它的 collection。重启时如果当前版本的旧权重已经不在（比如原地覆盖了模型文件），检索会暂停并报 `EMBEDDING_MODEL_MISMATCH`，同样在这个页面登记、生成、切换即可恢复。升级到这一版先执行 `alembic upgrade head`（迁移 `0009` 加 `embedding_models.fingerprint`），首次启动会核对并记录当前版本的编码器指纹。细节见契约 §6.5。
+模型权重随镜像发布（不挂载目录），所以换模型时镜像里要同时带新旧两个版本：
+
+1. 把新导出的模型打包成独立目录：`cd backend && python scripts/package_embedding_model.py /path/to/导出的.onnx`，得到 `config/model/embedding/embeddingcls-<hash>/`（.onnx 和外部权重文件原样放在里面，目录名是权重内容的 hash），脚本打印要填的 `EMBEDDING_CONFIG.model_path`。旧版本的目录保留在镜像里。
+2. 构建镜像、把 `EMBEDDING_CONFIG.model_path` 改成新目录、部署。predict 立即用新模型；自建库检索继续用旧版本自己的权重（从镜像里旧目录加载）查旧向量库，不会拿新模型去查旧向量。
+3. 前端「模型版本」页（或 `/api/embedding-models`）：登记为新版本（新建它自己的 collection）→ 生成向量（服务端后台从存储里的原图生成，可停止、续做）→ 切换（不用重启；切换时入库请求排队几秒，生成之后新入库的图片会先补上；原版本保留，可以切回，切回前它缺的图片也能先补齐）。
+4. 确定不再回滚后「下线」旧版本（删除它的 collection）；下一次构建镜像才能去掉旧目录。页面上「镜像里没有它的权重」的版本不能再切换过去。
+
+同一个模型的判断看预处理、权重文件 hash 和固定测试图输出，挪目录、改名不算换模型。重启时如果当前版本的权重已经不在镜像里（或被覆盖），检索会暂停并报 `EMBEDDING_MODEL_MISMATCH`，同样在这个页面登记、生成、切换即可恢复。升级到这一版先执行 `alembic upgrade head`（迁移 `0009` 加 `embedding_models.fingerprint`），首次启动会核对并记录当前版本的编码器指纹。细节见契约 §6.5。
 
 Alembic 和 workers 也按 `NACOS_ENV` 取库，而它默认是 prod：本机执行 `alembic upgrade head` 前先设
 `NACOS_ENV=test`，或用 `NACOS_ENABLED=0` 只读本地 YAML。Alembic 会在日志里打印目标库（密码已隐去）。

@@ -88,6 +88,14 @@ class FakeVectors:
                 points[pid]["payload"].update(payload)
         return sorted(pid for pid in payloads if pid not in points)
 
+    def existing_ids(self, ids):
+        return {str(i) for i in ids if str(i) in self.qdrant.get(self.collection, {})}
+
+    def point_count(self):
+        if self.collection not in self.qdrant:
+            raise err.search_qdrant_failed("no such collection")
+        return len(self.qdrant[self.collection])
+
 
 class FakeModelStore:
     """embedding_models + image_embeddings + images, with the repository's rules."""
@@ -183,6 +191,21 @@ class FakeModelStore:
     def sample_embedded_images(self, model_id, *, limit=3):
         return []
 
+    def list_embedded_ids(self, model_id, *, after=None, limit=256):
+        return sorted(i for (m, i) in self.ledger if m == int(model_id) and (after is None or i > after))[:limit]
+
+    def forget_embeddings(self, model_id, image_ids):
+        gone = [i for i in image_ids if self.ledger.pop((int(model_id), i), None) is not None]
+        return len(gone)
+
+    def clear_embeddings(self, model_id):
+        return self.forget_embeddings(model_id, [i for (m, i) in list(self.ledger) if m == int(model_id)])
+
+    def refresh_model_fingerprint(self, model_id, fingerprint):
+        row = self.models[int(model_id)]
+        row["fingerprint"], row["weights_uri"] = fingerprint, fingerprint["spec"]["model_path"]
+        return True
+
     @contextlib.contextmanager
     def try_maintenance_lock(self, key):
         held = key not in self.locked
@@ -221,8 +244,11 @@ class Storage:
         return url.encode()
 
 
-def stack_for(model, encoder, storage):
-    return SimpleNamespace(model=model, embedding=encoder, infra=SimpleNamespace(storage=storage), close=Mock())
+def stack_for(model, encoder, storage, qdrant=None):
+    vectors = FakeVectors(qdrant, {"collection": model.collection, "dim": model.dim}) if qdrant is not None else None
+    if vectors is not None:
+        vectors.ensure_collection()
+    return SimpleNamespace(model=model, embedding=encoder, infra=SimpleNamespace(storage=storage, vectors=vectors), close=Mock())
 
 
 class ModelVersionsTests(unittest.TestCase):
@@ -259,7 +285,7 @@ class ModelVersionsTests(unittest.TestCase):
                 encoder = self.loadable.get(model.fingerprint["spec"]["model_path"])
             if encoder is None:
                 raise err.embedding_model_mismatch(f"the weights of {model.space_id} could not be loaded")
-            stack = stack_for(model, encoder, self.storage)
+            stack = stack_for(model, encoder, self.storage, self.qdrant)
             self.built.append(stack)
             return stack
 
@@ -267,6 +293,18 @@ class ModelVersionsTests(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
         p = patch.object(registry_module, "RETIRED_STACK_GRACE_SECONDS", 0.01)
+        p.start()
+        self.addCleanup(p.stop)
+
+        def load_from_spec(config):  # weights still in the image, as model_registry loads them
+            def load(spec):
+                encoder = self.loadable.get(spec["model_path"])
+                if encoder is None:
+                    raise FileNotFoundError(f"could not be loaded: {spec['model_path']}")
+                return encoder
+            return load
+
+        p = patch("app.bootstrap.retrieval_stack.load_encoder_from_spec", side_effect=load_from_spec)
         p.start()
         self.addCleanup(p.stop)
 
@@ -307,11 +345,12 @@ class ModelVersionsTests(unittest.TestCase):
         body = self.ok(self.client.get("/api/embedding-models"))
         self.assertEqual(body["images"], 5)
         self.assertEqual(body["configured"], {"loaded": True, "model_path": "config/model/dino/new.onnx", "dim": 4,
-                                              "model_id": None, "detail": None})
+                                              "artifact": None, "model_id": None, "detail": None})
         self.assertEqual(body["retrieval"]["model_id"], 1)
         self.assertEqual(body["retrieval"]["encoder"], "own")  # search keeps the encoder that wrote dino_v1
         current = self.model(body, 1)
-        self.assertEqual((current["status"], current["embedded"], current["missing"]), ("current", 5, 0))
+        self.assertEqual((current["status"], current["embedded"], current["missing"], current["points"]), ("current", 5, 0, 5))
+        self.assertEqual((current["weights"], current["artifact"]), (None, None))  # this fake records no weight files
         self.assertEqual((current["serving"], current["configured"], current["encoder"]), (True, False, "serving"))
         self.assertIsNone(body["build"])
         self.assertNotIn("probe", str(body))  # the fingerprint itself stays on the server
@@ -324,8 +363,9 @@ class ModelVersionsTests(unittest.TestCase):
         self.assertEqual(self.qdrant["new_v2"], {})
         self.error(self.client.post("/api/embedding-models", json={}), 409, "EMBEDDING_MODEL_EXISTS")  # same encoder twice
         new_id = registered["id"]
-        # switching to it now would hide every image
-        body = self.error(self.client.post(f"/api/embedding-models/{new_id}/activate", json={}), 409, "EMBEDDING_MODEL_INCOMPLETE")
+        # switching to it now would hide more images than a switch tops up itself
+        with patch.object(registry_module, "FINAL_CATCHUP_MAX", 2):
+            body = self.error(self.client.post(f"/api/embedding-models/{new_id}/activate", json={}), 409, "EMBEDDING_MODEL_INCOMPLETE")
         self.assertIn("5 stored images", body["detail"])
 
         # build: every image embedded with the new encoder, the version becomes ready
@@ -457,11 +497,116 @@ class ModelVersionsTests(unittest.TestCase):
                              fingerprint=fingerprint(unit([0.3, 0.3, 0.9, 0.1]), "config/model/gone.onnx"))
         body = self.ok(self.client.get("/api/embedding-models"))
         self.assertEqual(self.model(body, 7)["encoder"], "recorded")
-        self.error(self.client.post("/api/embedding-models/7/build"), 409, "EMBEDDING_ENCODER_UNAVAILABLE")
+        body = self.error(self.client.post("/api/embedding-models/7/build"), 409, "EMBEDDING_ENCODER_UNAVAILABLE")
+        self.assertIn("could not be loaded", body["detail"])
         self.store.ledger.update({(7, i): 1 for i in IMAGES})
         body = self.error(self.client.post("/api/embedding-models/7/activate", json={}), 409, "EMBEDDING_ENCODER_UNAVAILABLE")
         self.assertIn("could not be loaded", body["detail"])
         self.assertEqual(self.store.models[1]["status"], "current")  # nothing switched
+
+    # -- the switch window, the collection's real points, the old version's own weights --------------
+
+    def built_new_version(self):
+        new_id = self.ok(self.client.post("/api/embedding-models", json={"version": "v2"}), 201)["model"]["id"]
+        self.ok(self.client.post(f"/api/embedding-models/{new_id}/build"))
+        self.assertEqual(self.model(self.wait_build(), new_id)["status"], "ready")
+        return new_id
+
+    def index_one_more(self, image_id, model_id):
+        """An image indexed through the stack in place: in PostgreSQL, the point and ledger row of model_id only."""
+        self.store.images[image_id] = {"payload_version": 1, "original_url": f"https://cdn/o/{image_id}.jpg"}
+        collection = self.store.models[model_id]["collection"]
+        self.qdrant[collection][image_id] = {"vector": [1.0, 0, 0, 0], "payload": {}}
+        self.store.ledger[(model_id, image_id)] = 1
+
+    def test_a_switch_tops_up_what_was_indexed_after_the_build(self):
+        new_id = self.built_new_version()
+        late = "00000009-0000-4000-8000-000000000000"
+        self.index_one_more(late, 1)  # went into the old collection after the build ended
+        self.assertEqual(self.model(self.ok(self.client.get("/api/embedding-models")), new_id)["missing"], 1)
+        switched = self.ok(self.client.post(f"/api/embedding-models/{new_id}/activate", json={}))
+        self.assertEqual((switched["switched"], switched["caught_up"], switched["remaining"]), (True, 1, 0))
+        self.assertEqual(switched["model"]["missing"], 0)
+        self.assertEqual(self.qdrant["new_v2"][late]["vector"], PROBE_NEW)  # embedded with the new encoder
+
+    def test_a_switch_holds_index_writes_back_until_the_new_stack_is_in(self):
+        new_id = self.built_new_version()
+        in_flight = self.runtime.vector_writes.shared()
+        in_flight.__enter__()  # an index request writing into the old collection right now
+        done = threading.Event()
+        outcome = {}
+
+        def switch():
+            outcome["response"] = self.client.post(f"/api/embedding-models/{new_id}/activate", json={})
+            done.set()
+
+        threading.Thread(target=switch, daemon=True).start()
+        self.assertFalse(done.wait(0.3))  # waits for the write in flight
+        self.assertTrue(self.runtime.vector_writes.closed)  # and new writes wait for the switch
+        late = "00000009-0000-4000-8000-000000000000"
+        self.index_one_more(late, 1)  # what the write in flight stored
+        in_flight.__exit__(None, None, None)
+        self.assertTrue(done.wait(5))
+        switched = self.ok(outcome["response"])
+        self.assertEqual((switched["caught_up"], switched["remaining"]), (1, 0))  # not left behind
+        self.assertFalse(self.runtime.vector_writes.closed)
+        self.assertEqual(self.runtime.retrieval.model.id, new_id)
+
+    def test_a_version_far_behind_needs_its_build_or_an_explicit_switch(self):
+        new_id = self.ok(self.client.post("/api/embedding-models", json={"version": "v2"}), 201)["model"]["id"]
+        with patch.object(registry_module, "FINAL_CATCHUP_MAX", 2):
+            body = self.error(self.client.post(f"/api/embedding-models/{new_id}/activate", json={}), 409, "EMBEDDING_MODEL_INCOMPLETE")
+            self.assertIn("5 stored images", body["detail"])
+            switched = self.ok(self.client.post(f"/api/embedding-models/{new_id}/activate", json={"allow_missing": True}))
+        self.assertEqual((switched["caught_up"], switched["remaining"]), (0, 5))  # left to builds and the reconciler
+        self.assertFalse(self.runtime.vector_writes.closed)
+
+    def test_points_lost_from_the_collection_are_noticed_and_embedded_again(self):
+        new_id = self.built_new_version()
+        self.qdrant["new_v2"].clear()  # Qdrant lost the points; the ledger still lists 5
+        body = self.ok(self.client.get("/api/embedding-models"))
+        self.assertEqual((self.model(body, new_id)["embedded"], self.model(body, new_id)["points"]), (5, 0))
+        with patch.object(registry_module, "FINAL_CATCHUP_MAX", 2):  # the ledger is not trusted for a switch
+            self.error(self.client.post(f"/api/embedding-models/{new_id}/activate", json={}), 409, "EMBEDDING_MODEL_INCOMPLETE")
+        self.qdrant["new_v2"].clear()
+        self.store.ledger.update({(new_id, i): 1 for i in IMAGES})  # the ledger claims them again
+        self.ok(self.client.post(f"/api/embedding-models/{new_id}/build"))
+        build = self.wait_build()["build"]
+        self.assertEqual((build["verified"], build["repaired"], build["embedded"], build["remaining"]), (5, 5, 5, 0))
+        self.assertEqual(sorted(self.qdrant["new_v2"]), IMAGES)
+
+    def test_a_dropped_collection_is_made_again_and_filled_by_a_build(self):
+        new_id = self.built_new_version()
+        del self.qdrant["new_v2"]
+        body = self.ok(self.client.get("/api/embedding-models"))
+        self.assertIsNone(self.model(body, new_id)["points"])
+        self.ok(self.client.post(f"/api/embedding-models/{new_id}/build"))
+        build = self.wait_build()["build"]
+        self.assertEqual((build["verified"], build["embedded"], build["remaining"]), (0, 5, 0))  # ledger void: all again
+        self.assertEqual(sorted(self.qdrant["new_v2"]), IMAGES)
+
+    def test_the_old_version_is_topped_up_from_its_own_weights_before_a_roll_back(self):
+        new_id = self.built_new_version()
+        self.ok(self.client.post(f"/api/embedding-models/{new_id}/activate", json={}))
+        for n in range(6, 9):  # indexed after the switch: only the new collection has them
+            self.index_one_more(f"0000000{n}-0000-4000-8000-000000000000", new_id)
+        body = self.ok(self.client.get("/api/embedding-models"))
+        self.assertEqual((self.model(body, 1)["missing"], self.model(body, 1)["encoder"]), (3, "recorded"))
+        self.ok(self.client.post("/api/embedding-models/1/build"))  # loads the old weights from the image
+        body = self.wait_build()
+        self.assertEqual((body["build"]["embedded"], self.model(body, 1)["missing"]), (3, 0))
+        self.assertEqual(self.qdrant["dino_v1"]["00000006-0000-4000-8000-000000000000"]["vector"], PROBE_OLD)
+        back = self.ok(self.client.post("/api/embedding-models/1/activate", json={}))
+        self.assertEqual((back["caught_up"], back["remaining"]), (0, 0))
+
+    def test_weights_gone_from_the_image_cannot_be_loaded(self):
+        gone = {**fingerprint(unit([0.3, 0.3, 0.9, 0.1]), "config/model/embedding/embeddingcls-0000/model.onnx"),
+                "files": [{"name": "model.onnx", "size": 10, "sha256": "ab" * 32}], "artifact": "ab" * 32}
+        self.store.add_model(id=7, name="other", version="v7", collection="other_v7", status="ready", fingerprint=gone)
+        body = self.ok(self.client.get("/api/embedding-models"))
+        self.assertEqual((self.model(body, 7)["weights"], self.model(body, 7)["artifact"]), ("missing", "ab" * 32))
+        body = self.error(self.client.post("/api/embedding-models/7/build"), 409, "EMBEDDING_ENCODER_UNAVAILABLE")
+        self.assertIn("are not in this image", body["detail"])
 
     def test_a_retrieval_stack_that_could_not_pair_is_fixed_by_switching(self):
         self.runtime.retrieval = None  # EMBEDDING_CONFIG changed and the old weights are gone

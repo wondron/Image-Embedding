@@ -49,7 +49,12 @@ def main(argv: list[str] | None = None) -> int:
             infra.metadata,
             sync=SyncSceneMembershipsUseCase(infra.metadata, infra.vectors, model=infra.model),
             deletions=DeletionWorker(infra.metadata, infra.vectors, infra.storage, others=infra.other_vectors),
-            limits=ReconcileLimits(max_payloads=settings.max_payloads, max_deletions=settings.max_deletions),
+            limits=ReconcileLimits(
+                max_payloads=settings.max_payloads, max_deletions=settings.max_deletions,
+                max_verifications=settings.max_verifications,
+            ),
+            # no encoder in this worker: the ledger is checked, missing vectors wait for the API
+            ledger=(infra.model.id, infra.vectors, infra.metadata),
         )
         cursor = None
         while True:

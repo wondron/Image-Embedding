@@ -99,17 +99,23 @@ def parse_score_threshold(raw: Any) -> Optional[float]:
 
 # -- POST /api/index ------------------------------------------------------------------
 
+def _write_vectors(runtime: ApplicationState, write: Any) -> Any:
+    """Run write(stack) in this worker thread behind the vector write gate: during a model
+    version switch it waits, then writes with the stack the switch put in place."""
+    with runtime.vector_writes.shared():
+        return write(require_retrieval(runtime))
+
+
 async def index_from_upload(
     runtime: ApplicationState, request: Request, file: UploadFile
 ) -> Dict[str, Any]:
     """Read one uploaded image and index it (recorded in index_tasks; its failure is raised)."""
     trace_id = bind_trace_id(request)
     data = await read_upload(file, runtime.max_image_bytes)
-    stack = require_retrieval(runtime)
+    require_retrieval(runtime)  # NOT_READY before waiting for anything
+    item = {"image_bytes": data, "filename": file.filename or "upload.bin"}
     indexed = await run_in_threadpool(
-        stack.index_uc.execute_file,
-        {"image_bytes": data, "filename": file.filename or "upload.bin"},
-        trace_id=trace_id,
+        _write_vectors, runtime, lambda stack: stack.index_uc.execute_file(item, trace_id=trace_id)
     )
     return {"ok": True, "trace_id": trace_id, "indexed": [indexed], "failed": []}
 
@@ -134,8 +140,10 @@ async def index_from_request(runtime: ApplicationState, request: Request) -> Dic
     else:
         items = await _index_items_from_form(request, runtime.max_image_bytes)
 
-    stack = require_retrieval(runtime)
-    outcome = await run_in_threadpool(stack.index_uc.execute_batch, items, trace_id=trace_id)
+    require_retrieval(runtime)
+    outcome = await run_in_threadpool(
+        _write_vectors, runtime, lambda stack: stack.index_uc.execute_batch(items, trace_id=trace_id)
+    )
     _raise_if_batch_failed_uniformly(outcome)
     return {"ok": True, "trace_id": trace_id, "indexed": outcome["indexed"], "failed": outcome["failed"]}
 

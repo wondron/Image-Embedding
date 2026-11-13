@@ -35,7 +35,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Optional
 
-from app.clients.inference import Embedder, config_for_fingerprint
+from app.clients.inference import Embedder, config_for_fingerprint, weights_status
 from app.clients.qdrant import QdrantConnection, QdrantStore
 from app.clients.image_storage import build_image_storage
 from app.core import errors as err
@@ -46,7 +46,7 @@ from app.repositories.ports import ImageStoragePort
 from app.repositories.vectors import QdrantVectorStore
 from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.delete_image import DeleteImageUseCase, DeletionWorker
-from app.services.retrieval.model_versions import ADOPTION_SAMPLES, check_collection_encoder, same_encoder
+from app.services.retrieval.model_versions import ADOPTION_SAMPLES, check_collection_encoder, moved, same_encoder
 from app.services.retrieval.index_image import IndexImageUseCase
 from app.services.retrieval.reembed_image import ReembedImageUseCase
 from app.services.retrieval.recompute_scenes import RecomputeScenesUseCase
@@ -170,7 +170,16 @@ def build_retrieval_infra(
                 distance=model.distance,
             )
         )
+        existed = vectors.collection_exists()
         vectors.ensure_collection(recreate=False)
+        if not existed:
+            # A collection made anew holds no point: whatever the ledger says, nothing is in it
+            forgotten = metadata.clear_embeddings(model.id)
+            if forgotten:
+                logger.warning(
+                    "collection=%s 不存在，已新建；%s 的 %d 条写入记录作废，这些图片要重新生成向量",
+                    model.collection, model.space_id, forgotten,
+                )
         storage = build_image_storage(storage_settings)
     except BaseException:
         if vectors is not None:
@@ -239,6 +248,22 @@ def _adopt_configured_encoder(infra: RetrievalInfra, configured: Embedder) -> No
     infra.model = replace(model, fingerprint=fingerprint)
 
 
+def _follow_moved_weights(infra: RetrievalInfra, encoder: Any) -> None:
+    """The version's encoder found at another path (or now with file hashes): record where, so
+    a later load (a roll back, a restart under another EMBEDDING_CONFIG) finds the weights."""
+    model = infra.model
+    current = encoder.fingerprint()
+    if not moved(model.fingerprint, current):
+        return
+    try:
+        infra.metadata.refresh_model_fingerprint(model.id, dict(current))
+    except Exception:
+        logger.exception("记录 %s 的权重新位置失败；下次再试", model.space_id)
+        return
+    logger.info("%s 的权重在新位置 %s（内容相同），已更新记录", model.space_id, current["spec"].get("model_path"))
+    infra.model = replace(model, fingerprint=dict(current), weights_uri=str(current["spec"].get("model_path") or ""))
+
+
 def pair_encoder(
     infra: RetrievalInfra,
     configured: Embedder,
@@ -257,11 +282,21 @@ def pair_encoder(
         return configured
     for encoder in (configured, *candidates):
         if encoder is not None and same_encoder(model.fingerprint, encoder.fingerprint()):
+            _follow_moved_weights(infra, encoder)
             return encoder
     spec = dict(model.fingerprint.get("spec") or {})
     if load is None:
         raise err.embedding_model_mismatch(
             f"no encoder of {model.space_id} (collection {model.collection}) is loaded and none may be loaded here"
+        )
+    status = weights_status(model.fingerprint)
+    if status in ("missing", "changed"):
+        what = "are not in this image any more" if status == "missing" else "were replaced by other files"
+        raise err.embedding_model_mismatch(
+            f"EMBEDDING_CONFIG ({configured.model_path}) is another model than the current version {model.space_id} "
+            f"(collection {model.collection}), and that version's weights at {spec.get('model_path')} {what}. Keep "
+            "each version's weights in their own folder until the version is retired, or register the configured "
+            "encoder as a new version and switch to it (/api/embedding-models)"
         )
     try:
         own = load(spec)

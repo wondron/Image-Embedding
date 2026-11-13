@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from app.core.config.settings import ReconcileSettings
+from app.services.retrieval.build_embeddings import BuildEmbeddingsUseCase
 from app.services.retrieval.reconcile import ReconcileLimits, ReconcileUseCase, RoundResult
 
 if TYPE_CHECKING:
@@ -27,7 +28,12 @@ class BackgroundReconciler:
     def __init__(self, runtime: "ApplicationState", settings: ReconcileSettings) -> None:
         self._runtime = runtime
         self._settings = settings
-        self._limits = ReconcileLimits(max_payloads=settings.max_payloads, max_deletions=settings.max_deletions)
+        self._limits = ReconcileLimits(
+            max_payloads=settings.max_payloads, max_deletions=settings.max_deletions,
+            max_verifications=settings.max_verifications, max_embeddings=settings.max_embeddings,
+        )
+        self._verify_cursor: str | None = None
+        self._embed_cursor: str | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._cursor: str | None = None
@@ -79,20 +85,44 @@ class BackgroundReconciler:
         followed = self._follow_current(stack)
         if followed is not None:
             stack = followed
-        if stack is not self._stack:  # a new stack (new collection): start the lap over
+        if stack is not self._stack:  # a new stack (new collection): start the laps over
             self._stack, self._cursor = stack, None
+            self._verify_cursor = self._embed_cursor = None
+        ledger, fill = self._vector_parts(stack)
         use_case = ReconcileUseCase(
             stack.infra.metadata, sync=stack.scene_sync_uc, deletions=stack.deletion_worker, limits=self._limits,
+            ledger=ledger, fill=fill, write_gate=self._runtime.vector_writes.shared,
         )
         try:
-            result = use_case.run_once(cursor=self._cursor, should_stop=self._stopping)
+            result = use_case.run_once(
+                cursor=self._cursor, should_stop=self._stopping,
+                verify_cursor=self._verify_cursor, embed_cursor=self._embed_cursor,
+            )
         except Exception as exc:
             logger.exception("reconcile round failed; the next round tries again")
             self._record({"skipped": None, "error": f"{type(exc).__name__}: {exc}"})
             return None
         self._cursor = result.cursor
+        self._verify_cursor, self._embed_cursor = result.verify_cursor, result.embed_cursor
         self._record(result.as_dict())
         return result
+
+    @staticmethod
+    def _vector_parts(stack: Any) -> tuple[Any, Any]:
+        """(ledger, fill) for the round's vector pass on this stack: its model, collection and store,
+        and a BuildEmbeddingsUseCase with its encoder. (None, None) for a stack without them."""
+        infra = stack.infra
+        vectors, storage = getattr(infra, "vectors", None), getattr(infra, "storage", None)
+        model, encoder = getattr(stack, "model", None), getattr(stack, "embedding", None)
+        if vectors is None or model is None:
+            return None, None
+        ledger = (model.id, vectors, infra.metadata)
+        if encoder is None or storage is None:
+            return ledger, None
+        fill = BuildEmbeddingsUseCase(
+            model=model, encoder=encoder, vectors=vectors, metadata=infra.metadata, models=infra.metadata, storage=storage,
+        )
+        return ledger, fill
 
     def _follow_current(self, stack: Any) -> Any:
         """The current model version was switched by another process (or by hand in PostgreSQL):

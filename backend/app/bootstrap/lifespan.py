@@ -87,7 +87,8 @@ def initialize_embedder(runtime: ApplicationState):
 
 
 def _loaded_embedder_for(runtime: ApplicationState, config: dict):
-    """An encoder already in memory whose spec matches config, else None."""
+    """An encoder already in memory whose spec matches config and whose weight files are still
+    the ones it loaded, else None (weights replaced in place at the same path load anew)."""
     from app.clients.inference import EmbeddingSpec
 
     spec = EmbeddingSpec.try_from_config(config)
@@ -99,8 +100,13 @@ def _loaded_embedder_for(runtime: ApplicationState, config: dict):
         getattr(runtime.retrieval, "embedding", None),
     )
     for embedder in holders:
-        if embedder is not None and getattr(embedder, "spec", None) == spec:
-            return embedder
+        if embedder is None or getattr(embedder, "spec", None) != spec:
+            continue
+        unchanged = getattr(embedder, "files_unchanged", None)
+        if callable(unchanged) and not unchanged():
+            logger.warning("%s 的权重文件已被替换，重新加载", spec.model_path)
+            continue
+        return embedder
     return None
 
 

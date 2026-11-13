@@ -116,8 +116,9 @@ def reembed_image(runtime: ApplicationState, request: Request, image_id: UUID) -
     """Embed the stored original again and write the point (repairs vector.status=missing).
     Needs the whole retrieval stack: encoder, Qdrant and object storage (NOT_READY otherwise)."""
     require_catalog(runtime).images_uc.get(image_id)  # IMAGE_NOT_FOUND before anything else
-    stack = require_retrieval(runtime)
-    stack.reembed_uc.execute(image_id)
+    require_retrieval(runtime)
+    with runtime.vector_writes.shared():  # a model version switch: wait, then use its stack
+        require_retrieval(runtime).reembed_uc.execute(image_id)
     image = require_catalog(runtime).images_uc.get(image_id)  # the ledger row moved
     logger.info(
         "image re-embedded id=%s payload_version=%s | trace_id=%s",

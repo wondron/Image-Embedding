@@ -3,7 +3,16 @@
  * page suggests next (guideFor), what each version can do now (actionsFor), and refusals in words.
  */
 import { ApiError } from '../../shared/api'
-import { buildActive, type BuildState, type EmbeddingModel, type EmbeddingModelStatus, type ModelOverview } from '../../entities/embedding-model'
+import {
+  buildActive,
+  encoderUsable,
+  lostPoints,
+  type BuildState,
+  type EmbeddingModel,
+  type EmbeddingModelStatus,
+  type ModelOverview,
+  type WeightsStatus,
+} from '../../entities/embedding-model'
 
 export const STATUS_TEXT: Readonly<Record<EmbeddingModelStatus, string>> = {
   building: '未完成',
@@ -18,6 +27,12 @@ export const BUILD_STATE_TEXT: Readonly<Record<BuildState, string>> = {
   done: '已完成',
   stopped: '已停止',
   failed: '已中止',
+}
+
+/** A version's weight files in this image, when that is a problem. */
+export const WEIGHTS_TEXT: Readonly<Record<Exclude<WeightsStatus, 'ok'>, string>> = {
+  missing: '镜像里没有它的权重',
+  changed: '权重文件被改过',
 }
 
 const FAILURE_TEXT: Readonly<Record<string, string>> = {
@@ -105,6 +120,15 @@ export function guideFor(overview: ModelOverview): Guide {
     if (!target.serving) {
       return { tone: tone('warn'), title: '检索没有在用当前版本', text: `${prefix}${retrieval.detail ?? ''} 可以重新启用 ${target.label}。`, step: 'switch', action: { kind: 'activate', model: target } }
     }
+    if (lostPoints(target)) {
+      return {
+        tone: 'warn',
+        title: '当前版本有向量丢了',
+        text: `写入记录有 ${target.embedded} 张，向量库里实际只有 ${target.points} 个向量。核对后会把丢的重新生成（后台对账也会逐步补上）。`,
+        step: 'done',
+        action: building ? null : { kind: 'build', model: target },
+      }
+    }
     if (target.missing > 0) {
       return {
         tone: 'warn',
@@ -146,12 +170,13 @@ export function actionsFor(model: EmbeddingModel, overview: ModelOverview): RowA
   const active = buildActive(overview.build)
   const mine = active && overview.build?.modelId === model.id
   const live = model.status !== 'retired'
-  const encoderHere = model.encoder === 'configured' || model.encoder === 'serving'
-  const build = live && encoderHere && model.missing > 0 && !active
-    ? model.status === 'current' ? '补齐缺少的向量' : model.embedded > 0 ? '继续生成向量' : '生成向量'
+  const usable = encoderUsable(model)  // in memory, or its weights still in the image
+  const lost = lostPoints(model)
+  const build = live && usable && (model.missing > 0 || lost) && !active
+    ? lost ? '核对并补齐' : model.status === 'current' ? '补齐缺少的向量' : model.embedded > 0 ? '继续生成向量' : '生成向量'
     : null
   let activate: string | null = null
-  if (!mine && model.encoder !== null) {
+  if (!mine && usable) {
     if (model.status === 'current' && !model.serving) activate = '重新启用检索'
     else if (model.status === 'building' || model.status === 'ready') activate = model.activatedAt ? '切回这个版本' : '切换为当前'
   }

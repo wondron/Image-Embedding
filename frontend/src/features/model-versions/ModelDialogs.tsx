@@ -50,17 +50,20 @@ export function RegisterModelDialog({ modelPath, dim, onConfirm, onClose }: {
 }
 
 /** Switch search and index to a version (or back to an earlier one). */
-export function ActivateModelDialog({ model, serving, images, onConfirm, onClose }: {
+export function ActivateModelDialog({ model, serving, images, catchUpMax, onConfirm, onClose }: {
   model: EmbeddingModel
   serving: EmbeddingModel | null
   images: number
+  /** The switch embeds up to this many missing images itself (index requests wait meanwhile). */
+  catchUpMax: number
   onConfirm: (allowMissing: boolean) => Promise<void>
   onClose: () => void
 }) {
   const [accept, setAccept] = useState(false)
   const [busy, run] = useBusy()
-  const incomplete = model.missing > 0
   const reenable = model.status === 'current'
+  const topUp = !reenable && model.missing > 0 && model.missing <= catchUpMax  // the switch embeds them first
+  const incomplete = !reenable && model.missing > catchUpMax  // too many: leave them, explicitly
   const footer = <div className="model-dialog-actions">
     <button type="button" className="mg-btn mg-secondary" data-dialog-initial-focus disabled={busy} onClick={onClose}>取消</button>
     <button type="button" className="mg-btn mg-primary" disabled={busy || (incomplete && !accept)} onClick={() => void run(() => onConfirm(incomplete))}>
@@ -74,14 +77,18 @@ export function ActivateModelDialog({ model, serving, images, onConfirm, onClose
         {serving && serving.id !== model.id && <>原来的 {serving.label} 保留为「可切换」，向量不删，随时可以切回。</>}
       </p>
       {model.encoder === 'recorded' && <p className="model-dialog-note">它的编码器现在没有加载，会按记录的权重 <code>{model.weightsUri}</code> 重新加载，需要几秒；权重文件不在了就切换不了。</p>}
+      {topUp && <p className="model-dialog-note is-info">
+        还有 <strong>{model.missing}</strong> 张图片没有它的向量（多是生成之后新入库的）。切换时会先为它们生成向量，
+        这期间新的入库请求排队等待（通常几秒），所以切换后不会有图片落下。
+      </p>}
       {incomplete && <div className="model-dialog-warn" role="alert">
         <TriangleAlert size={16} aria-hidden />
         <div>
-          <p>还有 <strong>{model.missing}</strong> / {images} 张图片没有这个版本的向量，切换后检索查不到它们，直到补齐。</p>
+          <p>还有 <strong>{model.missing}</strong> / {images} 张图片没有这个版本的向量，超过切换时能补的 {catchUpMax} 张。切换后检索查不到它们，直到后台补齐；建议先「继续生成向量」。</p>
           <label><input type="checkbox" checked={accept} disabled={busy} onChange={event => setAccept(event.target.checked)} />我知道，仍然切换</label>
         </div>
       </div>}
-      <p className="model-dialog-note">只切换本服务进程；多进程部署时其他进程要重启。</p>
+      <p className="model-dialog-note">立即切换的是本服务进程；多进程部署时，其他进程的后台对账会在下一轮（默认 5 分钟内）跟着切换，期间它们写进旧版本的图片随后补进新版本。</p>
     </div>
   </Dialog>
 }

@@ -66,6 +66,21 @@ class QdrantVectorStore(VectorStorePort):
         except Exception as exc:
             raise err.index_qdrant_failed(f"drop_collection: {type(exc).__name__}: {exc}") from exc
 
+    def existing_ids(self, point_ids: list[UUID | str]) -> set[str]:
+        """The image ids among point_ids that have a point in this collection."""
+        ids = [_image_point_id(pid) for pid in point_ids]
+        try:
+            return {str(pid) for pid in self._store.existing_ids(ids)}
+        except Exception as exc:
+            raise err.search_qdrant_failed(f"existing_ids: {type(exc).__name__}: {exc}") from exc
+
+    def point_count(self) -> int:
+        """How many points the collection holds (exact)."""
+        try:
+            return self._store.count()
+        except Exception as exc:
+            raise err.search_qdrant_failed(f"point_count: {type(exc).__name__}: {exc}") from exc
+
     def get_vectors(self, point_ids: list[UUID | str]) -> dict[str, list[float]]:
         """{image id: vector} of the images that have a point in this collection."""
         ids = [_image_point_id(pid) for pid in point_ids]

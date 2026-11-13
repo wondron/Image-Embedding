@@ -8,11 +8,15 @@ export {
   type ConfiguredEncoder,
   type RetrievalPairing,
   type ModelOverview,
+  type WeightsStatus,
   EMBEDDING_MODEL_STATUSES,
   toEmbeddingModel,
   toModelBuild,
   toModelOverview,
   buildActive,
+  lostPoints,
+  encoderUsable,
+  shortArtifact,
 } from './model'
 export {
   type ModelRequestOptions,

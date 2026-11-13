@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Optional
 import httpx
 from fastapi import Request
 
+from app.bootstrap.write_gate import VectorWriteGate
 from app.core.config.settings import Settings
 
 if TYPE_CHECKING:
@@ -50,6 +51,8 @@ class ApplicationState:
     reconciler: Optional["BackgroundReconciler"] = None
     # /api/embedding-models: register, build, switch and retire model versions
     models: Optional["ModelRegistry"] = None
+    # Writes of new vectors hold it shared; a model version switch holds it exclusively
+    vector_writes: VectorWriteGate = field(default_factory=VectorWriteGate, repr=False)
     stopping: bool = False
     config_provider: NacosConfigProvider | None = None
     configuration_lock: threading.RLock = field(

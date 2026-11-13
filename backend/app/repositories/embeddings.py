@@ -562,6 +562,77 @@ class PgEmbeddingsMixin:
         except Exception as exc:
             raise err.index_postgres_failed(f"record_embeddings: {type(exc).__name__}: {exc}") from exc
 
+    def list_embedded_ids(self, model_id: int, *, after: UUID | str | None = None, limit: int = 256) -> list[str]:
+        """Image ids with a ledger row for model_id, in id order after `after` (to check that their
+        points really are in the collection)."""
+        self.ensure_schema()
+        from sqlalchemy import text
+
+        try:
+            with self._get_engine().connect() as conn:
+                rows = conn.execute(
+                    text(
+                        "SELECT e.image_id::text FROM image_embeddings e WHERE e.model_id = :mid "
+                        "AND (CAST(:after AS uuid) IS NULL OR e.image_id > CAST(:after AS uuid)) "
+                        "ORDER BY e.image_id LIMIT :lim"
+                    ),
+                    {"mid": int(model_id), "after": _as_uuid(after) if after is not None else None,
+                     "lim": max(1, int(limit))},
+                ).fetchall()
+            return [str(row[0]) for row in rows]
+        except Exception as exc:
+            raise err.index_postgres_failed(f"list_embedded_ids: {type(exc).__name__}: {exc}") from exc
+
+    def forget_embeddings(self, model_id: int, image_ids: list[str]) -> int:
+        """Delete these ledger rows of model_id (their points are not in the collection): the images
+        are listed as without a vector again. Returns how many rows went."""
+        if not image_ids:
+            return 0
+        self.ensure_schema()
+        from sqlalchemy import text
+
+        try:
+            with self._get_engine().begin() as conn:
+                return int(conn.execute(
+                    text("DELETE FROM image_embeddings WHERE model_id = :mid AND image_id = ANY(CAST(:ids AS uuid[]))"),
+                    {"mid": int(model_id), "ids": [_as_uuid(i) for i in image_ids]},
+                ).rowcount or 0)
+        except Exception as exc:
+            raise err.index_postgres_failed(f"forget_embeddings: {type(exc).__name__}: {exc}") from exc
+
+    def clear_embeddings(self, model_id: int) -> int:
+        """Delete every ledger row of model_id (its collection was found missing and made anew)."""
+        self.ensure_schema()
+        from sqlalchemy import text
+
+        try:
+            with self._get_engine().begin() as conn:
+                return int(conn.execute(
+                    text("DELETE FROM image_embeddings WHERE model_id = :mid"), {"mid": int(model_id)}
+                ).rowcount or 0)
+        except Exception as exc:
+            raise err.index_postgres_failed(f"clear_embeddings: {type(exc).__name__}: {exc}") from exc
+
+    def refresh_model_fingerprint(self, model_id: int, fingerprint: dict[str, Any]) -> bool:
+        """The version's encoder found again at another path (or now with file hashes): record
+        the new fingerprint and its weights_uri. The caller has checked it is the same encoder."""
+        self.ensure_schema()
+        from sqlalchemy import text
+
+        try:
+            with self._get_engine().begin() as conn:
+                row = conn.execute(
+                    text(
+                        "UPDATE embedding_models SET fingerprint = CAST(:fp AS jsonb), weights_uri = :uri "
+                        "WHERE id = :id RETURNING id"
+                    ),
+                    {"id": int(model_id), "fp": json.dumps(fingerprint),
+                     "uri": str((fingerprint.get("spec") or {}).get("model_path") or "")},
+                ).fetchone()
+            return row is not None
+        except Exception as exc:
+            raise err.index_postgres_failed(f"refresh_model_fingerprint: {type(exc).__name__}: {exc}") from exc
+
     def sample_embedded_images(self, model_id: int, *, limit: int = 3) -> list[dict[str, Any]]:
         """The images last recorded in model_id's collection: [{id, original_url}] (to check that
         the collection's vectors come from a given encoder)."""

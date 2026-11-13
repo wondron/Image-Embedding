@@ -3,7 +3,9 @@ import { ArrowRightLeft, CircleAlert, CircleCheck, Cpu, Images, Info, LoaderCirc
 import {
   activateEmbeddingModel,
   buildActive,
+  lostPoints,
   registerEmbeddingModel,
+  shortArtifact,
   retireEmbeddingModel,
   startModelBuild,
   stopModelBuild,
@@ -14,7 +16,7 @@ import {
 import { formatLibraryTime } from '../../shared/lib'
 import { EmptyState, Metric, notify } from '../../shared/ui'
 import { ActivateModelDialog, RegisterModelDialog, RetireModelDialog } from './ModelDialogs'
-import { BUILD_STATE_TEXT, STATUS_TEXT, actionsFor, failureText, guideFor, modelById, refusalText, type GuideStep } from './messages'
+import { BUILD_STATE_TEXT, STATUS_TEXT, WEIGHTS_TEXT, actionsFor, failureText, guideFor, modelById, refusalText, type GuideStep } from './messages'
 import { useModelVersions } from './useModelVersions'
 import './model-versions.css'
 
@@ -62,6 +64,7 @@ function BuildProgress({ build, model, images, onStop, stopping }: {
     </div>
     {model && <Coverage model={model} images={images} />}
     <dl className="model-build-counts">
+      <div className={build.repaired ? 'is-warn' : ''}><dt>核对写入记录</dt><dd>{build.verified}</dd>{build.repaired > 0 && <small>{build.repaired} 张的向量已丢失，重新生成</small>}</div>
       <div><dt>本次写入</dt><dd>{build.embedded}</dd></div>
       <div className={build.failed ? 'is-warn' : ''}><dt>没生成</dt><dd>{build.failed}</dd></div>
       <div><dt>处理时已删除</dt><dd>{build.gone}</dd></div>
@@ -102,12 +105,14 @@ function ModelRow({ model, overview, busy, onBuild, onStop, onActivate, onRetire
         {model.serving && <span className="model-tag is-serving">检索在用</span>}
         {model.configured && <span className="model-tag">配置的模型</span>}
         {!model.hasFingerprint && !retired && <span className="model-tag is-unknown" title="登记时还没有记录编码器指纹">编码器未记录</span>}
+        {model.weights && model.weights !== 'ok' && <span className="model-tag is-warn" title="切换、回滚和重启后的配对都要从镜像加载它的权重">{WEIGHTS_TEXT[model.weights]}</span>}
       </div>
       <small>向量库 <code>{model.collection}</code> · {model.dim} 维 · 登记于 {formatLibraryTime(model.createdAt)}{model.activatedAt && ` · 最近切换于 ${formatLibraryTime(model.activatedAt)}`}</small>
-      <small className="model-row-weights">权重 <code>{model.weightsUri || '—'}</code></small>
+      <small className="model-row-weights">权重 <code>{model.weightsUri || '—'}</code>{model.artifact && <> · hash <code title={model.artifact}>{shortArtifact(model.artifact)}</code></>}</small>
     </div>
     <div className="model-row-coverage">
       {retired ? <small>向量库已删除</small> : <Coverage model={model} images={overview.images} />}
+      {lostPoints(model) && <small className="is-warn">向量库里实际只有 {model.points} 个向量，有 {model.embedded - (model.points ?? 0)} 张的丢了</small>}
       {!retired && model.behind > 0 && <small>{model.behind} 张的过滤信息落后，{model.status === 'current' ? '后台对账会补推' : '生成向量时一起补推'}</small>}
     </div>
     <div className="model-row-actions">
@@ -167,8 +172,11 @@ export function ModelVersionsPanel({ apiBase }: { apiBase: string }) {
       const result = await activateEmbeddingModel(model.id, { allowMissing }, { baseUrl: apiBase })
       setPending(null)
       const previous = data ? modelById(data, result.previousId) : null
+      const caught = result.caughtUp > 0 ? `切换时补上了 ${result.caughtUp} 张。` : ''
+      const kept = previous ? `${previous.label} 保留，可随时切回。` : ''
       if (!result.switched) notify.info(`检索已经在用 ${result.model.label}。`)
-      else notify.success(`检索和入库已改用 ${result.model.label}。${previous ? `${previous.label} 保留，可随时切回。` : ''}`)
+      else if (result.remaining > 0) notify.warn(`检索和入库已改用 ${result.model.label}。还有 ${result.remaining} 张没有向量，补齐前检索不到；后台会逐步补上，也可以「补齐缺少的向量」。${kept}`, { title: '已切换' })
+      else notify.success(`检索和入库已改用 ${result.model.label}。${caught}${kept}`)
     } catch (cause) {
       notify.error(refusalText(cause), { title: '没有切换' })
     } finally {
@@ -225,7 +233,7 @@ export function ModelVersionsPanel({ apiBase }: { apiBase: string }) {
       <Metric
         label="配置的模型"
         value={!data.configured.loaded ? '没有加载' : configuredModel ? configuredModel.label : '未登记的新模型'}
-        detail={data.configured.modelPath ?? 'EMBEDDING_CONFIG.model_path'}
+        detail={`${data.configured.modelPath ?? 'EMBEDDING_CONFIG.model_path'}${data.configured.artifact ? ` · hash ${shortArtifact(data.configured.artifact)}` : ''}`}
         icon={Cpu}
       />
       <Metric label="图库图片" value={String(data.images)} detail="每个版本都要为每张图片各存一份向量" icon={Images} />
@@ -273,14 +281,17 @@ export function ModelVersionsPanel({ apiBase }: { apiBase: string }) {
       <ul>
         <li>每个模型版本有自己的向量库。两个模型的向量不能放在一起比，所以检索只用当前版本的编码器查当前版本的向量库。</li>
         <li>改了 EMBEDDING_CONFIG 之后，「图搜图」的全网结果过滤马上用新模型；自建库检索仍用当前版本，直到你在这里切换。</li>
-        <li>生成向量在服务端后台进行，用存储里的原图，标注不变；期间新入库、修改和删除的图片也会照顾到，可以随时停止、继续。</li>
-        <li>切换后原来的版本保留为「可切换」，向量不删，随时切回；确定不用了再「下线」，才会删除它的向量库。</li>
-        <li>服务重启时会核对编码器：配置的模型和当前版本对不上，就用当前版本记录的权重启动检索；权重也找不到时检索暂停（不会用错模型），在这里切换到新版本即可恢复。</li>
+        <li>生成向量在服务端后台进行，用存储里的原图，标注不变；开始时先对照向量库里实际的点核对写入记录，丢了的重新生成；期间新入库、修改和删除的图片也会照顾到，可以随时停止、继续。</li>
+        <li>切换时先暂停新的入库请求（排队等待），等进行中的写完，把生成之后新入库的图片（最多 {data.switchCatchUpMax} 张）补上，再切换，所以不会有图片落下。</li>
+        <li>切换后原来的版本保留为「可切换」，向量不删，随时切回；切回前它缺的图片可以先「生成向量」（从镜像里加载它自己的权重）。确定不用了再「下线」，才会删除它的向量库。</li>
+        <li>不挂载目录时，新旧两个版本的权重都要在镜像里：每个版本一个 <code>config/model/embedding/embeddingcls-&lt;hash&gt;/</code> 目录（<code>python scripts/package_embedding_model.py</code> 生成），旧版本下线后，下次构建镜像才能去掉它的目录。版本行上的「镜像里没有它的权重」提示，就是这个目录不在当前镜像里。</li>
+        <li>是不是同一个模型，看预处理、权重文件的 hash 和固定测试图的输出三样都一致；服务重启时会核对：配置的模型和当前版本对不上，就用当前版本记录的权重启动检索；权重也找不到时检索暂停（不会用错模型），在这里切换到新版本即可恢复。</li>
+        <li>后台对账每轮会对照向量库抽查一段写入记录，并为当前版本补上没有向量的图片（例如其他进程在切换前写进旧库的），每轮数量见 <code>RECONCILE_CONFIG</code>。</li>
       </ul>
     </details>
 
     {pending?.kind === 'register' && <RegisterModelDialog modelPath={data.configured.modelPath} dim={data.configured.dim} onClose={() => setPending(null)} onConfirm={register} />}
-    {pending?.kind === 'activate' && <ActivateModelDialog model={pending.model} serving={serving} images={data.images} onClose={() => setPending(null)} onConfirm={allowMissing => activate(pending.model, allowMissing)} />}
+    {pending?.kind === 'activate' && <ActivateModelDialog model={pending.model} serving={serving} images={data.images} catchUpMax={data.switchCatchUpMax} onClose={() => setPending(null)} onConfirm={allowMissing => activate(pending.model, allowMissing)} />}
     {pending?.kind === 'retire' && <RetireModelDialog model={pending.model} onClose={() => setPending(null)} onConfirm={() => retire(pending.model)} />}
   </section>
 }

@@ -16,7 +16,7 @@ interface Row {
 const IMAGES = 6
 const NEW_WEIGHTS = 'config/model/dino/multitask_cls_v2.onnx'
 
-async function mockApi(page: Page, { stalled = false } = {}) {
+async function mockApi(page: Page, { stalled = false, catchUpMax = 200 } = {}) {
   const rows: Row[] = [
     { id: 1, name: 'dino', version: 'v1', status: 'current', collection: 'dino_v1', embedded: IMAGES, activatedAt: '2026-11-01T08:00:00+08:00', weights: 'config/model/dino/multitask_cls.onnx' },
   ]
@@ -28,16 +28,18 @@ async function mockApi(page: Page, { stalled = false } = {}) {
     id: row.id, name: row.name, version: row.version, status: row.status, collection: row.collection, dim: 1024,
     distance: 'cosine', weights_uri: row.weights, created_at: '2026-11-01T08:00:00+08:00', activated_at: row.activatedAt,
     embedded: row.status === 'retired' ? 0 : row.embedded, missing: row.status === 'retired' ? 0 : IMAGES - row.embedded, behind: 0,
+    points: row.status === 'retired' ? null : row.embedded, weights: row.status === 'retired' ? null : 'ok',
+    artifact: `${row.id}`.repeat(64).slice(0, 64),
     fingerprint: true, configured: row.id === configuredId, serving: row.id === servingId,
     encoder: row.id === configuredId ? 'configured' : row.id === servingId ? 'serving' : 'recorded',
   })
   const overview = () => ({
     ok: true, images: IMAGES,
-    configured: { loaded: true, model_path: NEW_WEIGHTS, dim: 1024, model_id: configuredId, detail: null },
+    configured: { loaded: true, model_path: NEW_WEIGHTS, dim: 1024, artifact: '2'.repeat(64), model_id: configuredId, detail: null },
     retrieval: servingId === null
       ? { ready: false, model_id: null, encoder: null, code: 'EMBEDDING_MODEL_MISMATCH', detail: 'EMBEDDING_MODEL_MISMATCH: the weights of dino:v1 could not be loaded' }
       : { ready: true, model_id: servingId, encoder: servingId === configuredId ? 'configured' : 'own', code: null, detail: null },
-    build, models: rows.map(wire),
+    build, switch_catch_up_max: catchUpMax, models: rows.map(wire),
   })
   const row = (id: number) => rows.find(r => r.id === id)!
   await page.route(url => url.pathname.startsWith('/api/'), async route => {
@@ -71,20 +73,23 @@ async function mockApi(page: Page, { stalled = false } = {}) {
     const id = Number(match[1])
     const target = row(id)
     if (match[2] === 'build') {
-      build = { model_id: id, state: 'running', started_at: '2026-11-12T10:00:00+08:00', finished_at: null, embedded: 0, failed: 0, gone: 0, payloads: 0, passes: 1, remaining: null, error: null, failures: [] }
+      build = { model_id: id, state: 'running', started_at: '2026-11-12T10:00:00+08:00', finished_at: null, verified: 0, repaired: 0, embedded: 0, failed: 0, gone: 0, payloads: 0, passes: 1, remaining: null, error: null, failures: [] }
       return route.fulfill({ json: { ok: true, build } })
     }
     if (match[2] === 'activate') {
       const { allow_missing } = request.postDataJSON() as { allow_missing: boolean }
-      if (target.embedded < IMAGES && !allow_missing) {
-        return route.fulfill({ status: 409, json: { ok: false, error: 'EMBEDDING_MODEL_INCOMPLETE', detail: `${IMAGES - target.embedded} stored images have no vector`, trace_id: 'e2e-incomplete' } })
+      const missing = IMAGES - target.embedded
+      if (missing > catchUpMax && !allow_missing) {
+        return route.fulfill({ status: 409, json: { ok: false, error: 'EMBEDDING_MODEL_INCOMPLETE', detail: `${missing} stored images have no vector`, trace_id: 'e2e-incomplete' } })
       }
+      const caughtUp = missing <= catchUpMax ? missing : 0  // the switch embeds a small gap itself
+      target.embedded += caughtUp
       const previous = rows.find(r => r.status === 'current' && r.id !== id) ?? null
       if (previous) previous.status = 'ready'
       target.status = 'current'
       target.activatedAt = '2026-11-12T10:05:00+08:00'
       servingId = id
-      return route.fulfill({ json: { ok: true, model: wire(target), previous_id: previous?.id ?? null, switched: true } })
+      return route.fulfill({ json: { ok: true, model: wire(target), previous_id: previous?.id ?? null, switched: true, caught_up: caughtUp, remaining: IMAGES - target.embedded } })
     }
     if (match[2] === 'retire') {
       const ledger = target.embedded
@@ -177,8 +182,26 @@ test('换模型：登记配置里的新模型 → 后台生成向量 → 切换�
   ])
 })
 
-test('有图片还没有新版本的向量时，切换要先确认，并说明它们会暂时检索不到', async ({ page }) => {
+test('缺的图片不多时，切换会先补上它们，不用勾选', async ({ page }) => {
   const { rows } = await mockApi(page)
+  const panel = await openModels(page)
+  await panel.locator('.model-guide').getByRole('button', { name: '登记为新版本' }).click()
+  await page.getByRole('dialog', { name: '登记新的模型版本' }).getByRole('button', { name: '登记' }).click()
+  await expectToast(page, '已登记', 'success')
+  rows[1].embedded = 4  // two images were indexed after its build
+  await panel.getByRole('button', { name: '刷新' }).click()
+  const label = `${rows[1].name}:${rows[1].version}`
+  await versionRow(panel, label).getByRole('button', { name: '切换为当前' }).click()
+  const dialog = page.getByRole('dialog', { name: '切换模型版本' })
+  await expect(dialog).toContainText('切换时会先为它们生成向量')
+  await expect(dialog.getByLabel('我知道，仍然切换')).toHaveCount(0)
+  await dialog.getByRole('button', { name: `切换到 ${label}` }).click()
+  await expectToast(page, '切换时补上了 2 张。', 'success')
+  await expect(versionRow(panel, label)).toContainText('6 / 6 张有向量')
+})
+
+test('缺得超过切换时能补的数量，要勾选才能切换，并说明它们会暂时检索不到', async ({ page }) => {
+  const { rows } = await mockApi(page, { catchUpMax: 1 })
   const panel = await openModels(page)
   await panel.locator('.model-guide').getByRole('button', { name: '登记为新版本' }).click()
   await page.getByRole('dialog', { name: '登记新的模型版本' }).getByRole('button', { name: '登记' }).click()
@@ -188,12 +211,12 @@ test('有图片还没有新版本的向量时，切换要先确认，并说明�
   await panel.getByRole('button', { name: '刷新' }).click()
   await versionRow(panel, rows[1].name + ':' + rows[1].version).getByRole('button', { name: '切换为当前' }).click()
   const dialog = page.getByRole('dialog', { name: '切换模型版本' })
-  await expect(dialog).toContainText('还有 2 / 6 张图片没有这个版本的向量')
+  await expect(dialog).toContainText('还有 2 / 6 张图片没有这个版本的向量，超过切换时能补的 1 张')
   const confirm = dialog.getByRole('button', { name: /^切换到/ })
   await expect(confirm).toBeDisabled()
   await dialog.getByLabel('我知道，仍然切换').check()
   await confirm.click()
-  await expectToast(page, '检索和入库已改用', 'success')
+  await acknowledgeNotice(page, '还有 2 张没有向量，补齐前检索不到', 'warn')
   const current = versionRow(panel, rows[1].name + ':' + rows[1].version)
   await expect(current).toContainText('2 张没有')
   await expect(current.getByRole('button', { name: '补齐缺少的向量' })).toBeVisible()

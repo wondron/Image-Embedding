@@ -90,6 +90,10 @@ export interface ActivateResult {
   model: EmbeddingModel
   previousId: number | null
   switched: boolean
+  /** Images the switch embedded itself while index requests waited. */
+  caughtUp: number
+  /** Images still without a vector (only when the switch was allowed to leave them). */
+  remaining: number
 }
 
 /**
@@ -105,10 +109,13 @@ export async function activateEmbeddingModel(id: number, { allowMissing = false 
   const model = modelOf(result.body, id, result.status, result.traceId)
   const switched = asBoolean(body?.switched)
   const previousId = body?.previous_id === null ? null : asInteger(body?.previous_id)
-  if (switched === undefined || model.status !== 'current' || (body?.previous_id !== null && (previousId === null || previousId < 1))) {
+  const caughtUp = asInteger(body?.caught_up)
+  const remaining = asInteger(body?.remaining)
+  if (switched === undefined || model.status !== 'current' || (body?.previous_id !== null && (previousId === null || previousId < 1))
+    || caughtUp === null || caughtUp < 0 || remaining === null || remaining < 0) {
     throw unreadable(result.status, result.traceId)
   }
-  return { model, previousId, switched }
+  return { model, previousId, switched, caughtUp, remaining }
 }
 
 export interface RetireResult {

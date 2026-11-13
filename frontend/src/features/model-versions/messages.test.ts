@@ -6,16 +6,18 @@ import { actionsFor, defaultVersion, guideFor, modelFileStem, refusalText } from
 const model = (id: number, fields: Record<string, unknown> = {}) => ({
   id, name: 'dino', version: `v${id}`, status: 'ready', collection: `dino_v${id}`, dim: 4, distance: 'cosine',
   weights_uri: `w${id}.onnx`, created_at: null, activated_at: null, embedded: 5, missing: 0, behind: 0,
+  points: 5, weights: 'ok', artifact: null,
   fingerprint: true, configured: false, serving: false, encoder: 'recorded', ...fields,
 })
 const current = model(1, { status: 'current', serving: true, encoder: 'serving' })
 const overview = (models: unknown[], extra: Record<string, unknown> = {}) => toModelOverview({
-  ok: true, images: 5, build: null, models,
-  configured: { loaded: true, model_path: 'config/model/dino/new.onnx', dim: 4, model_id: null, detail: null },
+  ok: true, images: 5, build: null, models, switch_catch_up_max: 200,
+  configured: { loaded: true, model_path: 'config/model/dino/new.onnx', dim: 4, artifact: null, model_id: null, detail: null },
   retrieval: { ready: true, model_id: 1, encoder: 'own', code: null, detail: null },
   ...extra,
 })!
-const configured = (id: number | null) => ({ configured: { loaded: true, model_path: 'config/model/dino/new.onnx', dim: 4, model_id: id, detail: null } })
+const configured = (id: number | null) => ({ configured: { loaded: true, model_path: 'config/model/dino/new.onnx', dim: 4, artifact: null, model_id: id, detail: null } })
+const buildWire = { model_id: 2, state: 'running', started_at: 't', finished_at: null, verified: 0, repaired: 0, embedded: 2, failed: 0, gone: 0, payloads: 0, passes: 1, remaining: null, error: null, failures: [] }
 
 describe('guideFor: the next step of a model update', () => {
   it('starts with registering a configured model nobody registered', () => {
@@ -26,9 +28,9 @@ describe('guideFor: the next step of a model update', () => {
   })
 
   it('then building its vectors, then switching, then done', () => {
-    const building = model(2, { status: 'building', embedded: 2, missing: 3, configured: true, encoder: 'configured' })
+    const building = model(2, { status: 'building', embedded: 2, missing: 3, points: 2, configured: true, encoder: 'configured' })
     expect(guideFor(overview([current, building], configured(2)))).toMatchObject({ step: 'build', action: { kind: 'build' } })
-    const ready = { ...building, status: 'ready', embedded: 5, missing: 0 }
+    const ready = { ...building, status: 'ready', embedded: 5, missing: 0, points: 5 }
     expect(guideFor(overview([current, ready], configured(2)))).toMatchObject({ step: 'switch', action: { kind: 'activate' } })
     const switched = [{ ...current, status: 'ready', serving: false }, { ...ready, status: 'current', serving: true }]
     expect(guideFor(overview(switched, { ...configured(2), retrieval: { ready: true, model_id: 2, encoder: 'configured', code: null, detail: null } })))
@@ -36,9 +38,8 @@ describe('guideFor: the next step of a model update', () => {
   })
 
   it('offers no second build while one runs', () => {
-    const building = model(2, { status: 'building', embedded: 2, missing: 3, configured: true, encoder: 'configured' })
-    const build = { model_id: 2, state: 'running', started_at: 't', finished_at: null, embedded: 2, failed: 0, gone: 0, payloads: 0, passes: 1, remaining: null, error: null, failures: [] }
-    expect(guideFor(overview([current, building], { ...configured(2), build })).action).toBeNull()
+    const building = model(2, { status: 'building', embedded: 2, missing: 3, points: 2, configured: true, encoder: 'configured' })
+    expect(guideFor(overview([current, building], { ...configured(2), build: buildWire })).action).toBeNull()
   })
 
   it('says loudly when search stopped because the encoder and the vectors are different models', () => {
@@ -50,33 +51,48 @@ describe('guideFor: the next step of a model update', () => {
   })
 
   it('points at the gap when the current version lacks vectors', () => {
-    const gap = { ...current, configured: true, encoder: 'configured', embedded: 4, missing: 1 }
+    const gap = { ...current, configured: true, encoder: 'configured', embedded: 4, missing: 1, points: 4 }
     expect(guideFor(overview([gap], { ...configured(1), retrieval: { ready: true, model_id: 1, encoder: 'configured', code: null, detail: null } })))
       .toMatchObject({ tone: 'warn', action: { kind: 'build' } })
   })
 
   it('cannot help while the configured model is not loaded', () => {
-    expect(guideFor(overview([current], { configured: { loaded: false, model_path: null, dim: null, model_id: null, detail: 'no onnx' } })))
+    expect(guideFor(overview([current], { configured: { loaded: false, model_path: null, dim: null, artifact: null, model_id: null, detail: 'no onnx' } })))
       .toMatchObject({ tone: 'warn', action: null, step: null })
   })
 })
 
 describe('actionsFor: what one version can do now', () => {
-  it('builds only with an encoder in memory, switches unless retired, retires only what is not current', () => {
-    const data = overview([current, model(2, { status: 'building', missing: 3, embedded: 2, encoder: 'configured' }), model(3, { activated_at: 'x' })])
+  it('builds with any encoder it can have, switches unless retired, retires only what is not current', () => {
+    const data = overview([current, model(2, { status: 'building', missing: 3, embedded: 2, points: 2, encoder: 'configured' }), model(3, { activated_at: 'x' }),
+      model(4, { activated_at: 'x', missing: 2, embedded: 3, points: 3 })])
     expect(actionsFor(data.models[0], data)).toEqual({ build: null, stop: false, activate: null, retire: false })
     expect(actionsFor(data.models[1], data)).toEqual({ build: '继续生成向量', stop: false, activate: '切换为当前', retire: true })
     expect(actionsFor(data.models[2], data)).toEqual({ build: null, stop: false, activate: '切回这个版本', retire: true })
+    // an older version, its encoder not loaded: topped up from its own weights before a roll back
+    expect(actionsFor(data.models[3], data)).toEqual({ build: '继续生成向量', stop: false, activate: '切回这个版本', retire: true })
+  })
+
+  it('a version whose weights left the image can only be retired', () => {
+    const data = overview([current, model(2, { weights: 'missing', missing: 2, embedded: 3, points: 3 }), model(3, { weights: 'changed' })])
+    expect(actionsFor(data.models[1], data)).toEqual({ build: null, stop: false, activate: null, retire: true })
+    expect(actionsFor(data.models[2], data)).toEqual({ build: null, stop: false, activate: null, retire: true })
+  })
+
+  it('lost points are checked and embedded again', () => {
+    const lost = { ...current, configured: true, encoder: 'configured', points: 3 }
+    const data = overview([lost], { ...configured(1), retrieval: { ready: true, model_id: 1, encoder: 'configured', code: null, detail: null } })
+    expect(actionsFor(data.models[0], data).build).toBe('核对并补齐')
+    expect(guideFor(data)).toMatchObject({ tone: 'warn', title: '当前版本有向量丢了', action: { kind: 'build' } })
   })
 
   it('stops the version being built and locks its other actions', () => {
-    const build = { model_id: 2, state: 'running', started_at: 't', finished_at: null, embedded: 2, failed: 0, gone: 0, payloads: 0, passes: 1, remaining: null, error: null, failures: [] }
-    const data = overview([current, model(2, { status: 'building', missing: 3, embedded: 2, encoder: 'configured' })], { build })
+    const data = overview([current, model(2, { status: 'building', missing: 3, embedded: 2, points: 2, encoder: 'configured' })], { build: buildWire })
     expect(actionsFor(data.models[1], data)).toEqual({ build: null, stop: true, activate: null, retire: false })
   })
 
   it('a version without a known encoder cannot be switched to', () => {
-    const data = overview([current, model(2, { fingerprint: false, encoder: null })])
+    const data = overview([current, model(2, { fingerprint: false, encoder: null, weights: null })])
     expect(actionsFor(data.models[1], data).activate).toBeNull()
   })
 })

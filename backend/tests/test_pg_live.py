@@ -476,6 +476,31 @@ class PgLiveTests(unittest.TestCase):
         self.assertIsNone(store.get_embedding_model(9999))
         self.assertEqual(self.sql("SELECT count(*) FROM embedding_models WHERE status = 'current'").scalar_one(), 1)
 
+    def test_the_ledger_can_be_checked_against_the_collection_and_follow_moved_weights(self):
+        store = self.store()
+        images = sorted(self.insert(store, n) for n in range(1, 6))
+        current = self.current_model("c_ledger")
+        other = self.sql(
+            "INSERT INTO embedding_models (name, version, dim, distance, input_size, weights_uri, collection, status) "
+            "VALUES ('m', '2', 4, 'cosine', 336, 's3://w', 'c_other', 'ready') RETURNING id"
+        ).scalar_one()
+        store.record_embeddings(model_id=current, versions={i: 1 for i in images})
+        store.record_embeddings(model_id=other, versions={images[0]: 1})
+        self.assertEqual(store.list_embedded_ids(current), images)
+        self.assertEqual(store.list_embedded_ids(current, after=images[1], limit=2), images[2:4])
+        self.assertEqual(store.forget_embeddings(current, [images[1], images[3], "00000000-0000-4000-8000-000000000999"]), 2)
+        self.assertEqual(store.forget_embeddings(current, []), 0)
+        self.assertEqual(store.list_embedded_ids(current), [images[0], images[2], images[4]])
+        self.assertEqual(store.count_embedding_backlog(current), 2)  # forgotten rows: without a vector again
+        self.assertEqual(store.clear_embeddings(current), 3)
+        self.assertEqual(store.list_embedded_ids(other), [images[0]])  # another version's ledger untouched
+        moved = {"spec": {"model_path": "config/model/embedding/embeddingcls-abc/model.onnx"}, "probe": [1.0, 0, 0, 0],
+                 "files": [{"name": "model.onnx", "size": 3, "sha256": "ab" * 32}], "artifact": "ab" * 32}
+        self.assertTrue(store.refresh_model_fingerprint(current, moved))
+        row = store.get_embedding_model(current)
+        self.assertEqual((row["fingerprint"], row["weights_uri"]), (moved, moved["spec"]["model_path"]))
+        self.assertFalse(store.refresh_model_fingerprint(9999, moved))
+
     def test_file_urls_come_from_the_image_or_its_queued_deletion(self):
         store = self.store()
         image = self.insert(store, 1)

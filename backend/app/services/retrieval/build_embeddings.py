@@ -34,8 +34,56 @@ from app.services.retrieval.sync_scenes import SyncSceneMembershipsUseCase
 logger = logging.getLogger("retrieval.build")
 
 BUILD_BATCH = 16
+VERIFY_BATCH = 256
 # Codes that belong to one image: the build records them and goes on
 IMAGE_FAILURES = frozenset({"IMAGE_FILE_UNAVAILABLE", "INDEX_BAD_IMAGE", "INDEX_BAD_EMBEDDING"})
+
+
+@dataclass
+class LedgerCheck:
+    """checked: ledger rows looked at; forgotten: rows deleted because their point is not in the
+    collection; last_id: where the next slice starts (None: the end was reached)."""
+
+    checked: int = 0
+    forgotten: int = 0
+    last_id: str | None = None
+    done: bool = False
+
+
+def verify_ledger(
+    model_id: int,
+    vectors: Any,
+    models: EmbeddingModelStorePort,
+    *,
+    after: str | None = None,
+    limit: int | None = None,
+    batch: int = VERIFY_BATCH,
+    should_stop: Any = None,
+) -> LedgerCheck:
+    """The ledger says which images have a vector in a version's collection; check that their
+    points really are there, and forget the rows whose point is gone (a collection lost and made
+    anew, points removed by hand), so the images count as without a vector again and a build or
+    the reconciler embeds them. limit: at most this many rows from `after` (a slice); None: all.
+
+    Points are written before their ledger row, so a row is never checked ahead of its point.
+    """
+    result = LedgerCheck(last_id=after)
+    while not (should_stop and should_stop()):
+        size = batch if limit is None else min(batch, limit - result.checked)
+        if size <= 0:
+            break
+        ids = models.list_embedded_ids(model_id, after=result.last_id, limit=size)
+        present = vectors.existing_ids(ids) if ids else set()
+        gone = [image_id for image_id in ids if image_id not in present]
+        if gone:
+            result.forgotten += models.forget_embeddings(model_id, gone)
+            logger.warning("version %s: %d image(s) in the ledger have no point in the collection; listed for embedding again", model_id, len(gone))
+        result.checked += len(ids)
+        if len(ids) < size:
+            result.last_id, result.done = None, True
+            break
+        result.last_id = ids[-1]
+    return result
 
 
 @dataclass

@@ -6,16 +6,19 @@ retrieval (index / search use cases). A config reload keeps the same instance
 unless the EmbeddingSpec changed, so the model is never loaded twice for the
 same weights.
 
-Embedder.fingerprint() says which embedding space an encoder writes: its preprocessing and
-its vector for one fixed test image (probe_image). embedding_models.fingerprint keeps it per
-model version, so retrieval never pairs an encoder with a collection another model wrote
+Embedder.fingerprint() says which embedding space an encoder writes: its preprocessing, the
+SHA-256 of its weight files (the .onnx and the external data it names) and its vector for one
+fixed test image (probe_image). embedding_models.fingerprint keeps it per model version, so
+retrieval never pairs an encoder with a collection another model wrote
 (services.retrieval.model_versions.same_encoder compares two of them), and a version's
-encoder can be loaded again from it (config_for_fingerprint).
+encoder can be loaded again from it (config_for_fingerprint). weights_status() tells whether a
+recorded version's weight files are still where they were, unchanged.
 """
 
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import logging
 import os
 import threading
@@ -27,6 +30,106 @@ import numpy as np
 from app.clients.inference_onnx import OnnxEmbedding
 
 logger = logging.getLogger("embedder")
+
+_HASH_CHUNK = 8 << 20
+_hashes: dict[tuple[str, int, int], str] = {}  # (absolute path, size, mtime_ns) -> sha256
+_hashes_lock = threading.Lock()
+
+
+def _sha256(path: str, stat: os.stat_result) -> str:
+    """SHA-256 of a file, remembered while its size and mtime stay the same (1.2 GB: ~1 s)."""
+    key = (os.path.abspath(path), stat.st_size, stat.st_mtime_ns)
+    with _hashes_lock:
+        known = _hashes.get(key)
+    if known is not None:
+        return known
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(_HASH_CHUNK), b""):
+            digest.update(chunk)
+    value = digest.hexdigest()
+    with _hashes_lock:
+        _hashes[key] = value
+    return value
+
+
+def _external_data_names(model_path: str) -> list[str]:
+    """The external data files the ONNX graph names (relative to its folder), without loading them."""
+    import onnx
+    from onnx.external_data_helper import _get_all_tensors, uses_external_data
+
+    model = onnx.load(model_path, load_external_data=False)
+    names = {
+        entry.value
+        for tensor in _get_all_tensors(model)
+        if uses_external_data(tensor)
+        for entry in tensor.external_data
+        if entry.key == "location"
+    }
+    return sorted(names)
+
+
+def model_files(model_path: str) -> list[dict[str, Any]]:
+    """[{name, size, sha256}] of the weight files: the .onnx first, then its external data."""
+    folder = os.path.dirname(os.path.abspath(model_path))
+    names = [os.path.basename(model_path), *_external_data_names(model_path)]
+    out = []
+    for name in names:
+        path = os.path.join(folder, name)
+        stat = os.stat(path)
+        out.append({"name": name, "size": int(stat.st_size), "sha256": _sha256(path, stat)})
+    return out
+
+
+def artifact_hash(files: list[Mapping[str, Any]]) -> str:
+    """One hash for the weights: the file's SHA-256 for a single-file model, else the SHA-256 of
+    the sorted file hashes (names left out: renaming a file keeps the weights)."""
+    hashes = sorted(str(f["sha256"]) for f in files)
+    if len(hashes) == 1:
+        return hashes[0]
+    return hashlib.sha256("\n".join(hashes).encode()).hexdigest()
+
+
+def weights_status(fingerprint: Mapping[str, Any] | None) -> str | None:
+    """Whether a version's recorded weight files are still there, unchanged: ok / missing /
+    changed; None when its fingerprint recorded no files (nothing to compare)."""
+    if not isinstance(fingerprint, Mapping):
+        return None
+    files = fingerprint.get("files")
+    spec = fingerprint.get("spec")
+    if not isinstance(files, list) or not files or not isinstance(spec, Mapping):
+        return None
+    folder = os.path.dirname(os.path.abspath(str(spec.get("model_path") or "")))
+    for entry in files:
+        path = os.path.join(folder, str(entry.get("name") or ""))
+        try:
+            stat = os.stat(path)
+        except OSError:
+            return "missing"
+        if int(stat.st_size) != int(entry.get("size") or -1):
+            return "changed"
+        try:
+            if _sha256(path, stat) != entry.get("sha256"):
+                return "changed"
+        except OSError:
+            return "missing"
+    return "ok"
+
+
+def _file_stats(model_path: str) -> tuple[tuple[str, int, int], ...] | None:
+    """(path, size, mtime_ns) of the weight files, to notice one replaced in place; None when
+    they cannot be listed (the encoder is then never reused on a reload)."""
+    try:
+        folder = os.path.dirname(os.path.abspath(model_path))
+        names = [os.path.basename(model_path), *_external_data_names(model_path)]
+        stats = []
+        for name in names:
+            path = os.path.join(folder, name)
+            stat = os.stat(path)
+            stats.append((path, int(stat.st_size), int(stat.st_mtime_ns)))
+        return tuple(stats)
+    except Exception:
+        return None
 
 # [height, width] of the fingerprint's test image: never an encoder's input size, so the
 # resize (scale, interpolation) is part of what the fingerprint sees
@@ -121,6 +224,13 @@ class Embedder:
         self.spec = EmbeddingSpec.from_config(config)
         self._lock: Any = threading.Lock() if self._model.use_iobinding else contextlib.nullcontext()
         self._fingerprint: dict[str, Any] | None = None
+        # the weight files as loaded: a file replaced in place since is a different model
+        self._loaded_files = _file_stats(self.spec.model_path)
+
+    def files_unchanged(self) -> bool:
+        """True while the weight files at model_path are the ones this session loaded (same
+        size and mtime): a reload may reuse it. A file replaced in place needs a new session."""
+        return self._loaded_files is not None and _file_stats(self.spec.model_path) == self._loaded_files
 
     # -- diagnostics ----------------------------------------------------------
 
@@ -156,16 +266,19 @@ class Embedder:
         return int(np.asarray(out).shape[-1])
 
     def fingerprint(self) -> dict[str, Any]:
-        """{spec, probe}: the embedding space this encoder writes (computed once per instance).
+        """{spec, files, artifact, probe}: the embedding space this encoder writes (computed once
+        per instance).
 
         spec: what loads it again (model_path) and how images are prepared (the effective input
-        size, mean, std, interpolation, output); probe: its L2-normalized vector for
-        probe_image(). Runtime flags (GPU, io-binding, device) are left out: they do not change
-        the space.
+        size, mean, std, interpolation, output); files: name, size and SHA-256 of the weight files
+        as they are now (the .onnx and its external data); artifact: one hash over them
+        (artifact_hash); probe: its L2-normalized vector for probe_image(). Runtime flags (GPU,
+        io-binding, device) are left out: they do not change the space. files / artifact are
+        missing when the files cannot be read (the probe still identifies the encoder then).
         """
         if self._fingerprint is None:
             vector = self.detect(probe_image())
-            self._fingerprint = {
+            fingerprint: dict[str, Any] = {
                 "spec": {
                     # forward slashes: a version recorded on Windows still loads in the Linux image
                     "model_path": self.spec.model_path.replace("\\", "/"),
@@ -177,6 +290,13 @@ class Embedder:
                 },
                 "probe": [round(float(v), PROBE_DECIMALS) for v in vector],
             }
+            try:
+                files = model_files(self.spec.model_path)
+                fingerprint["files"] = files
+                fingerprint["artifact"] = artifact_hash(files)
+            except Exception as exc:
+                logger.warning("权重文件 hash 计算失败（只用测试图向量识别这个编码器）：%s", exc)
+            self._fingerprint = fingerprint
         return self._fingerprint
 
     # -- retrieval EmbeddingPort -------------------------------------------------

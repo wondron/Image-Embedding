@@ -329,6 +329,26 @@ class EmbeddingModelStorePort(ABC):
         """[{id, original_url}] of images last recorded in the version's collection."""
         raise NotImplementedError
 
+    @abstractmethod
+    def list_embedded_ids(self, model_id: int, *, after: UUID | str | None = None, limit: int = 256) -> list[str]:
+        """Image ids with a ledger row for the version, id order (to check their points exist)."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def forget_embeddings(self, model_id: int, image_ids: list[str]) -> int:
+        """Delete these ledger rows (their points are gone); returns how many."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def clear_embeddings(self, model_id: int) -> int:
+        """Delete every ledger row of the version (its collection was made anew)."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def refresh_model_fingerprint(self, model_id: int, fingerprint: dict[str, Any]) -> bool:
+        """Record the same encoder's fingerprint at its new path (and weights_uri)."""
+        raise NotImplementedError
+
 
 class CatalogStorePort(ABC):
     """The category tree and the scene configuration, as the admin pages edit them.

@@ -56,7 +56,14 @@ def activate_model(runtime: ApplicationState, request: Request, model_id: int, *
         "embedding model activate id=%s switched=%s previous=%s allow_missing=%s | trace_id=%s",
         model_id, result["switched"], result["previous_id"], allow_missing, get_trace_id(request),
     )
-    return {"ok": True, "model": registry.item(model_id), "previous_id": result["previous_id"], "switched": result["switched"]}
+    return {
+        "ok": True,
+        "model": registry.item(model_id),
+        "previous_id": result["previous_id"],
+        "switched": result["switched"],
+        "caught_up": int(result.get("caught_up") or 0),
+        "remaining": int(result.get("remaining") or 0),
+    }
 
 
 def retire_model(runtime: ApplicationState, request: Request, model_id: int) -> dict[str, Any]:

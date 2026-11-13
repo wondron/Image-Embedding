@@ -583,6 +583,8 @@ export type EmbeddingModelStatusWire = 'building' | 'ready' | 'current' | 'retir
 /** configured: the EMBEDDING_CONFIG encoder; serving: the one retrieval holds; recorded: loadable from its fingerprint. */
 export type EmbeddingEncoderSourceWire = 'configured' | 'serving' | 'recorded'
 export type EmbeddingBuildStateWire = 'running' | 'stopping' | 'done' | 'stopped' | 'failed'
+/** The version's weight files in this image: ok / missing / changed (replaced). */
+export type EmbeddingWeightsStatusWire = 'ok' | 'missing' | 'changed'
 
 export interface EmbeddingModelWire {
   id: number
@@ -601,6 +603,12 @@ export interface EmbeddingModelWire {
   missing: number
   /** Images whose filter payload lags behind the database. */
   behind: number
+  /** Points really in its collection; null when it cannot be read (or the collection is gone). */
+  points: number | null
+  /** Its weight files in this image; null: no files recorded, or retired. */
+  weights: EmbeddingWeightsStatusWire | null
+  /** SHA-256 over its weight files (names the embeddingcls-<hash> folder). */
+  artifact: string | null
   /** Whether its encoder fingerprint is recorded. */
   fingerprint: boolean
   configured: boolean
@@ -612,6 +620,7 @@ export interface EmbeddingConfiguredWire {
   loaded: boolean
   model_path: string | null
   dim: number | null
+  artifact: string | null
   /** The version it is; null: not registered yet. */
   model_id: number | null
   detail: string | null
@@ -636,6 +645,9 @@ export interface EmbeddingBuildWire {
   state: EmbeddingBuildStateWire
   started_at: string
   finished_at: string | null
+  /** Ledger rows checked against the collection's points first; repaired: of them, lost points. */
+  verified: number
+  repaired: number
   embedded: number
   failed: number
   gone: number
@@ -653,6 +665,8 @@ export interface EmbeddingModelsResponseWire {
   configured: EmbeddingConfiguredWire
   retrieval: EmbeddingRetrievalWire
   build: EmbeddingBuildWire | null
+  /** A switch embeds at most this many missing images itself (index requests wait meanwhile). */
+  switch_catch_up_max: number
   models: EmbeddingModelWire[]
 }
 
@@ -668,6 +682,10 @@ export interface EmbeddingModelActivateResponseWire {
   model: EmbeddingModelWire
   previous_id: number | null
   switched: boolean
+  /** Images the switch embedded itself while index requests waited. */
+  caught_up: number
+  /** Images still without a vector after the switch (allow_missing). */
+  remaining: number
 }
 
 /** POST /api/embedding-models/{id}/retire */

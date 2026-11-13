@@ -252,7 +252,7 @@ erDiagram
 | `collection` | 文本，唯一 | 对应的 Qdrant collection 名 |
 | `status` | 枚举，默认 `building` | `building` / `ready` / `current` / `retired` |
 | `activated_at` | 时间戳，可空 | 切换为当前的时间 |
-| `fingerprint` | `jsonb`，可空 | 编码器指纹：预处理参数、权重位置和固定测试图的输出向量，用来认出写这个 collection 的编码器；为空表示还没记录 |
+| `fingerprint` | `jsonb`，可空 | 编码器指纹：预处理参数、权重位置、权重文件（含外部数据文件）的 SHA-256 和固定测试图的输出向量，用来认出写这个 collection 的编码器；为空表示还没记录 |
 | `created_at` | 时间戳 | 创建时间 |
 
 ### 4.2 `image_embeddings`

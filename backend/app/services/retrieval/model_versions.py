@@ -8,12 +8,13 @@ a new version is called, and which action each status allows.
     retired   out of use: its collection was dropped and its ledger rows deleted
 
 A version is identified by its encoder's fingerprint (clients.inference.Embedder.fingerprint):
-the preprocessing plus the vector of one fixed test image. Two encoders write the same embedding
-space when the preprocessing is equal and the two test vectors agree to SAME_MODEL_MIN_COSINE.
-Measured on the production encoder (dinov3, 1024-d): GPU against CPU 0.9999998; the same weights
-with linear instead of cubic resizing 0.99907. So the threshold sits well above what the
-arithmetic moves and below what any change of weights or preprocessing does. The weights' path
-is not compared: moving the file keeps the model.
+the preprocessing, the SHA-256 of the weight files and the vector of one fixed test image. Two
+encoders write the same embedding space when all three agree: equal preprocessing, equal file
+hashes (when both fingerprints recorded them; names and paths are not compared, so moving or
+renaming the files keeps the model) and test vectors within SAME_MODEL_MIN_COSINE. The hashes
+tell any two weights apart, however light the fine-tune; the test vector checks that the same
+weights still compute the same thing here. Measured on the production encoder (dinov3, 1024-d):
+GPU against CPU 0.9999998; the same weights with linear instead of cubic resizing 0.99907.
 """
 
 from __future__ import annotations
@@ -78,6 +79,25 @@ def _space_value(value: Any) -> Any:
     return value
 
 
+def file_hashes(fingerprint: Any) -> list[str] | None:
+    """The sorted SHA-256 of the weight files a fingerprint recorded, else None."""
+    if not isinstance(fingerprint, Mapping):
+        return None
+    files = fingerprint.get("files")
+    if not isinstance(files, list) or not files:
+        return None
+    hashes = [f.get("sha256") for f in files if isinstance(f, Mapping)]
+    if len(hashes) != len(files) or not all(isinstance(h, str) and h for h in hashes):
+        return None
+    return sorted(hashes)
+
+
+def artifact_of(fingerprint: Any) -> str | None:
+    """The one hash over a version's weight files (clients.inference.artifact_hash), else None."""
+    value = fingerprint.get("artifact") if isinstance(fingerprint, Mapping) else None
+    return value if isinstance(value, str) and value else None
+
+
 def same_encoder(a: Any, b: Any) -> bool:
     """True when the two fingerprints describe encoders that write the same embedding space."""
     pa, pb = probe_of(a), probe_of(b)
@@ -86,7 +106,19 @@ def same_encoder(a: Any, b: Any) -> bool:
     sa, sb = a["spec"], b["spec"]
     if any(_space_value(sa.get(key)) != _space_value(sb.get(key)) for key in SPACE_KEYS):
         return False
+    ha, hb = file_hashes(a), file_hashes(b)
+    if ha is not None and hb is not None and ha != hb:
+        return False  # other weights, however close their output on the test image
     return cosine(pa, pb) >= SAME_MODEL_MIN_COSINE
+
+
+def moved(recorded: Any, current: Any) -> bool:
+    """The same encoder (same_encoder) found at another path, or with file hashes the record
+    lacks: the record should follow it, so a later load finds the weights."""
+    if not same_encoder(recorded, current):
+        return False
+    path = lambda fp: str(fp["spec"].get("model_path") or "")  # noqa: E731
+    return path(recorded) != path(current) or (file_hashes(recorded) is None and file_hashes(current) is not None)
 
 
 def fingerprint_dim(fingerprint: Any) -> int | None:
@@ -157,14 +189,16 @@ def require_buildable(row: Mapping[str, Any]) -> None:
         raise err.embedding_model_state(f"embedding model {row['id']} is retired; register the encoder again")
 
 
-def require_activatable(row: Mapping[str, Any], *, backlog: int, allow_missing: bool) -> None:
+def require_activatable(row: Mapping[str, Any], *, backlog: int, allow_missing: bool, reasons: str | None = None) -> None:
     """A version can become current unless retired; images it has no vector for cannot be found
-    after the switch, so they must be allowed explicitly."""
+    after the switch, so they must be allowed explicitly. reasons: why the switch's own top-up
+    could not embed them (failure codes)."""
     if row["status"] == ModelStatus.RETIRED.value:
         raise err.embedding_model_state(f"embedding model {row['id']} is retired")
     if backlog > 0 and not allow_missing:
+        why = f" ({reasons})" if reasons else ""
         raise err.embedding_model_incomplete(
-            f"{backlog} stored images have no vector in {row['collection']}; finish its build first, "
+            f"{backlog} stored images have no vector in {row['collection']}{why}; finish its build first, "
             "or pass allow_missing=true (search cannot find them until they are embedded)"
         )
 

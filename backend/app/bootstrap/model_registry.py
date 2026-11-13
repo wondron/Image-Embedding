@@ -4,15 +4,20 @@ Changing the embedding model is a sequence, and this is where it runs:
 
 1. register: the configured encoder (EMBEDDING_CONFIG, the one predict uses) becomes a new version
    (status building) with its own, empty collection. Search and index stay on the current one.
-2. build: a background thread embeds every stored image's original with the new encoder into the
-   new collection (services.retrieval.build_embeddings), then catches up payloads that changed
-   meanwhile. The ledger is the progress: stopping and starting again goes on where it stopped.
-   A build that leaves no image behind marks the version ready.
-3. activate: builds the retrieval stack of the version (its encoder, its collection) first, then
-   makes it current in PostgreSQL (the previous one goes back to ready) and swaps the stack in
-   (the old one is closed a little later, after requests that still hold it). A roll back is
-   the same call on the previous version; its encoder is reloaded from its fingerprint when it
-   is not the configured one.
+2. build: a background thread first checks the ledger against the collection's real points
+   (verify_ledger: rows whose point is gone are forgotten), then embeds every stored image's
+   original that has no vector yet with the version's encoder (services.retrieval
+   .build_embeddings), then catches up payloads that changed meanwhile. The ledger is the
+   progress: stopping and starting again goes on where it stopped. A build that leaves no image
+   behind marks the version ready. The encoder is the configured one, the one search holds, or
+   the version's own loaded again from the weights its fingerprint names (still in the image).
+3. activate: checks the target's ledger against its points, builds its retrieval stack (its
+   encoder, its collection), then closes the vector write gate (app.bootstrap.write_gate: new
+   index requests wait, the ones in flight finish), embeds what the target still lacks (images
+   indexed since its build, at most FINAL_CATCHUP_MAX), makes it current in PostgreSQL (the
+   previous one goes back to ready), swaps the stack in and opens the gate again: no image
+   written meanwhile can miss the new collection. The old stack is closed a little later, after
+   requests that still hold it. A roll back is the same call on the previous version.
 4. retire: a version that is not current loses its collection and its ledger rows.
 
 It works while the retrieval stack is down: a changed EMBEDDING_CONFIG whose current version
@@ -33,13 +38,15 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from app.clients.inference import weights_status
 from app.clients.qdrant import QdrantStore
 from app.core import errors as err
 from app.core.enums import ModelStatus
 from app.repositories.vectors import QdrantVectorStore
 from app.services.retrieval.active_model import ActiveModel
-from app.services.retrieval.build_embeddings import BUILD_BATCH, BuildEmbeddingsUseCase
+from app.services.retrieval.build_embeddings import BUILD_BATCH, BuildEmbeddingsUseCase, verify_ledger
 from app.services.retrieval.model_versions import (
+    artifact_of,
     collection_name,
     default_name,
     default_version,
@@ -67,6 +74,9 @@ FAILURE_STREAK_LIMIT = 25
 MAX_FAILURES_SHOWN = 50
 # Requests that took the old stack just before a switch finish on it for this long
 RETIRED_STACK_GRACE_SECONDS = 30.0
+# A switch embeds at most this many missing images itself, with index requests held back; a
+# version further behind needs a build first (or allow_missing)
+FINAL_CATCHUP_MAX = 200
 
 
 def _now() -> str:
@@ -85,6 +95,8 @@ class BuildState:
     state: str
     started_at: str
     finished_at: str | None = None
+    verified: int = 0  # ledger rows checked against the collection's points
+    repaired: int = 0  # of them, rows whose point was gone (embedded again by this build)
     embedded: int = 0
     failed: int = 0
     gone: int = 0
@@ -174,6 +186,49 @@ class ModelRegistry:
             return "serving", stack.embedding
         return None
 
+    def _open_collection(self, row: dict[str, Any], store: Any) -> QdrantVectorStore:
+        """The version's collection, made anew when it is gone; then its ledger rows are void."""
+        vectors = self._vectors(row)
+        existed = vectors.collection_exists()
+        vectors.ensure_collection(recreate=False)
+        if not existed:
+            forgotten = store.clear_embeddings(int(row["id"]))
+            if forgotten:
+                logger.warning("collection=%s 不存在，已新建；%d 条写入记录作废", row["collection"], forgotten)
+        return vectors
+
+    def _encoder_for_build(self, row: dict[str, Any]) -> tuple[str, Any]:
+        """The version's encoder: in memory, else loaded again from the weights its fingerprint
+        names (EMBEDDING_ENCODER_UNAVAILABLE when they are gone or no longer the same)."""
+        found = self._encoder_in_memory(row)
+        if found is not None:
+            return found
+        fingerprint = row.get("fingerprint")
+        spec = dict((fingerprint or {}).get("spec") or {})
+        status = weights_status(fingerprint)
+        if fingerprint is None or not spec.get("model_path") or status in ("missing", "changed"):
+            reason = {"missing": "are not in this image", "changed": "were replaced by other files"}.get(
+                str(status), "were never recorded"
+            )
+            raise err.embedding_encoder_unavailable(
+                f"the weights of {row['name']}:{row['version']} ({row['weights_uri']}) {reason}; keep each version's "
+                "weights in their own folder of the image until it is retired"
+            )
+        from app.bootstrap.retrieval_stack import load_encoder_from_spec
+
+        try:
+            encoder = load_encoder_from_spec(self._runtime.config)(spec)
+        except Exception as exc:
+            raise err.embedding_encoder_unavailable(
+                f"the weights of {row['name']}:{row['version']} could not be loaded from {spec.get('model_path')}: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+        if not same_encoder(fingerprint, self._fingerprint(encoder)):
+            raise err.embedding_encoder_unavailable(
+                f"the weights at {spec.get('model_path')} are no longer the encoder of {row['name']}:{row['version']}"
+            )
+        return "loaded", encoder
+
     # -- reading --------------------------------------------------------------------
 
     def build_status(self) -> dict[str, Any] | None:
@@ -198,6 +253,13 @@ class ModelRegistry:
             if is_configured and row["status"] != ModelStatus.RETIRED.value and configured_id is None:
                 configured_id = int(row["id"])
             embedded = int(row.get("embedded") or 0)
+            live = row["status"] != ModelStatus.RETIRED.value
+            points = None
+            if live:
+                try:
+                    points = self._vectors(row).point_count()
+                except Exception:
+                    points = None  # unreachable, or no collection (a build makes it again)
             models.append({
                 "id": int(row["id"]),
                 "name": row["name"],
@@ -212,6 +274,9 @@ class ModelRegistry:
                 "embedded": embedded,
                 "missing": max(0, images - embedded) if row["status"] != ModelStatus.RETIRED.value else 0,
                 "behind": int(row.get("behind") or 0),
+                "points": points,
+                "weights": weights_status(fingerprint) if live else None,
+                "artifact": artifact_of(fingerprint),
                 "fingerprint": fingerprint is not None,
                 "configured": is_configured,
                 "serving": stack is not None and stack.model.id == int(row["id"]),
@@ -229,6 +294,7 @@ class ModelRegistry:
                 "loaded": configured is not None,
                 "model_path": getattr(configured, "model_path", None) if configured is not None else None,
                 "dim": fingerprint_dim(configured_fp),
+                "artifact": artifact_of(configured_fp),
                 "model_id": configured_id,
                 "detail": None if configured is not None else self._runtime.initialization_error,
             },
@@ -240,6 +306,7 @@ class ModelRegistry:
                 "detail": None if stack is not None else self._runtime.retrieval_error,
             },
             "build": self.build_status(),
+            "switch_catch_up_max": FINAL_CATCHUP_MAX,
             "models": models,
         }
 
@@ -302,14 +369,8 @@ class ModelRegistry:
             if row is None:
                 raise err.embedding_model_not_found(f"embedding model {model_id} does not exist")
             require_buildable(row)
-            found = self._encoder_in_memory(row)
-            if found is None:
-                raise err.embedding_encoder_unavailable(
-                    f"no encoder of {row['name']}:{row['version']} is loaded: point EMBEDDING_CONFIG at its weights "
-                    f"({row['weights_uri']}) to build it"
-                )
-            vectors = self._vectors(row)
-            vectors.ensure_collection(recreate=False)  # created again if it was dropped by hand
+            found = self._encoder_for_build(row)
+            vectors = self._open_collection(row, store)  # made again if it was dropped by hand
             use_case = BuildEmbeddingsUseCase(
                 model=ActiveModel.from_row(row), encoder=found[1], vectors=vectors,
                 metadata=store, models=store, storage=self._storage(),
@@ -317,7 +378,8 @@ class ModelRegistry:
             self._stop.clear()
             self._build = BuildState(model_id=int(row["id"]), state="running", started_at=_now())
             self._thread = threading.Thread(
-                target=self._run_build, args=(use_case, store, self._build), name=f"embedding-build-{row['id']}", daemon=True
+                target=self._run_build, args=(use_case, vectors, store, self._build),
+                name=f"embedding-build-{row['id']}", daemon=True,
             )
             self._thread.start()
             logger.info("开始生成向量 | model=%s:%s | collection=%s | encoder=%s", row["name"], row["version"], row["collection"], found[0])
@@ -338,12 +400,14 @@ class ModelRegistry:
             for key, value in changes.items():
                 setattr(build, key, value)
 
-    def _run_build(self, use_case: BuildEmbeddingsUseCase, store: Any, state: BuildState) -> None:
+    def _run_build(self, use_case: BuildEmbeddingsUseCase, vectors: Any, store: Any, state: BuildState) -> None:
         model = use_case.model
         try:
             with store.try_maintenance_lock(BUILD_LOCK_KEY_BASE + model.id) as held:
                 if not held:
                     raise _Halt(f"EMBEDDING_BUILD_RUNNING: another process is building {model.space_id}")
+                check = verify_ledger(model.id, vectors, store, should_stop=self._stopping)
+                self._record(state, verified=check.checked, repaired=check.forgotten)
                 self._passes(use_case, state)
                 if self._stopping():
                     self._record(state, state="stopped")
@@ -367,8 +431,9 @@ class ModelRegistry:
         finally:
             self._record(state, finished_at=_now())
             logger.info(
-                "生成向量结束 | model=%s | state=%s | embedded=%d | failed=%d | gone=%d | payloads=%d | remaining=%s",
-                model.space_id, state.state, state.embedded, state.failed, state.gone, state.payloads, state.remaining,
+                "生成向量结束 | model=%s | state=%s | verified=%d | repaired=%d | embedded=%d | failed=%d | gone=%d | payloads=%d | remaining=%s",
+                model.space_id, state.state, state.verified, state.repaired, state.embedded, state.failed, state.gone,
+                state.payloads, state.remaining,
             )
 
     def _passes(self, use_case: BuildEmbeddingsUseCase, state: BuildState) -> None:
@@ -438,11 +503,17 @@ class ModelRegistry:
             already = row["status"] == ModelStatus.CURRENT.value
             if already and stack is not None and stack.model.id == int(model_id):
                 return {"model": row, "previous_id": None, "switched": False}
-            if not already:
-                require_activatable(row, backlog=store.count_embedding_backlog(int(model_id)), allow_missing=allow_missing)
+            require_activatable(row, backlog=0, allow_missing=True)  # retired: EMBEDDING_MODEL_STATE
             configured = self._configured()
             if configured is None:
                 raise err.not_ready(f"the configured encoder (EMBEDDING_CONFIG) is not loaded: {self._runtime.initialization_error}")
+            # Count what the collection really holds, not what the ledger remembers
+            target = self._vectors(row)
+            if target.collection_exists():
+                verify_ledger(int(model_id), target, store)
+            backlog = store.count_embedding_backlog(int(model_id))
+            if not already and backlog > FINAL_CATCHUP_MAX:
+                require_activatable(row, backlog=backlog, allow_missing=allow_missing)
             candidates = [stack.embedding] if stack is not None else []
             try:
                 new_stack = build_retrieval_stack(
@@ -453,17 +524,47 @@ class ModelRegistry:
                 if exc.code == "EMBEDDING_MODEL_MISMATCH":
                     raise err.embedding_encoder_unavailable(err.client_detail(exc)) from exc
                 raise
+            swapped = False
             try:
-                result = store.activate_embedding_model(int(model_id))
-            except BaseException:
-                new_stack.close()
-                raise
-            self._swap_in(new_stack)
+                with self._runtime.vector_writes.exclusive():
+                    # No index request writes from here on until the new stack is in place
+                    caught = self._catch_up(new_stack, store) if backlog <= FINAL_CATCHUP_MAX else None
+                    remaining = store.count_embedding_backlog(int(model_id))
+                    if remaining and not already:
+                        reasons = sorted({f["code"] for f in (caught or {}).get("failures", [])})
+                        require_activatable(
+                            row, backlog=remaining, allow_missing=allow_missing,
+                            reasons=", ".join(reasons) if reasons else None,
+                        )
+                    result = store.activate_embedding_model(int(model_id))
+                    self._swap_in(new_stack)
+                    swapped = True
+            finally:
+                if not swapped:
+                    new_stack.close()
             logger.info(
-                "已切换检索模型 | model=%s:%s | collection=%s | previous_id=%s",
+                "已切换检索模型 | model=%s:%s | collection=%s | previous_id=%s | 切换时补齐 %s 张 | 仍缺 %d 张",
                 row["name"], row["version"], row["collection"], result["previous_id"],
+                (caught or {}).get("embedded", "—"), remaining,
             )
-            return {**result, "switched": True}
+            return {**result, "switched": True, "caught_up": (caught or {}).get("embedded", 0), "remaining": remaining}
+
+    def _catch_up(self, stack: Any, store: Any) -> dict[str, Any]:
+        """Embed what the switch target still lacks (images indexed since its build), with its
+        own stack, while the write gate is closed; each image is tried once."""
+        use_case = BuildEmbeddingsUseCase(
+            model=stack.model, encoder=stack.embedding, vectors=stack.infra.vectors,
+            metadata=store, models=store, storage=stack.infra.storage,
+        )
+        embedded, failures, tried, after = 0, [], [], None
+        while True:
+            batch = use_case.run_batch(after=after, limit=BUILD_BATCH, exclude=tried)
+            embedded += len(batch.embedded)
+            failures.extend(batch.failures)
+            tried.extend(f["image_id"] for f in batch.failures)
+            if batch.done:
+                return {"embedded": embedded, "failures": failures}
+            after = batch.last_id
 
     def retire(self, model_id: int) -> dict[str, Any]:
         """Drop a version that is not current: its collection, then its ledger rows."""

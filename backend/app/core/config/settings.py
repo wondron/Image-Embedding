@@ -347,6 +347,8 @@ class ReconcileSettings:
     initial_delay_seconds: float = 30.0
     max_payloads: int = 2000  # payloads pushed per round at most
     max_deletions: int = 200  # queued deletions tried per round at most
+    max_verifications: int = 2000  # ledger rows checked against the collection per round (0: off)
+    max_embeddings: int = 100  # images without a vector in the current collection embedded per round (0: off)
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> ReconcileSettings:
@@ -359,6 +361,8 @@ class ReconcileSettings:
             initial_delay_seconds=_number(section, name, "initial_delay_seconds", defaults.initial_delay_seconds, float),
             max_payloads=_number(section, name, "max_payloads", defaults.max_payloads, int),
             max_deletions=_number(section, name, "max_deletions", defaults.max_deletions, int),
+            max_verifications=_number(section, name, "max_verifications", defaults.max_verifications, int),
+            max_embeddings=_number(section, name, "max_embeddings", defaults.max_embeddings, int),
         )
         if settings.interval_seconds < 10:
             raise ValueError(f"{name}.interval_seconds must be at least 10, got {settings.interval_seconds!r}")
@@ -367,6 +371,9 @@ class ReconcileSettings:
         for key in ("max_payloads", "max_deletions"):
             if getattr(settings, key) < 1:
                 raise ValueError(f"{name}.{key} must be at least 1, got {getattr(settings, key)!r}")
+        for key in ("max_verifications", "max_embeddings"):
+            if getattr(settings, key) < 0:
+                raise ValueError(f"{name}.{key} must not be negative (0 turns it off), got {getattr(settings, key)!r}")
         return settings
 
 

@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   activateEmbeddingModel,
   buildActive,
+  encoderUsable,
   listEmbeddingModels,
+  lostPoints,
+  shortArtifact,
   registerEmbeddingModel,
   retireEmbeddingModel,
   startModelBuild,
@@ -15,25 +18,27 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const modelWire = (id: number, fields: Record<string, unknown> = {}) => ({
   id, name: 'dino', version: `v${id}`, status: 'ready', collection: `dino_v${id}`, dim: 1024, distance: 'cosine',
   weights_uri: `config/model/dino/v${id}.onnx`, created_at: '2026-11-01T00:00:00+00:00', activated_at: null,
-  embedded: 5, missing: 0, behind: 0, fingerprint: true, configured: false, serving: false, encoder: 'recorded',
+  embedded: 5, missing: 0, behind: 0, points: 5, weights: 'ok', artifact: `${id}`.repeat(64).slice(0, 64),
+  fingerprint: true, configured: false, serving: false, encoder: 'recorded',
   ...fields,
 })
 
 const overviewWire = (extra: Record<string, unknown> = {}) => ({
   ok: true,
   images: 5,
-  configured: { loaded: true, model_path: 'config/model/dino/v2.onnx', dim: 1024, model_id: 2, detail: null },
+  configured: { loaded: true, model_path: 'config/model/dino/v2.onnx', dim: 1024, artifact: 'ab'.repeat(32), model_id: 2, detail: null },
   retrieval: { ready: true, model_id: 1, encoder: 'own', code: null, detail: null },
   build: null,
+  switch_catch_up_max: 200,
   models: [
     modelWire(1, { status: 'current', serving: true, encoder: 'serving', activated_at: '2026-11-02T00:00:00+00:00' }),
-    modelWire(2, { status: 'building', embedded: 2, missing: 3, configured: true, encoder: 'configured' }),
+    modelWire(2, { status: 'building', embedded: 2, missing: 3, points: 2, configured: true, encoder: 'configured' }),
   ],
   ...extra,
 })
 
 const buildWire = (fields: Record<string, unknown> = {}) => ({
-  model_id: 2, state: 'running', started_at: '2026-11-12T10:00:00+08:00', finished_at: null, embedded: 2, failed: 0,
+  model_id: 2, state: 'running', started_at: '2026-11-12T10:00:00+08:00', finished_at: null, verified: 0, repaired: 0, embedded: 2, failed: 0,
   gone: 0, payloads: 0, passes: 1, remaining: null, error: null, failures: [], ...fields,
 })
 
@@ -46,7 +51,9 @@ describe('toModelOverview', () => {
     expect(overview.models.map(m => [m.label, m.status, m.embedded, m.missing, m.encoder])).toEqual([
       ['dino:v1', 'current', 5, 0, 'serving'], ['dino:v2', 'building', 2, 3, 'configured'],
     ])
-    expect(overview.configured).toEqual({ loaded: true, modelPath: 'config/model/dino/v2.onnx', dim: 1024, modelId: 2, detail: null })
+    expect(overview.configured).toEqual({ loaded: true, modelPath: 'config/model/dino/v2.onnx', dim: 1024, artifact: 'ab'.repeat(32), modelId: 2, detail: null })
+    expect(overview.switchCatchUpMax).toBe(200)
+    expect(overview.models.map(m => [m.points, m.weights])).toEqual([[5, 'ok'], [2, 'ok']])
     expect(overview.retrieval).toEqual({ ready: true, modelId: 1, encoder: 'own', code: null, detail: null })
     expect(overview.build?.state).toBe('running')
     expect(buildActive(overview.build)).toBe(true)
@@ -73,8 +80,33 @@ describe('toModelOverview', () => {
       overviewWire({ retrieval: { ready: true, model_id: null, encoder: null, code: null, detail: null } }),
       overviewWire({ build: buildWire({ model_id: 9 }) }),
       overviewWire({ build: buildWire({ failures: [{ image_id: 'a' }] }) }),
+      overviewWire({ models: [modelWire(1, { weights: 'gone' })] }),
+      overviewWire({ models: [modelWire(1, { points: -1 })] }),
+      overviewWire({ switch_catch_up_max: undefined }),
+      overviewWire({ build: buildWire({ verified: undefined }) }),
     ]
     for (const body of broken) expect(toModelOverview(body)).toBeNull()
+  })
+})
+
+describe('what a version can do', () => {
+  const model = (fields: Record<string, unknown>) => toModelOverview(overviewWire({ models: [modelWire(1, { status: 'ready', ...fields })], configured: { loaded: true, model_path: null, dim: null, artifact: null, model_id: null, detail: null }, retrieval: { ready: false, model_id: null, encoder: null, code: null, detail: null } }))!.models[0]
+
+  it('loads a version from its weights only while they are in the image unchanged', () => {
+    expect(encoderUsable(model({ encoder: 'recorded', weights: 'ok' }))).toBe(true)
+    expect(encoderUsable(model({ encoder: 'recorded', weights: null }))).toBe(true)  // no files recorded: try
+    expect(encoderUsable(model({ encoder: 'recorded', weights: 'missing' }))).toBe(false)
+    expect(encoderUsable(model({ encoder: 'recorded', weights: 'changed' }))).toBe(false)
+    expect(encoderUsable(model({ encoder: 'configured', weights: 'missing' }))).toBe(true)  // in memory
+    expect(encoderUsable(model({ encoder: null, fingerprint: false }))).toBe(false)
+  })
+
+  it('tells lost points from a full collection', () => {
+    expect(lostPoints(model({ embedded: 5, points: 3 }))).toBe(true)
+    expect(lostPoints(model({ embedded: 5, points: 6 }))).toBe(false)  // orphans waiting for cleanup
+    expect(lostPoints(model({ embedded: 5, points: null }))).toBe(false)  // unknown
+    expect(shortArtifact('7c11052d2dc49888b5ee')).toBe('7c11052d2dc4')
+    expect(shortArtifact(null)).toBeNull()
   })
 })
 
@@ -118,10 +150,10 @@ describe('model version requests', () => {
 
   it('switches, saying whether the switch needs to accept images without vectors', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(json({ ok: true, model: modelWire(2, { status: 'current', serving: true, missing: 3 }), previous_id: 1, switched: true }))
+      .mockResolvedValueOnce(json({ ok: true, model: modelWire(2, { status: 'current', serving: true, missing: 3 }), previous_id: 1, switched: true, caught_up: 0, remaining: 3 }))
       .mockResolvedValueOnce(json({ ok: false, error: 'EMBEDDING_MODEL_INCOMPLETE', detail: '3 stored images have no vector', trace_id: 't' }, 409))
     vi.stubGlobal('fetch', fetchMock)
-    expect(await activateEmbeddingModel(2, { allowMissing: true })).toMatchObject({ previousId: 1, switched: true })
+    expect(await activateEmbeddingModel(2, { allowMissing: true })).toMatchObject({ previousId: 1, switched: true, caughtUp: 0, remaining: 3 })
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ allow_missing: true })
     await expect(activateEmbeddingModel(2)).rejects.toMatchObject({ code: 'EMBEDDING_MODEL_INCOMPLETE', status: 409 })
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ allow_missing: false })
