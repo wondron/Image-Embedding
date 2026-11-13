@@ -25,6 +25,9 @@ Global 搜索阶段直接保留上游 `image_url`，不下载或验证候选图�
 
 ## 配置来源
 
+类别编码允许大小写并保留原样（例如 `ingredient.HongSu`），按小写判重；`ingredient.hongsu` 与它视为同一编码。
+更新到此版本后，先在 `backend` 目录用启动后端的 Python 环境执行 `python -m alembic upgrade head`（迁移 `20261113_0010` 新增大小写不敏感的唯一索引），再启动服务。已有编码转小写后重复时，迁移会报告冲突并停止，需要手动处理后重试。
+
 后端参数只有两个来源，不读 `.env`：
 
 - `backend/app/core/config/constant.py`：项目定下来后基本不变的值（服务名、端口、Nacos 接入点、PG 驱动名等）；

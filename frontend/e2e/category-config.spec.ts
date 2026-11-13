@@ -98,7 +98,7 @@ class Backend {
     }
     if (method === 'POST' && path === '/api/categories') {
       const input = body as Omit<Row, 'id' | 'image_count' | 'scene_rule_count'>
-      if (this.rows.some(r => r.code === input.code)) {
+      if (this.rows.some(r => r.code.toLowerCase() === input.code.toLowerCase())) {
         return route.fulfill({ status: 409, json: errorBody('CATEGORY_CODE_EXISTS', `another category already uses the code '${input.code}'`) })
       }
       const created: Row = { ...input, id: Math.max(0, ...this.rows.map(r => r.id)) + 1, image_count: 0, scene_rule_count: 0 }
@@ -108,6 +108,9 @@ class Backend {
     const target = this.rows.find(r => `/api/categories/${r.id}` === path)
     if (!target) return route.fulfill({ status: 404, json: errorBody('CATEGORY_NOT_FOUND', 'category does not exist') })
     if (method === 'PATCH') {
+      if (typeof body.code === 'string' && this.rows.some(r => r.id !== target.id && r.code.toLowerCase() === body.code.toLowerCase())) {
+        return route.fulfill({ status: 409, json: errorBody('CATEGORY_CODE_EXISTS', `another category already uses the code '${body.code}'`) })
+      }
       Object.assign(target, body)
       const sceneSync = this.sceneSync
       this.sceneSync = null
@@ -359,13 +362,61 @@ test('移动类别或改菜系后，说明其下图片的场景归属；没能�
   await expectToast(page, /^已保存「面条」。$/, 'success')
 })
 
+test('大小写编码会保留；仅修改自身大小写可保存，其他类别不能重复使用', async ({ page }) => {
+  const backend = await open(page, seededRows())
+  await page.getByRole('button', { name: '新建「食材」的下级类别' }).click()
+  const create = page.getByRole('dialog', { name: '新建类别' })
+  await create.locator('#category-form-code').fill('Ingredient.HongSu')
+  await create.locator('#category-form-zhName').fill('红薯')
+  await create.getByRole('button', { name: '创建', exact: true }).click()
+  await expect(create).toBeHidden()
+  expect(backend.writes()[0].body).toMatchObject({ code: 'Ingredient.HongSu', parent_id: 5 })
+  await expect(nodeButton(page, '红薯', 'Ingredient.HongSu')).toBeVisible()
+
+  await page.getByRole('button', { name: '编辑「红薯」' }).click()
+  const edit = page.getByRole('dialog', { name: '编辑类别' })
+  await edit.locator('#category-form-code').fill('ingredient.hongsu')
+  await edit.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(edit).toBeHidden()
+  expect(backend.writes()[1]).toMatchObject({ method: 'PATCH', body: { code: 'ingredient.hongsu' } })
+
+  await page.getByRole('button', { name: '新建「食材」的下级类别' }).click()
+  await create.locator('#category-form-code').fill('INGREDIENT.HONGSU')
+  await create.locator('#category-form-zhName').fill('重复红薯')
+  await create.getByRole('button', { name: '创建', exact: true }).click()
+  await expect(create.locator('#category-form-code-error')).toHaveText('该编码已被其他类别使用。')
+  expect(backend.writes()).toHaveLength(2)
+})
+
+test('已有大小写类别域时不再提供相同根编码', async ({ page }) => {
+  const backend = await open(page, [row(1, 'Ingredient', null, '食材')])
+  await createButton(page).click()
+  const dialog = page.getByRole('dialog', { name: '新建类别' })
+  await dialog.locator('#category-form-parentId').selectOption('root')
+  await expect(dialog.locator('#category-form-code option')).toHaveText([
+    '菜品（dish）', '甜点烘焙（dessert）', '饮品（beverage）', '混合（mixed）', '其他（other）',
+  ])
+  expect(backend.writes()).toEqual([])
+})
+
+test('大小写类别域编码的子节点可以提升到根层级', async ({ page }) => {
+  const backend = await open(page, [row(1, 'ingredient', null, '食材'), row(2, 'OtHeR', 1, '其他')])
+  await page.getByRole('button', { name: '编辑「其他」' }).click()
+  const dialog = page.getByRole('dialog', { name: '编辑类别' })
+  await dialog.locator('#category-form-parentId').selectOption('root')
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  expect(backend.writes()).toEqual([{ method: 'PATCH', path: '/api/categories/2', body: { parent_id: null } }])
+  await expect(nodeButton(page, '其他', 'OtHeR')).toBeVisible()
+})
+
 test('表单在发请求前校验，服务端拒绝时把原因显示在对应字段', async ({ page }) => {
   const backend = await open(page, seededRows())
   await page.getByRole('button', { name: '新建「菜品」的下级类别' }).click()
   const dialog = page.getByRole('dialog', { name: '新建类别' })
   const code = dialog.locator('#category-form-code')
 
-  await code.fill('Dish.Rice')
+  await code.fill('Dish Rice')
   await dialog.getByRole('button', { name: '创建', exact: true }).click()
   await expect(dialog.locator('#category-form-code-error')).toContainText('小写字母')
   await expect(dialog.locator('#category-form-zhName-error')).toHaveText('请填写中文名称。')

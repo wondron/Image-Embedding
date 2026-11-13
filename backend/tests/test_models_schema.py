@@ -7,7 +7,7 @@ from pathlib import Path
 from sqlalchemy import CheckConstraint, Enum, String
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import configure_mappers
-from sqlalchemy.schema import CreateTable
+from sqlalchemy.schema import CreateIndex, CreateTable
 
 import app.models  # noqa: F401
 from app.core import enums
@@ -115,6 +115,14 @@ class ModelsSchemaTests(unittest.TestCase):
         self.assertIn("uq_scene_rules_scene_id_category_id", ddl)
         self.assertIn("ck_scene_rules_one_target", ddl)
 
+    def test_categories_keep_original_codes_with_case_insensitive_unique_index(self):
+        table = self.tables["categories"]
+        index = next(ix for ix in table.indexes if ix.name == "uq_categories_code_lower")
+        self.assertTrue(index.unique)
+        ddl = str(CreateIndex(index).compile(dialect=postgresql.dialect()))
+        self.assertEqual(ddl, "CREATE UNIQUE INDEX uq_categories_code_lower ON categories (lower(code))")
+        self.assertIn("uq_categories_code", {str(c.name) for c in table.constraints})
+
 
 class MigrationChainTests(unittest.TestCase):
     def test_migration_chain_is_linear(self):
@@ -124,7 +132,8 @@ class MigrationChainTests(unittest.TestCase):
         cfg = Config(str(BACKEND / "alembic.ini"))
         cfg.set_main_option("script_location", str(BACKEND / "alembic"))
         script = ScriptDirectory.from_config(cfg)
-        self.assertEqual(script.get_heads(), ["20261112_0009"])
+        self.assertEqual(script.get_heads(), ["20261113_0010"])
+        self.assertEqual(script.get_revision("20261113_0010").down_revision, "20261112_0009")
         self.assertEqual(script.get_revision("20261112_0009").down_revision, "20261111_0008")
         self.assertEqual(script.get_revision("20261111_0008").down_revision, "20261109_0007")
         self.assertEqual(script.get_revision("20261109_0007").down_revision, "20261109_0006")

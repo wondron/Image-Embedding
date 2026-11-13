@@ -75,7 +75,7 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
 
   const entries = useMemo(() => flattenCategoryTree(tree), [tree])
   const takenCodes = useMemo(
-    () => new Set(entries.filter(entry => entry.node.id !== node?.id).map(entry => entry.node.code)),
+    () => new Set(entries.filter(entry => entry.node.id !== node?.id).map(entry => entry.node.code.toLowerCase())),
     [entries, node],
   )
   // A node cannot move under itself or its own subtree.
@@ -84,11 +84,11 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
     () => entries.filter(entry => !forbiddenParentIds.has(entry.node.id)),
     [entries, forbiddenParentIds],
   )
-  const freeRootCodes = useMemo(() => rootCodes.filter(code => !takenCodes.has(code)), [rootCodes, takenCodes])
+  const freeRootCodes = useMemo(() => rootCodes.filter(code => !takenCodes.has(code.toLowerCase())), [rootCodes, takenCodes])
   const rootCapacityAvailable = tree.roots.length < CATEGORY_ROOT_LIMIT
   // Only a domain may sit at the top: an existing root, or a node whose code is a domain's.
   const rootOffered = node
-    ? node.parentId === null || (rootCapacityAvailable && rootCodes.includes(node.code))
+    ? node.parentId === null || (rootCapacityAvailable && rootCodes.some(code => code.toLowerCase() === node.code.toLowerCase()))
     : rootCapacityAvailable && freeRootCodes.length > 0
 
   const prefixOf = (parentId: number | null) => {
@@ -125,7 +125,7 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
   function keepPrefix(input: HTMLInputElement) {
     if (node || !parentPicked || draft.parentId === null) return
     const prefix = prefixOf(draft.parentId)
-    if (input.value === prefix) input.setSelectionRange(prefix.length, prefix.length)
+    if (input.value.toLowerCase() === prefix.toLowerCase()) input.setSelectionRange(prefix.length, prefix.length)
   }
 
   useEffect(() => {
@@ -161,7 +161,7 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
     const followsDomain = draft.zhName.trim() === '' || draft.zhName.trim() === domainNameNow
     if (parentId === null) {
       // A root: its code is one of the free domain codes, its name follows the domain's
-      const code = freeRootCodes.includes(draft.code) ? draft.code : freeRootCodes[0] ?? ''
+      const code = freeRootCodes.find(code => code.toLowerCase() === draft.code.toLowerCase()) ?? freeRootCodes[0] ?? ''
       edit(['parentId', 'code', 'zhName'], { parentId, code, ...(followsDomain ? { zhName: domainName(code) ?? '' } : {}) })
     } else {
       // What was typed after the old parent's prefix moves under the new one
@@ -317,8 +317,8 @@ export function CategoryEditorDialog({ target, tree, heatingGroups, rootCodes, d
                 onChange={event => edit(['code'], { code: event.target.value })}
               />}
             <small id="category-form-code-hint">{rootMode || rootCodeFixed
-              ? '根类别只能使用类别域的编码。'
-              : '小写字母、数字和下划线，用点分段，例如 dish.pizza。入库时按编码引用类别。'}</small>
+              ? '根类别只能使用类别域的编码，重复检查不区分大小写。'
+              : '大小写字母、数字和下划线，用点分段，例如 ingredient.HongSu。保留大小写，重复检查不区分大小写。'}</small>
             <FieldError field="code" errors={fieldErrors} />
           </label>
         </section>

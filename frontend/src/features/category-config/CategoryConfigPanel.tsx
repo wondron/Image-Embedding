@@ -89,7 +89,7 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
 
   const tree = useMemo(() => buildCategoryTree(nodes), [nodes])
   const view = useMemo(() => categoryTableView(tree, filter, expanded), [tree, filter, expanded])
-  const domainName = useCallback((code: string) => enumValueLabel(catalog, DOMAIN_ENUM, code), [catalog])
+  const domainName = useCallback((code: string) => enumValueLabel(catalog, DOMAIN_ENUM, code.toLowerCase()), [catalog])
   const inactiveCount = useMemo(() => nodes.filter(node => !node.isActive).length, [nodes])
   const busy = Boolean(removing?.submitting)
   const failedEmpty = Boolean(listFailure) && nodes.length === 0

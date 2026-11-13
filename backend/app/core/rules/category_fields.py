@@ -81,7 +81,7 @@ def normalize_category_code(value: Any) -> str:
     code = _text(value, "code", max_len=CATEGORY_CODE_MAX_LEN)
     if not _CODE_RE.fullmatch(code):
         raise err.validation_error(
-            "code must be lowercase letters, digits and underscores in dot-separated segments, "
+            "code must use uppercase/lowercase letters, digits and underscores in dot-separated segments, "
             f"starting with a letter (e.g. dish.pizza); got {code!r}"
         )
     return code
@@ -201,7 +201,7 @@ def normalize_category_fields(fields: Any, *, partial: bool) -> dict[str, Any]:
 
 def check_root_code(code: str) -> None:
     """Roots are the domains; any other code needs a parent."""
-    if code not in ROOT_CODES:
+    if code.lower() not in ROOT_CODES:
         raise err.validation_error(
             f"a root category must use a domain code ({', '.join(ROOT_CODES)}); {code!r} needs a parent"
         )

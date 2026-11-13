@@ -36,6 +36,7 @@ class Category(TimestampMixin, Base):
         CheckConstraint("parent_id IS NULL OR parent_id <> id", name="not_own_parent"),
         Index("ix_categories_path_gist", "path", postgresql_using="gist"),
         Index("ix_categories_cuisines_gin", "cuisines", postgresql_using="gin"),
+        Index("uq_categories_code_lower", text("lower(code)"), unique=True),
         {"comment": "类别树"},
     )
 

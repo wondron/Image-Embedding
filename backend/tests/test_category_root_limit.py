@@ -54,7 +54,7 @@ class Connection:
                 raise AssertionError("root count must be checked under the catalog lock")
             self.events.append("count")
             return Result(self.root_count)
-        if sql.startswith("SELECT 1 FROM categories WHERE code"):
+        if sql.startswith("SELECT 1 FROM categories WHERE lower(code)"):
             return Result((1,) if self.duplicate else None)
         if sql.startswith("SELECT 1 FROM categories WHERE id"):
             return Result((1,))

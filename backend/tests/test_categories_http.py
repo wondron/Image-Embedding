@@ -155,7 +155,7 @@ class CategoryEndpointTests(unittest.TestCase):
         post = lambda body: self.client.post("/api/categories", json=body)  # noqa: E731
         good = {"code": "dish", "names": [ZH]}
         cases = {
-            "code": dict(good, code="Dish"),
+            "code": dict(good, code="Dish-Pizza"),
             "names": dict(good, names=[]),
             "parent_id": dict(good, parent_id=True),  # strict: true is not 1
             "sort_order": dict(good, sort_order="3"),
@@ -172,6 +172,15 @@ class CategoryEndpointTests(unittest.TestCase):
         self.assertEqual(error["errors"][0]["loc"], ["body", "names", 0, "lang"])
         self.assert_error(post({"names": [ZH]}), 422, "VALIDATION_ERROR")
         self.assertEqual(self.store.calls, [])
+
+    def test_create_and_case_only_patch_preserve_the_submitted_code(self):
+        root = self.create(code="Ingredient")
+        child = self.create(code="Ingredient.HongSu", parent_id=root["id"])
+        self.assertEqual(child["code"], "Ingredient.HongSu")
+        response = self.client.patch(f"/api/categories/{child['id']}", json={"code": "ingredient.HONGSU"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["category"]["code"], "ingredient.HONGSU")
+        self.assertEqual(response.json()["category"]["id"], child["id"])
 
     def test_rules_a_schema_cannot_say_are_validation_errors_too(self):
         body = {"code": "dish", "names": [{"lang": "en", "name": "Pizza", "kind": "primary"}]}

@@ -8,9 +8,15 @@
 默认只预览，不访问服务器；--apply 通过 /api/categories 添加类别。
 使用后端当前生效的数据库，无需另填数据库密码。可用 --base-url 指定后端。
 Food 根映射到 ingredient（食材），其余节点保留原层级、名称、别称和同级顺序。
+除根节点外，identifier 必须恰好是 6 个英文字母（A-Z / a-z）。
+编码包含全部祖先，保留 identifier 大小写，例如 ingredient.YeTiLe.BaiSYe.DJiang；转小写后必须唯一。
+编码冲突或不合法时，ERROR 日志会列出源文件行号、名称和 identifier，写入前停止。
+请手动修改 create_node 的 identifier（第二个参数）及对应 parent 引用后重试。
 源文件只静态解析，不执行，也不需要安装 numpy/treelib。
 原识别逻辑字段（type/goto/compare/review 等）不作为类别属性导入。
-已存在的相同编码、名称和父级会跳过；冲突会停止，不覆盖已有类别。
+已存在的编码按小写匹配，名称和父级相同时跳过；冲突会停止，不覆盖已有类别。
+若后端仍有旧版 standard.n_... 编码，先日志提示并停止，避免重复导入另一套目录。
+若后端已有旧版两段编码（如 ingredient.DJiang），会列出对应的完整路径并停止，供手动修改。
 中断后可重新运行以继续添加；每个节点独立提交，不会整体回滚。
 """
 
@@ -18,8 +24,8 @@ from __future__ import annotations
 
 import argparse
 import ast
-import hashlib
 import json
+import logging
 import re
 import sys
 from collections import Counter
@@ -28,6 +34,10 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+logger = logging.getLogger(__name__)
+CODE_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)*$")
+IDENTIFIER_PATTERN = re.compile(r"[A-Za-z]{6}")
 
 
 @dataclass(frozen=True)
@@ -53,14 +63,10 @@ class Category:
         }
 
 
-def category_code(identifier: str) -> str:
-    # Hash the case-sensitive original: HSheng/HShenG/hSheng are different nodes.
-    stem = re.sub(r"[^a-z0-9_]", "_", identifier.lower())
-    suffix = hashlib.sha256(identifier.encode("utf-8")).hexdigest()[:10]
-    code = f"ingredient.standard.n_{stem}_{suffix}"
-    if len(code) > 128:
-        raise ValueError(f"源节点标识过长：{identifier!r}")
-    return code
+def category_code(identifier: str, parent_code: str = "ingredient") -> str:
+    # Preserve the identifier, including its casing. Validate the whole tree before writing;
+    # do not silently replace characters or add suffixes to resolve collisions.
+    return f"{parent_code}.{identifier}"
 
 
 def read_tree(path: Path) -> list[Category]:
@@ -70,6 +76,7 @@ def read_tree(path: Path) -> list[Category]:
         raise ValueError("源文件需要恰好一个 create_standard_tree 函数")
     nodes: list[Category] = []
     seen: dict[str, Category] = {}
+    locations: dict[str, int] = {}
     siblings: Counter[str | None] = Counter()
     for stmt in functions[0].body:
         if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
@@ -118,15 +125,44 @@ def read_tree(path: Path) -> list[Category]:
         if len(unique) + 1 > 50 or any(len(n) > 128 for n in (name, *unique)):
             raise ValueError(f"节点 {identifier!r} 的名称长度或别称数量超出类别接口限制")
         node = Category(identifier, parent, name, unique,
-                        category_code(identifier) if parent is not None else "ingredient",
+                        category_code(identifier, seen[parent].code) if parent is not None else "ingredient",
                         siblings[parent], seen[parent].depth + 1 if parent is not None else 0)
         siblings[parent] += 1
         nodes.append(node)
         seen[identifier] = node
+        locations[identifier] = stmt.lineno
     if not nodes:
         raise ValueError("源分类树为空")
-    if len({n.code for n in nodes}) != len(nodes):
-        raise ValueError("生成的类别编码存在冲突，未导入")
+    grouped: dict[str, list[Category]] = {}
+    problems = 0
+    for node in nodes:
+        grouped.setdefault(node.code.lower(), []).append(node)
+        if node.parent is not None and not IDENTIFIER_PATTERN.fullmatch(node.source_id):
+            logger.error(
+                "%s:%d 名称=%r identifier=%r 编码=%r 不合法："
+                "identifier 必须恰好是 6 个英文字母（A-Z / a-z），当前长度=%d",
+                path, locations[node.source_id], node.name, node.source_id, node.code, len(node.source_id),
+            )
+            problems += 1
+        elif len(node.code) > 128 or not CODE_PATTERN.fullmatch(node.code):
+            logger.error(
+                "%s:%d 名称=%r identifier=%r 编码=%r 不合法："
+                "编码只能含大小写字母、数字、下划线和点，总长度不超过 128",
+                path, locations[node.source_id], node.name, node.source_id, node.code,
+            )
+            problems += 1
+    for code, group in grouped.items():
+        if len(group) > 1:
+            logger.error("小写编码冲突 %r，共 %d 个节点：", code, len(group))
+            for node in group:
+                logger.error("  %s:%d 名称=%r identifier=%r parent=%r",
+                             path, locations[node.source_id], node.name, node.source_id, node.parent)
+            problems += 1
+    if problems:
+        raise ValueError(
+            f"发现 {problems} 组编码问题，详见 ERROR 日志；"
+            "请修改 identifier（create_node 第二个参数）及对应 parent 引用后重试。未访问后端、未导入。"
+        )
     return nodes
 
 
@@ -159,17 +195,53 @@ class CategoryAPI:
 
 def import_tree(nodes: list[Category], api: CategoryAPI) -> tuple[int, int]:
     existing = api.list_categories()
-    by_code = {row["code"]: row for row in existing}
+    normalized: dict[str, list[dict[str, Any]]] = {}
+    for row in existing:
+        normalized.setdefault(row["code"].lower(), []).append(row)
+    duplicates = {code: rows for code, rows in normalized.items() if len(rows) > 1}
+    if duplicates:
+        for code, rows in duplicates.items():
+            logger.error("后端已有小写编码冲突 %r，共 %d 个节点：", code, len(rows))
+            for row in rows:
+                logger.error("  已有节点 id=%s 名称=%r 编码=%r", row["id"], row.get("name"), row["code"])
+        raise ValueError("后端已有转小写后重复的类别编码，请先处理日志中的冲突。本次未新增或修改节点。")
+    legacy = [row for row in existing if row["code"].lower().startswith("ingredient.standard.n_")]
+    if legacy:
+        logger.error("后端已有 %d 个旧格式类别，新旧编码不同，继续导入会产生重复目录。", len(legacy))
+        for row in legacy[:10]:
+            logger.error("  已有节点 id=%s 名称=%r 编码=%r", row["id"], row.get("name"), row["code"])
+        if len(legacy) > 10:
+            logger.error("  另有 %d 个旧格式类别，请在类别管理中查看。", len(legacy) - 10)
+        raise ValueError("请先核对并修改已导入节点的旧编码，再使用新编码导入。本次未新增或修改节点。")
+    by_code = {code: rows[0] for code, rows in normalized.items()}
     by_id = {row["id"]: row for row in existing}
     source = {node.source_id: node for node in nodes}
+    planned_codes = {node.code.lower() for node in nodes}
+    flat_rows = []
+    for node in nodes:
+        if node.depth < 2:
+            continue
+        flat_code = category_code(node.source_id).lower()
+        row = by_code.get(flat_code)
+        # A planned top-level category legitimately keeps its two-segment code.
+        # Other matching flat codes came from the earlier importer: do not create
+        # a second node for the same source item under its new full-path code.
+        if row is not None and flat_code not in planned_codes:
+            flat_rows.append((row, node))
+    if flat_rows:
+        logger.error("检测到旧版两段编码；请先核对并修改现有节点编码，避免重复导入：")
+        for row, node in flat_rows:
+            logger.error("  已有节点 id=%s 名称=%r：%s → %s", row["id"], row.get("name"), row["code"], node.code)
+        raise ValueError("检测到旧版两段编码，完整父级路径已在日志中列出。本次未新增或修改节点。")
     # Preflight the entire plan before the first write: a late conflict cannot leave
     # half an import behind. Network failures during creation can still be resumed.
     for node in nodes:
-        row = by_code.get(node.code)
+        row = by_code.get(node.code.lower())
         if row is None:
             continue
         actual_parent = by_id.get(row["parent_id"], {}).get("code") if row["parent_id"] is not None else None
-        expected_parent = source[node.parent].code if node.parent is not None else None
+        actual_parent = actual_parent.lower() if actual_parent is not None else None
+        expected_parent = source[node.parent].code.lower() if node.parent is not None else None
         if actual_parent != expected_parent:
             raise ValueError(f"类别 {node.code} 的现有父级不同，已停止；请先检查现有分类")
         if node.parent is not None and row.get("name") != node.name:
@@ -177,8 +249,9 @@ def import_tree(nodes: list[Category], api: CategoryAPI) -> tuple[int, int]:
     added, skipped = 0, 0
     ids: dict[str, int] = {}
     for node in nodes:
-        if node.code in by_code:
-            row = by_code[node.code]
+        normalized_code = node.code.lower()
+        if normalized_code in by_code:
+            row = by_code[normalized_code]
             skipped += 1
         else:
             try:
@@ -188,7 +261,7 @@ def import_tree(nodes: list[Category], api: CategoryAPI) -> tuple[int, int]:
                     f"添加 {node.name}（{node.source_id}）失败；本次已添加 {added}，跳过 {skipped}。"
                     f"修复问题后重跑同一命令可继续。原因：{exc}"
                 ) from exc
-            by_code[node.code] = row
+            by_code[normalized_code] = row
             added += 1
             if added % 25 == 0:
                 print(f"进度：已添加 {added}，跳过 {skipped}", flush=True)
@@ -212,6 +285,7 @@ def main(argv: list[str] | None = None) -> int:
         nodes = read_tree(args.source)
         print(f"分类文件：{args.source.resolve()}")
         print(f"节点数：{len(nodes)}（含食材根节点）；别称数：{sum(len(n.aliases) for n in nodes)}")
+        print(f"最大层级：{max(node.depth for node in nodes) + 1}（含食材根节点）")
         print("一级分类：" + "、".join(n.name for n in nodes if n.depth == 1))
         if args.show_tree:
             for node in nodes:
@@ -233,6 +307,7 @@ if __name__ == "__main__":
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
     try:
         raise SystemExit(main())
     except KeyboardInterrupt:

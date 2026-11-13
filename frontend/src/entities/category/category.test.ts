@@ -252,7 +252,7 @@ describe('category draft', () => {
       const result = validateCategoryDraft(draft(input), ctx)
       return result.ok ? {} : result.fieldErrors
     }
-    for (const code of ['', 'Dish.rice', 'dish..rice', 'dish.', '米饭', '1dish', 'dish rice', 'x'.repeat(129)]) {
+    for (const code of ['', 'dish..rice', 'dish.', '米饭', '1dish', 'dish rice', 'x'.repeat(129)]) {
       expect(errorsOf({ code }).code, code).toBeTruthy()
     }
     expect(errorsOf({ code: 'dish.pizza' }).code).toContain('已被其他类别使用')
@@ -263,6 +263,28 @@ describe('category draft', () => {
     for (const sortOrder of ['', 'abc', '1.5', '2147483648']) expect(errorsOf({ sortOrder }).sortOrder, sortOrder).toBeTruthy()
     expect(errorsOf({ parentId: 2 }, context({ forbiddenParentIds: new Set([2, 4]) })).parentId).toBeTruthy()
     expect(errorsOf({ code: 'Dish', zhName: '', sortOrder: 'x' })).toMatchObject({ code: expect.any(String), zhName: expect.any(String), sortOrder: expect.any(String) })
+  })
+
+  it('preserves mixed-case codes and rejects duplicates regardless of casing', () => {
+    const result = validateCategoryDraft(draft({ code: ' Ingredient.HongSu ' }), context())
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.payload.code).toBe('Ingredient.HongSu')
+      expect(toCategoryCreateBody(result.payload).code).toBe('Ingredient.HongSu')
+    }
+    for (const [code, taken] of [['DISH.Pizza', 'dish.pizza'], ['dish.PIZZA', 'Dish.Pizza']]) {
+      const duplicate = validateCategoryDraft(draft({ code }), context({ takenCodes: new Set([taken]) }))
+      expect(duplicate.ok).toBe(false)
+      if (!duplicate.ok) expect(duplicate.fieldErrors.code).toContain('已被其他类别使用')
+    }
+  })
+
+  it('allows case-only renames when the current node is excluded from taken codes', () => {
+    const loaded = node(2, 'dish.pizza', 1)
+    const result = validateCategoryDraft({ ...categoryDraftFromNode(loaded), code: 'Dish.Pizza' },
+      context({ takenCodes: new Set(['dish']), original: loaded }))
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(toCategoryUpdateBody(loaded, result.payload)).toEqual({ code: 'Dish.Pizza' })
   })
 
   it('checks the other names like the server does', () => {
@@ -285,6 +307,7 @@ describe('category draft', () => {
     expect(validateCategoryDraft(rootDraft('dessert'), context()).ok).toBe(true)
     expect(validateCategoryDraft(rootDraft('mixed'), context()).ok).toBe(true)
     expect(validateCategoryDraft(rootDraft('other'), context()).ok).toBe(true)
+    expect(validateCategoryDraft(rootDraft('OtHeR'), context()).ok).toBe(true)
     const snack = validateCategoryDraft(rootDraft('snack'), context())
     expect(snack.ok).toBe(false)
     if (!snack.ok) expect(snack.fieldErrors.code).toContain('ingredient、dish、dessert、beverage、mixed、other')

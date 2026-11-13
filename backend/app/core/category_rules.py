@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from app.core.enums import ENUM_VALUE_MAX_LEN, ENUM_VALUE_PATTERN
 
-# 编码：小写字母、数字、下划线，用点分段，字母开头，如 dish.pizza。入库请求按它引用类别
-CATEGORY_CODE_PATTERN = r"^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$"
+# 编码保留大小写；字母、数字、下划线，用点分段，字母开头；按小写判重。
+CATEGORY_CODE_PATTERN = r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)*$"
 CATEGORY_CODE_MAX_LEN = 128
 CATEGORY_MAX_ROOTS = 6  # 含停用的根节点和旧数据里的根节点；新增和移到根时均检查
 

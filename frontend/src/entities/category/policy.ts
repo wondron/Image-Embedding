@@ -7,7 +7,7 @@ import type { CategoryCreateRequestWire, CategoryUpdateRequestWire } from '../..
 import type { CategoryName, CategoryNameKind, CategoryNode } from './model'
 
 export const CATEGORY_CODE_MAX_LEN = 128
-export const CATEGORY_CODE_PATTERN = /^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$/
+export const CATEGORY_CODE_PATTERN = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)*$/
 export const CATEGORY_NAME_MAX_LEN = 128
 export const CATEGORY_LANG_MAX_LEN = 16
 export const CATEGORY_LANG_PATTERN = /^[a-z]{2,3}(-[a-z0-9]{2,8})*$/
@@ -56,7 +56,7 @@ export interface CategoryDraftContext {
   rootCodes: readonly string[]
   /** Existing roots, including any categories created before the domain restriction. */
   rootCount: number
-  /** Codes of every other node. */
+  /** Codes of every other node; uniqueness is compared without casing. */
   takenCodes: ReadonlySet<string>
   /** The node being edited; omit when creating. */
   original?: Pick<CategoryNode, 'id' | 'code' | 'parentId'>
@@ -114,13 +114,14 @@ function codeError(code: string, draft: CategoryDraft, context: CategoryDraftCon
   if (!code) return '请填写编码。'
   if (charLength(code) > CATEGORY_CODE_MAX_LEN) return `编码最长 ${CATEGORY_CODE_MAX_LEN} 个字符。`
   if (!CATEGORY_CODE_PATTERN.test(code)) {
-    return '编码只能用小写字母、数字和下划线，用点分段，并以字母开头，例如 dish.pizza。'
+    return '编码可使用大小写字母、数字和下划线，用点分段，并以字母开头，例如 ingredient.HongSu。'
   }
-  if (context.takenCodes.has(code)) return '该编码已被其他类别使用。'
+  const codeKey = code.toLowerCase()
+  if ([...context.takenCodes].some(taken => taken.toLowerCase() === codeKey)) return '该编码已被其他类别使用。'
   // Like the server: checked only when the code or the position changes, so an older root can still be edited.
   const original = context.original
   const changed = !original || original.code !== code || original.parentId !== draft.parentId
-  if (draft.parentId === null && changed && !context.rootCodes.includes(code)) {
+  if (draft.parentId === null && changed && !context.rootCodes.some(root => root.toLowerCase() === codeKey)) {
     return `根类别的编码只能是：${context.rootCodes.join('、')}。其他类别需要选择上级。`
   }
   return null

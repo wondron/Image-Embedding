@@ -80,6 +80,8 @@ describe('retargetCode', () => {
     expect(retargetCode('dish.pizza', 'dish.', 'ingredient.')).toBe('ingredient.pizza')
     expect(retargetCode('dish.', 'dish.', 'ingredient.vegetable.')).toBe('ingredient.vegetable.')
     expect(retargetCode('', '', 'dish.')).toBe('dish.')
+    expect(retargetCode('DISH.HongSu', 'dish.', 'Ingredient.')).toBe('Ingredient.HongSu')
+    expect(retargetCode('DISH.', 'dish.', 'Ingredient.')).toBe('Ingredient.')
   })
 
   it('keeps a code that does not follow the old prefix', () => {

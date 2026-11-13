@@ -61,10 +61,10 @@ class CategoryFieldsTests(unittest.TestCase):
                 self.assert_invalid(normalize_category_fields, {key: None}, partial=True)
 
     def test_code_spelling(self):
-        for good in ("dish", "dish.pizza", "dish.staple_food.rice2", "a.1"):
+        for good in ("dish", "dish.pizza", "dish.staple_food.rice2", "a.1", "Dish", "ingredient.HongSu", "DISH.Pizza"):
             with self.subTest(code=good):
                 self.assertEqual(normalize_category_code(good), good)
-        for bad in ("Dish", "dish..pizza", ".dish", "dish.", "dish pizza", "披萨", "1dish", "dish-pizza",
+        for bad in ("dish..pizza", ".dish", "dish.", "dish pizza", "披萨", "1dish", "dish-pizza",
                     "", "   ", "x" * (CATEGORY_CODE_MAX_LEN + 1), 5, None):
             with self.subTest(code=bad):
                 self.assert_invalid(normalize_category_code, bad)
@@ -133,6 +133,7 @@ class CategoryFieldsTests(unittest.TestCase):
         self.assertEqual(set(ROOT_CODES), {member.value for member in CategoryDomain})
         for code in ROOT_CODES:
             check_root_code(code)
+            check_root_code(code.upper())
         self.assertIn("needs a parent", self.assert_invalid(check_root_code, "dish.pizza"))
         self.assert_invalid(check_root_code, "snack")
 

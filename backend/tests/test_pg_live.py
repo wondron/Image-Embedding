@@ -956,6 +956,44 @@ class PgLiveTests(unittest.TestCase):
         self.assert_category_error("CATEGORY_NOT_FOUND", store.delete_category, 987654)
         self.assertEqual(self.sql("SELECT count(*) FROM categories").scalar_one(), 4)
 
+    def test_category_codes_preserve_case_and_are_unique_ignoring_case(self):
+        from sqlalchemy.exc import IntegrityError
+
+        store = self.store()
+        root = store.create_category({"code": "Ingredient", "names": [self.zh("食材")]})
+        sweet = store.create_category({"code": "ingredient.HongSu", "parent_id": root["id"], "names": [self.zh("红薯")]})
+        other = store.create_category({"code": "ingredient.ZiShuu", "parent_id": root["id"], "names": [self.zh("紫薯")]})
+        self.assertEqual((root["code"], sweet["code"]), ("Ingredient", "ingredient.HongSu"))
+        self.assertEqual(store.get_category_id_by_code("INGREDIENT.HONGSU"), sweet["id"])
+        self.assertEqual(store.get_category_id_by_code("ingredient.hongsu"), sweet["id"])
+        self.assert_category_error("CATEGORY_CODE_EXISTS", store.create_category, {
+            "code": "Ingredient.hONGsU", "parent_id": root["id"], "names": [self.zh("重复")],
+        })
+        self.assert_category_error("CATEGORY_CODE_EXISTS", store.update_category, other["id"], {"code": "Ingredient.hONGsU"})
+        renamed = store.update_category(sweet["id"], {"code": "Ingredient.hONGsU"})["category"]
+        self.assertEqual((renamed["code"], renamed["id"]), ("Ingredient.hONGsU", sweet["id"]))
+        # Writers outside the repository still hit the lower(code) unique index.
+        with self.assertRaises(IntegrityError):
+            self.sql("INSERT INTO categories (code) VALUES ('INGREDIENT.HONGSU')")
+        with self.assertRaises(IntegrityError):
+            self.sql("UPDATE categories SET code = 'ingredient.hongsu' WHERE id = :id", {"id": other["id"]})
+
+    def test_category_code_case_unique_migration_reports_conflicts_without_changing_rows(self):
+        _alembic("downgrade", "20261112_0009")
+        ids = [self.sql("INSERT INTO categories (code) VALUES (:code) RETURNING id", {"code": code}).scalar_one()
+               for code in ("LegacyCase", "legacycase")]
+        with self.assertRaises(Exception) as caught:
+            _alembic("upgrade", "head")
+        error = str(caught.exception)
+        self.assertIn("Category codes conflict ignoring case", error)
+        self.assertIn("LegacyCase", error)
+        self.assertIn("legacycase", error)
+        self.assertEqual(self.sql("SELECT code FROM categories ORDER BY id").scalars().all(), ["LegacyCase", "legacycase"])
+        self.assertEqual(self.sql("SELECT version_num FROM alembic_version").scalar_one(), "20261112_0009")
+        self.sql("UPDATE categories SET code = 'LegacyOther' WHERE id = :id", {"id": ids[1]})
+        _alembic("upgrade", "head")
+        self.assertEqual(self.sql("SELECT version_num FROM alembic_version").scalar_one(), "20261113_0010")
+
     def test_category_inserted_by_sql_keeps_its_root_code_until_it_is_renamed(self):
         store = self.store()
         legacy = self.sql("INSERT INTO categories (code) VALUES ('legacy') RETURNING id").scalar_one()

@@ -137,7 +137,7 @@ class CategoryCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     code: str = Field(
-        ..., description="小写字母、数字、下划线，用点分段，字母开头。根节点只能用六个域的编码", **_CODE
+        ..., description="大小写字母、数字、下划线，用点分段，字母开头。保留大小写，按小写判重；根节点只能用六个域的编码", **_CODE
     )
     parent_id: int | None = Field(default=None, gt=0, strict=True, description="父节点；不传或 null 为根节点")
     names: list[CategoryName] = Field(

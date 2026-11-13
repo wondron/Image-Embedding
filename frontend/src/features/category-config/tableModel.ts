@@ -92,7 +92,9 @@ export function otherCategoryNames(names: readonly CategoryName[]): CategoryName
  * new prefix; a code that does not start with the old prefix is kept.
  */
 export function retargetCode(code: string, oldPrefix: string, newPrefix: string): string {
-  if (code === '' || code === oldPrefix) return newPrefix
-  if (oldPrefix !== '' && code.startsWith(oldPrefix)) return newPrefix + code.slice(oldPrefix.length)
+  const codeKey = code.toLowerCase()
+  const prefixKey = oldPrefix.toLowerCase()
+  if (code === '' || codeKey === prefixKey) return newPrefix
+  if (oldPrefix !== '' && codeKey.startsWith(prefixKey)) return newPrefix + code.slice(oldPrefix.length)
   return code
 }

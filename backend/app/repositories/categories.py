@@ -93,10 +93,15 @@ def _read_node(conn: Any, category_id: int) -> dict[str, Any]:
     return _node(row)
 
 
-def _check_code_free(conn: Any, code: str) -> None:
-    taken = conn.execute(text("SELECT 1 FROM categories WHERE code = :code"), {"code": code}).fetchone()
+def _check_code_free(conn: Any, code: str, *, exclude_id: int | None = None) -> None:
+    sql = "SELECT 1 FROM categories WHERE lower(code) = lower(:code)"
+    params: dict[str, Any] = {"code": code}
+    if exclude_id is not None:
+        sql += " AND id <> :exclude_id"
+        params["exclude_id"] = exclude_id
+    taken = conn.execute(text(sql), params).fetchone()
     if taken is not None:
-        raise err.category_code_exists(f"another category already uses the code {code!r}")
+        raise err.category_code_exists(f"another category already uses the code {code!r} (ignoring case)")
 
 
 def _check_heating_group(conn: Any, heating_group_id: int | None) -> None:
@@ -122,7 +127,7 @@ def _write_names(conn: Any, category_id: int, names: list[dict[str, str]]) -> No
 def _constraint_error(op: str, exc: IntegrityError) -> err.AppError:
     """A constraint that fired although the checks passed: a writer outside this store got in between."""
     name = getattr(getattr(exc.orig, "diag", None), "constraint_name", None) or "unknown"
-    if name == "uq_categories_code":
+    if name in {"uq_categories_code", "uq_categories_code_lower"}:
         return err.category_code_exists("another category already uses this code")
     if op == "delete_category":
         return err.category_in_use(f"the category is still referenced ({name})")
@@ -244,7 +249,7 @@ class PgCategoriesMixin:
                 if parent_id is None and (renamed or moved):
                     check_root_code(code)
                 if renamed:
-                    _check_code_free(conn, code)
+                    _check_code_free(conn, code, exclude_id=cid)
                 _check_heating_group(conn, changes.get("heating_group_id"))
                 if moved and parent_id is None:
                     _check_root_capacity(conn)

@@ -125,7 +125,7 @@ erDiagram
 | 字段 | 类型要点 | 说明 |
 | --- | --- | --- |
 | `id` | 自增主键 |  |
-| `code` | 文本，唯一 | 稳定编码，如 `dish.pizza`；配置和规则里用它引用类别 |
+| `code` | 文本，`lower(code)` 唯一 | 保留大小写，如 `ingredient.HongSu`；大小写不同但转小写相同的编码视为重复 |
 | `parent_id` | 外键 → `categories.id`，`ON DELETE RESTRICT`，可空 | 父节点；根节点为空。不能指向自己 |
 | `path` | ltree，唯一，由数据库维护 | ID 链，如 `2.15.137`；有 GiST 索引 |
 | `cuisines` | `text[]`，默认空数组 | 菜系，如 `{american,italian}`；子孙沿用祖先的菜系。有 GIN 索引 |
@@ -136,6 +136,11 @@ erDiagram
 | `updated_at` | 时间戳 | 更新时间 |
 
 六个根节点（域）的编码约定：
+
+类别编码允许大小写字母、数字、下划线和点，须以字母开头，保存时保留大小写；根域白名单和类别编码判重都忽略大小写。
+迁移 `20261113_0010` 新增 `uq_categories_code_lower` 唯一索引，阻止并发写入大小写变体。
+更新代码后，先执行 `cd backend`、`python -m alembic upgrade head` 再启动服务。
+迁移若检测到现有编码转小写后重复，会列出冲突并停止；请手动处理后重试，不会自动改名或删除。
 
 | 编码 | 含义 |
 | --- | --- |

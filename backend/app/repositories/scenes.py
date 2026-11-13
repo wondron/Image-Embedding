@@ -421,7 +421,7 @@ class PgScenesMixin:
         engine = self._get_engine()
         with engine.connect() as conn:
             row = conn.execute(
-                text("SELECT id FROM categories WHERE code = :c LIMIT 1"),
+                text("SELECT id FROM categories WHERE lower(code) = lower(:c) LIMIT 1"),
                 {"c": str(code).strip()},
             ).fetchone()
         return int(row[0]) if row else None
