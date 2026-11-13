@@ -68,6 +68,25 @@ Global 搜索阶段直接保留上游 `image_url`，不下载或验证候选图�
 Alembic 和 workers 也按 `NACOS_ENV` 取库，而它默认是 prod：本机执行 `alembic upgrade head` 前先设
 `NACOS_ENV=test`，或用 `NACOS_ENABLED=0` 只读本地 YAML。Alembic 会在日志里打印目标库（密码已隐去）。
 
+## 数据库初始化与数据重置
+
+Alembic 管表结构，Seed 管基础数据，Reset 管业务数据清理。三条命令都在 `backend` 目录、用启动后端的 Python 环境执行，
+连接的库和后端、Alembic 一样（`NACOS_ENV` 默认 prod，本机先设 `NACOS_ENV=test` 或 `NACOS_ENABLED=0`）：
+
+| 命令 | 作用 | 什么时候用 |
+|---|---|---|
+| `python -m alembic upgrade head` | 创建、升级表结构（迁移只建表，不插数据） | 首次部署、数据库升级 |
+| `python -m scripts.seed_data` | 补齐基础数据：场景 通用 / 一体机 / 抽油烟机，类别根节点 食材 / 菜品 / 甜点烘焙 / 饮品 / 混合 / 其他 | 首次部署（紧跟 upgrade）、基础数据被误删 |
+| `python -m scripts.reset_data` | 清空业务数据（图片、类别树、场景配置、任务记录）和向量库里的点，再补齐基础数据 | 开发 / 测试环境重新开始 |
+
+- 基础数据定义在 `backend/scripts/seed_data.py` 顶部（`BASE_SCENES`、`ROOT_CATEGORIES`），要增减就改那里。Seed 可以重复执行：
+  按编码判断，缺的插入，已有的不改（和定义不同只提示），不删除其他数据；`--dry-run` 只列出会补哪些。
+- Reset 先列出目标库、每张表的行数和要清的 Qdrant collection，输入数据库名确认后执行（`--yes` 跳过确认，`--dry-run` 只看不改）。
+  PostgreSQL 的清空和补齐在一个事务里，失败则什么都不改。`NACOS_ENV=prod` 时拒绝执行（`--allow-prod` 才放行）。
+  保留模型版本登记（`embedding_models`）和加热组；对象存储里的文件不删除。`--keep-catalog` 只清图片和任务记录，保留类别树和场景配置；
+  `--keep-vectors` 不动 Qdrant。执行前先停掉连着这个库的后端，否则可能等锁超时（10 秒后放弃、不做修改）。
+- 迁移 `0001` 以前会插入六个场景，现在不再插入；已经迁移过的库保留原有场景。空库部署要在 `upgrade head` 之后执行一次 seed。
+
 ## Nacos 配置环境
 
 通过环境变量 `NACOS_ENV` 选择 Nacos 环境，这是部署时唯一需要指定的变量：未设置或为空时默认 `prod`，

@@ -43,6 +43,11 @@ class IndexPgConcurrencyTests(unittest.TestCase):
     def setUp(self):
         _alembic("downgrade", "base")
         _alembic("upgrade", "head")
+        # Migrations create no rows; these are the two scenes the tests use
+        self.sql(
+            "INSERT INTO scenes (code, name, include_all, outputs_heating) VALUES "
+            "('general', '通用', true, false), ('oven', '一体机', false, true)"
+        )
         self.model_id = self.sql(
             "INSERT INTO embedding_models "
             "(name, version, dim, distance, input_size, weights_uri, collection, status) "

@@ -25,6 +25,20 @@ def _alembic(cmd: str, rev: str) -> None:
     getattr(command, cmd)(cfg, rev)
 
 
+# Test fixture: the six scenes these tests were written against (migration 0001 used to insert
+# them; base data now comes from scripts/seed_data.py, which only has the first three).
+FIXTURE_SCENES_SQL = """
+INSERT INTO scenes (code, name, description, include_all, outputs_heating, is_active)
+VALUES
+  ('general', '通用（日常）', '含全部图片', true, false, true),
+  ('oven', '一体机', '按类别规则 + scene_labels；结果带加热组', false, true, true),
+  ('range_hood', '抽油烟机', '待配置规则', false, false, true),
+  ('us_diet', '美国饮食', '菜系含 american', false, false, true),
+  ('cn_diet', '中国饮食', '菜系含 chinese', false, false, true),
+  ('jp_diet', '日本饮食', '菜系含 japanese', false, false, true)
+"""
+
+
 def _sha(n: int) -> bytes:
     return hashlib.sha256(f"image-{n}".encode()).digest()
 
@@ -44,6 +58,7 @@ class PgLiveTests(unittest.TestCase):
     def setUp(self):
         _alembic("downgrade", "base")
         _alembic("upgrade", "head")
+        self.sql(FIXTURE_SCENES_SQL)
 
     def sql(self, statement, params=None):
         from sqlalchemy import text

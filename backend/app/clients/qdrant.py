@@ -380,6 +380,16 @@ class QdrantStore:
             wait=True,
         )
 
+    def delete_all_points(self) -> None:
+        """Remove every point; the collection, its vector config and payload indexes stay."""
+        from qdrant_client.http import models as rest
+
+        self.client.delete(
+            collection_name=self.collection,
+            points_selector=rest.FilterSelector(filter=rest.Filter()),
+            wait=True,
+        )
+
     def count(self) -> int:
         return int(self.client.count(collection_name=self.collection, exact=True).count)
 

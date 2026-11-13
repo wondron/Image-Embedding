@@ -1,10 +1,14 @@
-"""PG v0.1 initial: 12 tables + ltree + path trigger + scene seeds.
+"""PG v0.1 initial: 12 tables + ltree + path trigger.
 
 Revision ID: 20261104_0001
 Revises:
 Create Date: 2026-11-04
 
 Contract: docs/image-search-pg-v01-data-contract.md §2
+
+Structure only. This revision used to insert six scenes; base data (default scenes, category
+roots) now lives in scripts/seed_data.py: run `python -m scripts.seed_data` after
+`alembic upgrade head`. Databases migrated earlier keep the scenes they already have.
 """
 from __future__ import annotations
 
@@ -283,16 +287,6 @@ CREATE TABLE external_candidates (
 );
 CREATE INDEX idx_external_candidates_review_created
   ON external_candidates (review_status, created_at);
-
--- Seed scenes (contract §2.6)
-INSERT INTO scenes (code, name, description, include_all, outputs_heating, is_active)
-VALUES
-  ('general', '通用（日常）', '含全部图片', true, false, true),
-  ('oven', '一体机', '按类别规则 + scene_labels；结果带加热组', false, true, true),
-  ('range_hood', '抽油烟机', '待配置规则', false, false, true),
-  ('us_diet', '美国饮食', '菜系含 american', false, false, true),
-  ('cn_diet', '中国饮食', '菜系含 chinese', false, false, true),
-  ('jp_diet', '日本饮食', '菜系含 japanese', false, false, true);
 """
 
 DOWNGRADE_SQL = r"""
