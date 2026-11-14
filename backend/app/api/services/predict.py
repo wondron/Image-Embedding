@@ -35,13 +35,11 @@ async def run_predict(
     search_num: int | None = None,
 ) -> dict[str, Any]:
     """Call FoodService.detect with shared logging and upstream error handling."""
-    t0 = time.perf_counter()
     svc = require_food_service(runtime)
     if not img_bytes:
         raise errors.empty_file("Image bytes is empty.")
 
     try:
-        # FoodService includes blocking upstream requests and model inference.
         result = await run_in_threadpool(
             svc.detect,
             img_bytes,
@@ -50,9 +48,6 @@ async def run_predict(
             trace_id=trace_id,
             save_result=save_res,
         )
-        latency_ms = round((time.perf_counter() - t0) * 1000.0, 2)
-        logger.info("图像检索成功 | 请求ID=%s | 来源=%s | 图片大小=%s 字节 | 耗时=%.2f 毫秒", trace_id, source, len(img_bytes), latency_ms)
-        show_text(f"图像检索成功 | 请求ID={trace_id} | 来源={source} | 图片大小={len(img_bytes)} 字节 | 耗时={latency_ms:.2f} 毫秒", trace_id=trace_id)
         return {"result": result, "trace_id": trace_id}
     except AppError as app_err:
         logger.warning("图像检索请求异常 | 请求ID=%s | 来源=%s | 详情=%s", trace_id, source, app_err.detail)

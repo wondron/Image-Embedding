@@ -20,7 +20,6 @@ The query image is read once (upload or download) and given to both channels.
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any
 
 from starlette.concurrency import run_in_threadpool
@@ -29,6 +28,8 @@ from app.api.deps import require_retrieval
 from app.api.services.predict import run_predict
 from app.bootstrap.state import ApplicationState
 from app.core import errors as err
+from app.core.observability.log_helper import show_text
+from app.utils.timer import timer_tool
 
 logger = logging.getLogger("svc.auto_search")
 
@@ -47,10 +48,6 @@ def _global_cards(result: Any, top_k: int) -> list[dict[str, Any]]:
     return [card for card in result if isinstance(card, dict)][:top_k]
 
 
-def _elapsed_ms(started: float) -> float:
-    return round((time.perf_counter() - started) * 1000.0, 1)
-
-
 async def run_auto_search(
     runtime: ApplicationState,
     *,
@@ -63,69 +60,76 @@ async def run_auto_search(
     trace_id: str,
     input_label: str,
 ) -> dict[str, Any]:
-    """The response body ({ok, trace_id, source, scene, outputs_heating, items, fallback, message?}).
+    timer = timer_tool()
+    step = "require_retrieval"
+    status = "failed"
+    body: dict[str, Any] = {}
+    try:
+        stack = require_retrieval(runtime)
+        timer.mark(step)
 
-    input_label names the query image in the logs, e.g. "file:a.jpg" or "url:https://...".
-    """
-    started = time.perf_counter()
-    stack = require_retrieval(runtime)
-    local = await run_in_threadpool(
-        stack.search_uc.execute,
-        image_bytes=image_bytes,
-        scene=scene,
-        top_k=top_k,
-        score_threshold=score_threshold,
-    )
-    self_ms = _elapsed_ms(started)
-    body: dict[str, Any] = {
-        "ok": True,
-        "trace_id": trace_id,
-        "scene": local["scene"],
-        "outputs_heating": bool(local.get("outputs_heating")),
-    }
+        step = "自建库搜索"
+        local = await run_in_threadpool(
+            stack.search_uc.execute,
+            image_bytes=image_bytes,
+            scene=scene,
+            top_k=top_k,
+            score_threshold=score_threshold,
+            trace_id=trace_id,
+        )
+        timer.mark(step)
 
-    global_ms: float | None = None
-    if local["items"]:
-        body.update(source="self", items=local["items"], fallback={"status": "not_needed"})
-    elif not global_fallback:
-        body.update(source="empty", items=[], fallback={"status": "disabled"}, message=_MESSAGES["disabled"])
-    else:
-        global_started = time.perf_counter()
-        try:
-            answer = await run_predict(
-                runtime=runtime,
-                img_bytes=image_bytes,
-                source=input_label,
-                machine_info=machine_info,
-                trace_id=trace_id,
-                save_res=False,
-                search_num=top_k,
-            )
-        except err.AppError as exc:
-            # Not the request's failure: nothing was found in the library either way
-            logger.warning(
-                "auto search: global fallback failed | trace_id=%s | %s: %s", trace_id, exc.code, exc.detail
-            )
-            body.update(
-                source="empty",
-                items=[],
-                fallback={"status": "failed", "error": exc.code, "detail": err.client_detail(exc)},
-                message=_MESSAGES["failed"],
-            )
+        step = "build_response"
+        body = {
+            "ok": True,
+            "trace_id": trace_id,
+            "scene": local["scene"],
+            "outputs_heating": bool(local.get("outputs_heating")),
+        }
+        if local["items"]:
+            body.update(source="self", items=local["items"], fallback={"status": "not_needed"})
+        elif not global_fallback:
+            body.update(source="empty", items=[], fallback={"status": "disabled"}, message=_MESSAGES["disabled"])
         else:
-            cards = _global_cards(answer.get("result"), top_k)
-            if cards:
-                # Global results carry no heating information, whatever the scene
-                body.update(source="global", outputs_heating=False, items=cards, fallback={"status": "hit"})
-            else:
-                body.update(source="empty", items=[], fallback={"status": "empty"}, message=_MESSAGES["empty"])
-        finally:
-            global_ms = _elapsed_ms(global_started)
+            timer.mark("prepare_fallback")
 
-    logger.info(
-        "auto search | trace_id=%s | input=%s | scene=%s | top_k=%s | source=%s | fallback=%s | items=%d | "
-        "self_ms=%s | global_ms=%s | total_ms=%s | machine_info=%s",
-        trace_id, input_label, body["scene"], top_k, body["source"], body["fallback"]["status"],
-        len(body["items"]), self_ms, global_ms, _elapsed_ms(started), machine_info,
-    )
-    return body
+            step = "联网搜索"
+            try:
+                answer = await run_predict(
+                    runtime=runtime,
+                    img_bytes=image_bytes,
+                    source=input_label,
+                    machine_info=machine_info,
+                    trace_id=trace_id,
+                    save_res=False,
+                    search_num=top_k,
+                )
+            except err.AppError as exc:
+                timer.mark(step)
+                step = "build_response"
+                message = f"auto search: global fallback failed | trace_id={trace_id} | {exc.code}: {exc.detail}"
+                logger.warning(message)
+                show_text(message, trace_id=trace_id, logger_level=logging.WARNING)
+                body.update(
+                    source="empty", items=[],
+                    fallback={"status": "failed", "error": exc.code, "detail": err.client_detail(exc)},
+                    message=_MESSAGES["failed"],
+                )
+            else:
+                timer.mark(step)
+                step = "build_response"
+                cards = _global_cards(answer.get("result"), top_k)
+                if cards:
+                    body.update(source="global", outputs_heating=False, items=cards, fallback={"status": "hit"})
+                else:
+                    body.update(source="empty", items=[], fallback={"status": "empty"}, message=_MESSAGES["empty"])
+        timer.mark(step)
+        status = "success"
+        return body
+    finally:
+        if status == "failed":
+            timer.mark(f"{step}_failed")
+        show_string = f"time={timer.summary()}"
+        level = logging.WARNING if status == "failed" or body.get("fallback", {}).get("status") == "failed" else logging.INFO
+        logger.log(level, show_string)
+        show_text(show_string, trace_id=trace_id, logger_level=level)

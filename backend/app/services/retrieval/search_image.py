@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from app.core import errors as err
+from app.core.observability.log_helper import show_text
 from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.embedding_validate import validate_embedding
 from app.core.rules.food_fields import FOOD_FIELDS
@@ -31,8 +32,9 @@ from app.services.retrieval.score_threshold import (
     qdrant_score_threshold,
     resolve_score_threshold,
 )
+from app.utils.timer import timer_tool
 
-logger = logging.getLogger("retrieval.search")
+logger = logging.getLogger("embedsearch")
 
 
 def _as_id_str(value: Any) -> str | None:
@@ -124,96 +126,107 @@ class SearchImageUseCase:
         scene: str | None = None,
         top_k: int = 10,
         score_threshold: float | None = None,
+        trace_id: str | None = None,
     ) -> dict[str, Any]:
         """Search by query image bytes (the HTTP layer downloads img_url inputs)."""
-        if not image_bytes:
-            raise err.validation_error("file or img_url is required")
-        if not (1 <= int(top_k) <= 50):
-            raise err.validation_error("top_k must be in 1..50")
-
-        # The scene first: an unknown or inactive one is refused before any embedding work.
-        scene_meta = lookup_scene(
-            self._metadata,
-            requested_scene_code(scene),
-            unknown=err.search_unknown_scene,
-            failed=err.search_postgres_failed,
-        )
-        active_scene = str(scene_meta["code"])
-        effective_t = resolve_score_threshold(score_threshold)
-        native_thr = qdrant_score_threshold(effective_t)
-
+        timer = timer_tool()
+        trace_id = trace_id or str(uuid4())
+        step = "前处理"
+        completed = False
+        active_scene = scene
         try:
-            vector = self._embedding.embed_bytes(image_bytes)
-        except err.AppError:
-            raise
-        except Exception as exc:
-            raise err.search_bad_image(f"embed failed: {exc}") from exc
+            if not image_bytes:
+                raise err.validation_error("file or img_url is required")
+            if not (1 <= int(top_k) <= 50):
+                raise err.validation_error("top_k must be in 1..50")
 
-        vector = validate_embedding(vector, for_search=True, expected_dim=self._model.dim)
-
-        raw_hits = self._vectors.search(
-            vector,
-            top_k=int(top_k),
-            score_threshold=native_thr,
-            scene=active_scene,
-        )
-
-        if effective_t > 0.0:
-            raw_hits = [
-                h for h in raw_hits if float(h.get("score") or 0) >= effective_t
-            ]
-
-        ids: list[str] = []
-        score_by_id: dict[str, float] = {}
-        for h in raw_hits:
-            pid = _as_id_str(h.get("id"))
-            if not pid:
-                continue
-            ids.append(pid)
-            score_by_id[pid] = float(h.get("score") or 0.0)
-
-        rows = (
-            self._metadata.get_active_by_ids(ids, scene=active_scene) if ids else {}
-        )
-        heating = _outputs_heating(scene_meta)
-        labels = self._scene_labels(scene_meta, rows.values())
-
-        items: list[dict[str, Any]] = []
-        for pid in ids:
-            row = rows.get(pid) or rows.get(pid.lower())
-            if not row:
-                continue
-            category_id = row.get("category_id")
-            mapped = labels is not None and category_id is not None
-            hit = _hit_from_row(
-                row,
-                score_by_id.get(pid),
-                scene_meta=scene_meta,
-                scene_label=labels.get(int(category_id)) if mapped else None,
+            # The scene first: an unknown or inactive one is refused before any embedding work.
+            scene_meta = lookup_scene(
+                self._metadata,
+                requested_scene_code(scene),
+                unknown=err.search_unknown_scene,
+                failed=err.search_postgres_failed,
             )
-            if mapped:
-                hit["details"].setdefault("scene_label", None)
-            items.append(hit)
+            active_scene = str(scene_meta["code"])
+            effective_t = resolve_score_threshold(score_threshold)
+            native_thr = qdrant_score_threshold(effective_t)
+            timer.mark(step)
 
-        if items:
-            return {
-                "source": "self",
-                "scene": active_scene,
-                "outputs_heating": heating,
-                "items": items,
-            }
+            step = "embedding"
+            try:
+                vector = self._embedding.embed_bytes(image_bytes)
+            except err.AppError:
+                raise
+            except Exception as exc:
+                raise err.search_bad_image(f"embed failed: {exc}") from exc
+            vector = validate_embedding(vector, for_search=True, expected_dim=self._model.dim)
+            timer.mark(step)
 
-        logger.info(
-            "self-built empty after join; source=empty scene=%s (FlyB skipped A4)",
-            active_scene,
-        )
-        return {
-            "source": "empty",
-            "scene": active_scene,
-            "outputs_heating": heating,
-            "items": [],
-            "message": f"no local matches for scene={active_scene}",
-        }
+            step = "vector搜索"
+            raw_hits = self._vectors.search(
+                vector,
+                top_k=int(top_k),
+                score_threshold=native_thr,
+                scene=active_scene,
+            )
+            timer.mark(step)
+
+            step = "后处理"
+            if effective_t > 0.0:
+                raw_hits = [h for h in raw_hits if float(h.get("score") or 0) >= effective_t]
+
+            ids: list[str] = []
+            score_by_id: dict[str, float] = {}
+            for h in raw_hits:
+                pid = _as_id_str(h.get("id"))
+                if not pid:
+                    continue
+                ids.append(pid)
+                score_by_id[pid] = float(h.get("score") or 0.0)
+
+            rows = (self._metadata.get_active_by_ids(ids, scene=active_scene) if ids else {})
+
+            heating = _outputs_heating(scene_meta)
+            labels = self._scene_labels(scene_meta, rows.values())
+
+            items: list[dict[str, Any]] = []
+            for pid in ids:
+                row = rows.get(pid) or rows.get(pid.lower())
+                if not row:
+                    continue
+                category_id = row.get("category_id")
+                mapped = labels is not None and category_id is not None
+                hit = _hit_from_row(
+                    row,
+                    score_by_id.get(pid),
+                    scene_meta=scene_meta,
+                    scene_label=labels.get(int(category_id)) if mapped else None,
+                )
+                if mapped:
+                    hit["details"].setdefault("scene_label", None)
+                items.append(hit)
+
+            if items:
+                body = {"source": "self", "scene": active_scene, "outputs_heating": heating, "items": items}
+            else:
+                logger.info("self-built empty after join; source=empty scene=%s (FlyB skipped A4)",active_scene,)
+                body = {
+                    "source": "empty",
+                    "scene": active_scene,
+                    "outputs_heating": heating,
+                    "items": [],
+                    "message": f"no local matches for scene={active_scene}",
+                }
+            timer.mark(step)
+            completed = True
+            return body
+        finally:
+            if not completed:
+                timer.mark(f"{step}_failed")
+            level = logging.INFO if completed else logging.WARNING
+            message = f"自建库耗时：{timer.summary()}"
+            logger.log(level, message)
+            show_text(message, trace_id=trace_id, logger_level=level)
 
     def _scene_labels(
         self, scene_meta: dict[str, Any], rows: Any

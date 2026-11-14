@@ -3,17 +3,16 @@ fallback (app.api.services.auto_search). One route per input, like the global se
 an uploaded file (multipart) or an image URL (JSON)."""
 
 from __future__ import annotations
-
+import logging
 from typing import Any
-
 from fastapi import APIRouter, File, Form, Request, UploadFile
-
 from app.api.deps import require_retrieval
 from app.api.services.auto_search import run_auto_search
 from app.api.uploads import read_upload
 from app.bootstrap.state import get_application_state
 from app.clients.image_fetch import read_url_bytes
 from app.core.middleware import bind_trace_id
+from app.core.observability.log_helper import show_text
 from app.schemas.auto_search import (
     GLOBAL_FALLBACK_DOC,
     MACHINE_INFO_DOC,
@@ -27,7 +26,9 @@ from app.schemas.auto_search import (
     AutoSearchResponse,
     AutoSearchUrlRequest,
 )
+from app.utils.timer import timer_tool
 
+logger = logging.getLogger("autosearch")
 router = APIRouter(prefix="/api/search/auto", tags=["business-search"])
 
 _DESCRIPTION = (
@@ -38,6 +39,25 @@ _DESCRIPTION = (
     "自建库出错（未知场景 SEARCH_UNKNOWN_SCENE、图片无法解码 SEARCH_BAD_IMAGE、检索服务未就绪 NOT_READY 等）"
     "按统一错误格式返回，不走兜底。详见契约 §6.6。"
 )
+
+
+def _log_search_timing(
+    timer: timer_tool,
+    *,
+    input_type: str,
+    params: dict[str, Any],
+    trace_id: str,
+    step: str,
+    completed: bool,
+) -> None:
+    if not completed:
+        timer.mark(step)
+    summary = timer.summary().replace("|| total ", ", 总耗时 ")
+    params_text = ", ".join(f"{key}={value}" for key, value in params.items())
+    message = f"业务搜图({input_type}), 耗时 {summary}, 参数={params_text} "
+    level = logging.INFO if completed else logging.WARNING
+    logger.log(level, message)
+    show_text(message, trace_id=trace_id, logger_level=level)
 
 
 @router.post(
@@ -60,19 +80,42 @@ async def auto_search_by_file(
     """multipart/form-data：file 加上其余表单字段。"""
     runtime = get_application_state(request)
     trace_id = bind_trace_id(request, trace_id)
-    require_retrieval(runtime)  # NOT_READY before reading the upload
-    image_bytes = await read_upload(file, runtime.max_image_bytes)
-    return await run_auto_search(
-        runtime,
-        image_bytes=image_bytes,
-        scene=scene,
-        top_k=top_k,
-        score_threshold=score_threshold,
-        global_fallback=global_fallback,
-        machine_info=machine_info,
-        trace_id=trace_id,
-        input_label=f"file:{file.filename or 'upload'}",
-    )
+    params = {
+        "scene": scene,
+        "top_k": top_k,
+        "score_threshold": score_threshold,
+        "global_fallback": global_fallback,
+        "trace_id": trace_id,
+        "machine_info": machine_info,
+    }
+    timer = timer_tool()
+    step = "图像获取"
+    completed = False
+    try:
+        require_retrieval(runtime)  # NOT_READY before reading the upload
+        image_bytes = await read_upload(file, runtime.max_image_bytes)
+        timer.mark(step)
+
+        step = "结果获取"
+        result = await run_auto_search(
+            runtime,
+            image_bytes=image_bytes,
+            scene=scene,
+            top_k=top_k,
+            score_threshold=score_threshold,
+            global_fallback=global_fallback,
+            machine_info=machine_info,
+            trace_id=trace_id,
+            input_label=f"file:{file.filename or 'upload'}",
+        )
+        timer.mark(step)
+        completed = True
+        return result
+    finally:
+        _log_search_timing(
+            timer, input_type="上传文件", params=params, trace_id=trace_id,
+            step=step, completed=completed,
+        )
 
 
 @router.post(
@@ -86,20 +129,36 @@ async def auto_search_by_url(request: Request, body: AutoSearchUrlRequest) -> An
     """application/json：{image_url, scene, top_k, score_threshold, global_fallback, trace_id, machine_info}。"""
     runtime = get_application_state(request)
     trace_id = bind_trace_id(request, body.trace_id)
-    require_retrieval(runtime)  # NOT_READY before downloading anything
-    image_bytes = await read_url_bytes(
-        body.image_url,
-        max_image_bytes=runtime.max_image_bytes,
-        timeout_s=runtime.http_timeout,
-    )
-    return await run_auto_search(
-        runtime,
-        image_bytes=image_bytes,
-        scene=body.scene,
-        top_k=body.top_k,
-        score_threshold=body.score_threshold,
-        global_fallback=body.global_fallback,
-        machine_info=body.machine_info,
-        trace_id=trace_id,
-        input_label=f"url:{body.image_url}",
-    )
+    params = {**body.model_dump(mode="json"), "trace_id": trace_id}
+    timer = timer_tool()
+    step = "图像获取"
+    completed = False
+    try:
+        require_retrieval(runtime)  # NOT_READY before downloading anything
+        image_bytes = await read_url_bytes(
+            body.image_url,
+            max_image_bytes=runtime.max_image_bytes,
+            timeout_s=runtime.http_timeout,
+        )
+        timer.mark(step)
+
+        step = "结果获取"
+        result = await run_auto_search(
+            runtime,
+            image_bytes=image_bytes,
+            scene=body.scene,
+            top_k=body.top_k,
+            score_threshold=body.score_threshold,
+            global_fallback=body.global_fallback,
+            machine_info=body.machine_info,
+            trace_id=trace_id,
+            input_label=f"url:{body.image_url}",
+        )
+        timer.mark(step)
+        completed = True
+        return result
+    finally:
+        _log_search_timing(
+            timer, input_type="图片链接", params=params, trace_id=trace_id,
+            step=step, completed=completed,
+        )

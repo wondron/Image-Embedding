@@ -38,7 +38,6 @@ class FoodService:
 
 
     def detect(self, image_data: bytes, search_num: int = None, machine_info: str = "", trace_id: str = "", save_result: bool = False):
-        logger.info('start, trace_id: %s, search_num: %s, save_result: %s, machine_info: %s', trace_id, search_num, save_result, machine_info)
         timer_tools = timerUtils.timer_tool()
         
         img_bgr = None
@@ -58,7 +57,7 @@ class FoodService:
             res = filtered
         timer_tools.mark('clip_dtct')
 
-        timer_summary = timer_tools.summary()
+        timer_summary = "联网搜索：" + timer_tools.summary()
         logger.info(timer_summary)
         show_text(timer_summary, trace_id)
         return res

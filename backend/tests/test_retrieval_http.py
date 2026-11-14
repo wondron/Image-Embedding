@@ -201,7 +201,7 @@ class RetrievalHttpTests(unittest.TestCase):
         response = self.client.post("/api/search", json={"img_url": "https://x/a.jpg", "trace_id": "t-42"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["trace_id"], "t-42")
-        self.assertNotIn("trace_id", self.calls["search"])  # use cases know nothing about the wire
+        self.assertEqual(self.calls["search"]["trace_id"], "t-42")  # correlate per-step timing logs
 
     def test_bad_score_threshold_literal_has_its_own_code(self):
         response = self.client.post("/api/search", data={"img_url": "https://x/a.jpg", "score_threshold": "high"})

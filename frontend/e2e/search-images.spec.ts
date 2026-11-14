@@ -39,7 +39,7 @@ async function mockApi(page: Page, { hits = [] as unknown[], predict = null as u
     if (path === '/api/search') {
       return route.fulfill({ json: { ok: true, trace_id: 't', source: 'self', scene: 'general', outputs_heating: false, items: hits } })
     }
-    if (path.startsWith('/api/predict/')) return route.fulfill({ json: predict })
+    if (path.startsWith('/api/search/global/') || path.startsWith('/api/predict/')) return route.fulfill({ json: predict })
     const file = /^\/api\/images\/([^/]+)\/file$/.exec(path)
     if (file) {
       files.push(`${file[1]}:${url.searchParams.get('variant')}`)
@@ -168,7 +168,7 @@ test('两个通道的结果卡一样：详情里都显示标签和描述，结�
     await page.locator('.result-card').getByRole('button', { name: `查看图片详情：${name}` }).click()
     return page.getByRole('dialog', { name: '图片详情' })
   }
-  const field = (dialog: Locator, name: string) => dialog.locator('.detail-fields > div').filter({ hasText: name }).locator('dd')
+  const field = (dialog: Locator, name: string) => dialog.locator('.detail-fields > div').filter({ has: page.locator('dt').getByText(name, { exact: true }) }).locator('dd')
 
   await searchByUrl(page)
   await page.getByLabel('搜索结果标题或来源').fill('带皮')

@@ -103,6 +103,7 @@ def setup_logger(
     formatter = CustomFormatter(name_width=12)
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
     for h in root_logger.handlers[:]:
         root_logger.removeHandler(h)

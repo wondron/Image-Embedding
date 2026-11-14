@@ -22,7 +22,7 @@ import { SceneConfigPage } from './pages/scenes/SceneConfigPage'
 import { SceneMembershipPanel } from './features/scene-memberships/SceneMembershipPanel'
 import {
   AUTO_TOP_K_DEFAULT, AUTO_TOP_K_MAX, AUTO_TOP_K_MIN,
-  SourceBadge, displayCategoryLabel, getThumbnailSources, searchAutoImages, searchGlobalImages, searchLocalImages,
+  SourceBadge, getThumbnailSources, searchAutoImages, searchGlobalImages, searchLocalImages,
   type SearchChannel, type SearchImage, type SearchResponse,
 } from './entities/search-result'
 import { pingApi, useApiBase } from './shared/api'
@@ -34,7 +34,7 @@ import {
   SCORE_DEFAULT,
   clampScoreThreshold,
 } from './features/score-threshold'
-import { HeatingFields, SearchNeverEmpty, SearchNoMatch, SearchFilteredEmpty } from './features/search'
+import { HeatingFields, ResultMetadata, ResultSceneLabel, ResultTags, SearchNeverEmpty, SearchNoMatch, SearchFilteredEmpty } from './features/search'
 import { SearchNumControl, SEARCH_NUM_DEFAULT, type CountRange } from './features/search-num'
 
 type View = 'search' | ManagementView
@@ -131,12 +131,14 @@ function ResultTable({ items, onDetail, onDownload, downloading, selected, onTog
   selected: Set<string>; onToggle: (id: string) => void; outputsHeating?: boolean
 }) {
   return <div className="result-table-scroll"><table className="result-table">
-    <thead><tr><th>选择</th><th>图片</th><th>图片名称</th><th>相似度</th><th>类别</th><th>来源</th><th>通道</th><th>操作</th></tr></thead>
+    <thead><tr><th>选择</th><th>图片</th><th>类别</th><th>场景标签</th><th>标签</th><th>相似度</th><th>来源</th><th>通道</th><th>操作</th></tr></thead>
     <tbody>{items.map(item => <tr key={item.id} className={selected.has(item.id) ? 'result-row-selected' : ''}>
       <td><input type="checkbox" className="result-checkbox" aria-label={`选择图片：${item.title}`} checked={selected.has(item.id)} onChange={() => onToggle(item.id)} /></td>
       <td><button className="table-image" onClick={() => onDetail(item)} aria-label={`查看图片详情：${item.title}`}><ResultThumbnail item={item} /></button></td>
-      <th scope="row"><button className="table-title" onClick={() => onDetail(item)}>{item.title}</button></th>
-      <td><Score value={item.similarity} /></td><td>{displayCategoryLabel(item) ?? '—'}{(item.outputsHeating || outputsHeating) ? <> · <HeatingFields show compact heatingGroup={item.heatingGroup} foodState={item.foodState} /></> : null}</td><td>{item.siteName ?? '—'}</td><td><SourceBadge source={item.source} /></td>
+      <th scope="row"><button className="table-title" title={item.category ?? '未分类'} onClick={() => onDetail(item)}>{item.category ?? '未分类'}</button></th>
+      <td><ResultSceneLabel value={item.sceneLabel} />{(item.outputsHeating || outputsHeating) && <div className="result-table-heating"><HeatingFields show compact heatingGroup={item.heatingGroup} foodState={item.foodState} /></div>}</td>
+      <td className="result-table-tags"><ResultTags value={item.tags} /></td>
+      <td><Score value={item.similarity} /></td><td>{item.siteName ?? '—'}</td><td><SourceBadge source={item.source} /></td>
       <td><div className="table-actions"><button className="btn btn-secondary" onClick={() => onDetail(item)}>详情</button><button className="btn btn-secondary" disabled={Boolean(downloading)} aria-label={`下载图片：${item.title}`} onClick={() => onDownload(item)}>{downloading === item.id ? <LoaderCircle size={13} className="spin" /> : <ArrowDownToLine size={13} />}下载</button></div></td>
     </tr>)}</tbody>
   </table></div>
@@ -312,8 +314,8 @@ export default function App() {
   }
 
   const items = response?.items ?? []
-  const categories = [...new Set(items.flatMap(item => { const label = displayCategoryLabel(item); return label ? [label] : [] }))]
-  const filtered = items.filter(item => (category === 'all' || displayCategoryLabel(item) === category) && (!keyword || `${item.title} ${item.tags} ${displayCategoryLabel(item) ?? ''}`.toLocaleLowerCase().includes(keyword.toLocaleLowerCase())))
+  const categories = [...new Set(items.flatMap(item => item.category ? [item.category] : []))]
+  const filtered = items.filter(item => (category === 'all' || item.category === category) && (!keyword || `${item.title} ${item.tags} ${item.category ?? ''} ${item.sceneLabel ?? ''} ${item.siteName ?? ''}`.toLocaleLowerCase().includes(keyword.toLocaleLowerCase())))
   const sorted = sort === 'similarity' ? [...filtered].sort((a, b) => (b.similarity ?? -Infinity) - (a.similarity ?? -Infinity)) : filtered
   const pages = Math.max(1, Math.ceil(sorted.length / pageSize))
   const currentPage = Math.min(page, pages)
@@ -476,7 +478,19 @@ export default function App() {
                     onGoImport={() => navigate('import')}
                   />)
               : resultLayout === 'list' ? <ResultTable items={visible} outputsHeating={response?.outputsHeating} onDetail={setDetail} onDownload={item => void saveImage(item)} downloading={downloading} selected={selected} onToggle={toggleSelected} />
-              : <div className="result-grid">{visible.map(item => <article className={`result-card ${selected.has(item.id) ? 'result-selected' : ''}`} key={item.id}><label className="image-select"><input className="result-checkbox" type="checkbox" aria-label={`选择图片：${item.title}`} checked={selected.has(item.id)} onChange={() => toggleSelected(item.id)} /></label><button className="result-image-button" onClick={() => setDetail(item)} aria-label={`查看图片详情：${item.title}`}><ResultThumbnail item={item} /><Score value={item.similarity} /><SourceBadge source={item.source} /><span className="image-hover-hint"><Search size={15} />查看详情</span></button><div className="result-card-body"><h3><button onClick={() => setDetail(item)}>{item.title}</button></h3><div className="result-card-meta"><span>{displayCategoryLabel(item) ?? '—'}</span>{(item.outputsHeating || response?.outputsHeating) && <HeatingFields show compact heatingGroup={item.heatingGroup} foodState={item.foodState} />}<button className="icon-button download-button" title="下载图片" aria-label={`下载图片：${item.title}`} disabled={Boolean(downloading)} onClick={() => void saveImage(item)}>{downloading === item.id ? <LoaderCircle size={16} className="spin" /> : <ArrowDownToLine size={16} />}</button></div></div></article>)}</div>}
+              : <div className="result-grid">{visible.map(item => <article className={`result-card ${selected.has(item.id) ? 'result-selected' : ''}`} key={item.id}>
+                  <label className="image-select"><input className="result-checkbox" type="checkbox" aria-label={`选择图片：${item.title}`} checked={selected.has(item.id)} onChange={() => toggleSelected(item.id)} /></label>
+                  <button className="result-image-button" onClick={() => setDetail(item)} aria-label={`查看图片详情：${item.title}`}>
+                    <ResultThumbnail item={item} /><Score value={item.similarity} /><SourceBadge source={item.source} /><span className="image-hover-hint"><Search size={15} />查看详情</span>
+                  </button>
+                  <div className="result-card-body">
+                    <ResultMetadata item={item} onDetail={() => setDetail(item)} />
+                    <div className="result-card-meta">
+                      {(item.outputsHeating || response?.outputsHeating) && <HeatingFields show compact heatingGroup={item.heatingGroup} foodState={item.foodState} />}
+                      <button className="icon-button download-button" title="下载图片" aria-label={`下载图片：${item.title}`} disabled={Boolean(downloading)} onClick={() => void saveImage(item)}>{downloading === item.id ? <LoaderCircle size={16} className="spin" /> : <ArrowDownToLine size={16} />}</button>
+                    </div>
+                  </div>
+                </article>)}</div>}
             </div>
             <div className="results-footer"><span>{searched ? `共 ${items.length} 张图片${filtered.length !== items.length ? ` · 筛选后 ${filtered.length} 张` : ''}` : '搜索结果将在这里展示'}{items.length > 0 && !categories.length && <small> · 暂无类别数据</small>}</span><div className="pagination"><button className="icon-button" aria-label="上一页" disabled={currentPage <= 1 || !items.length} onClick={() => setPage(currentPage - 1)}><ArrowLeft size={15} /></button><span>{currentPage} <small>/ {pages}</small></span><button className="icon-button" aria-label="下一页" disabled={currentPage >= pages || !items.length} onClick={() => setPage(currentPage + 1)}><ArrowRight size={15} /></button></div></div>
           </section>
@@ -489,7 +503,7 @@ export default function App() {
       <div className="detail-content">
         <section className="detail-section"><h3>检索信息</h3>
           <div className="detail-summary"><h4>{detail.title}</h4><Score value={detail.similarity} /></div>
-          <dl className="detail-fields"><div><dt>食材类别</dt><dd>{displayCategoryLabel(detail) ?? '未提供类别'}</dd></div><div><dt>标签</dt><dd>{detail.tags || '未提供'}</dd></div>
+          <dl className="detail-fields"><div><dt>类别</dt><dd>{detail.category ?? '未分类'}</dd></div><div><dt>场景标签</dt><dd><ResultSceneLabel value={detail.sceneLabel} /></dd></div><div><dt>标签</dt><dd>{detail.tags || '无标签'}</dd></div>
           {(detail.outputsHeating || response?.outputsHeating) && (
             <div className="detail-heating"><dt>加热信息</dt><dd><HeatingFields show heatingGroup={detail.heatingGroup} foodState={detail.foodState} /></dd></div>
           )}<div><dt>图片尺寸</dt><dd>{detail.width && detail.height ? `${detail.width} × ${detail.height} px` : '未提供'}</dd></div><div><dt>图片来源</dt><dd>{detail.siteName ?? '未提供'}</dd></div><div><dt>检索通道</dt><dd>{channelText(detail.source)}</dd></div><div><dt>结果编号</dt><dd className="monospace">{detail.id}</dd></div></dl>
@@ -504,7 +518,7 @@ export default function App() {
     </Dialog>}
     {downloadItems && <DownloadDialog items={downloadItems} apiBase={apiBase} onClose={() => setDownloadItems(null)} />}
     {settingsOpen && <Dialog title="搜索服务连接" onClose={() => setSettingsOpen(false)}><div className="settings-content"><p>连接现有的图像搜索服务。留空时使用当前站点的接口。</p><label htmlFor="api-base">服务地址</label><input className="input" id="api-base" type="url" placeholder="默认使用站点 /api" value={apiDraft} onChange={event => setApiDraft(event.target.value)} /><small>例如 http://127.0.0.1:8320，不包含 /api 路径。跨域连接需服务端允许访问。</small>{apiDraft.trim() && !safeHttpUrl(apiDraft.trim()) && <p className="inline-error">请输入 HTTP 或 HTTPS 地址。</p>}<div className="connection-info"><span className={`status-dot ${connection}`} />{connection === 'online' ? '接口可连接' : connection === 'checking' ? '正在检查连接…' : '当前未连接，请检查服务地址与后端运行状态'}<button className="text-button" onClick={() => void checkConnection()}>重新检查</button></div><div className="dialog-actions"><button className="btn btn-secondary" onClick={() => setSettingsOpen(false)}>取消</button><button className="btn btn-primary" disabled={Boolean(apiDraft.trim() && !safeHttpUrl(apiDraft.trim()))} onClick={saveSettings}><Check size={16} />保存连接</button></div></div></Dialog>}
-    {helpOpen && <Dialog title="开始使用食图" onClose={() => setHelpOpen(false)}><div className="help-content"><div><Search size={21} /><section><h3>以图搜图</h3><p>上传图片或输入可公开访问的图片直链，在自建库中检索。默认场景为「通用」（general）；可切换场景与拒识阈值后点「开始搜索」。切到「现网 Global」或批量搜索时，可设置返回数量（1–20 条）。「业务搜图」走给业务方的接口：先查自建库，没有达到阈值的结果时可用现网 Global 兜底（结果卡标「Global」），返回数量对两个通道都生效。空库时请先去「上传与导入」入库（PG + S3），不以 FlyB 外搜兜底为完成标准。</p></section></div><div><ArrowDownToLine size={21} /><section><h3>查看与下载</h3><p>点击结果打开详情，勾选图片后可「批量下载」。一体机场景下结果会展示加热组与食物状态（缺字段显示「—」）。</p></section></div><div><FolderOpen size={21} /><section><h3>图库与入库</h3><p>图库按场景筛选（默认 general），缩略图使用 S3 https 地址。入库时可设置类别（取自「食材管理」的类别树）、标签、描述、食物标注、来源与许可；场景按所选类别的规则预览，和规则不同的勾选入库后写成人工纳入 / 排除。单张图片可单独标注。</p></section></div><div className="help-note">相似度仅在服务返回分数时展示；类别优先展示 scene_label，否则回落通用类别。</div></div></Dialog>}
+    {helpOpen && <Dialog title="开始使用食图" onClose={() => setHelpOpen(false)}><div className="help-content"><div><Search size={21} /><section><h3>以图搜图</h3><p>上传图片或输入可公开访问的图片直链，在自建库中检索。默认场景为「通用」（general）；可切换场景与拒识阈值后点「开始搜索」。切到「现网 Global」或批量搜索时，可设置返回数量（1–20 条）。「业务搜图」走给业务方的接口：先查自建库，没有达到阈值的结果时可用现网 Global 兜底（结果卡标「Global」），返回数量对两个通道都生效。空库时请先去「上传与导入」入库（PG + S3），不以 FlyB 外搜兜底为完成标准。</p></section></div><div><ArrowDownToLine size={21} /><section><h3>查看与下载</h3><p>点击结果打开详情，勾选图片后可「批量下载」。一体机场景下结果会展示加热组与食物状态（缺字段显示「—」）。</p></section></div><div><FolderOpen size={21} /><section><h3>图库与入库</h3><p>图库按场景筛选（默认 general），缩略图使用 S3 https 地址。入库时可设置类别（取自「食材管理」的类别树）、标签、描述、食物标注、来源与许可；场景按所选类别的规则预览，和规则不同的勾选入库后写成人工纳入 / 排除。单张图片可单独标注。</p></section></div><div className="help-note">相似度仅在服务返回分数时展示；结果分别显示原始类别、场景标签和图片标签。场景标签未配置时显示「未映射」。</div></div></Dialog>}
     {/* The one popup every page signals through notify() */}
     <StatusOverlay />
   </div></EnumCatalogProvider></SceneApiContext.Provider>

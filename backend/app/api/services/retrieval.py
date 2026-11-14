@@ -228,6 +228,7 @@ async def search_from_request(runtime: ApplicationState, request: Request) -> Di
         scene=params.scene,
         top_k=params.top_k,
         score_threshold=params.score_threshold,
+        trace_id=trace_id,
     )
     return {"ok": True, "trace_id": trace_id, **result}
 
