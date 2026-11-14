@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, FolderTree, LoaderCircle, Plus, RotateCcw, Search, X } from 'lucide-react'
+import { AlertTriangle, Download, FolderTree, LoaderCircle, Plus, RotateCcw, Search, X } from 'lucide-react'
 import {
   buildCategoryTree,
   categoryLabel,
@@ -22,6 +22,7 @@ import { CategoryEditorDialog, type CategoryEditorTarget, type CategorySaveReque
 import { CategoryTable, rowElementId } from './CategoryTable'
 import { NO_CATEGORY_FILTER, categoryScopeOptions, categoryTableView, type CategoryStatusFilter, type CategoryTableFilter } from './tableModel'
 import { deleteFailureText, loadFailureText, saveFailureText, savedNotice } from './messages'
+import { buildCategoryTreeExport, downloadCategoryTree } from './export'
 import '../../components/ManagementViews.css'
 import './category-config.css'
 
@@ -96,6 +97,7 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
   const inactiveCount = useMemo(() => nodes.filter(node => !node.isActive).length, [nodes])
   const busy = Boolean(removing?.submitting)
   const failedEmpty = Boolean(listFailure) && nodes.length === 0
+  const exportDisabled = !loadedOnce || loading || Boolean(listFailure) || nodes.length === 0 || busy
 
   const loadTree = useCallback(async (signal: AbortSignal): Promise<LoadState> => {
     const gen = ++listGen.current
@@ -335,6 +337,17 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
     }
   }
 
+  function exportTree() {
+    if (exportDisabled) return
+    try {
+      const file = buildCategoryTreeExport(tree, rootCodes, heatingGroups)
+      downloadCategoryTree(file)
+      notify.success(`已发起类别树下载，共 ${file.count} 个类别。`)
+    } catch {
+      notify.error('类别树文件生成失败，请重试。', { title: '下载失败' })
+    }
+  }
+
   const removingEntry = removing ? tree.byId.get(removing.node.id) ?? { node: removing.node, depth: 0, children: [] } : null
   const connection = loading && !loadedOnce ? '类别树加载中…' : failedEmpty ? '类别树加载失败' : listFailure ? '刷新失败' : '类别树已接入'
 
@@ -372,6 +385,13 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
         <option value="inactive">仅停用</option>
       </select>
       <button type="button" className="mg-btn mg-primary" disabled={busy || failedEmpty || !loadedOnce} onClick={openCreate}><Plus size={17} />新建类别</button>
+      <button
+        type="button"
+        className="mg-btn mg-secondary"
+        disabled={exportDisabled}
+        title="下载完整类别树（JSON），包含停用类别，不受筛选或折叠影响"
+        onClick={exportTree}
+      ><Download size={17} />下载类别树</button>
       <span className={`mg-status ct-connection${failedEmpty ? ' is-error' : loadedOnce && !listFailure ? ' is-online' : ''}`}><span />{connection}</span>
     </div>
 
