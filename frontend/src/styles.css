@@ -572,6 +572,17 @@ main { flex: 1; min-height: 0; width: 100%; max-width: none; padding: 14px; marg
 .scene-select .mg-select {
   width: 100%;
 }
+/* Search sidebar only: scene label and refresh above the existing select. */
+.scene-select.search-scene-select {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  min-width: 0;
+}
+.search-scene-select > .scene-select-label { grid-area: 1 / 1; }
+.search-scene-select > .text-button { grid-area: 1 / 2; justify-self: end; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.search-scene-select > select { grid-row: 2; grid-column: 1 / -1; min-width: 0; max-width: 100%; }
+.search-scene-select > .mg-form-error { grid-column: 1 / -1; min-width: 0; overflow-wrap: anywhere; }
 .query-scene-score {
   display: flex;
   flex-direction: column;

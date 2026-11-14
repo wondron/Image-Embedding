@@ -447,6 +447,7 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 |---|---|---|
 | **Index** `POST /api/index` | 本地 path 入库、scenes JSON、BIGINT id | 收字节或可拉 URL → 算 sha256/uuid → 写 S3 → 写 `images` → embed → upsert **current** collection；场景经规则/`image_scenes`；**无 path**。**2026-11-11**：multipart / JSON 另可传 `label_status`（`auto`/`verified`，要有类别）、`source_type`、`license`（取值见 `/api/enums`，不传为 `user_upload` / `unknown`）；`indexed[].created` 为 `false` 表示相同图片此前已入库、沿用首次的标注 |
 | **Search** `POST /api/search` | `scene` 默认 `normal`；拒识；仅 normal 空→FlyB | `scene` 改为默认 **`general`**（A5）；按 payload `scenes` 过滤；场景标签投票；`outputs_heating` 附加字段；**`score_threshold` 沿用 MVP（A6）**；自建空 → **`source=empty`**；**FlyB 编排 OUT OF SCOPE（A4 / M0）** |
+| **业务搜图** `POST /api/search/auto/file`、`POST /api/search/auto/url`（**2026-11-13 新增**） | 无 | 给业务方的统一入口：自建库优先，自建库没有达到阈值的结果且请求 `global_fallback=true` 时用现网 Global 兜底；`top_k`（1–20）对两个通道都生效；结果卡同 §6.1.1，`source` 为 `self` / `global` / `empty`，`fallback.status` 说明兜底情况；Global 失败不让请求失败。原 `/api/search`、`/api/search/global/*` 不变。见 §6.6 |
 | **List** `GET /api/images` | 分页、scene、title/category、仅 active | 无 soft-status：未删即在库；scene 成员过滤；返回 `original_url`/`thumb_url`、类别树字段、场景 codes；category 改 ID/code。**2026-11-11**：新增 `category_id`（正整数，这个类别及其所有下级类别，ltree 子树；未标注的图片不匹配）和 `label_status`（`unlabeled`/`auto`/`verified`，非法值 422）筛选；原 `category`（编码 / 名称 / ID，只匹配一个类别）保留 |
 | **单图** `/api/images/{image_id}`（**已落地 2026-11-11**） | 无 | `GET` 详情（全部字段 + 向量写入记录 + 当前 collection 里的向量状态 `synced`/`stale`/`missing`/`unavailable`）、`PATCH` 改类别 / 标注状态 / 描述 / 标签 / 食物标注（提交后推 payload）、`POST …/vector-sync` 重推这张图的 payload、`DELETE` 删除、`GET …/file` 读回存储里的缩略图或原图。见 §6.3。新错误码 `IMAGE_NOT_FOUND` 404 |
 | **类别** `/api/categories`（**已落地 2026-11-10**） | 无独立 API | `GET /api/categories` 返回整棵树（不分页）`{ ok, categories: CategoryItem[], heating_groups: [{id, code, name}], root_codes: string[] }`，节点按「父在子前、同级 `sort_order`、`id`」排好；`POST /api/categories`（201）新建；`PATCH /api/categories/{id}` 只改请求里给了的字段（`parent_id` 换父节点，整棵子树一起移动，并按新父级编码与当前节点最后一段递归更新所有后代编码，`null` 移到根；只改 `code` 时也递归更新后代编码；写入前统一检查大小写冲突和长度，失败整体回滚；`names` 给了就整体替换；`heating_group_id: null` 清空）；`DELETE /api/categories/{id}` 返回 `{ ok, deleted: {id, code} }`。`CategoryItem` = `{ id, code, parent_id, path, name, names: [{lang, name, kind}], cuisines, heating_group, sort_order, is_active, image_count, scene_rule_count, created_at, updated_at }`（`name` 是中文主名；`cuisines` / `heating_group` 是节点自己设的，不含沿用祖先的）。规则：`code` 匹配 `^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)*$`，保留大小写、按 `lower(code)` 全局唯一（迁移 `20261113_0010` 新增唯一表达式索引，历史冲突须手动处理），同一节点仅修改大小写允许；根节点只能用六个域的编码（ingredient / dish / dessert / beverage / mixed / other；新建、移到根、给根改编码时校验），新增或移到根层级时在目录写锁内检查根节点总数最多六个（含停用和旧根节点）；`names` 必须含中文（`zh`）主名，每种语言至多一个主名；不能移到自己或子孙下面；还有子类别、图片或场景规则引用时不能删除（场景规则不再被级联悄悄删掉）。错误码 `CATEGORY_NOT_FOUND` 404、`CATEGORY_CODE_EXISTS` 409、`CATEGORY_IN_USE` 409、`CATEGORY_POSTGRES_FAILED` 502、`VALIDATION_ERROR` 422。成功体不带 `trace_id`（在响应头 `X-Trace-Id`）。字段和上限见 `backend/app/schemas/categories.py`、`backend/app/core/category_rules.py`。加热组只随列表只读返回，管理仍 **TBD**。**2026-11-11 起**移动类别（`parent_id` 变化）或改菜系（集合有变化）时，同一事务里重算标在该节点及其子孙上的图片的 `image_scenes`，有效场景集合变化的图片 `payload_version` +1；提交后检索栈可用时把这些图片的 payload 推到当前 collection（一次请求至多 2000 张，分批），结果在 `PATCH` 成功体的 `scene_sync`：`{ images, changed, pushed, pending, vector_sync: pushed\|partial\|not_ready\|failed, sync_required }`，其余修改为 `null`；推送失败不影响 200，没推上的由后台对账补上（§2.11 同步规则下的「后台对账」） |
@@ -932,6 +933,97 @@ PATCH 字段（不传 = 不变）：
 
 ---
 
+## 6.6 业务搜图：自建库优先，Global 兜底（2026-11-13 · 本地实现，未测试）
+
+给业务方（设备、业务后台）的一个搜图入口：先查自建库；自建库没有达到阈值的结果、且请求开启了兜底时，再用现网 Global 搜图，返回最终结果。原有 `POST /api/search`（只查自建库，`source` 只有 `self` / `empty`）和 `POST /api/search/global/file`、`/url` 不变。
+
+代码：路由 `backend/app/api/v1/auto_search.py`，编排 `backend/app/api/services/auto_search.py`，wire `backend/app/schemas/auto_search.py`。两个通道都走现有链路：自建库同 `POST /api/search` 的用例，Global 同 `POST /api/search/global/*`（`FLAB_CONFIG`，相似度过滤按 `GLOBAL_FILTER`）。查询图只读一次（上传或下载），两个通道共用。
+
+### 6.6.1 请求
+
+| 接口 | 请求体 |
+|---|---|
+| `POST /api/search/auto/file` | `multipart/form-data`：`file` 加下表其余字段（表单字段） |
+| `POST /api/search/auto/url` | `application/json`：`image_url` 加下表其余字段；**未知字段返回 422**，避免 `img_url`、`search_num`、`global_switch` 这类旧名或拼错的参数被悄悄忽略 |
+
+| 参数 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `file` / `image_url` | 文件 / `string` | 必填 | 查询图片，最大 15 MB。`image_url` 由服务端下载，只允许公网 http(s)，规则同其他按 URL 搜图的接口 |
+| `scene` | `string` | `general` | 检测场景 code（`GET /api/scenes`），如 `oven`（一体机）、`range_hood`（抽油烟机）。只作用于自建库：按场景过滤，场景类别名和加热信息也按它；未知或停用的场景返回 `SEARCH_UNKNOWN_SCENE` 422。Global 不分场景 |
+| `top_k` | `integer` | `10` | 最多返回多少条，1–20。自建库：相似度达到阈值的前 `top_k` 条；Global：向上游要 `top_k` 条（即 Global 接口的 `search_num`）。上限 20 是 Global 的上限 |
+| `score_threshold` | `number` | 0.55 | 自建库的相似度阈值，规则同 `POST /api/search`（§3.2.1）：`0` 表示不设阈值（总是有结果，不会走兜底），其余 0.30–1，超出返回 `SEARCH_BAD_SCORE_THRESHOLD` 422 |
+| `global_fallback` | `boolean` | `false` | 自建库没有结果时是否用 Global 兜底。Global 是外部付费服务，没命中的请求会多花几秒：上游超时 `FLAB_CONFIG.Timeout`，开了 `GLOBAL_FILTER.switch` 还要下载候选图做比对 |
+| `trace_id` | `string` | 服务端生成 | 1–64 位字母、数字或 `. _ : -`，原样回在响应体 `trace_id` 和响应头 `X-Trace-Id`；不传或不合规时由服务端生成。也可以用请求头 `X-Trace-Id` 传；参数校验失败（422）的响应只认请求头 |
+| `machine_info` | `string` | — | 调用方设备信息（如设备型号），只写日志，最长 128 个字符 |
+
+### 6.6.2 流程
+
+1. 自建库：按 `scene` 过滤，取相似度 ≥ 阈值的前 `top_k` 条。有结果 → `source=self`。
+2. 自建库没有结果：`global_fallback=false` → `source=empty`；`true` → 用同一张图查 Global，有结果 → `source=global`，没有 → `source=empty`。
+3. 只有「自建库查询成功但没有结果」才兜底。自建库出错（未知场景、图片无法解码、检索服务未就绪、向量库 / 数据库失败）按统一错误格式返回，不走 Global。Global 兜底失败不让请求失败：返回空结果，`fallback.status=failed` 并给出错误码，调用方能区分「没找到」和「兜底没跑成」。
+
+### 6.6.3 响应（`AutoSearchResponse`）
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `ok` | `boolean` | 成功为 `true`；没有结果、兜底失败也是 `true` |
+| `trace_id` | `string` | 同响应头 `X-Trace-Id` |
+| `source` | `"self" \| "global" \| "empty"` | `items` 来自哪里 |
+| `scene` | `string` | 实际使用的场景 code |
+| `outputs_heating` | `boolean` | `items` 是否带加热信息：`self`、`empty` 按场景配置；`global` 总是 `false`（Global 结果没有类别和加热信息） |
+| `items` | `array` | 结果卡（§6.1.1，两个通道同形：顶层 `tags` / `description` / `original_url` / `similarity`，其余在 `details`）。`source=self` 的 `details` 同 `POST /api/search`（`id`、`category`、`scene_label`、加热信息等）；`source=global` 的同 Global 搜图（`rank`、`page_url`、`site`、`images[]` 等）。自建库按相似度从高到低，Global 按上游排名；`empty` 时为 `[]` |
+| `fallback` | `object` | 总是出现：`status` 见下表；`status=failed` 时另有 `error`（错误码）和 `detail`（说明） |
+| `message` | `string` | 没有结果时给人看的说明，可选 |
+
+| `fallback.status` | `source` | 含义 |
+|---|---|---|
+| `not_needed` | `self` | 自建库有结果，没有走兜底 |
+| `disabled` | `empty` | 自建库没有结果，`global_fallback=false` |
+| `hit` | `global` | Global 有结果 |
+| `empty` | `empty` | Global 也没有结果（含上游的空结果响应） |
+| `failed` | `empty` | Global 失败，`error` 如 `UPSTREAM_TIMEOUT`、`UPSTREAM_ERROR`、`NOT_READY`（Global 服务没有初始化）、`PREDICT_FAILED` |
+
+### 6.6.4 错误
+
+统一错误格式（§6）：`VALIDATION_ERROR` 422（参数不合法，如 `top_k` 超范围、JSON 里有未知字段）、`SEARCH_BAD_SCORE_THRESHOLD` 422、`SEARCH_UNKNOWN_SCENE` 422、`SEARCH_BAD_IMAGE` 422、`EMPTY_FILE` 400、`FILE_TOO_LARGE` 413、`INVALID_URL` 422、`FORBIDDEN_HOST` 403、`DOWNLOAD_FAILED` 502、`DOWNLOAD_TIMEOUT` 504、`SEARCH_QDRANT_FAILED` / `SEARCH_POSTGRES_FAILED` 502、`NOT_READY` 503（自建检索未就绪）。Global 的失败不在这里，见 `fallback.status=failed`。
+
+### 6.6.5 示例
+
+```http
+POST /api/search/auto/url
+Content-Type: application/json
+X-Trace-Id: biz-20261113-0001
+
+{"image_url": "https://example.com/food.jpg", "scene": "oven", "top_k": 5, "global_fallback": true, "machine_info": "device-model-001"}
+```
+
+```shell
+curl -X POST "http://<host>:8320/api/search/auto/file" \
+  -H "X-Trace-Id: biz-20261113-0002" \
+  -F "file=@food.jpg" -F "scene=oven" -F "top_k=5" -F "global_fallback=true"
+```
+
+自建库命中：
+
+```json
+{"ok": true, "trace_id": "biz-20261113-0001", "source": "self", "scene": "oven", "outputs_heating": true,
+ "items": [{"tags": "带骨", "description": "煎牛排", "original_url": "https://cdn.example.com/original/0cf457e2.jpg", "similarity": 0.83,
+            "details": {"id": "0cf457e2-4a47-9f02-fd4d-34540389f720", "category_id": 12, "category": "牛排", "scenes": ["general", "oven"],
+                        "label_status": "verified", "images": [{"image_url": "https://cdn.example.com/original/0cf457e2.jpg", "thumbnail_url": "https://cdn.example.com/thumb/0cf457e2.webp", "width": 640, "height": 480}],
+                        "food_state": "raw", "food_processing": null, "food_count": null, "total_mass_g": null, "water_mass_g": null, "main_ingredient_mass_g": null,
+                        "heating_group": {"id": 2, "code": "grill", "name": "烤"}}}],
+ "fallback": {"status": "not_needed"}}
+```
+
+自建库没有结果，Global 兜底超时：
+
+```json
+{"ok": true, "trace_id": "biz-20261113-0001", "source": "empty", "scene": "oven", "outputs_heating": true, "items": [],
+ "fallback": {"status": "failed", "error": "UPSTREAM_TIMEOUT", "detail": "上游搜索服务响应超时，请稍后重试。"},
+ "message": "自建库没有达到阈值的结果，Global 兜底失败"}
+```
+
+
 ## 7. 明确不作本刀范围（含 M0 OUT OF SCOPE）
 
 | 项 | 归属 |
@@ -1010,6 +1102,7 @@ PATCH 字段（不传 = 不变）：
 | 2026-11-12 | **embedding 模型更新流程**（迁移 `0009`：`embedding_models.fingerprint`，可空列）：① 编码器指纹（预处理 + 固定测试图向量）记在每个版本上，启动时按指纹配对：配置的编码器不是当前版本的，就按记录加载当前版本自己的编码器继续检索，加载不了则检索不启动（`EMBEDDING_MODEL_MISMATCH`），不再只比维度、不再新旧向量混用；没有指纹的当前版本先抽查至多 3 张原图再记录。② 新接口 `/api/embedding-models`：列版本与覆盖率、登记配置的编码器为新版本（独立 collection）、后台生成向量（服务端线程、进度、停止 / 续做、失败列出原因、补推期间的 payload）、切换 / 回滚（先建新检索栈再改 PG，进程内替换，不用重启）、下线（删 collection 和写入记录）。③ 删图清理所有 `building` / `ready` 版本的 collection（API 与两个 worker）。④ 后台对账每轮核对 PG 当前版本，其他进程切换后跟随。⑤ Nacos 热更新日志改为中文提示去「模型版本」。FE：数据管理新增「模型版本」页（§6.5）。见 §2.10 / §4.4 / §6.5 |
 | 2026-11-12 | **模型版本：评审修订**（无新迁移；指纹 jsonb 多了 `files` / `artifact`）：① 切换窗口：切换时关闭向量写入闸门（入库、重新生成请求排队，进行中的写完），用目标编码器补上生成之后新入库的图（≤200 张，`caught_up` / `remaining`），再改 PG、换检索栈，不再漏图；后台对账每轮为当前版本补上没有向量的图（`RECONCILE_CONFIG.max_embeddings`，默认 100），覆盖其他进程和意外漏掉的。② 只看账本：生成向量先按 collection 实际的点核对写入记录（`verified` / `repaired`），切换前同样核对；启动时 collection 新建则作废它的写入记录；后台对账每轮抽查一段（`max_verifications`，默认 2000），补推 payload 发现点不在也删记录；`GET` 每个版本多了 `points`。③ 同一个模型的判断加上权重文件 SHA-256（实测轻微微调的测试图余弦仍是 1.000000，只有 hash 分得开）；热更新只在权重文件未变时复用会话；`weights` 显示权重是否还在镜像里；同一份权重换路径自动更新记录。④ 生成向量可按指纹从镜像加载版本自己的权重（回滚前补齐旧版本）。⑤ 权重目录 `config/model/embedding/embeddingcls-<hash>/` 与打包脚本 `scripts/package_embedding_model.py`，镜像里同时带新旧两个版本（不挂载）。无法核对的旧库、观察期维护旧版本、效果评测按决定不做。见 §6.5 |
 | 2026-11-13 | **重新生成向量与删图并发**（无表结构变化、无新迁移）：`POST /api/images/{image_id}/reembed` 读原图、算向量不加锁；写点和记账时锁住这张图片的行（`lock_image_for_vector`，同入库时的写法），在同一事务里按锁住后读到的 payload 写点、记账后提交。删图在此之前已提交的，不再写点，返回 `IMAGE_NOT_FOUND`；在此之后的删图等这次写完再删，它的清理会删掉刚写的点。此前删图若在算向量期间提交并清理完，点会被写回，而图片、删除队列、记账都已没有它，对账清不掉。顺带：写入的 payload 和记账的版本取锁住时的数据，算向量期间的编辑不再让这张图显示「待同步」；编辑要等这次写点完成（一次单点写入，通常是毫秒级）。 |
+| 2026-11-13 | **业务搜图接口**（无表结构变化、无新迁移）：新增 `POST /api/search/auto/file`（multipart）、`POST /api/search/auto/url`（JSON），先查自建库，没有达到阈值的结果且 `global_fallback=true` 时用现网 Global 兜底。参数 `scene`、`top_k`（1–20，默认 10，对应 Global 的 `search_num`）、`score_threshold`、`global_fallback`（默认 false）、`trace_id`、`machine_info`；响应 `source`（self / global / empty）+ 同形结果卡 + `fallback.status`。Global 失败返回空结果和原因，不让请求失败；自建库出错照常报错。原 `/api/search`、`/api/search/global/*` 不变。本地实现，未测试。见 §6.6 |
 
 ---
 

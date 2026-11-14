@@ -19,6 +19,8 @@ npm.cmd run dev
 
 「现网 Global」的两个输入接口明确命名为 `POST /api/search/global/file`（上传图片文件）和 `POST /api/search/global/url`（图片链接），前端使用这两个地址；两者共用同一套 Global 搜图逻辑。旧 `/api/predict/searchImage_file`、`/api/predict/searchImage_url` 保留为兼容别名，不在 Swagger 中展示，参数和响应保持一致。
 
+给业务方的搜图接口是 `POST /api/search/auto/file`（上传文件）和 `POST /api/search/auto/url`（JSON 图片链接）：先查自建库，没有达到阈值的结果且 `global_fallback=true` 时用现网 Global 兜底，按 `source`（`self` / `global` / `empty`）返回同一种结果卡。参数、响应和错误见 [数据契约 §6.6](docs/image-search-pg-v01-data-contract.md)。
+
 Global 搜索阶段直接保留上游 `image_url`，不下载或验证候选图片。开启 `GLOBAL_FILTER.switch` 后，embedding 计算时才通过 `image_utils.resolve_image_bgr(item)` 获取 `(可用 URL, BGR 图像)`，按原图、large、medium、small、其他缩略图依次尝试；全部失败返回 `(None, None)`，工具不修改输入 item。关闭过滤时由前端在加载或下载图片时回退。
 
 目录选择需要支持该功能的 Chrome、Edge 等浏览器及 HTTPS 或本机 localhost 页面，页面只显示目录名称，不显示完整本地路径；普通 HTTP 局域网访问可使用 ZIP。「食材管理」就是类别树（`/api/categories`，原「类别配置」页已并入），上传标注、图库筛选和场景规则都从这里选类别。

@@ -27,7 +27,7 @@ export function ScoreThresholdControl({
       <div className="score-threshold-header">
         <SlidersHorizontal size={14} aria-hidden />
         <span className="score-threshold-title">拒识阈值</span>
-        <span className="score-threshold-hint">仅自建库生效 · 默认 {SCORE_DEFAULT} · 范围 {SCORE_MIN}–{SCORE_MAX}</span>
+        <span className="score-threshold-hint">仅自建库生效 · 默认 {SCORE_DEFAULT}({SCORE_MIN}–{SCORE_MAX} )</span>
       </div>
       <div className="score-threshold-row">
         <input

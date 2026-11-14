@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from fastapi.responses import RedirectResponse
 
+from app.api.v1.auto_search import router as auto_search_router
 from app.api.v1.categories import router as categories_router
 from app.api.v1.embedding_models import router as embedding_models_router
 from app.api.v1.enums import router as enums_router
@@ -25,6 +26,7 @@ for sub_router in (
     predict_router,
     tools_router,
     retrieval_router,
+    auto_search_router,  # /api/search/auto/*: self-built first, global as the fallback
     enums_router,
     categories_router,
     scenes_router,

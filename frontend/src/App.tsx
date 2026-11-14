@@ -357,6 +357,7 @@ export default function App() {
               {searchTarget === 'local' && (
                 <SceneSelect
                   id="search-scene"
+                  className="search-scene-select"
                   value={scene}
                   disabled={busy}
                   onChange={setScene}
