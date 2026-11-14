@@ -1,8 +1,0 @@
-{
-  "exact_container_id": "6ce6497c7b742e8cd1ed3d88ebcf9f8a189f1a9fba2d216b2c0d04e6ef5e9e5a",
-  "returncode": 1,
-  "stderr": "error: no such object: 6ce6497c7b742e8cd1ed3d88ebcf9f8a189f1a9fba2d216b2c0d04e6ef5e9e5a\n",
-  "absent": true,
-  "fixture_setup_error": "Attempt1 tried image.thumb_url=NULL, rejected by actual schema NOT NULL. QA fixture only; production unmodified. Subsequent fixture uses schema-legal empty text and explicitly labels wire difference.",
-  "cleanup_parser_error": "Original case-sensitive No such test missed lower-case no such object; raw evidence retained."
-}

@@ -279,6 +279,49 @@ class PgLiveTests(unittest.TestCase):
                           "RETURNING status").scalar_one()
         self.assertEqual(status, "building")
 
+    def test_a_point_written_again_holds_the_image_until_its_ledger_row_is_in(self):
+        """lock_image_for_vector (reembed): a deletion waits for the write, so its cleanup comes
+        after the point; one that came first leaves nothing to write."""
+        import threading
+
+        store = self.store()
+        iid = self.insert(store, 1)
+        model_id = self.current_model("c_reembed")
+        ledger = lambda: [tuple(r) for r in self.sql("SELECT image_id::text, synced_version FROM image_embeddings").fetchall()]
+
+        with self.assertRaises(RuntimeError), store.lock_image_for_vector(iid, model_id=model_id):
+            raise RuntimeError("the upsert failed")
+        self.assertEqual(ledger(), [])  # rolled back
+        with store.lock_image_for_vector(iid, model_id=model_id) as current:
+            self.assertEqual((current["payload_version"], current["scenes"]), (1, ["general"]))
+        self.assertEqual(ledger(), [(str(iid), 1)])
+
+        done, failure = threading.Event(), []
+
+        def delete():
+            try:
+                store.enqueue_image_deletion(iid)
+            except Exception as exc:  # surfaced below
+                failure.append(exc)
+            done.set()
+
+        worker = threading.Thread(target=delete, daemon=True)
+        with store.lock_image_for_vector(iid, model_id=model_id) as current:
+            self.assertIsNotNone(current)
+            worker.start()
+            self.assertFalse(done.wait(0.6), "the deletion did not wait for the point being written")
+        self.assertTrue(done.wait(10), "the deletion never went on after the write")
+        worker.join(10)
+        self.assertEqual(failure, [])
+        self.assertIsNone(store.get_image_by_uuid(iid))
+        # Queued after the write: its cleanup removes the point just written
+        self.assertEqual([str(r["image_id"]) for r in store.list_pending_deletions()], [str(iid)])
+        self.assertEqual(ledger(), [])  # gone with the image
+
+        with store.lock_image_for_vector(iid, model_id=model_id) as current:
+            self.assertIsNone(current)  # deleted: no point may be written
+        self.assertEqual(ledger(), [])
+
     # ---- one image as the gallery admin reads and edits it (patch_image / get_image_detail) ----
 
     def current_model(self, collection):

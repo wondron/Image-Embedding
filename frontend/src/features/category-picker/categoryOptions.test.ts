@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildCategoryTree, type CategoryNode } from '../../entities/category'
-import { categoryOptions, categoryPath, filterCategoryOptions } from './categoryOptions'
+import { categoryOptions, categoryPath, codeTail, filterCategoryOptions, matchedOtherName } from './categoryOptions'
 
 function node(id: number, code: string, parentId: number | null, name: string | null, extra: Partial<CategoryNode> = {}): CategoryNode {
   return {
@@ -46,5 +46,42 @@ describe('filterCategoryOptions', () => {
     expect(codes('肉')).toEqual(['dish.meat', 'dish.meat.pork', 'dish.meat.steak'])  // label hits before path-only hits
     expect(codes('菜品 牛')).toEqual(['dish.meat.steak'])  // every word must match
     expect(codes('旧')).toEqual([])  // disabled categories are not offered
+  })
+
+  it('offers what the picker allows instead, when it says', () => {
+    expect(filterCategoryOptions(options, '旧', new Set([5])).map(option => option.code)).toEqual(['dish.old'])
+    expect(filterCategoryOptions(options, '', new Set([3, 4])).map(option => option.code)).toEqual(['dish.meat.steak', 'dish.meat.pork'])
+  })
+
+  it('puts a category whose alias is what was typed right after an exact name', () => {
+    const withAliases = buildCategoryTree([
+      node(1, 'ingredient', null, '食材'),
+      node(2, 'ingredient.ShuLei', 1, '薯类'),
+      node(3, 'ingredient.ShuLei.HongSu', 2, '红薯', { names: [{ lang: 'zh', name: '红薯', kind: 'primary' }, { lang: 'zh', name: '地瓜', kind: 'alias' }] }),
+      node(4, 'ingredient.ShuLei.DiGuaGan', 2, '地瓜干'),
+    ])
+    const found = filterCategoryOptions(categoryOptions(withAliases), '地瓜')
+    expect(found.map(option => option.label)).toEqual(['红薯', '地瓜干'])  // the alias equals it, the name only starts with it
+  })
+})
+
+describe('matchedOtherName', () => {
+  const [steak] = categoryOptions(tree).filter(option => option.code === 'dish.meat.steak')
+
+  it('names the alias that explains a match the label and code do not', () => {
+    expect(steak.otherNames).toEqual(['Steak'])
+    expect(matchedOtherName(steak, 'stea')).toBeNull()  // the code dish.meat.steak says it already
+    const [pork] = categoryOptions(buildCategoryTree([
+      node(1, 'dish', null, '菜品'),
+      node(2, 'dish.hsr', 1, '红烧肉', { names: [{ lang: 'zh', name: '红烧肉', kind: 'primary' }, { lang: 'zh', name: '东坡肉', kind: 'alias' }] }),
+    ])).filter(option => option.code === 'dish.hsr')
+    expect(matchedOtherName(pork, '东坡')).toBe('东坡肉')
+    expect(matchedOtherName(pork, '红烧')).toBeNull()
+    expect(matchedOtherName(pork, '菜品')).toBeNull()  // only the path matched: the path is shown anyway
+  })
+
+  it('cuts a code to the segment the category adds', () => {
+    expect(codeTail('ingredient.ShuLei.HongSu')).toBe('HongSu')
+    expect(codeTail('dish')).toBe('dish')
   })
 })

@@ -107,6 +107,15 @@ class MetadataStorePort(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def lock_image_for_vector(
+        self, image_id: UUID | str, *, model_id: int
+    ) -> AbstractContextManager[dict[str, Any] | None]:
+        """Lock a stored image while the caller writes its point again; yields the image now
+        (with scenes) or None when it was deleted. A deletion waits for the write. Normal exit
+        records the yielded payload_version in model_id's ledger and commits."""
+        raise NotImplementedError
+
+    @abstractmethod
     def mark_deleted(self, image_id: UUID | str) -> None:
         raise NotImplementedError
 

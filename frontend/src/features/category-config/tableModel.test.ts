@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildCategoryTree, type CategoryName, type CategoryNode } from '../../entities/category'
-import { NO_CATEGORY_FILTER, categoryTableView, otherCategoryNames, retargetCode, type CategoryTableFilter } from './tableModel'
+import { NO_CATEGORY_FILTER, categoryScopeOptions, categoryTableView, otherCategoryNames, retargetCode, type CategoryTableFilter } from './tableModel'
 
 const zh = (name: string): CategoryName => ({ lang: 'zh', name, kind: 'primary' })
 const node = (id: number, code: string, parentId: number | null, name: string, extra: Partial<CategoryNode> = {}): CategoryNode => ({
@@ -61,9 +61,30 @@ describe('categoryTableView', () => {
   })
 
   it('a domain limits the table and the counts to that root\'s subtree', () => {
-    expect(ids({ domainId: 7 }, [7])).toEqual([7, 8])
-    expect(categoryTableView(tree, { ...NO_CATEGORY_FILTER, domainId: 1 }, new Set()).total).toBe(6)
-    expect(ids({ domainId: 1, query: '牛肉' })).toEqual([1, 5, 6])
+    expect(ids({ scopeId: 7 }, [7])).toEqual([7, 8])
+    expect(categoryTableView(tree, { ...NO_CATEGORY_FILTER, scopeId: 1 }, new Set()).total).toBe(6)
+    expect(ids({ scopeId: 1, query: '牛肉' })).toEqual([1, 5, 6])
+  })
+
+  it('a group inside a domain becomes the only top row, without the nodes above it', () => {
+    const view = categoryTableView(tree, { ...NO_CATEGORY_FILTER, scopeId: 2 }, new Set([2]))
+    expect(view.rows.map(row => [row.entry.node.id, row.depth])).toEqual([[2, 0], [3, 1], [4, 1]])
+    expect(view.total).toBe(3)
+    // A search inside it keeps the group as context, never its domain
+    expect(ids({ scopeId: 2, query: '番茄' })).toEqual([2, 3])
+    // A scope that is gone lists nothing (the page then goes back to the whole tree)
+    expect(categoryTableView(tree, { ...NO_CATEGORY_FILTER, scopeId: 99 }, new Set()).rows).toEqual([])
+  })
+})
+
+describe('categoryScopeOptions', () => {
+  it('offers each domain, then the groups right below it that hold categories', () => {
+    expect(categoryScopeOptions(tree)).toEqual([
+      { id: 1, label: '食材', depth: 0 },
+      { id: 2, label: '蔬菜', depth: 1 },
+      { id: 5, label: '肉禽', depth: 1 },
+      { id: 7, label: '菜品', depth: 0 },  // 牛肉面 is a leaf: not a group worth narrowing to
+    ])
   })
 })
 

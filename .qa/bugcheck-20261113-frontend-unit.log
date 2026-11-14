@@ -1,0 +1,37 @@
+﻿Snapshot: eb5691de0efd9690390e932b1069e48bcb187af9 (checkpoint commit observed during testing)
+Command: npm.cmd test
+
+> food-atlas-frontend@0.1.0 test
+> vitest run src
+
+ RUN  v5.0.5 C:/Users/47202/PROJECT/Image-Embedding/frontend
+
+ ❯ src/features/category-config/tableModel.test.ts (9 tests | 1 failed) 19ms
+   ❯ categoryTableView (6)
+     × a domain limits the table and the counts to that root's subtree 8ms
+
+ FAIL  src/features/category-config/tableModel.test.ts > categoryTableView > a domain limits the table and the counts to that root's subtree
+AssertionError: expected [ 1, 7, 8 ] to deeply equal [ 7, 8 ]
+
+- Expected
++ Received
+
+  [
++   1,
+    7,
+    8,
+  ]
+
+ ❯ src/features/category-config/tableModel.test.ts:64:39
+     62|
+     63|   it('a domain limits the table and the counts to that root\'s subtree…
+     64|     expect(ids({ domainId: 7 }, [7])).toEqual([7, 8])
+       |                                       ^
+     65|     expect(categoryTableView(tree, { ...NO_CATEGORY_FILTER, domainId: …
+     66|     expect(ids({ domainId: 1, query: '牛肉' })).toEqual([1, 5, 6])
+
+ Test Files  1 failed | 29 passed (30)
+      Tests  1 failed | 274 passed (275)
+   Start at  16:54:30
+   Duration  1.44s (transform 65%, import 23%, worker 6%, tests 6%)
+Exit code: 1

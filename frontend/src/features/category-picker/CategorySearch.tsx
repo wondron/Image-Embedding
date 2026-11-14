@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent } from 'react'
 import { ChevronRight, History, LoaderCircle, Search } from 'lucide-react'
 import { categoryAncestors, categoryLabel, type CategoryTree } from '../../entities/category'
+import { isImeComposing } from '../../shared/lib'
 import { categoryOptions, codeTail, filterCategoryOptions, matchedOtherName } from './categoryOptions'
 import { pickerIndex, pickerRows } from './pickerRows'
 import { loadRecentCategories, rememberCategory } from './recentCategories'
@@ -228,6 +229,9 @@ export function CategorySearch({
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    // Typing in 拼音: Enter commits the characters, the arrows choose a candidate. Picking a
+    // category here would take whatever is highlighted and throw away what was being typed.
+    if (isImeComposing(event)) return
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
       if (!open) { show(); return }
@@ -311,7 +315,7 @@ export function CategorySearch({
       />
       {loading && <LoaderCircle size={15} className="spin" aria-label="正在读取类别" />}
     </div>
-    {open && !searching && recentShown.length > 0 && tree && <div className="cp-recent" role="group" aria-label={`最近选过的${label}`}>
+    {open && !searching && recentShown.length > 0 && tree && <div className="cp-recent" role="group" aria-label="最近选过的类别">
       <History size={13} aria-hidden="true" />
       {recentShown.map(item => {
         const node = tree.byId.get(item)!.node

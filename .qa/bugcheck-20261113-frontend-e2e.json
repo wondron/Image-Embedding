@@ -1,0 +1,2121 @@
+﻿{
+  "config": {
+    "argv": [
+      "D:\\98-softwaredata\\nodejs\\node.exe",
+      "C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "deletion-queue",
+      "enum-labels",
+      "import-annotation",
+      "index-tasks",
+      "library-annotation",
+      "library-batch",
+      "model-versions",
+      "scene-sync",
+      "search-images",
+      "status-overlay",
+      "stored-image",
+      "--config",
+      "../.qa/bugcheck-20261113-frontend-playwright.config.ts",
+      "--timeout",
+      "12000",
+      "--max-failures",
+      "12",
+      "--output",
+      "../.qa/bugcheck-20261113-frontend-results-secondary",
+      "--reporter",
+      "json"
+    ],
+    "configFile": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-playwright.config.ts",
+    "rootDir": "C:/Users/47202/PROJECT/Image-Embedding/frontend/e2e",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": true,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 12,
+    "metadata": {
+      "actualWorkers": 2
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "C:/Users/47202/PROJECT/Image-Embedding/.qa/bugcheck-20261113-frontend-results-secondary",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 2
+        },
+        "id": "",
+        "name": "",
+        "testDir": "C:/Users/47202/PROJECT/Image-Embedding/frontend/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 12000
+      }
+    ],
+    "filteredProjects": [
+      {
+        "grep": {},
+        "grepInvert": null,
+        "outputDir": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 2
+        },
+        "name": "",
+        "testDir": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\e2e",
+        "snapshotDir": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\e2e",
+        "testIgnore": [],
+        "testMatch": "**/*.@(spec|test).?(c|m)[jt]s?(x)",
+        "timeout": 12000,
+        "use": {
+          "baseURL": "http://127.0.0.1:5173",
+          "viewport": {
+            "width": 1440,
+            "height": 1000
+          },
+          "trace": "retain-on-failure",
+          "screenshot": "only-on-failure"
+        },
+        "dependencies": [],
+        "ignoreSnapshots": false,
+        "__projectId": ""
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "default",
+    "updateSourceMethod": "patch",
+    "version": "1.64.1",
+    "workers": 2,
+    "webServer": {
+      "command": "npm run dev -- --host 127.0.0.1",
+      "url": "http://127.0.0.1:5173",
+      "reuseExistingServer": true,
+      "timeout": 60000,
+      "cwd": "C:/Users/47202/PROJECT/Image-Embedding/frontend"
+    }
+  },
+  "suites": [
+    {
+      "title": "deletion-queue.spec.ts",
+      "file": "deletion-queue.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "待清理图片：列出队列，立即清理后说明结果，失败的留在队列里并写明原因",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1527,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-13T23:59:36.205Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a82ca4b53173c3244a53-5503658c0255f055357b",
+          "file": "deletion-queue.spec.ts",
+          "line": 60,
+          "column": 1
+        },
+        {
+          "title": "待清理图片：全部清理完是轻提示，队列为空时说明已清理完",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 1133,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-13T23:59:36.205Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a82ca4b53173c3244a53-7c183d5d355f5e7a3df5",
+          "file": "deletion-queue.spec.ts",
+          "line": 76,
+          "column": 1
+        },
+        {
+          "title": "待清理图片：检索服务未就绪时不能清理，并说明原因",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 900,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-13T23:59:37.461Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a82ca4b53173c3244a53-f72d4e0d075bab8a5871",
+          "file": "deletion-queue.spec.ts",
+          "line": 85,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "enum-labels.spec.ts",
+      "file": "enum-labels.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "食物状态显示 /api/enums 里的中文名，没有中文名的取值原样显示",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "timedOut",
+                  "duration": 12158,
+                  "error": {
+                    "message": "\u001b[31mTest timeout of 12000ms exceeded.\u001b[39m",
+                    "stack": "\u001b[31mTest timeout of 12000ms exceeded.\u001b[39m"
+                  },
+                  "errors": [
+                    {
+                      "message": "\u001b[31mTest timeout of 12000ms exceeded.\u001b[39m"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-13T23:59:37.874Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\enum-labels-食物状态显示-api-enums-里的中文名，没有中文名的取值原样显示\\test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\enum-labels-食物状态显示-api-enums-里的中文名，没有中文名的取值原样显示\\error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\enum-labels-食物状态显示-api-enums-里的中文名，没有中文名的取值原样显示\\trace.zip"
+                    }
+                  ]
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "3060e07eecc4c6522f21-1f5dbfa4fbc008269cb1",
+          "file": "enum-labels.spec.ts",
+          "line": 57,
+          "column": 1
+        },
+        {
+          "title": "/api/enums 读取失败时食物状态仍按原始取值显示",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "timedOut",
+                  "duration": 12157,
+                  "error": {
+                    "message": "\u001b[31mTest timeout of 12000ms exceeded.\u001b[39m",
+                    "stack": "\u001b[31mTest timeout of 12000ms exceeded.\u001b[39m"
+                  },
+                  "errors": [
+                    {
+                      "message": "\u001b[31mTest timeout of 12000ms exceeded.\u001b[39m"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-13T23:59:38.375Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\enum-labels--api-enums-读取失败时食物状态仍按原始取值显示\\test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\enum-labels--api-enums-读取失败时食物状态仍按原始取值显示\\error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\enum-labels--api-enums-读取失败时食物状态仍按原始取值显示\\trace.zip"
+                    }
+                  ]
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "3060e07eecc4c6522f21-d9258bb01eb5a5136b31",
+          "file": "enum-labels.spec.ts",
+          "line": 72,
+          "column": 1
+        },
+        {
+          "title": "在枚举配置页追加取值后，其他页面立即显示新取值的中文名",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 0,
+                  "status": "timedOut",
+                  "duration": 12185,
+                  "error": {
+                    "message": "\u001b[31mTest timeout of 12000ms exceeded.\u001b[39m",
+                    "stack": "\u001b[31mTest timeout of 12000ms exceeded.\u001b[39m"
+                  },
+                  "errors": [
+                    {
+                      "message": "\u001b[31mTest timeout of 12000ms exceeded.\u001b[39m"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-13T23:59:50.510Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\enum-labels-在枚举配置页追加取值后，其他页面立即显示新取值的中文名\\test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\enum-labels-在枚举配置页追加取值后，其他页面立即显示新取值的中文名\\error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\enum-labels-在枚举配置页追加取值后，其他页面立即显示新取值的中文名\\trace.zip"
+                    }
+                  ]
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "3060e07eecc4c6522f21-07a1f7f01a7476bb94e0",
+          "file": "enum-labels.spec.ts",
+          "line": 88,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "import-annotation.spec.ts",
+      "file": "import-annotation.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "批量标注：类别来自数据库，场景按规则预览并可人工调整，所有属性随入库提交",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 3,
+                  "parallelIndex": 1,
+                  "status": "timedOut",
+                  "duration": 12199,
+                  "error": {
+                    "message": "\u001b[31mTest timeout of 12000ms exceeded.\u001b[39m",
+                    "stack": "\u001b[31mTest timeout of 12000ms exceeded.\u001b[39m"
+                  },
+                  "errors": [
+                    {
+                      "message": "\u001b[31mTest timeout of 12000ms exceeded.\u001b[39m"
+                    },
+                    {
+                      "location": {
+                        "file": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\e2e\\import-annotation.spec.ts",
+                        "column": 71,
+                        "line": 125
+                      },
+                      "message": "Error: locator.click: Test timeout of 12000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('.mg-import-settings').getByRole('option', { name: /^牛排/ })\u001b[22m\n\n\n  123 |   const box = scope.getByRole('combobox', { name: '类别' })\n  124 |   await box.fill(query)\n> 125 |   await scope.getByRole('option', { name: new RegExp(`^${option}`) }).click()\n      |                                                                       ^\n  126 | }\n  127 |\n  128 | test('批量标注：类别来自数据库，场景按规则预览并可人工调整，所有属性随入库提交', async ({ page }, info) => {\n    at pickCategory (C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\e2e\\import-annotation.spec.ts:125:71)\n    at C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\e2e\\import-annotation.spec.ts:138:3"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-13T23:59:51.115Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\import-annotation-批量标注：类别来自数据库，场景按规则预览并可人工调整，所有属性随入库提交\\test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\import-annotation-批量标注：类别来自数据库，场景按规则预览并可人工调整，所有属性随入库提交\\error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\import-annotation-批量标注：类别来自数据库，场景按规则预览并可人工调整，所有属性随入库提交\\trace.zip"
+                    }
+                  ]
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "d2162923e1e8914ab042-d8c686fb5e73fc26efb8",
+          "file": "import-annotation.spec.ts",
+          "line": 128,
+          "column": 1
+        },
+        {
+          "title": "相同图片已在库中：提示沿用原有标注，不写场景调整",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 4,
+                  "parallelIndex": 0,
+                  "status": "timedOut",
+                  "duration": 12189,
+                  "error": {
+                    "message": "\u001b[31mTest timeout of 12000ms exceeded.\u001b[39m",
+                    "stack": "\u001b[31mTest timeout of 12000ms exceeded.\u001b[39m"
+                  },
+                  "errors": [
+                    {
+                      "message": "\u001b[31mTest timeout of 12000ms exceeded.\u001b[39m"
+                    },
+                    {
+                      "location": {
+                        "file": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\e2e\\import-annotation.spec.ts",
+                        "column": 71,
+                        "line": 125
+                      },
+                      "message": "Error: locator.click: Test timeout of 12000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('.mg-import-settings').getByRole('option', { name: /^牛排/ })\u001b[22m\n\n\n  123 |   const box = scope.getByRole('combobox', { name: '类别' })\n  124 |   await box.fill(query)\n> 125 |   await scope.getByRole('option', { name: new RegExp(`^${option}`) }).click()\n      |                                                                       ^\n  126 | }\n  127 |\n  128 | test('批量标注：类别来自数据库，场景按规则预览并可人工调整，所有属性随入库提交', async ({ page }, info) => {\n    at pickCategory (C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\e2e\\import-annotation.spec.ts:125:71)\n    at C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\e2e\\import-annotation.spec.ts:207:3"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:03.279Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\import-annotation-相同图片已在库中：提示沿用原有标注，不写场景调整\\test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\import-annotation-相同图片已在库中：提示沿用原有标注，不写场景调整\\error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\import-annotation-相同图片已在库中：提示沿用原有标注，不写场景调整\\trace.zip"
+                    }
+                  ]
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "d2162923e1e8914ab042-aca7afde7374ac83e380",
+          "file": "import-annotation.spec.ts",
+          "line": 202,
+          "column": 1
+        },
+        {
+          "title": "窄屏：标注表单排在队列下方，没有横向滚动",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 5,
+                  "parallelIndex": 1,
+                  "status": "timedOut",
+                  "duration": 12149,
+                  "error": {
+                    "message": "\u001b[31mTest timeout of 12000ms exceeded.\u001b[39m",
+                    "stack": "\u001b[31mTest timeout of 12000ms exceeded.\u001b[39m"
+                  },
+                  "errors": [
+                    {
+                      "message": "\u001b[31mTest timeout of 12000ms exceeded.\u001b[39m"
+                    },
+                    {
+                      "location": {
+                        "file": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\e2e\\import-annotation.spec.ts",
+                        "column": 71,
+                        "line": 125
+                      },
+                      "message": "Error: locator.click: Test timeout of 12000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('.mg-import-settings').getByRole('option', { name: /^牛排/ })\u001b[22m\n\n\n  123 |   const box = scope.getByRole('combobox', { name: '类别' })\n  124 |   await box.fill(query)\n> 125 |   await scope.getByRole('option', { name: new RegExp(`^${option}`) }).click()\n      |                                                                       ^\n  126 | }\n  127 |\n  128 | test('批量标注：类别来自数据库，场景按规则预览并可人工调整，所有属性随入库提交', async ({ page }, info) => {\n    at pickCategory (C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\e2e\\import-annotation.spec.ts:125:71)\n    at C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\e2e\\import-annotation.spec.ts:220:3"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:03.937Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\import-annotation-窄屏：标注表单排在队列下方，没有横向滚动\\test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\import-annotation-窄屏：标注表单排在队列下方，没有横向滚动\\error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\import-annotation-窄屏：标注表单排在队列下方，没有横向滚动\\trace.zip"
+                    }
+                  ]
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "d2162923e1e8914ab042-4cb3bc57d1d61f736aca",
+          "file": "import-annotation.spec.ts",
+          "line": 215,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "index-tasks.spec.ts",
+      "file": "index-tasks.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "删除了图片的入库记录标为「图片已删除」，可以单独筛出来",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 6,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 993,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:16.016Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "88170d03549bcdd869a4-a20684f7982e078ebf59",
+          "file": "index-tasks.spec.ts",
+          "line": 82,
+          "column": 1
+        },
+        {
+          "title": "清理图片已删除的记录：确认后只删这些记录，列表和计数随之更新",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 7,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 1301,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:16.681Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "88170d03549bcdd869a4-85fdadcc838b1a6b93c5",
+          "file": "index-tasks.spec.ts",
+          "line": 102,
+          "column": 1
+        },
+        {
+          "title": "详情里删除单条记录：要再确认一次，只删这一条",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 6,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1190,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:17.126Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "88170d03549bcdd869a4-3d2d5cc766b40ec39768",
+          "file": "index-tasks.spec.ts",
+          "line": 122,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "library-annotation.spec.ts",
+      "file": "library-annotation.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "图库：类别与标注状态筛选取自数据库；单张图片可查看向量状态、重推、编辑和删除",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 7,
+                  "parallelIndex": 1,
+                  "status": "timedOut",
+                  "duration": 12275,
+                  "error": {
+                    "message": "\u001b[31mTest timeout of 12000ms exceeded.\u001b[39m",
+                    "stack": "\u001b[31mTest timeout of 12000ms exceeded.\u001b[39m"
+                  },
+                  "errors": [
+                    {
+                      "message": "\u001b[31mTest timeout of 12000ms exceeded.\u001b[39m"
+                    },
+                    {
+                      "location": {
+                        "file": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\e2e\\library-annotation.spec.ts",
+                        "column": 71,
+                        "line": 163
+                      },
+                      "message": "Error: locator.click: Test timeout of 12000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('dialog', { name: '图片标注' }).getByRole('option', { name: /^红烧肉/ })\u001b[22m\n\n\n  161 | async function pickCategory(scope: Locator, query: string, option: string) {\n  162 |   await scope.getByRole('combobox', { name: '类别' }).fill(query)\n> 163 |   await scope.getByRole('option', { name: new RegExp(`^${option}`) }).click()\n      |                                                                       ^\n  164 | }\n  165 |\n  166 | test('图库：类别与标注状态筛选取自数据库；单张图片可查看向量状态、重推、编辑和删除', async ({ page }, info) => {\n    at pickCategory (C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\e2e\\library-annotation.spec.ts:163:71)\n    at C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\e2e\\library-annotation.spec.ts:212:3"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:18.089Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\library-annotation-图库：类别与标注状态筛选取自数据库；单张图片可查看向量状态、重推、编辑和删除\\test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\library-annotation-图库：类别与标注状态筛选取自数据库；单张图片可查看向量状态、重推、编辑和删除\\error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\library-annotation-图库：类别与标注状态筛选取自数据库；单张图片可查看向量状态、重推、编辑和删除\\trace.zip"
+                    }
+                  ]
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "a3ede5d252a915ac53f0-6ab35efa987aa5c30f35",
+          "file": "library-annotation.spec.ts",
+          "line": 166,
+          "column": 1
+        },
+        {
+          "title": "图库：撤销修改后可以关闭，没有改动的保存按钮不可用",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 6,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1316,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:18.351Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a3ede5d252a915ac53f0-478517c21c74330f60d5",
+          "file": "library-annotation.spec.ts",
+          "line": 245,
+          "column": 1
+        },
+        {
+          "title": "图库：旧版服务端的写入不带向量状态时，再读一次详情",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 6,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1189,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:19.674Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a3ede5d252a915ac53f0-bf60fd4ab0be82c00927",
+          "file": "library-annotation.spec.ts",
+          "line": 261,
+          "column": 1
+        },
+        {
+          "title": "图库：没有向量的图片用存储里的原图重新生成，不用重新上传",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 6,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1311,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:20.870Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a3ede5d252a915ac53f0-6b6348574490350ac154",
+          "file": "library-annotation.spec.ts",
+          "line": 273,
+          "column": 1
+        },
+        {
+          "title": "图库：原图读不到时说明只能重新上传",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 6,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1391,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:22.187Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a3ede5d252a915ac53f0-bf0d99cb181e715eae5e",
+          "file": "library-annotation.spec.ts",
+          "line": 292,
+          "column": 1
+        },
+        {
+          "title": "图库：可以只看待同步或没有向量的图片",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 6,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 861,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:23.585Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a3ede5d252a915ac53f0-cb88a77c407d259cd1c4",
+          "file": "library-annotation.spec.ts",
+          "line": 303,
+          "column": 1
+        },
+        {
+          "title": "图库：点卡片上的类别、标签直接筛选；「未标注」和类别互斥；生效的筛选可以逐个清除",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 6,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1597,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:24.454Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a3ede5d252a915ac53f0-f872f13c2cb79d19132e",
+          "file": "library-annotation.spec.ts",
+          "line": 314,
+          "column": 1
+        },
+        {
+          "title": "图库：上千个类别时树只渲染看得见的行，搜索直接找到深层类别，键盘可以浏览",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 6,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 7952,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoContainText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByRole('complementary', { name: '图片筛选' })\nExpected substring: \u001b[32m\"找到 550 个\"\u001b[39m\nReceived string:    \u001b[31m\"筛选重置展开筛选场景通用（general）一体机（oven）标注全部未标注自动标注已核验向量全部待同步或没有向量标签类别2041 个启用隐藏没有图片的520显示停用的菜品2920大类373菜3-11菜3-22菜3-33菜3-51菜3-62菜3-73菜3-91菜3-102菜3-113菜3-131菜3-142菜3-153菜3-171菜3-182菜3-193菜3-211菜3-222菜3-233菜3-251菜3-262找到 407 个，另有 143 个被上面的选项隐藏 全部显示\"\u001b[39m\nTimeout: 7000ms\n\nCall log:\n\u001b[2m  - Expect \"toContainText\" getByRole('complementary', { name: '图片筛选' }) with timeout 7000ms\u001b[22m\n\u001b[2m  - waiting for getByRole('complementary', { name: '图片筛选' })\u001b[22m\n\u001b[2m    18 × locator resolved to <aside class=\"lf-panel\" aria-label=\"图片筛选\">…</aside>\u001b[22m\n\u001b[2m       - unexpected value \"筛选重置展开筛选场景通用（general）一体机（oven）标注全部未标注自动标注已核验向量全部待同步或没有向量标签类别2041 个启用隐藏没有图片的520显示停用的菜品2920大类373菜3-11菜3-22菜3-33菜3-51菜3-62菜3-73菜3-91菜3-102菜3-113菜3-131菜3-142菜3-153菜3-171菜3-182菜3-193菜3-211菜3-222菜3-233菜3-251菜3-262找到 407 个，另有 143 个被上面的选项隐藏 全部显示\"\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoContainText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByRole('complementary', { name: '图片筛选' })\nExpected substring: \u001b[32m\"找到 550 个\"\u001b[39m\nReceived string:    \u001b[31m\"筛选重置展开筛选场景通用（general）一体机（oven）标注全部未标注自动标注已核验向量全部待同步或没有向量标签类别2041 个启用隐藏没有图片的520显示停用的菜品2920大类373菜3-11菜3-22菜3-33菜3-51菜3-62菜3-73菜3-91菜3-102菜3-113菜3-131菜3-142菜3-153菜3-171菜3-182菜3-193菜3-211菜3-222菜3-233菜3-251菜3-262找到 407 个，另有 143 个被上面的选项隐藏 全部显示\"\u001b[39m\nTimeout: 7000ms\n\nCall log:\n\u001b[2m  - Expect \"toContainText\" getByRole('complementary', { name: '图片筛选' }) with timeout 7000ms\u001b[22m\n\u001b[2m  - waiting for getByRole('complementary', { name: '图片筛选' })\u001b[22m\n\u001b[2m    18 × locator resolved to <aside class=\"lf-panel\" aria-label=\"图片筛选\">…</aside>\u001b[22m\n\u001b[2m       - unexpected value \"筛选重置展开筛选场景通用（general）一体机（oven）标注全部未标注自动标注已核验向量全部待同步或没有向量标签类别2041 个启用隐藏没有图片的520显示停用的菜品2920大类373菜3-11菜3-22菜3-33菜3-51菜3-62菜3-73菜3-91菜3-102菜3-113菜3-131菜3-142菜3-153菜3-171菜3-182菜3-193菜3-211菜3-222菜3-233菜3-251菜3-262找到 407 个，另有 143 个被上面的选项隐藏 全部显示\"\u001b[22m\n\n    at C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\e2e\\library-annotation.spec.ts:370:25",
+                    "location": {
+                      "file": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\e2e\\library-annotation.spec.ts",
+                      "column": 25,
+                      "line": 370
+                    },
+                    "snippet": "  368 |   const search = filters.getByRole('searchbox', { name: '搜索类别' })\n  369 |   await search.fill('菜3')\n> 370 |   await expect(filters).toContainText('找到 550 个')\n      |                         ^\n  371 |   expect(await tree.getByRole('treeitem').count()).toBeLessThan(80)  // a virtual list, not 600 rows\n  372 |   await search.fill('菜37-42')\n  373 |   await tree.getByRole('treeitem', { name: /^菜37-42，/ }).click()"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\e2e\\library-annotation.spec.ts",
+                        "column": 25,
+                        "line": 370
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoContainText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByRole('complementary', { name: '图片筛选' })\nExpected substring: \u001b[32m\"找到 550 个\"\u001b[39m\nReceived string:    \u001b[31m\"筛选重置展开筛选场景通用（general）一体机（oven）标注全部未标注自动标注已核验向量全部待同步或没有向量标签类别2041 个启用隐藏没有图片的520显示停用的菜品2920大类373菜3-11菜3-22菜3-33菜3-51菜3-62菜3-73菜3-91菜3-102菜3-113菜3-131菜3-142菜3-153菜3-171菜3-182菜3-193菜3-211菜3-222菜3-233菜3-251菜3-262找到 407 个，另有 143 个被上面的选项隐藏 全部显示\"\u001b[39m\nTimeout: 7000ms\n\nCall log:\n\u001b[2m  - Expect \"toContainText\" getByRole('complementary', { name: '图片筛选' }) with timeout 7000ms\u001b[22m\n\u001b[2m  - waiting for getByRole('complementary', { name: '图片筛选' })\u001b[22m\n\u001b[2m    18 × locator resolved to <aside class=\"lf-panel\" aria-label=\"图片筛选\">…</aside>\u001b[22m\n\u001b[2m       - unexpected value \"筛选重置展开筛选场景通用（general）一体机（oven）标注全部未标注自动标注已核验向量全部待同步或没有向量标签类别2041 个启用隐藏没有图片的520显示停用的菜品2920大类373菜3-11菜3-22菜3-33菜3-51菜3-62菜3-73菜3-91菜3-102菜3-113菜3-131菜3-142菜3-153菜3-171菜3-182菜3-193菜3-211菜3-222菜3-233菜3-251菜3-262找到 407 个，另有 143 个被上面的选项隐藏 全部显示\"\u001b[22m\n\n\n  368 |   const search = filters.getByRole('searchbox', { name: '搜索类别' })\n  369 |   await search.fill('菜3')\n> 370 |   await expect(filters).toContainText('找到 550 个')\n      |                         ^\n  371 |   expect(await tree.getByRole('treeitem').count()).toBeLessThan(80)  // a virtual list, not 600 rows\n  372 |   await search.fill('菜37-42')\n  373 |   await tree.getByRole('treeitem', { name: /^菜37-42，/ }).click()\n    at C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\e2e\\library-annotation.spec.ts:370:25"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:26.059Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\library-annotation-图库：上千个类别时树只渲染看得见的行，搜索直接找到深层类别，键盘可以浏览\\test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\library-annotation-图库：上千个类别时树只渲染看得见的行，搜索直接找到深层类别，键盘可以浏览\\error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\.qa\\bugcheck-20261113-frontend-results-secondary\\library-annotation-图库：上千个类别时树只渲染看得见的行，搜索直接找到深层类别，键盘可以浏览\\trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "C:\\Users\\47202\\PROJECT\\Image-Embedding\\frontend\\e2e\\library-annotation.spec.ts",
+                    "column": 25,
+                    "line": 370
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "a3ede5d252a915ac53f0-af66c097c5aae57c1e1f",
+          "file": "library-annotation.spec.ts",
+          "line": 354,
+          "column": 1
+        },
+        {
+          "title": "图库：每页数量、跳页与展示方式；展示偏好在浏览器里记住",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 8,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 1624,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:30.897Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a3ede5d252a915ac53f0-b39f8e14871c53e376cd",
+          "file": "library-annotation.spec.ts",
+          "line": 396,
+          "column": 1
+        },
+        {
+          "title": "桌面：左侧筛选窄、右侧图片宽，图片区单独滚动，页头和翻页留在视口里",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 8,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 1168,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:32.611Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a3ede5d252a915ac53f0-c6198c8720eadae9c241",
+          "file": "library-annotation.spec.ts",
+          "line": 421,
+          "column": 1
+        },
+        {
+          "title": "窄屏：筛选收起时在卡片上点类别，展开后树停在这个类别上",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 8,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 1225,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:33.786Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a3ede5d252a915ac53f0-4c8b86aa141b0f7876f9",
+          "file": "library-annotation.spec.ts",
+          "line": 456,
+          "column": 1
+        },
+        {
+          "title": "窄屏：筛选收在页头里，展开后和编辑弹窗都不产生横向滚动",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 9,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1543,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:34.547Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a3ede5d252a915ac53f0-0bd21d7f5a6e6592fec8",
+          "file": "library-annotation.spec.ts",
+          "line": 476,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "library-batch.spec.ts",
+      "file": "library-batch.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "批量修改：勾选（Shift 连选），只发改了的字段；没有类别的图片不改标注状态",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 8,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 2044,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:35.027Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "afca519c2afbbec56624-020a1689b88301d40d10",
+          "file": "library-batch.spec.ts",
+          "line": 109,
+          "column": 1
+        },
+        {
+          "title": "批量修改：失败的可以重试；全部成功后自动关闭并提示",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 9,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1705,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:36.203Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "afca519c2afbbec56624-7b1d39861c70fa308c51",
+          "file": "library-batch.spec.ts",
+          "line": 151,
+          "column": 1
+        },
+        {
+          "title": "批量删除：选择全部筛选结果，数量多时输入「删除」确认；删完从列表和选择里去掉",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 8,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 1885,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:37.080Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "afca519c2afbbec56624-e2766b75611144c09179",
+          "file": "library-batch.spec.ts",
+          "line": 172,
+          "column": 1
+        },
+        {
+          "title": "少量删除不用输入确认；换筛选条件会清空选择",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 9,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1573,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:37.918Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "afca519c2afbbec56624-a700f06374a81451fba6",
+          "file": "library-batch.spec.ts",
+          "line": 196,
+          "column": 1
+        },
+        {
+          "title": "选择全部：超过 1000 张时请先缩小筛选范围",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 8,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 1481,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:38.976Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "afca519c2afbbec56624-1a861c709e6af8985957",
+          "file": "library-batch.spec.ts",
+          "line": 215,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "model-versions.spec.ts",
+      "file": "model-versions.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "换模型：登记配置里的新模型 → 后台生成向量 → 切换；旧版本保留，可切回，再下线",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 9,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5019,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:39.509Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1addf9c997441aa0db6a-9a35009a2f40bd861072",
+          "file": "model-versions.spec.ts",
+          "line": 116,
+          "column": 1
+        },
+        {
+          "title": "缺的图片不多时，切换会先补上它们，不用勾选",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 8,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 1525,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:40.489Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1addf9c997441aa0db6a-a77a200492d1d0aead9b",
+          "file": "model-versions.spec.ts",
+          "line": 185,
+          "column": 1
+        },
+        {
+          "title": "缺得超过切换时能补的数量，要勾选才能切换，并说明它们会暂时检索不到",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 8,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 1912,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:42.022Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1addf9c997441aa0db6a-f453b1ac9850d37fc299",
+          "file": "model-versions.spec.ts",
+          "line": 203,
+          "column": 1
+        },
+        {
+          "title": "检索因为编码器和向量库对不上而暂停时，页面说明原因并给出换模型的路",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 8,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 882,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:43.945Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1addf9c997441aa0db6a-a9afda201778093e45c8",
+          "file": "model-versions.spec.ts",
+          "line": 225,
+          "column": 1
+        },
+        {
+          "title": "切换被拒时弹窗写明原因和追踪号，检索保持原样",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 9,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2189,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:44.540Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1addf9c997441aa0db6a-52a40b08c820a8b6cc7d",
+          "file": "model-versions.spec.ts",
+          "line": 236,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "scene-sync.spec.ts",
+      "file": "scene-sync.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "全量同步：没有向量的图片可以用原图批量重新生成，读不到原图的说明原因",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 8,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 1065,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:44.855Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "5dadfc493626d2167312-8e28fbd1c9b6005eaaba",
+          "file": "scene-sync.spec.ts",
+          "line": 44,
+          "column": 1
+        },
+        {
+          "title": "窄屏：场景管理一次只显示一个面板，可以返回列表",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 8,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 872,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:45.931Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "5dadfc493626d2167312-b7defdae3a9f902c8b76",
+          "file": "scene-sync.spec.ts",
+          "line": 64,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "search-images.spec.ts",
+      "file": "search-images.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "自建库结果：列表只加载 512px 缩略图；点开详情先显示缩略图，原图加载完再换上",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 9,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1378,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:46.749Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "33c83c2167b2b1782a7a-03a44df2b49c97aa2e3b",
+          "file": "search-images.spec.ts",
+          "line": 74,
+          "column": 1
+        },
+        {
+          "title": "现网结果：列表用缩略图（大图失败退到中图），原图只在详情里加载；原图打不开时保留缩略图并说明",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 8,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 1223,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:46.826Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "33c83c2167b2b1782a7a-4fbaf656ddc66dcc757f",
+          "file": "search-images.spec.ts",
+          "line": 99,
+          "column": 1
+        },
+        {
+          "title": "自建库图片的存储地址打不开：列表用后端读出的缩略图，详情直接从后端读原图",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 8,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 1308,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:48.056Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "33c83c2167b2b1782a7a-71012544d91c58763e74",
+          "file": "search-images.spec.ts",
+          "line": 121,
+          "column": 1
+        },
+        {
+          "title": "现网 Global 可设置返回数量：单张链接放在 JSON 里，批量文件放在 query 里；自建库不显示",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 9,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1371,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:48.141Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "33c83c2167b2b1782a7a-17d0921235c5fa7ae7f4",
+          "file": "search-images.spec.ts",
+          "line": 136,
+          "column": 1
+        },
+        {
+          "title": "两个通道的结果卡一样：详情里都显示标签和描述，结果内筛选也能按标签找",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 8,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 1678,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:49.376Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "33c83c2167b2b1782a7a-d96aa9d8674d405af07f",
+          "file": "search-images.spec.ts",
+          "line": 161,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "status-overlay.spec.ts",
+      "file": "status-overlay.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "错误弹窗一直留到看过为止，给出补救的链接；Esc 关闭后焦点回到原处",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 9,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3935,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:49.537Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "57e662db13d0909f254f-df90cb43565524b3fc89",
+          "file": "status-overlay.spec.ts",
+          "line": 43,
+          "column": 1
+        },
+        {
+          "title": "成功提示是不挡操作的轻提示：不抢焦点，自己关闭，鼠标停在上面时先不关",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 8,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 6956,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:51.077Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "57e662db13d0909f254f-7b0e2d505d2427c05e3f",
+          "file": "status-overlay.spec.ts",
+          "line": 63,
+          "column": 1
+        },
+        {
+          "title": "对话框打开时轻提示显示在它上面，可以关掉，对话框不受影响",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 9,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1527,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:53.480Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "57e662db13d0909f254f-ffa0f77936442187daae",
+          "file": "status-overlay.spec.ts",
+          "line": 87,
+          "column": 1
+        },
+        {
+          "title": "上传时不合格的图片逐条列在弹窗里，点空白处关闭",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 9,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 920,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:55.015Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "57e662db13d0909f254f-f3f677b48b818f73a948",
+          "file": "status-overlay.spec.ts",
+          "line": 102,
+          "column": 1
+        },
+        {
+          "title": "搜索页选错文件时用同一个弹窗提示",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 9,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 869,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:55.941Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "57e662db13d0909f254f-f2be777d9e67b4babef0",
+          "file": "status-overlay.spec.ts",
+          "line": 119,
+          "column": 1
+        },
+        {
+          "title": "窄屏：弹窗不超出屏幕、不产生横向滚动",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 9,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 818,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:56.819Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "57e662db13d0909f254f-a2da59884e9f348685c8",
+          "file": "status-overlay.spec.ts",
+          "line": 127,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "stored-image.spec.ts",
+      "file": "stored-image.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "存储地址打不开的缩略图改由后端读出；之后同一地址直接走后端",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 9,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 972,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:57.663Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "5269b73e15f5d41923b5-afe3f3efa6451d2f8a02",
+          "file": "stored-image.spec.ts",
+          "line": 61,
+          "column": 1
+        },
+        {
+          "title": "图片编辑：只显示缩略图，点开大图才加载原图；存储地址打不开时两者都从后端读",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 12000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 8,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 1391,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-14T00:00:58.055Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "5269b73e15f5d41923b5-d28bfdad8ae0dde5ce01",
+          "file": "stored-image.spec.ts",
+          "line": 81,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-11-13T23:59:34.901Z",
+    "duration": 84758.373,
+    "expected": 41,
+    "skipped": 0,
+    "unexpected": 8,
+    "flaky": 0
+  }
+}

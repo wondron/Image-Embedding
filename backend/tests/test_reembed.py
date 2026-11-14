@@ -2,7 +2,9 @@
 reading objects back from storage (clients.image_storage), over in-memory fakes."""
 
 import tempfile
+import threading
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -64,15 +66,30 @@ class StorageReadTests(unittest.TestCase):
 
 
 class FakeStore:
+    """The image row, its ledger rows, and the row lock that a deletion waits for (like
+    PgMetadataStore.lock_image_for_vector and enqueue_image_deletion)."""
+
     def __init__(self, row=None):
         self.row = dict(row or ROW)
         self.ledger = []
+        self.row_lock = threading.Lock()
 
     def get_by_id(self, image_id):
         return dict(self.row) if self.row and str(image_id) == self.row["id"] else None
 
-    def upsert_image_embedding(self, *, model_id, image_id, synced_version=None):
-        self.ledger.append((model_id, str(image_id), synced_version))
+    @contextmanager
+    def lock_image_for_vector(self, image_id, *, model_id):
+        with self.row_lock:
+            current = self.get_by_id(image_id)
+            yield current  # an exception from the caller leaves the ledger as it was
+            if current is not None:
+                self.ledger.append((model_id, str(image_id), current["payload_version"]))
+
+    def delete(self, image_id):
+        """DELETE /api/images/{id}: waits for the row, then the image goes with its ledger rows."""
+        with self.row_lock:
+            self.row = None
+            self.ledger = [entry for entry in self.ledger if entry[1] != str(image_id)]
 
 
 class ReembedUseCaseTests(unittest.TestCase):
@@ -119,6 +136,73 @@ class ReembedUseCaseTests(unittest.TestCase):
             self.run_it()
         self.assertEqual(ctx.exception.code, "INDEX_QDRANT_FAILED")
         self.assertEqual(self.store.ledger, [])
+
+    def collection(self):
+        """The current collection as a dict the fake vector store writes to."""
+        points = {}
+
+        def upsert(point_id, vector, payload):
+            points[str(point_id)] = payload
+
+        self.vectors.upsert.side_effect = upsert
+        self.vectors.delete.side_effect = lambda point_id: points.pop(str(point_id), None)
+        return points
+
+    def test_an_image_deleted_while_it_is_embedded_gets_no_point_back(self):
+        points = self.collection()
+        points[IMAGE] = expected_payload(ROW)  # the point the deletion's cleanup is about to remove
+
+        def embed_while_deleted(data):
+            self.store.delete(IMAGE)  # the deletion commits ...
+            self.vectors.delete(IMAGE)  # ... and its cleanup runs, before the vector is ready
+            return [0.5, 0.5, 0.5, 0.5]
+
+        self.embedding.embed_bytes.side_effect = embed_while_deleted
+        with self.assertRaises(err.AppError) as ctx:
+            self.run_it()
+        self.assertEqual(ctx.exception.code, "IMAGE_NOT_FOUND")
+        self.vectors.upsert.assert_not_called()
+        self.assertEqual(points, {})  # nothing would ever remove a point written now
+        self.assertEqual(self.store.ledger, [])
+
+    def test_a_deletion_that_comes_while_the_point_is_written_waits_and_then_removes_it(self):
+        points = self.collection()
+        deleted = threading.Event()
+
+        def delete_image():  # DELETE /api/images/{id}: the queue row, then the cleanup of the point
+            self.store.delete(IMAGE)
+            self.vectors.delete(IMAGE)
+            deleted.set()
+
+        deletion = threading.Thread(target=delete_image, daemon=True)
+        waited = []
+
+        def upsert_while_deleting(point_id, vector, payload):
+            deletion.start()
+            waited.append(not deleted.wait(0.3))  # the deletion is held at the image row
+            points[str(point_id)] = payload
+
+        self.vectors.upsert.side_effect = upsert_while_deleting
+        self.assertEqual(self.run_it(), {"image_id": IMAGE, "payload_version": 7})
+        self.assertTrue(deleted.wait(5), "the deletion never went on after the write")
+        deletion.join(5)
+        self.assertEqual(waited, [True])
+        self.assertEqual(points, {})  # its cleanup came after the write and took the point out
+        self.assertIsNone(self.store.row)
+        self.assertEqual(self.store.ledger, [])  # gone with the image
+
+    def test_the_payload_and_version_are_the_image_as_it_is_when_the_point_is_written(self):
+        edited = {**ROW, "category_id": 13, "scenes": ["general"], "label_status": "verified", "payload_version": 8}
+
+        def embed_while_edited(data):
+            self.store.row = dict(edited)  # an edit committed while the original was embedded
+            return [0.5, 0.5, 0.5, 0.5]
+
+        self.embedding.embed_bytes.side_effect = embed_while_edited
+        self.assertEqual(self.run_it(), {"image_id": IMAGE, "payload_version": 8})
+        (_, _, payload), _ = self.vectors.upsert.call_args
+        self.assertEqual(payload, expected_payload(edited))
+        self.assertEqual(self.store.ledger, [(MODEL.id, IMAGE, 8)])
 
     def test_unknown_images_and_missing_storage_or_url(self):
         self.store.row = None

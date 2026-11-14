@@ -17,3 +17,4 @@ export { SCORE_DEFAULT, SCORE_MIN, SCORE_MAX, SCORE_STEP, clampScoreThreshold, f
 export { formatLibraryTime } from './format'
 export { requestSignal } from './requestSignal'
 export { usePreference, oneOf } from './preference'
+export { type ComposingKey, isImeComposing } from './keyboard'

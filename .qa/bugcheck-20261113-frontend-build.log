@@ -1,0 +1,10 @@
+﻿Snapshot: eb5691de0efd9690390e932b1069e48bcb187af9 (checkpoint commit observed during testing)
+Command: npm.cmd run build
+
+> food-atlas-frontend@0.1.0 build
+> tsc -b && vite build
+
+src/features/category-config/tableModel.test.ts(64,18): error TS2353: Object literal may only specify known properties, and 'domainId' does not exist in type 'Partial<CategoryTableFilter>'.
+src/features/category-config/tableModel.test.ts(65,61): error TS2353: Object literal may only specify known properties, and 'domainId' does not exist in type 'CategoryTableFilter'.
+src/features/category-config/tableModel.test.ts(66,18): error TS2353: Object literal may only specify known properties, and 'domainId' does not exist in type 'Partial<CategoryTableFilter>'.
+Exit code: 1

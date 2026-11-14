@@ -122,7 +122,7 @@ const batch = (page: Page) => page.locator('.mg-import-settings')
 async function pickCategory(scope: ReturnType<Page['locator']>, query: string, option: string) {
   const box = scope.getByRole('combobox', { name: '类别' })
   await box.fill(query)
-  await scope.getByRole('option', { name: new RegExp(`^${option}`) }).click()
+  await scope.getByRole('treeitem', { name: new RegExp(`^${option}`) }).click()
 }
 
 test('批量标注：类别来自数据库，场景按规则预览并可人工调整，所有属性随入库提交', async ({ page }, info) => {
@@ -210,6 +210,56 @@ test('相同图片已在库中：提示沿用原有标注，不写场景调整',
   await expect(page.locator('.mg-upload-card.mg-job-success')).toHaveCount(1)
   await expect(page.locator('.mg-job-note')).toContainText('相同图片已在图库中')
   expect(api.membershipCalls).toEqual([])
+})
+
+test('类别选择：不输入时逐级展开挑选，最近选过的一键再选；拼音输入时的回车只确认候选字', async ({ page }) => {
+  await mockApi(page)
+  await openImport(page)
+  await page.getByLabel('选择待入库图片').setInputFiles([upload('a.png')])
+  const form = batch(page)
+  const box = form.getByRole('combobox', { name: '类别' })
+  const tree = form.getByRole('tree', { name: '类别候选' })
+  const item = (name: string) => tree.getByRole('treeitem', { name, exact: true })
+  const selected = form.locator('.cp-selected')
+
+  // Nothing typed: the tree folded below the domains, a level opened with its arrow
+  await box.click()
+  await expect(item('菜品')).toHaveAttribute('aria-expanded', 'true')
+  await expect(item('肉类')).toHaveAttribute('aria-expanded', 'false')
+  await expect(item('牛排')).toHaveCount(0)
+  await expect(item('停用类别')).toHaveCount(0)  // disabled: not offered
+  await item('肉类').locator('.cp-twisty').click()
+  await item('牛排').click()
+  await expect(selected).toContainText('菜品 / 肉类 / 牛排')
+
+  // Opened again: down to the current one; the keyboard folds (←) and picks (Enter)
+  await box.click()
+  await expect(item('牛排')).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.press('ArrowLeft')  // to 肉类
+  await page.keyboard.press('ArrowLeft')  // fold it
+  await expect(item('牛排')).toHaveCount(0)
+  await page.keyboard.press('ArrowRight')
+  await page.keyboard.press('ArrowRight')
+  await page.keyboard.press('ArrowDown')  // 牛排 → 红烧肉
+  await page.keyboard.press('Enter')
+  await expect(selected).toContainText('菜品 / 肉类 / 红烧肉')
+
+  // The ones picked last come back as shortcuts
+  await box.click()
+  await form.getByRole('group', { name: '最近选过的类别' }).getByRole('button', { name: '牛排' }).click()
+  await expect(selected).toContainText('牛排')
+
+  // 拼音: the Enter that commits the characters must not pick the highlighted category
+  await box.focus()
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('Input.imeSetComposition', { text: 'hong', selectionStart: 4, selectionEnd: 4 })
+  await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 229, nativeVirtualKeyCode: 229 })
+  await expect(box).toHaveValue('hong')
+  await expect(selected).toContainText('牛排')
+  await cdp.send('Input.insertText', { text: '红烧' })
+  await expect(box).toHaveValue('红烧')
+  await page.keyboard.press('Enter')
+  await expect(selected).toContainText('红烧肉')
 })
 
 test('窄屏：标注表单排在队列下方，没有横向滚动', async ({ page }, info) => {

@@ -160,7 +160,7 @@ async function screenshot(page: Page, info: TestInfo, name: string) {
 
 async function pickCategory(scope: Locator, query: string, option: string) {
   await scope.getByRole('combobox', { name: '类别' }).fill(query)
-  await scope.getByRole('option', { name: new RegExp(`^${option}`) }).click()
+  await scope.getByRole('treeitem', { name: new RegExp(`^${option}`) }).click()
 }
 
 test('图库：类别与标注状态筛选取自数据库；单张图片可查看向量状态、重推、编辑和删除', async ({ page }, info) => {
@@ -365,9 +365,12 @@ test('图库：上千个类别时树只渲染看得见的行，搜索直接找�
   // Counts add up the subtree: 40 groups × (0+1+…+49 taken mod 4 = 73)
   await expect(tree.getByRole('treeitem', { name: '菜品，2920 张' })).toBeVisible()
 
+  // A category without images finds nothing: with images in the library, those are hidden by default
+  await expect(filters.getByRole('checkbox', { name: /隐藏没有图片的/ })).toBeChecked()
   const search = filters.getByRole('searchbox', { name: '搜索类别' })
   await search.fill('菜3')
-  await expect(filters).toContainText('找到 550 个')
+  // 11 groups × 50 match; 13 per group have no image (leaf % 4 === 0)
+  await expect(filters).toContainText('找到 407 个，另有 143 个被上面的选项隐藏')
   expect(await tree.getByRole('treeitem').count()).toBeLessThan(80)  // a virtual list, not 600 rows
   await search.fill('菜37-42')
   await tree.getByRole('treeitem', { name: /^菜37-42，/ }).click()
@@ -385,8 +388,7 @@ test('图库：上千个类别时树只渲染看得见的行，搜索直接找�
   await expect(tree.getByRole('treeitem', { name: /^大类0，/ })).toHaveAttribute('aria-expanded', 'true')
   await screenshot(page, info, 'library-many-categories')
 
-  // Leave out what has no image: 菜x-0 (image_count 0) disappears from the search
-  await filters.getByRole('checkbox', { name: '隐藏没有图片的' }).check()
+  // What has no image stays out: 菜x-0 (image_count 0) is not in the search
   await search.fill('菜5-0')
   await expect(filters).toContainText('找到 0 个，另有 1 个被上面的选项隐藏')
   await filters.getByRole('button', { name: '全部显示' }).click()

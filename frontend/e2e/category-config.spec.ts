@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from '@playwright/test'
+import { expect, test, type Locator, type Page, type Route } from '@playwright/test'
 import { acknowledgeNotice, expectToast } from './notice'
 
 // Fixtures only: every API request is answered by the in-memory backend below.
@@ -168,6 +168,24 @@ const rowOf = (page: Page, id: number) => page.locator(`#category-row-${id}`)
 const createButton = (page: Page) => page.getByRole('button', { name: '新建类别', exact: true })
 const noHorizontalOverflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)
 
+/** The editor's 上级类别: a searchable tree (category-picker), its top entry the root level. */
+const ROOT_PARENT = '（根节点 · 类别域）'
+const parentBox = (dialog: Locator) => dialog.getByRole('combobox', { name: '上级类别' })
+const parentTree = (dialog: Locator) => dialog.getByRole('tree', { name: '上级类别候选' })
+const pickedParent = (dialog: Locator) => dialog.locator('.cat-parent-current')
+
+/** Pick a parent by its name (searched), or ROOT_PARENT for the top level. */
+async function chooseParent(dialog: Locator, name: string) {
+  await parentBox(dialog).click()
+  if (name === ROOT_PARENT) {
+    await parentTree(dialog).getByRole('treeitem', { name: ROOT_PARENT }).click()
+  } else {
+    await parentBox(dialog).fill(name)
+    await parentTree(dialog).getByRole('treeitem', { name: new RegExp(`^${name}(\\s|$)`) }).click()
+  }
+  await expect(parentTree(dialog)).toHaveCount(0)  // the list closes on a pick
+}
+
 test('导航只有「食材管理」一个入口，它就是类别树', async ({ page }) => {
   await open(page, seededRows(), '/')
   const nav = page.getByRole('navigation', { name: '主导航' })
@@ -185,7 +203,7 @@ test('五个根类别后可以添加「其他」，满六个后只允许添加�
   await expect(nodeButton(page, '混合', 'mixed')).toBeVisible()
   await createButton(page).click()
   const dialog = page.getByRole('dialog', { name: '新建类别' })
-  await dialog.locator('#category-form-parentId').selectOption('root')
+  await chooseParent(dialog, ROOT_PARENT)
   await expect(dialog.locator('#category-form-code option')).toHaveText(['其他（other）'])
   await expect(dialog.locator('#category-form-zhName')).toHaveValue('其他')
   await dialog.getByRole('button', { name: '创建', exact: true }).click()
@@ -196,9 +214,10 @@ test('五个根类别后可以添加「其他」，满六个后只允许添加�
   expect(backend.writes()[0].body).toMatchObject({ code: 'other', parent_id: null, names: [zh('其他')] })
 
   await createButton(page).click()
-  await expect(dialog.locator('#category-form-parentId option[value="root"]')).toHaveCount(0)
+  await parentBox(dialog).click()
+  await expect(parentTree(dialog).getByRole('treeitem', { name: ROOT_PARENT })).toHaveCount(0)
   await expect(dialog.locator('#category-form-parentId-hint')).toContainText('已达到六个根类别的上限')
-  await dialog.locator('#category-form-parentId').selectOption('6')
+  await chooseParent(dialog, '其他')
   await expect(dialog.locator('#category-form-code')).toHaveValue('other.')
 })
 
@@ -208,7 +227,9 @@ test('已有六个根类别包含旧编码时，也不再提供第七个根类�
   await open(page, [...roots, row(6, 'legacy', null, '旧类别域')])
   await createButton(page).click()
   const dialog = page.getByRole('dialog', { name: '新建类别' })
-  await expect(dialog.locator('#category-form-parentId option[value="root"]')).toHaveCount(0)
+  await parentBox(dialog).click()
+  await expect(parentTree(dialog).getByRole('treeitem', { name: '旧类别域' })).toBeVisible()
+  await expect(parentTree(dialog).getByRole('treeitem', { name: ROOT_PARENT })).toHaveCount(0)
   await expect(dialog.locator('#category-form-parentId-hint')).toContainText('已达到六个根类别的上限')
 })
 
@@ -218,7 +239,7 @@ test('空库：先建类别域，再在它下面建下级类别', async ({ page 
 
   await createButton(page).click()
   const rootDialog = page.getByRole('dialog', { name: '新建类别' })
-  await expect(rootDialog.locator('#category-form-parentId')).toHaveValue('root')
+  await expect(pickedParent(rootDialog)).toContainText('根节点 · 类别域')
   // The root codes come from the API; their Chinese names from the category_domain enum.
   await expect(rootDialog.locator('#category-form-code option')).toHaveText(['食材（ingredient）', '菜品（dish）', '甜点烘焙（dessert）', '饮品（beverage）', '混合（mixed）', '其他（other）'])
   await expect(rootDialog.locator('#category-form-zhName')).toHaveValue('食材')
@@ -236,7 +257,7 @@ test('空库：先建类别域，再在它下面建下级类别', async ({ page 
 
   await page.getByRole('button', { name: '新建「菜品」的下级类别' }).click()
   const childDialog = page.getByRole('dialog', { name: '新建类别' })
-  await expect(childDialog.locator('#category-form-parentId')).toHaveValue('1')
+  await expect(pickedParent(childDialog)).toContainText('菜品')
   const code = childDialog.locator('#category-form-code')
   await expect(code).toHaveValue('dish.')
   await expect(code).toBeFocused()
@@ -282,21 +303,22 @@ test('工具栏新建：先选上级，编码随上级前缀变化', async ({ pa
   await dialog.getByRole('button', { name: '创建', exact: true }).click()
   await expect(dialog.locator('#category-form-parentId-error')).toHaveText('请选择上级类别。')
 
-  await parent.selectOption('2') // 披萨
+  await chooseParent(dialog, '披萨')
+  await expect(pickedParent(dialog)).toContainText('菜品 / 披萨')
   await expect(code).toHaveValue('dish.pizza.')
   await parent.focus()
   await page.keyboard.press('Tab') // Tab selects a field's whole value; the prefix must survive typing
   await expect(code).toBeFocused()
   await page.keyboard.type('calzone')
   await expect(code).toHaveValue('dish.pizza.calzone')
-  await parent.selectOption('5') // 食材: what was typed moves under the new prefix
+  await chooseParent(dialog, '食材') // what was typed moves under the new prefix
   await expect(code).toHaveValue('ingredient.calzone')
 
   // The four unused domain codes are still free for a root; the name follows the domain.
-  await parent.selectOption('root')
+  await chooseParent(dialog, ROOT_PARENT)
   await expect(code.locator('option')).toHaveText(['甜点烘焙（dessert）', '饮品（beverage）', '混合（mixed）', '其他（other）'])
   await expect(dialog.locator('#category-form-zhName')).toHaveValue('甜点烘焙')
-  await parent.selectOption('3') // 面条
+  await chooseParent(dialog, '面条')
   await expect(code).toHaveValue('dish.noodle.')
   await expect(dialog.locator('#category-form-zhName')).toHaveValue('')
 
@@ -323,7 +345,13 @@ test('编辑只提交改过的字段；换上级时下级类别一起移动', as
   await expect(dialog.locator('#category-form-zhName')).toBeFocused()
   await expect(dialog).toContainText('1 个下级类别 · 0 张图片 · 0 条场景规则')
   // A node cannot move under itself or its own subtree: those are not offered.
-  await expect(dialog.locator('#category-form-parentId option')).toHaveText(['菜品（dish）', '　面条（dish.noodle）', '食材（ingredient）'])
+  await expect(pickedParent(dialog)).toContainText('菜品')
+  await parentBox(dialog).click()
+  await expect(parentTree(dialog).getByRole('treeitem')).toHaveCount(3)
+  for (const name of ['菜品', '面条', '食材']) await expect(parentTree(dialog).getByRole('treeitem', { name, exact: true })).toBeVisible()
+  await parentBox(dialog).fill('披萨')
+  await expect(parentTree(dialog)).toContainText('没有匹配的类别')
+  await parentBox(dialog).fill('')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expectToast(page, '没有改动，无需保存。', 'info')
   expect(backend.writes()).toEqual([])
@@ -336,7 +364,7 @@ test('编辑只提交改过的字段；换上级时下级类别一起移动', as
   await expect(rowOf(page, 2).locator('.ct-col-status')).toHaveText('停用')
 
   await nodeButton(page, '披萨', 'dish.pizza').click() // the name opens the editor too
-  await dialog.locator('#category-form-parentId').selectOption('5')
+  await chooseParent(dialog, '食材')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(dialog).toBeHidden()
   expect(backend.writes()[1]).toEqual({ method: 'PATCH', path: '/api/categories/2', body: { parent_id: 5, code: 'ingredient.pizza' } })
@@ -354,7 +382,7 @@ test('移动类别或改菜系后，说明其下图片的场景归属；没能�
 
   backend.sceneSync = { images: 3, changed: 2, pushed: 2, pending: 0, vector_sync: 'pushed', sync_required: false }
   await page.getByRole('button', { name: '编辑「面条」' }).click()
-  await dialog.locator('#category-form-parentId').selectOption('5')
+  await chooseParent(dialog, '食材')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(dialog).toBeHidden()
   await expectToast(page, '已保存「面条」。其下 2 张图片的场景归属已随之更新，并已同步到向量库。', 'success')
@@ -371,7 +399,7 @@ test('移动类别或改菜系后，说明其下图片的场景归属；没能�
   // Nothing below changed scenes: the plain save
   backend.sceneSync = { images: 3, changed: 0, pushed: 0, pending: 0, vector_sync: 'pushed', sync_required: false }
   await page.getByRole('button', { name: '编辑「面条」' }).click()
-  await dialog.locator('#category-form-parentId').selectOption('1')
+  await chooseParent(dialog, '菜品')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expectToast(page, /^已保存「面条」。$/, 'success')
 })
@@ -384,7 +412,7 @@ test('换父级或修改节点编码时，预览并以一个请求更新所有�
   const backend = await open(page, rows)
   await page.getByRole('button', { name: '编辑「披萨」' }).click()
   const dialog = page.getByRole('dialog', { name: '编辑类别' })
-  await dialog.locator('#category-form-parentId').selectOption('5')
+  await chooseParent(dialog, '食材')
   await expect(dialog.locator('#category-form-code')).toHaveValue('ingredient.PiZza')
   const preview = dialog.getByRole('status', { name: '编码更新预览' })
   await expect(preview).toContainText('一起更新 3 个节点')
@@ -412,7 +440,7 @@ test('后代编码与外部类别冲突时，在发请求前阻止整棵子树�
   const backend = await open(page, [...seededRows(), row(9, 'Ingredient.PIZZA.SLICE', 5, '外部切片')])
   await page.getByRole('button', { name: '编辑「披萨」' }).click()
   const dialog = page.getByRole('dialog', { name: '编辑类别' })
-  await dialog.locator('#category-form-parentId').selectOption('5')
+  await chooseParent(dialog, '食材')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(dialog.locator('#category-form-code-error')).toContainText('披萨切片')
   await expect(dialog.locator('#category-form-code-error')).toContainText('ingredient.pizza.slice')
@@ -425,7 +453,7 @@ test('后代编码超长时不能保存，也不会发送部分更新', async ({
   const backend = await open(page, [...seededRows(), row(8, parentCode, 5, '长编码父类')])
   await page.getByRole('button', { name: '编辑「披萨」' }).click()
   const dialog = page.getByRole('dialog', { name: '编辑类别' })
-  await dialog.locator('#category-form-parentId').selectOption('8')
+  await chooseParent(dialog, '长编码父类')
   await expect(dialog.locator('#category-form-code')).toHaveValue(`${parentCode}.pizza`)
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(dialog.locator('#category-form-code-error')).toContainText('披萨切片')
@@ -463,7 +491,7 @@ test('已有大小写类别域时不再提供相同根编码', async ({ page }) 
   const backend = await open(page, [row(1, 'Ingredient', null, '食材')])
   await createButton(page).click()
   const dialog = page.getByRole('dialog', { name: '新建类别' })
-  await dialog.locator('#category-form-parentId').selectOption('root')
+  await chooseParent(dialog, ROOT_PARENT)
   await expect(dialog.locator('#category-form-code option')).toHaveText([
     '菜品（dish）', '甜点烘焙（dessert）', '饮品（beverage）', '混合（mixed）', '其他（other）',
   ])
@@ -474,7 +502,7 @@ test('大小写类别域编码的子节点可以提升到根层级', async ({ pa
   const backend = await open(page, [row(1, 'ingredient', null, '食材'), row(2, 'OtHeR', 1, '其他')])
   await page.getByRole('button', { name: '编辑「其他」' }).click()
   const dialog = page.getByRole('dialog', { name: '编辑类别' })
-  await dialog.locator('#category-form-parentId').selectOption('root')
+  await chooseParent(dialog, ROOT_PARENT)
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(dialog).toBeHidden()
   expect(backend.writes()).toEqual([{ method: 'PATCH', path: '/api/categories/2', body: { parent_id: null } }])
@@ -563,10 +591,69 @@ test('搜索名称、别名或编码时保留上级作为上下文；可按类�
   await expect(page.getByLabel('搜索类别')).toHaveValue('')
   await expect(nodeButton(page, '面条', 'dish.noodle')).toBeVisible()
 
-  await page.getByLabel('类别域筛选').selectOption({ label: '食材' })
+  await page.getByLabel('范围筛选').selectOption({ label: '食材' })
   await expect(nodeButton(page, '食材', 'ingredient')).toBeVisible()
   await expect(nodeButton(page, '菜品', 'dish')).toHaveCount(0)
   await expect(footer).toContainText('共 1 个类别')
+})
+
+test('目录大了：缩小到一个分组，在它下面连续新建；名称和已有类别（含别名）相同会提示', async ({ page }) => {
+  const rows = seededRows()
+  rows.find(item => item.id === 3)!.names.push({ lang: 'zh', name: '拉面', kind: 'alias' })
+  const backend = await open(page, rows)
+  const footer = table(page).locator('.ct-footer')
+  // The domains and the groups inside them (a leaf right below a domain is no group)
+  await expect(page.getByLabel('范围筛选').locator('option')).toHaveText(['全部类别', '菜品', '　披萨', '食材'])
+  await page.getByLabel('范围筛选').selectOption({ label: '　披萨' })
+  await expect(nodeButton(page, '披萨', 'dish.pizza')).toBeVisible()
+  await expect(nodeButton(page, '披萨切片', 'dish.pizza.slice')).toBeVisible()  // opened to show what is in it
+  await expect(nodeButton(page, '面条', 'dish.noodle')).toHaveCount(0)
+  await expect(footer).toContainText('共 2 个类别')
+
+  // 新建类别 starts under the group the table shows
+  await createButton(page).click()
+  const dialog = page.getByRole('dialog', { name: '新建类别' })
+  await expect(pickedParent(dialog)).toContainText('菜品 / 披萨')
+  const code = dialog.locator('#category-form-code')
+  await expect(code).toHaveValue('dish.pizza.')
+  await expect(code).toBeFocused()
+  await page.keyboard.type('margherita')
+  const sameName = dialog.getByRole('status').filter({ hasText: '已有同名的类别' })
+  await dialog.locator('#category-form-zhName').fill('拉面')
+  await expect(sameName).toContainText('菜品 / 面条（别名「拉面」）')
+  await dialog.locator('#category-form-zhName').fill('玛格丽特')
+  await expect(sameName).toHaveCount(0)
+
+  // 创建并继续: the same parent, the rest blank, the caret after the prefix
+  await dialog.getByRole('button', { name: '创建并继续' }).click()
+  await expect(dialog.getByRole('status').filter({ hasText: '本次已创建' })).toHaveText('本次已创建 1 个')
+  await expect(code).toHaveValue('dish.pizza.')
+  await expect(code).toBeFocused()
+  await expect(dialog.locator('#category-form-zhName')).toHaveValue('')
+  await page.keyboard.type('marinara')
+  await dialog.locator('#category-form-zhName').fill('水手')
+  await dialog.getByRole('button', { name: '创建', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  expect(backend.writes().map(call => call.body)).toMatchObject([
+    { code: 'dish.pizza.margherita', parent_id: 2, names: [zh('玛格丽特')] },
+    { code: 'dish.pizza.marinara', parent_id: 2, names: [zh('水手')] },
+  ])
+  await expect(nodeButton(page, '玛格丽特', 'dish.pizza.margherita')).toBeVisible()
+  await expect(nodeButton(page, '水手', 'dish.pizza.marinara')).toHaveAttribute('aria-current', 'true')
+  await expect(footer).toContainText('共 4 个类别')
+})
+
+test('分组行给出下级类别上的图片合计；行高一行，长编码只截掉前面的上级部分', async ({ page }) => {
+  const rows = seededRows()
+  rows.find(item => item.id === 4)!.image_count = 5
+  await open(page, rows)
+  await expect(rowOf(page, 1).locator('.ct-col-usage')).toHaveText('下级 8 张')  // 3 on 面条 + 5 on 披萨切片
+  await expect(rowOf(page, 3).locator('.ct-col-usage')).toHaveText('3 张图片')
+  await page.getByRole('button', { name: '展开「披萨」' }).click()
+  const slice = rowOf(page, 4)
+  await expect(slice.locator('.ct-col-usage')).toHaveText('5 张图片')
+  expect((await slice.boundingBox())!.height).toBeLessThanOrEqual(40)
+  await expect(slice.locator('.ct-code')).toHaveAttribute('title', 'dish.pizza.slice')
 })
 
 test('列表加载失败时显示错误码和追踪号，重试后恢复；链接可以直接打开某个类别', async ({ page }) => {

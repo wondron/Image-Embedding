@@ -242,6 +242,61 @@ class PgImagesMixin:
                 raise
             raise err.index_postgres_failed(f"index_image: {type(exc).__name__}: {exc}") from exc
 
+    @contextmanager
+    def lock_image_for_vector(
+        self, image_id: UUID | str, *, model_id: int
+    ) -> Iterator[dict[str, Any] | None]:
+        """Hold one stored image while the caller writes its point again (reembed).
+
+        Yields the image as it is now, with its effective scenes (what the point's payload is
+        built from), or None when it is gone (deleted meanwhile): then no point may be written.
+        The row stays locked until the caller is done, so a deletion waits for the write, and its
+        cleanup, which runs after the deletion commits, removes the point written here. Without
+        the lock a deletion could commit and be cleaned up while the point was being written, and
+        the point would come back with nothing left to remove it: no image, no queue row, no
+        ledger row for the reconciler to check.
+
+        Normal exit records the yielded payload_version in model_id's ledger and commits; an
+        exception rolls back and leaves the ledger as it was. Edits wait for the write too, so
+        the payload written is the one the ledger records.
+        """
+        self.ensure_schema()
+        from sqlalchemy import text
+
+        uid = str(_as_uuid(image_id))
+        consumer_failed = False
+        try:
+            with self._get_engine().begin() as conn:
+                # Lock first, then read: in READ COMMITTED the second statement sees whatever the
+                # writer we waited for committed (its image_foods and image_scenes rows too)
+                locked = conn.execute(
+                    text("SELECT 1 FROM images WHERE id = CAST(:id AS uuid) FOR UPDATE"), {"id": uid}
+                ).fetchone()
+                snapshot: dict[str, Any] | None = None
+                if locked is not None:
+                    row = conn.execute(
+                        text(f"SELECT i.*, {FOOD_SELECT} FROM images i {FOOD_JOIN}WHERE i.id = CAST(:id AS uuid)"),
+                        {"id": uid},
+                    ).mappings().fetchone()
+                    snapshot = _row_to_dict(row)
+                    snapshot["scenes"] = self._scene_codes_by_image(conn, [uid]).get(uid, [])
+                try:
+                    yield snapshot
+                except BaseException:
+                    consumer_failed = True
+                    raise
+                if snapshot is not None:
+                    _upsert_image_embedding(
+                        conn,
+                        model_id=model_id,
+                        image_id=uid,
+                        synced_version=int(snapshot["payload_version"]),
+                    )
+        except BaseException as exc:
+            if isinstance(exc, err.AppError) or consumer_failed or not isinstance(exc, Exception):
+                raise
+            raise err.index_postgres_failed(f"lock_image_for_vector: {type(exc).__name__}: {exc}") from exc
+
     def _mark_index_embedding_stale(self, *, model_id: int, image_id: UUID) -> None:
         """Best effort after an uncertain external write; preserve every image."""
         from sqlalchemy import text

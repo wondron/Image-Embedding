@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { ChevronRight, FolderTree, History, LoaderCircle, RotateCcw, Search, X } from 'lucide-react'
 import { categoryAncestors, categoryLabel, type CategoryTree } from '../../entities/category'
-import { usePreference } from '../../shared/lib'
+import { isImeComposing, usePreference } from '../../shared/lib'
 import { categoryNavView, highlightParts, searchWords, subtreeImageCounts, type CategoryNavRow } from './categoryNav'
 
 /** Every row is this tall, so the list renders only the rows in view (the tree can hold thousands). */
@@ -256,6 +256,8 @@ export function CategoryNavigator({ tree, loading, error, onRetry, value, onChan
         value={query}
         onChange={event => setQuery(event.target.value)}
         onKeyDown={event => {
+          // 拼音 being typed: its Enter commits the characters, not the first match
+          if (isImeComposing(event)) return
           if (event.key === 'ArrowDown' && rows.length) {
             event.preventDefault()
             list?.focus()

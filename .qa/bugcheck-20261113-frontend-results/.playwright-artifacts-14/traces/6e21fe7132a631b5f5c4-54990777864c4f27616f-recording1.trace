@@ -1,1 +1,0 @@
-{"version":10,"type":"context-options","origin":"library","browserName":"","playwrightVersion":"1.64.1","options":{},"platform":"win32","wallTime":1794614257334,"monotonicTime":81296.347,"sdkLanguage":"javascript","title":"downloads.spec.ts:151 › 停止 ZIP 下载后不生成文件，晚到图片响应不会触发保存"}

@@ -1,5 +1,0 @@
-INFO:     Started server process [28580]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://127.0.0.1:57511 (Press CTRL+C to quit)
-INFO:     127.0.0.1:50238 - "GET /api/index-tasks?page=1&page_size=20 HTTP/1.1" 200 OK
