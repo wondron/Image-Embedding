@@ -102,9 +102,11 @@ notify.success('已保存。', { action: { label: '去同步', onClick } })     
 
 | 方法与路径 | 请求 |
 | --- | --- |
-| `POST /api/predict/searchImage_file` | `multipart/form-data`，文件字段为 `file`；返回数量走 Query：`?search_num=10` |
-| `POST /api/predict/searchImage_url` | JSON：`{"img_url":"https://example.com/image.jpg","search_num":10}` |
+| `POST /api/search/global/file` | 现网 Global 搜图（上传文件）：`multipart/form-data`，文件字段为 `file`；返回数量走 Query：`?search_num=10` |
+| `POST /api/search/global/url` | 现网 Global 搜图（图片链接）：JSON：`{"img_url":"https://example.com/image.jpg","search_num":10}` |
 | `GET /api/images/download` | Query：`url`，返回经验证的图片字节和实际图片 MIME 类型 |
+
+两个 Global 接口只在图片输入方式上不同，共用同一套检索逻辑。前端单张及批量搜索使用上述新地址；旧 `/api/predict/searchImage_file`、`/api/predict/searchImage_url` 保留为兼容别名，不在 Swagger 中展示，参数和响应不变。
 
 响应为 `{ "result": [...], "trace_id": "..." }`，上游没有结果时 `result` 为包含 `results` 数组的对象（`status=upstream_empty_response`）。`result[]` 的每一项和自建检索 `POST /api/search` 的 `items[]` 是同一张结果卡：顶层 `tags`（FlyB 为结果标题）、`description`、`original_url`、`similarity`（缺失时不显示虚构分数），其余在 `details` 里（缩略图在 `details.images[]`，来源网页、站点在 `details.page_url` / `details.site`），见契约 §6.1.1。Global 搜索返回的候选结果不等同于已入库图片。
 

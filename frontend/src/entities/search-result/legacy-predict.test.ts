@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fromPredictResponse, getImageSources, getThumbnailSources } from '.'
 
-/** Bodies as POST /api/predict/searchImage_* returns them: { ok, trace_id, result } (FlyB result cards). */
+/** Bodies as POST /api/search/global/* returns them: { ok, trace_id, result } (FlyB result cards). */
 const predict = (result: unknown, traceId: string | null = 'trace-1') => ({ ok: true, trace_id: traceId, result })
 /** A FlyB result card (schemas/predict.py PredictHit); `details` merges over an empty one. */
 const card = (fields: Record<string, unknown> = {}, details: Record<string, unknown> = {}) => ({

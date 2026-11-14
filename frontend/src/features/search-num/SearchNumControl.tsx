@@ -18,10 +18,10 @@ export function SearchNumControl({ value, disabled = false, onChange }: SearchNu
   return (
     <div className="search-num-control" role="group" aria-label="返回数量"
       title="最多返回这么多条；FlyB 找到的少、或开启了相似度过滤时会更少">
+      <span className="search-num-hint">仅现网 Global 生效 · 默认 {SEARCH_NUM_DEFAULT} · 范围 {SEARCH_NUM_MIN}–{SEARCH_NUM_MAX}</span>
       <div className="search-num-header">
         <ListOrdered size={14} aria-hidden />
         <span className="search-num-title">返回数量</span>
-        <span className="search-num-hint">仅现网 Global 生效 · 默认 {SEARCH_NUM_DEFAULT} · 范围 {SEARCH_NUM_MIN}–{SEARCH_NUM_MAX}</span>
       </div>
       <div className="search-num-row">
         <input

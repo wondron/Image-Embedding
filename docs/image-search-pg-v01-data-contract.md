@@ -6,6 +6,8 @@
 > **本文件**：`docs/image-search-pg-v01-data-contract.md`  
 > **相对旧 SSOT**：取代 `docs/image-search-mvp-data-contract.md` 中 **MySQL 元数据 / 单 collection / path 唯一** 方向；`score_threshold` 等拒识数字**沿用 MVP 直至另刀**；**FlyB 空兜底本轮 OUT OF SCOPE**（M0 总裁已拍）。  
 > **编码**：UTF-8（无 BOM）
+>
+> **Global 接口命名更新（2026-11-13）**：现网 Global 规范入口为 `POST /api/search/global/file`（上传文件）和 `POST /api/search/global/url`（图片链接）；两者共用原有检索逻辑，参数和响应不变。前端使用新地址；旧 `/api/predict/searchImage_file`、`/api/predict/searchImage_url` 保留为兼容别名，不在 Swagger 中展示。下文带日期的历史变更记录保留当时名称。
 
 ---
 
@@ -521,9 +523,9 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 
 #### Hit = 结果卡（`items[]` 元素；**2026-11-12 起与 FlyB 结果同形**）
 
-自建检索 hit 与 FlyB 结果（`POST /api/predict/searchImage_*` 的 `result[]`）是同一张结果卡：顶层只有下面四个字段和 `details`，其余字段一律在 `details` 里（`backend/app/schemas/search_hit.py` `SearchHitBase`；自建 `SearchHit`、FlyB `PredictHit` 都继承它）。
+自建检索 hit 与 FlyB 结果（`POST /api/search/global/file`、`POST /api/search/global/url` 的 `result[]`）是同一张结果卡：顶层只有下面四个字段和 `details`，其余字段一律在 `details` 里（`backend/app/schemas/search_hit.py` `SearchHitBase`；自建 `SearchHit`、FlyB `PredictHit` 都继承它）。
 
-| 字段 | 必填 | 类型 | 自建（`POST /api/search`） | FlyB（`POST /api/predict/searchImage_*`） |
+| 字段 | 必填 | 类型 | 自建（`POST /api/search`） | FlyB（`POST /api/search/global/file`、`/api/search/global/url`） |
 |---|---|---|---|---|
 | `tags` | 是 | `string` | `images.tags` 用「、」连接；无标签为 `""`。仅供展示：标签本身可能含「、」，要标签数组请读单图 / List | 结果标题（`Title`）；没有为 `""` |
 | `description` | 是 | `string` | `images.description`；默认 `""`；不进 Qdrant payload | 文字片段（`Snippet` 中 `Type=text`）去首尾空白后用空格连接；没有为 `""` |

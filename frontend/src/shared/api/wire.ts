@@ -187,7 +187,7 @@ export interface SearchJsonRequestWire {
 
 /**
  * schemas/search_hit.py SearchHitBase — the result card both search channels answer with
- * (POST /api/search items[], POST /api/predict/searchImage_* result[]): these four fields at the
+ * (POST /api/search items[], POST /api/search/global/* result[]): these four fields at the
  * top level, everything else in `details`, whose content depends on the channel.
  */
 export interface SearchHitBaseWire<Details> {
@@ -321,11 +321,12 @@ export interface IndexResponseWire {
   failed: IndexFailureWire[]
 }
 
-// -- POST /api/predict/searchImage_* (现网 Global · FlyB; hits are §6.1.1 cards) ----------
+// -- POST /api/search/global/* (现网 Global · FlyB; hits are §6.1.1 cards) ----------
 
 /**
- * schemas/predict.py PredictUrlBody (searchImage_url JSON body). searchImage_file takes the same
- * search_num / machine_info / trace_id / save_res as query parameters only.
+ * schemas/predict.py PredictUrlBody (POST /api/search/global/url JSON body).
+ * POST /api/search/global/file takes the same search_num / machine_info / trace_id / save_res
+ * as query parameters only.
  */
 export interface PredictUrlBodyWire {
   img_url: string

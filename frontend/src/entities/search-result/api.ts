@@ -51,8 +51,8 @@ function searchQuery({ file, url }: Pick<SearchOptions, 'file' | 'url'>): Search
 }
 
 /**
- * 现网 Global: POST /api/predict/searchImage_file (multipart `file`, `search_num` in the query: the
- * file route reads it only there) or searchImage_url (JSON `{ img_url, search_num }`).
+ * 现网 Global: POST /api/search/global/file (multipart `file`, `search_num` in the query: the
+ * file route reads it only there) or /api/search/global/url (JSON `{ img_url, search_num }`).
  */
 export async function searchGlobalImages({ file, url, baseUrl, signal, searchNum }: SearchOptions): Promise<SearchResponse> {
   const query = searchQuery({ file, url })
@@ -64,10 +64,10 @@ export async function searchGlobalImages({ file, url, baseUrl, signal, searchNum
     const form = new FormData()
     form.append('file', query.file)
     const params = searchNum !== undefined ? new URLSearchParams({ search_num: String(searchNum) }) : undefined
-    payload = await requestJson('/api/predict/searchImage_file', { baseUrl, method: 'POST', query: params, form, signal, labels: GLOBAL_LABELS })
+    payload = await requestJson('/api/search/global/file', { baseUrl, method: 'POST', query: params, form, signal, labels: GLOBAL_LABELS })
   } else {
     const body: PredictUrlBodyWire = { img_url: query.url, ...(searchNum !== undefined ? { search_num: searchNum } : {}) }
-    payload = await requestJson('/api/predict/searchImage_url', { baseUrl, method: 'POST', json: body, signal, labels: GLOBAL_LABELS })
+    payload = await requestJson('/api/search/global/url', { baseUrl, method: 'POST', json: body, signal, labels: GLOBAL_LABELS })
   }
   return fromPredictResponse(payload)
 }

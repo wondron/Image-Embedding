@@ -514,6 +514,23 @@ main { flex: 1; min-height: 0; width: 100%; max-width: none; padding: 14px; marg
   opacity: 0.55;
   cursor: not-allowed;
 }
+/* Local threshold heading: one inline text flow, with natural wrapping when needed. */
+.score-threshold-header { display: block; overflow-wrap: anywhere; }
+.score-threshold-header > svg { display: inline-block; margin-inline-end: 6px; vertical-align: middle; }
+.score-threshold-header > .score-threshold-title { margin-inline-end: 6px; white-space: nowrap; }
+/* Global count: full hint first, title and existing inputs on the next row. */
+.search-num-control {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+.search-num-header { flex-wrap: nowrap; white-space: nowrap; }
+.search-num-row { min-width: 0; }
+.search-num-control > .search-num-hint {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .score-threshold-off {
   display: inline-flex;
   align-items: center;

@@ -86,7 +86,7 @@ test('空页面显示真实连接状态及搜索引导', async ({ page }, info) 
 
 test('图片链接搜索显示结果、缺失分数与缩略图回退', async ({ page }, info) => {
   await mockSearch(page)
-  const requestPromise = page.waitForRequest('**/api/predict/searchImage_url')
+  const requestPromise = page.waitForRequest('**/api/search/global/url')
   await search(page)
   const request = await requestPromise
   expect(request.method()).toBe('POST')
@@ -125,7 +125,7 @@ test('查询文件以 multipart file 字段提交', async ({ page }) => {
   await mockSearch(page)
   await page.getByLabel('选择查询图片').setInputFiles(upload())
   await expect(page.getByRole('img', { name: '当前查询图片' })).toBeVisible()
-  const requestPromise = page.waitForRequest('**/api/predict/searchImage_file')
+  const requestPromise = page.waitForRequest('**/api/search/global/file')
   await page.getByRole('button', { name: '开始搜索', exact: true }).click()
   const request = await requestPromise
   expect(request.headers()['content-type']).toContain('multipart/form-data; boundary=')
@@ -191,7 +191,7 @@ test('批量上传实际点击后可切预览且返回批量模式恢复结果',
   const gate = new Promise<void>(resolve => { release = resolve })
   page.on('pageerror', error => pageErrors.push(error.message))
   page.on('filechooser', () => { chooserCount += 1 })
-  await page.route('**/api/predict/searchImage_file', async route => {
+  await page.route('**/api/search/global/file', async route => {
     const filename = /filename="([^"]+)"/.exec(route.request().postDataBuffer()?.toString() ?? '')?.[1] ?? ''
     await gate
     await route.fulfill({ json: { result: [{ ...rows[1], title: filename }] } }).catch(() => {})
@@ -210,7 +210,7 @@ test('批量上传实际点击后可切预览且返回批量模式恢复结果',
     await expect(page.getByRole('img', { name: '当前查询图片：second.png', exact: true })).toBeVisible()
     await firstPreview.click()
 
-    const request = page.waitForRequest('**/api/predict/searchImage_file')
+    const request = page.waitForRequest('**/api/search/global/file')
     await page.getByRole('button', { name: '开始批量搜索', exact: true }).click()
     await request
     const results = page.locator('.results-panel')
@@ -445,7 +445,7 @@ test('取消正在等待的请求并忽略迟到结果', async ({ page }) => {
     await route.fulfill({ json: result }).catch(() => {})
   })
   try {
-    const requestPromise = page.waitForRequest('**/api/predict/searchImage_url')
+    const requestPromise = page.waitForRequest('**/api/search/global/url')
     await search(page)
     await requestPromise
     await expect(page.getByRole('button', { name: '取消搜索', exact: true })).toBeVisible()
@@ -541,7 +541,7 @@ test('批量图片查询逐项提交且失败不影响后续查询与结果切�
   const filenames: string[] = []
   let releaseLast: () => void = () => {}
   const gate = new Promise<void>(resolve => { releaseLast = resolve })
-  await page.route('**/api/predict/searchImage_file', async route => {
+  await page.route('**/api/search/global/file', async route => {
     const body = route.request().postDataBuffer()?.toString() ?? ''
     const filename = /filename="([^"]+)"/.exec(body)?.[1] ?? ''
     filenames.push(filename)

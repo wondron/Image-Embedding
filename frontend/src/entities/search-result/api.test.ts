@@ -10,13 +10,13 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('searchGlobalImages (现网 predict)', () => {
+describe('searchGlobalImages (现网 Global)', () => {
   it('sends URL requests to the configured server and passes cancellation', async () => {
     const fetchMock = vi.fn().mockResolvedValue(json({ ok: true, trace_id: 't', result: [] }))
     vi.stubGlobal('fetch', fetchMock)
     const signal = new AbortController().signal
     await searchGlobalImages({ url: 'https://example.com/a.png', baseUrl: 'https://api.example/', signal })
-    expect(fetchMock).toHaveBeenCalledWith('https://api.example/api/predict/searchImage_url', expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith('https://api.example/api/search/global/url', expect.objectContaining({
       method: 'POST', body: JSON.stringify({ img_url: 'https://example.com/a.png' }),
       headers: { 'Content-Type': 'application/json' }, signal,
     }))
@@ -28,7 +28,7 @@ describe('searchGlobalImages (现网 predict)', () => {
     const file = new File(['image-data'], 'photo.png', { type: 'image/png' })
     await searchGlobalImages({ file })
     const [url, options] = fetchMock.mock.calls[0]
-    expect(url).toBe('/api/predict/searchImage_file')
+    expect(url).toBe('/api/search/global/file')
     expect(options.body).toBeInstanceOf(FormData)
     expect(options.body.get('file').name).toBe('photo.png')
     expect(options.headers).toBeUndefined()
@@ -51,11 +51,11 @@ describe('searchGlobalImages (现网 predict)', () => {
     const fetchMock = vi.fn().mockImplementation(async () => json({ ok: true, trace_id: 't', result: [] }))
     vi.stubGlobal('fetch', fetchMock)
     await searchGlobalImages({ url: 'https://example.com/a.png', searchNum: 7 })
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/predict/searchImage_url')
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/search/global/url')
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ img_url: 'https://example.com/a.png', search_num: 7 })
     // The file route reads search_num from the query only
     await searchGlobalImages({ file: new File(['image-data'], 'photo.png', { type: 'image/png' }), baseUrl: 'https://api.example', searchNum: 20 })
-    expect(fetchMock.mock.calls[1][0]).toBe('https://api.example/api/predict/searchImage_file?search_num=20')
+    expect(fetchMock.mock.calls[1][0]).toBe('https://api.example/api/search/global/file?search_num=20')
     expect([...(fetchMock.mock.calls[1][1].body as FormData).keys()]).toEqual(['file'])
   })
 

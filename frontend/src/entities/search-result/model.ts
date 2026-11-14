@@ -10,7 +10,7 @@ export type SearchChannel = 'self' | 'empty' | 'flyb'
 
 /**
  * One result card, from either channel: a self-built hit (POST /api/search) or a 现网 FlyB result
- * (POST /api/predict/searchImage_*). Both send the same card (§6.1.1): `tags` / `description` /
+ * (POST /api/search/global/*). Both send the same card (§6.1.1): `tags` / `description` /
  * `original_url` / `similarity` at the top level, everything else in `details.*`.
  */
 export interface SearchImage {

@@ -1,7 +1,7 @@
 """Search result card shared by both search channels (contract §6.1.1).
 
 Self-built search (POST /api/search → SearchHit) and FlyB global search
-(POST /api/predict/searchImage_* → PredictHit) answer with the same card: the four
+(POST /api/search/global/* → PredictHit) answer with the same card: the four
 fields below at the top level, every other field in ``details`` (its content depends on
 the channel, see the two subclasses).
 """

@@ -9,6 +9,8 @@
 
 
 > **作废交叉引用（2026-11-04）**：旧 **§9 / ALIGNMENT-ASK（path+OSS 双轨入库优化）已被 `docs/image-search-pg-v01-data-contract.md`（PG v0.1 · M1 草案）取代**；元数据目标态改 PostgreSQL，勿再按 §9 实现。
+>
+> **接口命名更新（2026-11-13）**：现网 Global 的规范入口现为 `POST /api/search/global/file`（上传文件）和 `POST /api/search/global/url`（图片链接），两者检索逻辑、参数及响应不变，前端使用新入口。下文历史记录中的 `/api/predict/searchImage_file`、`/api/predict/searchImage_url` 仍保留为兼容别名，但不在 Swagger 中展示；“旧 predict 保留不动”为当时约定，不代表当前前端继续使用旧名称。
 ---
 
 ## 0. 现网对照摘要（扫仓结论）

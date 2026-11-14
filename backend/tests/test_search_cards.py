@@ -160,7 +160,7 @@ class SameWireTests(unittest.TestCase):
         self.runtime.require_food_service.return_value.detect.return_value = [{**flyb_cards(FISH)[0], "image_url": "legacy"}]
 
         hits = self.post("/api/search")["items"]
-        documents = self.post("/api/predict/searchImage_file")["result"]
+        documents = self.post("/api/search/global/file")["result"]
         for card in (*hits, *documents):
             self.assertEqual(set(card), CARD_KEYS)
         self.assertEqual(hits[0]["details"]["heating_group"], {"id": 1, "code": "grill", "name": "烤"})

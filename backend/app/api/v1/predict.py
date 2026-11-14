@@ -1,4 +1,4 @@
-"""Image search routes: bind HTTP inputs and delegate processing."""
+"""Global image search routes for uploaded files and image URLs."""
 
 from __future__ import annotations
 
@@ -28,8 +28,18 @@ def ping(request: Request) -> dict[str, Any]:
     }
 
 
-@router.post("/predict/searchImage_file", response_model=PredictResponse)
-async def predict_file(
+@router.post(
+    "/search/global/file",
+    response_model=PredictResponse,
+    summary="现网 Global 搜图（上传文件）",
+)
+@router.post(
+    "/predict/searchImage_file",
+    response_model=PredictResponse,
+    include_in_schema=False,
+    deprecated=True,
+)
+async def search_global_by_file(
     request: Request,
     file: UploadFile = File(..., description="上传图片文件"),
     search_num: int | None = Query(default=None, description="搜索结果数量"),
@@ -37,7 +47,7 @@ async def predict_file(
     trace_id: str | None = Query(default=None, description="Trace ID"),
     save_res: bool = Query(default=False, description="是否保存结果"),
 ) -> dict[str, Any]:
-    """使用 multipart/form-data 上传 file 字段进行图片检索。"""
+    """通过 multipart/form-data 的 file 字段上传图片，使用现网 Global 检索。"""
     runtime = get_application_state(request)
     trace_id = bind_trace_id(request, trace_id)
     img_bytes = await read_upload(file, runtime.max_image_bytes)
@@ -52,8 +62,18 @@ async def predict_file(
     )
 
 
-@router.post("/predict/searchImage_url", response_model=PredictResponse)
-async def predict_url(
+@router.post(
+    "/search/global/url",
+    response_model=PredictResponse,
+    summary="现网 Global 搜图（图片链接）",
+)
+@router.post(
+    "/predict/searchImage_url",
+    response_model=PredictResponse,
+    include_in_schema=False,
+    deprecated=True,
+)
+async def search_global_by_url(
     request: Request,
     img_url: str | None = Query(default=None, description="远程图片 URL（query，可选，与 JSON 二选一）"),
     search_num: int | None = Query(default=None, description="搜索结果数量"),
@@ -65,7 +85,7 @@ async def predict_url(
         description="JSON 方式传参：{img_url, search_num, machine_info, trace_id, save_res}",
     ),
 ) -> dict[str, Any]:
-    """URL 参数支持 Query 或 JSON；显式 Query 值优先。"""
+    """下载 img_url 指向的图片后使用现网 Global 检索。支持 Query 或 JSON，显式 Query 值优先。"""
     img_url = img_url if img_url is not None else (body.img_url if body else None)
     search_num = search_num if search_num is not None else (body.search_num if body else None)
     machine_info = machine_info if machine_info is not None else (body.machine_info if body else None)

@@ -4,6 +4,8 @@
 > 范围：在现有 Image-Embedding 前端壳上做入库面板与搜图结果增强；**不重做整站**；**本文档不写业务代码**。  
 > API 字段以「数据规范」终稿为准；下文未定字段一律标 **「待契约」**。  
 > 文档版本：v0.1 · 2026-10-27（America/Denver）
+>
+> 接口命名更新（2026-11-13）：现网 Global 统一使用 `POST /api/search/global/file`（上传文件）和 `POST /api/search/global/url`（图片链接），共用原有检索逻辑；旧 `/api/predict/searchImage_file`、`/api/predict/searchImage_url` 为兼容别名，不在 Swagger 中展示。
 
 ---
 
@@ -15,7 +17,7 @@
 
 - 图搜图工作台：单张 / 批量查询、结果网格·列表、详情、下载
 - 数据管理壳：图片数据 / 上传与导入 / 入库任务 / 食材管理（多为本地草稿或「等待接口」空态）
-- 现网搜索走 `POST /api/predict/searchImage_file|url`（FlyB 外搜 + 可选 embedding 过滤）
+- 现网搜索走 `POST /api/search/global/file` 或 `POST /api/search/global/url`（FlyB 外搜 + 可选 embedding 过滤）
 
 MVP 目标：对接即将落地的 **自建向量入库 / 检索**（`POST /index`、`POST /search`），在壳上补齐：
 
@@ -73,8 +75,8 @@ MVP 目标：对接即将落地的 **自建向量入库 / 检索**（`POST /inde
 
 | 方法 | 用途 |
 | --- | --- |
-| `POST /api/predict/searchImage_file` | 现网单张/批量文件搜（FlyB 主路径） |
-| `POST /api/predict/searchImage_url` | URL 搜 |
+| `POST /api/search/global/file` | 现网 Global 单张/批量搜图（上传文件，FlyB 主路径） |
+| `POST /api/search/global/url` | 现网 Global 搜图（图片链接） |
 | `GET /api/images/download` | 下载代理 |
 | `GET /api/ping`（前端探测） | 连接状态 |
 
@@ -340,7 +342,7 @@ MVP 新增：`POST /index`、`POST /search`（完整前缀是否带 `/api` **待
 ## 8. 前端架构注意（≤3）
 
 1. **契约未冻结**：`id`/`point_id`、`source` 枚举、`/api` 前缀、相似度值域、入库批量形态均为 **待契约**；建议先做 thin adapter（类似 `normalizeSearchResponse`），避免结果卡绑死字段名。  
-2. **双搜并存**：现网 `searchImage_*` 与 `POST /search` 并存时，应用显式「搜索目标」切换，避免静默改调用导致批量搜/单张行为不一致。  
+2. **双搜并存**：现网 `POST /api/search/global/file`、`POST /api/search/global/url` 与 `POST /search` 并存时，应用显式「搜索目标」切换，避免静默改调用导致批量搜/单张行为不一致。
 3. **来源 vs 站点**：列表列「来源」今日是 `siteName`；通道标签（自建/FlyB）需另加徽章或列，避免把 hostname 当成 FlyB/自建。
 
 ---

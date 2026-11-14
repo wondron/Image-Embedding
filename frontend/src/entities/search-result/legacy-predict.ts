@@ -1,5 +1,5 @@
 /**
- * 现网 Global search — POST /api/predict/searchImage_* — FlyB results through FoodService:
+ * 现网 Global search — POST /api/search/global/* — FlyB results through FoodService:
  * `{ ok, trace_id, result }`, where `result` is a list of result cards (the same card as a
  * self-built hit, §6.1.1) or the upstream-empty status (`{ results, status, upstream_error, request_id }`).
  * The card fields are read by the shared readCardFields; this file reads the FlyB `details`

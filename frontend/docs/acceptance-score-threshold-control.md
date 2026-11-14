@@ -5,6 +5,8 @@
 > 契约对齐：`docs/image-search-mvp-data-contract.md` **§3.2 / §3.2.1**（终稿）。下文若与契约冲突以契约为准。  
 > 文档版本：v0.2 · 2026-10-28（Asia/Shanghai）  
 > 相关：入库 + 搜图见 `frontend/docs/acceptance-index-search-mvp.md`；图库 list 见 `frontend/docs/acceptance-library-images-list.md`。本刀**仅**拒识阈值控件。
+>
+> 接口命名更新（2026-11-13）：现网 Global 的规范入口为 `POST /api/search/global/file`（上传文件）和 `POST /api/search/global/url`（图片链接）。旧 `/api/predict/searchImage_file`、`/api/predict/searchImage_url` 保留兼容，不在 Swagger 中展示；拒识阈值的适用范围不变。
 
 ---
 
@@ -14,7 +16,7 @@
 
 现有单张搜已具备：
 
-- 搜索目标切换：`searchTarget` · **自建库** (`local` → `searchLocalImages` → `POST /api/search`) / **现网 Global** (`global` → `searchImages` → `POST /api/predict/searchImage_*`)
+- 搜索目标切换：`searchTarget` · **自建库** (`local` → `searchLocalImages` → `POST /api/search`) / **现网 Global** (`global` → `searchGlobalImages` → `POST /api/search/global/file` 或 `POST /api/search/global/url`)
 - 查询方式：本地上传 / 图片链接；批量仅走现网（本轮不扩自建批量）
 - `lib/search.ts` · `searchLocalImages` **已预留**可选形参 `scoreThreshold`（及 `topK`），但 **App 未传、UI 无控件** → 当前请求省略字段，后端按契约缺省 **0.55**
 
@@ -69,7 +71,7 @@
 | 路径 | 是否传 `score_threshold` |
 | --- | --- |
 | `POST /api/search`（自建 · `searchLocalImages`） | **是**（本刀主路径） |
-| `POST /api/predict/searchImage_file\|url`（现网） | **否** |
+| `POST /api/search/global/file` / `POST /api/search/global/url`（现网） | **否** |
 
 `search.ts` 已支持：multipart 时 `form.append('score_threshold', String(...))`；JSON 时 `payload.score_threshold = ...`。架构须从 App **传入当前控件值**（含关闭时的 `0`）。
 
