@@ -438,8 +438,8 @@ main { flex: 1; min-height: 0; width: 100%; max-width: none; padding: 14px; marg
 }
 .result-image-button .source-badge {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  bottom: 8px;
+  left: 8px;
   z-index: 1;
   background: #fffffff2;
 }
