@@ -1,9 +1,9 @@
 """按 standard_tree.py 的 create_standard_tree 分类，将类别树添加到后端。
 
 在项目根目录运行：
-  python backend/scripts/import_standard_tree.py --source F:/standard_tree.py
-  python backend/scripts/import_standard_tree.py --source F:/standard_tree.py --show-tree
-  python backend/scripts/import_standard_tree.py --source F:/standard_tree.py --apply
+  python scripts/import_standard_tree.py --source F:/standard_tree.py
+  python scripts/import_standard_tree.py --source F:/standard_tree.py --show-tree
+  python scripts/import_standard_tree.py --source F:/standard_tree.py --apply
 
 默认只预览，不访问服务器；--apply 通过 /api/categories 添加类别。
 使用后端当前生效的数据库，无需另填数据库密码。可用 --base-url 指定后端。
