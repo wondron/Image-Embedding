@@ -21,8 +21,9 @@ import { SceneApiContext, useSceneSelection } from './features/scene-catalog'
 import { SceneConfigPage } from './pages/scenes/SceneConfigPage'
 import { SceneMembershipPanel } from './features/scene-memberships/SceneMembershipPanel'
 import {
-  SourceBadge, displayCategoryLabel, getThumbnailSources, searchGlobalImages, searchLocalImages,
-  type SearchImage, type SearchResponse,
+  AUTO_TOP_K_DEFAULT, AUTO_TOP_K_MAX, AUTO_TOP_K_MIN,
+  SourceBadge, displayCategoryLabel, getThumbnailSources, searchAutoImages, searchGlobalImages, searchLocalImages,
+  type SearchChannel, type SearchImage, type SearchResponse,
 } from './entities/search-result'
 import { pingApi, useApiBase } from './shared/api'
 import { safeHttpUrl } from './shared/lib'
@@ -34,9 +35,28 @@ import {
   clampScoreThreshold,
 } from './features/score-threshold'
 import { HeatingFields, SearchNeverEmpty, SearchNoMatch, SearchFilteredEmpty } from './features/search'
-import { SearchNumControl, SEARCH_NUM_DEFAULT } from './features/search-num'
+import { SearchNumControl, SEARCH_NUM_DEFAULT, type CountRange } from './features/search-num'
 
 type View = 'search' | ManagementView
+/** 自建库 (POST /api/search), 现网 Global (POST /api/search/global/*), 业务搜图 (POST /api/search/auto/*: 自建库优先, Global 兜底). */
+type SearchTarget = 'local' | 'global' | 'auto'
+const SEARCH_TARGETS: ReadonlyArray<{ key: SearchTarget; label: string; title: string }> = [
+  { key: 'local', label: '自建库', title: '只查自建库' },
+  { key: 'global', label: '现网 Global', title: '只查现网 Global' },
+  { key: 'auto', label: '业务搜图', title: '业务方用的接口：先查自建库，没有结果时可用现网 Global 兜底' },
+]
+const AUTO_TOP_K_RANGE: CountRange = { min: AUTO_TOP_K_MIN, max: AUTO_TOP_K_MAX, fallback: AUTO_TOP_K_DEFAULT }
+
+/** What the detail view calls a result's channel. */
+function channelText(source?: SearchChannel): string {
+  switch (source) {
+    case 'self': return '自建'
+    case 'global': return '现网 Global（业务搜图兜底）'
+    case 'empty': return '无结果'
+    case 'flyb': return 'FlyB 兜底'
+    default: return '未提供'
+  }
+}
 const navigation = [
   { key: 'search' as const, name: '图搜图', icon: ScanLine, description: '全网发现，相似检索' },
   { key: 'library' as const, name: '图片数据', icon: Images, description: '管理你的食材图库' },
@@ -136,7 +156,10 @@ export default function App() {
   const [navCollapsed, setNavCollapsed] = useState(false)
   const [mode, setMode] = useState<'file' | 'url'>('file')
   const [queryKind, setQueryKind] = useState<'single' | 'batch'>('single')
-  const [searchTarget, setSearchTarget] = useState<'local' | 'global'>('local')
+  const [searchTarget, setSearchTarget] = useState<SearchTarget>('local')
+  /** 业务搜图: top_k (1–20, also what the Global fallback asks for) and whether to fall back at all. */
+  const [autoTopK, setAutoTopK] = useState(AUTO_TOP_K_DEFAULT)
+  const [globalFallback, setGlobalFallback] = useState(true)
   const [scoreThreshold, setScoreThreshold] = useState(SCORE_DEFAULT)
   const [rejectOff, setRejectOff] = useState(false)
   const [scoreBeforeOff, setScoreBeforeOff] = useState(SCORE_DEFAULT)
@@ -221,7 +244,7 @@ export default function App() {
   }
   async function runSearch() {
     if (busy || batchRunning) return
-    if (searchTarget === 'local' && !sceneCatalog.selectionValid) { notify.warn('场景目录不可用，请刷新后重试。', { title: '暂时不能搜索' }); return }
+    if (searchTarget !== 'global' && !sceneCatalog.selectionValid) { notify.warn('场景目录不可用，请刷新后重试。', { title: '暂时不能搜索' }); return }
     if (mode === 'file' && !file) { notify.warn('请先上传一张查询图片。', { title: '暂时不能搜索' }); return }
     if (mode === 'url' && !safeHttpUrl(url.trim())) { notify.warn('请输入有效的 HTTP 或 HTTPS 图片链接。', { title: '暂时不能搜索' }); return }
     const controller = new AbortController()
@@ -233,12 +256,17 @@ export default function App() {
     const timer = window.setTimeout(() => controller.abort('timeout'), 120000)
     try {
       const common = { file: mode === 'file' ? file! : undefined, url: mode === 'url' ? url.trim() : undefined, baseUrl: apiBase, signal: controller.signal }
+      const threshold = rejectOff ? 0 : clampScoreThreshold(scoreThreshold)
       const result = searchTarget === 'local'
-        ? await searchLocalImages({ ...common, scoreThreshold: rejectOff ? 0 : clampScoreThreshold(scoreThreshold), scene })
-        : await searchGlobalImages({ ...common, searchNum })
+        ? await searchLocalImages({ ...common, scoreThreshold: threshold, scene })
+        : searchTarget === 'auto'
+          ? await searchAutoImages({ ...common, scoreThreshold: threshold, scene, topK: autoTopK, globalFallback })
+          : await searchGlobalImages({ ...common, searchNum })
       if (activeRequest.current !== controller) return
       setResponse(result); setSearched(true); setElapsed((performance.now() - started) / 1000)
-      if (result.message) notify.info(result.message, { title: '搜索提示' })
+      // 业务搜图: the request went through, but its Global fallback did not — worth more than a hint
+      if (result.fallback?.status === 'failed') notify.warn(result.message ?? '现网 Global 兜底没有成功。', { title: 'Global 兜底失败' })
+      else if (result.message) notify.info(result.message, { title: '搜索提示' })
     } catch (cause) {
       if (activeRequest.current !== controller) return
       if (unknownScene(cause)) void sceneCatalog.refresh()
@@ -342,8 +370,15 @@ export default function App() {
             <span className="subtle-label">{queryKind === 'batch' ? '≤30 张 · 15 MB/张' : '≤15 MB'}</span>
             </div>
             {queryKind === 'single' && <div className="segmented search-target-tabs" aria-label="搜索目标">
-              <button type="button" className={searchTarget === 'local' ? 'selected' : ''} aria-pressed={searchTarget === 'local'} disabled={busy} onClick={() => { if (searchTarget !== 'local') { resetResults(); setSearchTarget('local') } }}>自建库</button>
-              <button type="button" className={searchTarget === 'global' ? 'selected' : ''} aria-pressed={searchTarget === 'global'} disabled={busy} onClick={() => { if (searchTarget !== 'global') { resetResults(); setSearchTarget('global') } }}>现网 Global</button>
+              {SEARCH_TARGETS.map(target => <button
+                type="button"
+                key={target.key}
+                className={searchTarget === target.key ? 'selected' : ''}
+                aria-pressed={searchTarget === target.key}
+                title={target.title}
+                disabled={busy}
+                onClick={() => { if (searchTarget !== target.key) { resetResults(); setSearchTarget(target.key) } }}
+              >{target.label}</button>)}
             </div>}
             {queryKind === 'batch' && <p className="search-target-batch-note">批量搜索当前仅走现网 Global；自建批量检索不在本轮范围。</p>}
             {queryKind === 'batch' && <div className="query-scene-score"><SearchNumControl value={searchNum} disabled={batchRunning} onChange={setSearchNum} /></div>}
@@ -354,7 +389,7 @@ export default function App() {
               </div> : <div className="url-input-area"><label className="sr-only" htmlFor="image-url">图片地址</label><input id="image-url" className="input" type="url" placeholder="https://example.com/image.jpg" value={url} onChange={event => { resetResults(); setUrl(event.target.value) }} /><p>请填写可公开访问的图片直链。</p>{queryImageUrl && <QueryPreview key={queryImageUrl} src={queryImageUrl} />}</div>}
             </div>
             <div className="query-scene-score">
-              {searchTarget === 'local' && (
+              {searchTarget !== 'global' && (
                 <SceneSelect
                   id="search-scene"
                   className="search-scene-select"
@@ -364,10 +399,24 @@ export default function App() {
                 />
               )}
               {searchTarget === 'global' && <SearchNumControl value={searchNum} disabled={busy} onChange={setSearchNum} />}
+              {searchTarget === 'auto' && <>
+                <SearchNumControl
+                  value={autoTopK}
+                  disabled={busy}
+                  onChange={setAutoTopK}
+                  range={AUTO_TOP_K_RANGE}
+                  hint={`自建库取达到阈值的前 N 条；兜底时向 Global 要 N 条 · 默认 ${AUTO_TOP_K_DEFAULT} · 范围 ${AUTO_TOP_K_MIN}–${AUTO_TOP_K_MAX}`}
+                  title="接口参数 top_k：两个通道共用一个数量"
+                />
+                <label className="global-fallback-toggle" title="接口参数 global_fallback。Global 是外部付费服务，没命中时会多花几秒">
+                  <input type="checkbox" checked={globalFallback} disabled={busy} onChange={event => setGlobalFallback(event.target.checked)} />
+                  自建库没有结果时，用现网 Global 兜底
+                </label>
+              </>}
               <ScoreThresholdControl
                 scoreThreshold={scoreThreshold}
                 rejectOff={rejectOff}
-                disabled={busy || searchTarget !== 'local'}
+                disabled={busy || searchTarget === 'global'}
                 scoreBeforeOff={scoreBeforeOff}
                 onScoreChange={setScoreThreshold}
                 onRejectOffChange={(off, restore) => {
@@ -383,7 +432,7 @@ export default function App() {
               />
             </div>
             <div className="query-actions">
-              <button className="btn btn-primary search-button" onClick={() => void runSearch()} disabled={!inputReady || busy || (searchTarget === 'local' && !sceneCatalog.selectionValid)}>{busy ? <LoaderCircle size={15} className="spin" /> : <Search size={15} />}{busy ? '正在搜索相似图片…' : '开始搜索'}</button>
+              <button className="btn btn-primary search-button" onClick={() => void runSearch()} disabled={!inputReady || busy || (searchTarget !== 'global' && !sceneCatalog.selectionValid)}>{busy ? <LoaderCircle size={15} className="spin" /> : <Search size={15} />}{busy ? '正在搜索相似图片…' : '开始搜索'}</button>
               {busy && <button className="text-button cancel-search" onClick={() => { activeRequest.current?.abort(); activeRequest.current = null; setBusy(false); notify.info('已取消本次搜索。') }}>取消搜索</button>}
               <button className="btn btn-secondary" disabled={!file && !url && !searched} onClick={() => { resetResults(); setFile(null); setUrl('') }}>重置</button>
             </div>
@@ -417,7 +466,7 @@ export default function App() {
               <button className="btn btn-primary bulk-download-button" disabled={!selectedItems.length} onClick={() => setDownloadItems(selectedItems)}><ArrowDownToLine size={15} />批量下载{selectedItems.length > 0 ? `（${selectedItems.length}）` : ''}</button>
             </div>}
             <div className={`results-content ${resultLayout === 'list' ? 'content-list' : ''}`}>
-            {waitingForResults ? <div className="loading-state" role="status"><div className="loading-orbit"><ScanLine size={37} strokeWidth={1.3} /></div><h3>正在寻找图片之间的联系</h3><p>{queryKind === 'batch' ? '批量搜索正在进行，查询图片完成后会显示对应结果。' : searchTarget === 'local' ? '正在自建库中检索…' : '搜索、获取图片并计算相似度，请稍候…'}</p><div className="skeleton-row">{[1, 2, 3].map(n => <div className="skeleton-card" key={n} />)}</div></div>
+            {waitingForResults ? <div className="loading-state" role="status"><div className="loading-orbit"><ScanLine size={37} strokeWidth={1.3} /></div><h3>正在寻找图片之间的联系</h3><p>{queryKind === 'batch' ? '批量搜索正在进行，查询图片完成后会显示对应结果。' : searchTarget === 'local' || (searchTarget === 'auto' && !globalFallback) ? '正在自建库中检索…' : searchTarget === 'auto' ? '先查自建库，没有结果再用现网 Global 兜底，请稍候…' : '搜索、获取图片并计算相似度，请稍候…'}</p><div className="skeleton-row">{[1, 2, 3].map(n => <div className="skeleton-card" key={n} />)}</div></div>
               : !searched ? <SearchNeverEmpty />
               : !visible.length ? (items.length
                 ? <SearchFilteredEmpty onClear={() => { setKeyword(''); setCategory('all') }} />
@@ -432,7 +481,7 @@ export default function App() {
             <div className="results-footer"><span>{searched ? `共 ${items.length} 张图片${filtered.length !== items.length ? ` · 筛选后 ${filtered.length} 张` : ''}` : '搜索结果将在这里展示'}{items.length > 0 && !categories.length && <small> · 暂无类别数据</small>}</span><div className="pagination"><button className="icon-button" aria-label="上一页" disabled={currentPage <= 1 || !items.length} onClick={() => setPage(currentPage - 1)}><ArrowLeft size={15} /></button><span>{currentPage} <small>/ {pages}</small></span><button className="icon-button" aria-label="下一页" disabled={currentPage >= pages || !items.length} onClick={() => setPage(currentPage + 1)}><ArrowRight size={15} /></button></div></div>
           </section>
         </div>
-        <div className="search-bottom-note">{response?.traceId && <span className="trace-id" title={response.traceId}>请求 ID：{response.traceId}</span>}{response?.source === 'self' && <span className="source-mode-note">检索通道：自建</span>}{/* M6: FlyB not a product-success path for self-built acceptance */}{response?.source === 'empty' && <span className="source-mode-note">检索通道：无结果</span>}<span className="local-filter-note">类别筛选与分页仅作用于本次搜索结果</span></div>
+        <div className="search-bottom-note">{response?.traceId && <span className="trace-id" title={response.traceId}>请求 ID：{response.traceId}</span>}{response?.source === 'self' && <span className="source-mode-note">检索通道：自建</span>}{/* M6: FlyB not a product-success path for self-built acceptance */}{response?.source === 'global' && <span className="source-mode-note">检索通道：自建库没有结果，现网 Global 兜底</span>}{response?.source === 'empty' && <span className="source-mode-note">检索通道：无结果{response.fallback?.status === 'failed' ? '（Global 兜底失败）' : response.fallback?.status === 'empty' ? '（Global 也没有结果）' : ''}</span>}<span className="local-filter-note">类别筛选与分页仅作用于本次搜索结果</span></div>
       </div>
     </main></div>
 
@@ -443,7 +492,7 @@ export default function App() {
           <dl className="detail-fields"><div><dt>食材类别</dt><dd>{displayCategoryLabel(detail) ?? '未提供类别'}</dd></div><div><dt>标签</dt><dd>{detail.tags || '未提供'}</dd></div>
           {(detail.outputsHeating || response?.outputsHeating) && (
             <div className="detail-heating"><dt>加热信息</dt><dd><HeatingFields show heatingGroup={detail.heatingGroup} foodState={detail.foodState} /></dd></div>
-          )}<div><dt>图片尺寸</dt><dd>{detail.width && detail.height ? `${detail.width} × ${detail.height} px` : '未提供'}</dd></div><div><dt>图片来源</dt><dd>{detail.siteName ?? '未提供'}</dd></div><div><dt>检索通道</dt><dd>{detail.source === 'self' ? '自建' : detail.source === 'empty' ? '无结果' : detail.source === 'flyb' ? 'FlyB 兜底' : '未提供'}</dd></div><div><dt>结果编号</dt><dd className="monospace">{detail.id}</dd></div></dl>
+          )}<div><dt>图片尺寸</dt><dd>{detail.width && detail.height ? `${detail.width} × ${detail.height} px` : '未提供'}</dd></div><div><dt>图片来源</dt><dd>{detail.siteName ?? '未提供'}</dd></div><div><dt>检索通道</dt><dd>{channelText(detail.source)}</dd></div><div><dt>结果编号</dt><dd className="monospace">{detail.id}</dd></div></dl>
           {detail.description.trim() && <div className="detail-description"><span>描述</span><div><p>{detail.description}</p></div></div>}
         </section>
         <section className="detail-section"><h3>图片预览</h3><div className="detail-image"><ResultPreview key={detail.id} item={detail} /></div></section>
@@ -455,7 +504,7 @@ export default function App() {
     </Dialog>}
     {downloadItems && <DownloadDialog items={downloadItems} apiBase={apiBase} onClose={() => setDownloadItems(null)} />}
     {settingsOpen && <Dialog title="搜索服务连接" onClose={() => setSettingsOpen(false)}><div className="settings-content"><p>连接现有的图像搜索服务。留空时使用当前站点的接口。</p><label htmlFor="api-base">服务地址</label><input className="input" id="api-base" type="url" placeholder="默认使用站点 /api" value={apiDraft} onChange={event => setApiDraft(event.target.value)} /><small>例如 http://127.0.0.1:8320，不包含 /api 路径。跨域连接需服务端允许访问。</small>{apiDraft.trim() && !safeHttpUrl(apiDraft.trim()) && <p className="inline-error">请输入 HTTP 或 HTTPS 地址。</p>}<div className="connection-info"><span className={`status-dot ${connection}`} />{connection === 'online' ? '接口可连接' : connection === 'checking' ? '正在检查连接…' : '当前未连接，请检查服务地址与后端运行状态'}<button className="text-button" onClick={() => void checkConnection()}>重新检查</button></div><div className="dialog-actions"><button className="btn btn-secondary" onClick={() => setSettingsOpen(false)}>取消</button><button className="btn btn-primary" disabled={Boolean(apiDraft.trim() && !safeHttpUrl(apiDraft.trim()))} onClick={saveSettings}><Check size={16} />保存连接</button></div></div></Dialog>}
-    {helpOpen && <Dialog title="开始使用食图" onClose={() => setHelpOpen(false)}><div className="help-content"><div><Search size={21} /><section><h3>以图搜图</h3><p>上传图片或输入可公开访问的图片直链，在自建库中检索。默认场景为「通用」（general）；可切换场景与拒识阈值后点「开始搜索」。切到「现网 Global」或批量搜索时，可设置返回数量（1–20 条）。空库时请先去「上传与导入」入库（PG + S3），不以 FlyB 外搜兜底为完成标准。</p></section></div><div><ArrowDownToLine size={21} /><section><h3>查看与下载</h3><p>点击结果打开详情，勾选图片后可「批量下载」。一体机场景下结果会展示加热组与食物状态（缺字段显示「—」）。</p></section></div><div><FolderOpen size={21} /><section><h3>图库与入库</h3><p>图库按场景筛选（默认 general），缩略图使用 S3 https 地址。入库时可设置类别（取自「食材管理」的类别树）、标签、描述、食物标注、来源与许可；场景按所选类别的规则预览，和规则不同的勾选入库后写成人工纳入 / 排除。单张图片可单独标注。</p></section></div><div className="help-note">相似度仅在服务返回分数时展示；类别优先展示 scene_label，否则回落通用类别。</div></div></Dialog>}
+    {helpOpen && <Dialog title="开始使用食图" onClose={() => setHelpOpen(false)}><div className="help-content"><div><Search size={21} /><section><h3>以图搜图</h3><p>上传图片或输入可公开访问的图片直链，在自建库中检索。默认场景为「通用」（general）；可切换场景与拒识阈值后点「开始搜索」。切到「现网 Global」或批量搜索时，可设置返回数量（1–20 条）。「业务搜图」走给业务方的接口：先查自建库，没有达到阈值的结果时可用现网 Global 兜底（结果卡标「Global」），返回数量对两个通道都生效。空库时请先去「上传与导入」入库（PG + S3），不以 FlyB 外搜兜底为完成标准。</p></section></div><div><ArrowDownToLine size={21} /><section><h3>查看与下载</h3><p>点击结果打开详情，勾选图片后可「批量下载」。一体机场景下结果会展示加热组与食物状态（缺字段显示「—」）。</p></section></div><div><FolderOpen size={21} /><section><h3>图库与入库</h3><p>图库按场景筛选（默认 general），缩略图使用 S3 https 地址。入库时可设置类别（取自「食材管理」的类别树）、标签、描述、食物标注、来源与许可；场景按所选类别的规则预览，和规则不同的勾选入库后写成人工纳入 / 排除。单张图片可单独标注。</p></section></div><div className="help-note">相似度仅在服务返回分数时展示；类别优先展示 scene_label，否则回落通用类别。</div></div></Dialog>}
     {/* The one popup every page signals through notify() */}
     <StatusOverlay />
   </div></EnumCatalogProvider></SceneApiContext.Provider>

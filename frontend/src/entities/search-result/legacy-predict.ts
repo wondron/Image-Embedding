@@ -60,7 +60,8 @@ function siteName(details: Untrusted<PredictHitDetailsWire>, pageUrl: string | n
     ?? (pageUrl ? new URL(pageUrl).hostname : null)
 }
 
-function toPredictImage(doc: Untrusted<PredictHitWire>, index: number): SearchImage {
+/** One 现网 Global result (POST /api/search/global/*, and 业务搜图 with source=global) → SearchImage. */
+export function toPredictImage(doc: Untrusted<PredictHitWire>, index: number): SearchImage {
   const card = readCardFields(doc)
   const details = untrusted<PredictHitDetailsWire>(doc.details) ?? {}
   const images = untrustedList<SearchHitImageWire>(details.images)

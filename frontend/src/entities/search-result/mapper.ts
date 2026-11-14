@@ -47,7 +47,8 @@ function parseSource(value: unknown): 'self' | 'empty' | undefined {
   return source === 'self' || source === 'empty' ? source : undefined
 }
 
-function toSearchImage(
+/** One self-built hit (POST /api/search, and 业务搜图 with source=self) → SearchImage. */
+export function toSearchImage(
   hit: Untrusted<SearchHitWire>,
   index: number,
   envelope: { source?: 'self' | 'empty'; outputsHeating?: boolean },

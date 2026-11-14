@@ -3,10 +3,21 @@ import { uniqueHttpUrls } from '../../shared/lib/safeHttpUrl'
 import type { FoodState, HeatingGroup, LabelStatus } from '../image'
 
 /**
- * Search channel for badges. Self-built search reports only self | empty (§6.1.1);
+ * Search channel for badges. Self-built search reports only self | empty (§6.1.1); 业务搜图
+ * (POST /api/search/auto/*, §6.6) also 'global', for results of its 现网 Global fallback.
  * 'flyb' is kept for the legacy UI branches (contract W5) and is not produced for new results.
  */
-export type SearchChannel = 'self' | 'empty' | 'flyb'
+export type SearchChannel = 'self' | 'empty' | 'flyb' | 'global'
+
+/** 业务搜图: what happened to the Global fallback (envelope `fallback.status`). */
+export type SearchFallbackStatus = 'not_needed' | 'disabled' | 'hit' | 'empty' | 'failed'
+
+export interface SearchFallback {
+  status: SearchFallbackStatus
+  /** status=failed: the error code (e.g. UPSTREAM_TIMEOUT) and what it means; null otherwise. */
+  error: string | null
+  detail: string | null
+}
 
 /**
  * One result card, from either channel: a self-built hit (POST /api/search) or a 现网 FlyB result
@@ -57,12 +68,14 @@ export interface SearchResponse {
   traceId: string | null
   /** Text for people, e.g. why the result is empty. */
   message?: string
-  /** Envelope channel: self | empty; absent for predict. */
+  /** Envelope channel: self | empty (自建), self | global | empty (业务搜图); absent for 现网 Global. */
   source?: SearchChannel
   /** Scene actually searched (envelope `scene`). */
   scene?: string
   /** Envelope `outputs_heating` only — never inferred from the scene seed (P9). */
   outputsHeating?: boolean
+  /** 业务搜图 only: what happened to the Global fallback. */
+  fallback?: SearchFallback
 }
 
 /** Prefer scene_label when present; else generic category. */

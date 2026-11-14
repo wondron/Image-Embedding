@@ -430,6 +430,12 @@ main { flex: 1; min-height: 0; width: 100%; max-width: none; padding: 14px; marg
   background: #f3f4f6;
   border-color: #e5e7eb;
 }
+/* 业务搜图: a result of the 现网 Global fallback (the self-built library had nothing) */
+.source-badge-global {
+  color: #8a5a00;
+  background: #fff6e5;
+  border-color: #f2dcae;
+}
 .result-image-button .source-badge {
   position: absolute;
   top: 8px;
@@ -544,6 +550,33 @@ main { flex: 1; min-height: 0; width: 100%; max-width: none; padding: 14px; marg
   margin: 0;
 }
 .score-threshold-off:has(input:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+/* 业务搜图: whether the Global fallback runs (global_fallback) */
+.global-fallback-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+  padding: 10px 12px;
+  border: 1px solid #e1e6ee;
+  border-radius: 8px;
+  background: #f7f8fa;
+  font-size: 13px;
+  color: #334155;
+  line-height: 1.45;
+  cursor: pointer;
+  user-select: none;
+}
+.global-fallback-toggle input {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--primary);
+}
+.global-fallback-toggle:has(input:disabled) {
   opacity: 0.55;
   cursor: not-allowed;
 }

@@ -370,6 +370,50 @@ export interface PredictHitDetailsWire {
 /** schemas/predict.py PredictHit — the same card as a self-built hit (SearchHitWire). */
 export type PredictHitWire = SearchHitBaseWire<PredictHitDetailsWire>
 
+// -- POST /api/search/auto/* (业务搜图: 自建库优先, 现网 Global 兜底; contract §6.6) ---------
+
+/**
+ * schemas/auto_search.py AutoSearchUrlRequest — the JSON body of POST /api/search/auto/url; the
+ * file route (multipart) takes the same names as form fields. The server refuses unknown fields.
+ */
+export interface AutoSearchUrlRequestWire {
+  image_url: string
+  scene?: string | null
+  /** 1–20, default 10: the self-built top-K over the threshold, or how many results Global is asked for. */
+  top_k?: number
+  /** 自建库 only. Omit/null = 0.55; 0 = no threshold (never falls back); else [0.30, 1]. */
+  score_threshold?: number | null
+  /** Ask 现网 Global when the self-built library has nothing; default false. */
+  global_fallback?: boolean
+  trace_id?: string | null
+  /** The caller's device, for the logs; at most 128 characters. */
+  machine_info?: string | null
+}
+
+/** schemas/auto_search.py AutoSearchFallback — what happened to the Global fallback. */
+export interface AutoSearchFallbackWire {
+  status: 'not_needed' | 'disabled' | 'hit' | 'empty' | 'failed'
+  /** status=failed only: the error code, e.g. UPSTREAM_TIMEOUT. */
+  error?: string | null
+  detail?: string | null
+}
+
+/**
+ * schemas/auto_search.py AutoSearchResponse: items are self-built hits when source=self (as
+ * POST /api/search answers) and Global results when source=global (as POST /api/search/global/*).
+ */
+export interface AutoSearchResponseWire {
+  ok: true
+  trace_id: string
+  source: 'self' | 'global' | 'empty'
+  scene: string
+  /** false for Global results (they carry no heating information). */
+  outputs_heating: boolean
+  items: Array<SearchHitWire | PredictHitWire>
+  fallback: AutoSearchFallbackWire
+  message?: string | null
+}
+
 // -- one stored image: GET / PATCH / DELETE /api/images/{id}, POST …/vector-sync ----------
 
 /** schemas/images.py ImageEmbeddingRecord. */
