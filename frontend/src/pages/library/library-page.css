@@ -103,10 +103,37 @@
   padding: 14px;
 }
 .mg-library-grid.lib-grid.is-small { grid-template-columns: repeat(auto-fill, minmax(min(100%, 130px), 1fr)); gap: 10px; }
-.lib-grid.is-small .mg-upload-card > div { padding: 7px 8px 8px; }
-.lib-grid.is-small .mg-upload-card strong { font-size: 12px; }
-.lib-grid.is-small .mg-upload-card small { gap: 3px; margin-top: 5px; }
-.lib-grid.is-small .mg-category-chip { padding: 1px 6px; font-size: 12px; }
+
+/*
+ * One card, top down: the image (the checkbox and what needs attention sit on it), what it is
+ * (its category, and how far its labelling got), what was written about it, then where it shows
+ * up (scenes) and its tags. Cards of a row end level: the last line is pushed to the bottom.
+ */
+.mg-library-card { display: flex; flex-direction: column; background: #fff; transition: border-color .12s, box-shadow .12s; }
+.mg-library-card:hover { border-color: #c4d3ea; box-shadow: 0 2px 10px rgba(15, 23, 42, .06); }
+.mg-library-card > .mg-upload-preview { flex-shrink: 0; }
+.mg-library-card > .lib-card-body { display: flex; flex: 1; flex-direction: column; gap: 5px; min-width: 0; padding: 9px 10px 10px; }
+.lib-card-flags { position: absolute; top: 8px; right: 8px; z-index: 2; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.lib-card-flags:empty { display: none; }
+.lib-card-flags > .mg-vector-flag { box-shadow: 0 1px 4px rgba(15, 23, 42, .14); }
+.lib-card-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.lib-card-head > .mg-category-chip { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 8px; color: #223046; font-size: 13px; font-weight: 600; }
+.lib-card-head > .mg-category-chip.is-empty { color: #94a3b8; font-weight: 400; }
+.lib-card-head > .mg-category-chip.is-current { color: var(--primary); }
+.lib-card-head > .mg-label-status { flex-shrink: 0; margin-left: auto; }
+.mg-library-card strong.lib-card-title { color: #5b6878; font-size: 12px; font-weight: 400; line-height: 1.5; }
+.mg-library-card strong.lib-card-title.is-id { color: #a3adbb; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+.lib-card-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; min-width: 0; margin-top: auto; padding-top: 7px; border-top: 1px solid #f0f2f5; }
+.lib-card-scenes { display: inline-flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.lib-card-foot .mg-library-tags { display: inline-flex; flex-wrap: wrap; min-width: 0; margin-top: 0 !important; }
+
+/* Small cards: the image, its category and the first line about it */
+.lib-grid.is-small .mg-library-card > .lib-card-body { gap: 3px; padding: 6px 8px 8px; }
+.lib-grid.is-small .lib-card-head > .mg-category-chip { padding: 1px 6px; font-size: 12px; }
+.lib-grid.is-small .lib-card-head > .mg-label-status { padding: 0 5px; font-size: 10px; line-height: 16px; }
+.lib-grid.is-small .mg-library-card strong.lib-card-title { font-size: 11px; }
+.lib-grid.is-small .lib-card-flags { top: 6px; right: 6px; }
+.lib-grid.is-small .lib-card-check { top: 6px; left: 6px; width: 24px; height: 24px; }
 .lib-grid.is-small .mg-upload-preview > span { display: none; }
 
 /* A card's category and tags filter by themselves */

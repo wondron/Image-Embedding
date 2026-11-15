@@ -2,10 +2,13 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Dialog } from '../../components/Dialog'
 import { EmptyState, notify } from '../../shared/ui'
 import { ApiError } from '../../shared/api'
-import { Layers3, LoaderCircle } from 'lucide-react'
+import { Download, Layers3, LoaderCircle, Upload } from 'lucide-react'
 import { createRule, deleteSceneResource, sceneError, uncertainWrite, updateRule, writeLabel, writeScene, type Scene, type SceneLabel, type SceneRule, type SceneWrite } from '../../entities/scene'
-import { refreshSceneCatalog, sceneSaved, useSceneCatalog } from '../scene-catalog'
+import { readJsonFile, saveText } from '../../shared/lib/saveFile'
+import { ImportDialog, importSceneConfig, type ImportReport } from '../config-transfer'
+import { markScenePending, refreshSceneCatalog, sceneSaved, useSceneCatalog } from '../scene-catalog'
 import { beginSceneWrite, endSceneWrite, sceneWritesLocked, stopSceneSync, useSceneSync } from '../scene-sync'
+import { buildSceneConfigExport } from './export'
 import { SceneEditor, LabelEditor } from './Editors'
 import { RuleEditor } from './RuleEditor'
 import { SceneSyncPanel } from './SceneSyncPanel'
@@ -21,6 +24,9 @@ export function SceneManagement({ apiBase }: { apiBase: string }) {
   /** The last write was refused for a code already taken: the editor marks its code field. */
   const [codeTaken, setCodeTaken] = useState(false)
   const [confirmation, setConfirmation] = useState<{ title: string; text: string; action: () => Promise<boolean> } | null>(null)
+  /** A file picked for 「上传配置」, parsed: its preview and import run in the dialog. */
+  const [importing, setImporting] = useState<{ name: string; document: unknown } | null>(null)
+  const importInput = useRef<HTMLInputElement>(null)
   const detailsRef = useRef<HTMLElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const headingRef = useRef<HTMLElement>(null)
@@ -55,6 +61,34 @@ export function SceneManagement({ apiBase }: { apiBase: string }) {
     }
     finally { pending.current = false; setBusy(false); endSceneWrite() }
   }
+  /** 「下载配置」: every scene with its labels and rules, as one JSON file (also a backup). */
+  function downloadConfig() {
+    if (!c.data) return
+    try {
+      const file = buildSceneConfigExport(c.data)
+      saveText(file.content, file.filename, 'application/json;charset=utf-8')
+      notify.success(`已发起场景配置下载，共 ${file.count} 个场景。`)
+    } catch { notify.error('场景配置文件生成失败，请重试。', { title: '下载失败' }) }
+  }
+  /** 「上传配置」: read the picked file here; what it would change is previewed in the dialog. */
+  async function pickImport(file: File | undefined) {
+    if (!file) return
+    try { setImporting({ name: file.name, document: await readJsonFile(file) }) }
+    catch (e) { notify.error(e instanceof Error ? e.message : '文件读取失败，请重试。', { title: '不能用这个文件' }) }
+  }
+  /** A preview only reads; the import itself is a configuration write, so it takes the write lock. */
+  async function runImport(content: unknown, dryRun: boolean, prune: boolean): Promise<ImportReport> {
+    if (dryRun) return importSceneConfig(content, { baseUrl: apiBase, dryRun: true, prune })
+    if (pending.current || sceneWritesLocked() || !beginSceneWrite()) throw new Error('全量同步或另一项写入正在进行，请稍后再导入。')
+    pending.current = true; setBusy(true)
+    try { return await importSceneConfig(content, { baseUrl: apiBase, dryRun: false, prune }) }
+    finally { pending.current = false; setBusy(false); endSceneWrite() }
+  }
+  /** After an import was sent: the catalog is read again; stored images wait for the full sync when the server says so (or when the outcome is unknown). */
+  function importApplied(report: ImportReport | null) {
+    if (!report || report.syncRequired) markScenePending(apiBase, true)
+    void refreshSceneCatalog(apiBase, true)
+  }
   function open(value: Editor) { setCodeTaken(false); setEditor(value) }
   function ask(title: string, text: string, action: () => Promise<boolean>) { setConfirmation({ title, text, action }) }
   const protectedScene = Boolean(scene && (scene.code === 'general' || scene.code === c.data?.defaultScene))
@@ -80,7 +114,11 @@ export function SceneManagement({ apiBase }: { apiBase: string }) {
   }, [selected, tab, Boolean(scene)])
   useLayoutEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = 0 }, [selected, tab])
   return <div className="scene-management">
-    <div className="mg-page-toolbar"><h2>场景管理</h2><button className="mg-btn mg-secondary" onClick={() => void c.refresh()}>刷新</button><button className="mg-btn mg-primary" disabled={!canWrite} onClick={() => open({ type: 'scene' })}>新建场景</button><button className="mg-btn mg-secondary" onClick={() => setTab('sync')}>全量同步</button></div>
+    <div className="mg-page-toolbar"><h2>场景管理</h2><button className="mg-btn mg-secondary" onClick={() => void c.refresh()}>刷新</button><button className="mg-btn mg-primary" disabled={!canWrite} onClick={() => open({ type: 'scene' })}>新建场景</button><button className="mg-btn mg-secondary" onClick={() => setTab('sync')}>全量同步</button>
+      <button type="button" className="mg-btn mg-secondary" disabled={!c.data || Boolean(c.error) || c.loading} title="下载全部场景及其场景类别、规则（JSON）：可以编辑后再上传，也可以作为备份" onClick={downloadConfig}><Download size={16} />下载配置</button>
+      <button type="button" className="mg-btn mg-secondary" disabled={!canWrite} title="上传场景配置文件（下载得到的 JSON，可以改过）：按编码新建或更新场景、场景类别和规则，先预览再确认" onClick={() => importInput.current?.click()}><Upload size={16} />上传配置</button>
+      <input ref={importInput} type="file" accept=".json,application/json" hidden aria-label="选择场景配置文件" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void pickImport(file) }} />
+    </div>
     <div className="scene-status-stack scene-directory-status" aria-label="场景目录状态">
       {c.error && <p className="mg-form-error" role="alert">{c.error} 已保留上次结果，依赖目录的写入已禁用。<button type="button" className="text-button" onClick={() => void c.refresh()}>重试刷新</button></p>}
       {locked && <p role="status">全量同步正在进行，本页配置与同窗口人工成员写入已禁用。</p>}
@@ -144,6 +182,7 @@ export function SceneManagement({ apiBase }: { apiBase: string }) {
     {editor?.type === 'rule' && <RuleEditor scene={editor.scene} rule={editor.rule} apiBase={apiBase} busy={busy || locked} onClose={() => setEditor(null)} onSave={input => perform(() => editor.rule
       ? updateRule(apiBase, editor.scene.id, editor.rule.id, input)
       : createRule(apiBase, editor.scene.id, input))} />}
+    {importing && <ImportDialog title="上传场景配置" fileName={importing.name} leftoverNoun="场景" prunable run={({ dryRun, prune }) => runImport(importing.document, dryRun, prune)} onApplied={importApplied} onClose={() => setImporting(null)} />}
     {confirmation && <Dialog title={confirmation.title} size="sm" onClose={() => setConfirmation(null)} dismissDisabled={busy}><p>{confirmation.text}</p><button type="button" className="mg-btn mg-secondary" disabled={busy} onClick={() => setConfirmation(null)}>取消</button><button type="button" className="mg-btn mg-primary" disabled={!canWrite} onClick={async () => { if (await confirmation.action()) setConfirmation(null) }}>确认</button></Dialog>}
   </div>
 }

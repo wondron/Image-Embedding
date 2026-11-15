@@ -8,6 +8,7 @@ import {
 import { safeHttpUrl } from '../../shared/lib/safeHttpUrl'
 import { DEFAULT_SCENE, toApiSceneCode } from '../scene'
 import { toAutoSearchResponse } from './auto-search'
+import { toBatchSearchResponse, type BatchSearchResponse } from './batch-search'
 import { fromPredictResponse } from './legacy-predict'
 import { toSearchResponse } from './mapper'
 import type { SearchResponse } from './model'
@@ -15,6 +16,10 @@ import type { SearchResponse } from './model'
 const GLOBAL_LABELS: ApiLabels = { service: '搜索服务', endpoint: '搜索接口', action: '搜索' }
 const LOCAL_LABELS: ApiLabels = { service: '自建检索服务', endpoint: '自建检索接口', action: '搜索' }
 const AUTO_LABELS: ApiLabels = { service: '业务搜图服务', endpoint: '业务搜图接口', action: '搜索' }
+const BATCH_LABELS: ApiLabels = { service: '自建检索服务', endpoint: '多图搜索接口', action: '多图搜索' }
+
+/** 多图搜索: query images one request may carry (the server's BATCH_MAX_IMAGES). */
+export const BATCH_SEARCH_MAX_IMAGES = 30
 
 /**
  * 业务搜图 result count (`top_k`): one number for both channels — the self-built top-K over the
@@ -115,6 +120,32 @@ export async function searchLocalImages({
     payload = await requestJson('/api/search', { baseUrl, method: 'POST', json: body, signal, labels: LOCAL_LABELS })
   }
   return toSearchResponse(payload)
+}
+
+export interface BatchSearchOptions extends Pick<SearchOptions, 'baseUrl' | 'signal' | 'topK' | 'scoreThreshold' | 'traceId' | 'scene'> {
+  /** 1..BATCH_SEARCH_MAX_IMAGES query images; they share the scene, top_k and the threshold. */
+  files: readonly File[]
+}
+
+/**
+ * 多图搜索 (自建库): POST /api/search/batch/files — multipart `files` (repeated) + the shared
+ * fields. One outcome per file, in the order given: an image that cannot be searched has its own
+ * error and does not fail the others (§6.7).
+ */
+export async function searchLocalBatch({
+  files, baseUrl, signal, topK, scoreThreshold, traceId, scene,
+}: BatchSearchOptions): Promise<BatchSearchResponse> {
+  if (!files.length) throw new Error('请至少选择一张图片。')
+  if (files.length > BATCH_SEARCH_MAX_IMAGES) throw new Error(`一次最多搜索 ${BATCH_SEARCH_MAX_IMAGES} 张图片。`)
+  const threshold = scoreThreshold ?? undefined
+  const form = new FormData()
+  for (const file of files) form.append('files', file)
+  form.append('scene', toApiSceneCode(scene, DEFAULT_SCENE))
+  if (topK !== undefined) form.append('top_k', String(topK))
+  if (threshold !== undefined) form.append('score_threshold', String(threshold))
+  if (traceId) form.append('trace_id', traceId)
+  const payload = await requestJson('/api/search/batch/files', { baseUrl, method: 'POST', form, signal, labels: BATCH_LABELS })
+  return toBatchSearchResponse(payload)
 }
 
 export interface AutoSearchOptions extends Omit<SearchOptions, 'searchNum' | 'topK'> {

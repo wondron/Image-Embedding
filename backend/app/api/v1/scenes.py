@@ -1,14 +1,16 @@
-"""Scene configuration routes (scenes, their labels and rules) and the membership sync."""
+"""Scene configuration routes (scenes, their labels and rules), the import of a configuration
+file, and the membership sync."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Path, Request
+from fastapi import APIRouter, Body, Path, Query, Request
 
 from app.api.services import scenes as scenes_service
 from app.bootstrap.state import get_application_state
 from app.schemas.common import ErrorResponse
+from app.schemas.config_import import DRY_RUN_DOC, PRUNE_DOC, SceneImportResponse
 from app.schemas.scenes import (
     SceneCreateRequest,
     SceneDeleteResponse,
@@ -58,6 +60,33 @@ def list_scenes(request: Request) -> Any:
 )
 def sync_memberships(request: Request, body: SceneSyncRequest) -> Any:
     return scenes_service.sync_memberships(get_application_state(request), request, body)
+
+
+@router.post(
+    "/import",
+    response_model=SceneImportResponse,
+    summary="Import a scene configuration file",
+    description=(
+        "上传场景配置文件做批量修改或恢复备份。请求体就是文件内容（JSON 对象）：「场景管理」页下载的场景配置，"
+        "或 GET /api/scenes 的响应体（scenes 列表，每个场景带 labels 和 rules），可以手工编辑，也可以只保留要改的部分。"
+        "场景按编码匹配，场景类别按场景内的编码匹配，规则按目标匹配（类别用类别编码，或菜系）；没有的新建，"
+        "已有的把文件里给了且不同的字段更新（规则只能改映射的场景类别，label 为 null 清空映射）。"
+        "文件里没给的字段、没带的 labels / rules 列表都不动。规则里的类别必须已在类别树里（先导入类别树）。"
+        "默认不删除任何东西；prune=true 时，对文件列出的场景，删除文件里没有列出的规则和场景类别。"
+        "场景本身从不删除，文件里没列出的场景在 not_in_file 里列出。文件里的 id 不读取，所以可以导入另一套库。"
+        "dry_run 默认 true，只返回将要发生的变更；dry_run=false 才写入。逐项写入（各自一个事务），"
+        "某一项失败不影响其他项。sync_required 为 true 时要「重算场景归属」后才作用到已入库图片。详见契约 §6.8。"
+    ),
+)
+def import_scenes(
+    request: Request,
+    document: dict[str, Any] = Body(..., description="场景配置文件的内容"),
+    dry_run: bool = Query(True, description=DRY_RUN_DOC),
+    prune: bool = Query(False, description=PRUNE_DOC),
+) -> Any:
+    return scenes_service.import_scenes(
+        get_application_state(request), request, document, dry_run=dry_run, prune=prune
+    )
 
 
 @router.post(

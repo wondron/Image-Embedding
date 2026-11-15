@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from fastapi.responses import RedirectResponse
 
 from app.api.v1.auto_search import router as auto_search_router
+from app.api.v1.batch_search import router as batch_search_router
 from app.api.v1.categories import router as categories_router
 from app.api.v1.embedding_models import router as embedding_models_router
 from app.api.v1.enums import router as enums_router
@@ -27,6 +28,7 @@ for sub_router in (
     tools_router,
     retrieval_router,
     auto_search_router,  # /api/search/auto/*: self-built first, global as the fallback
+    batch_search_router,  # /api/search/batch/*: several query images, self-built only
     enums_router,
     categories_router,
     scenes_router,

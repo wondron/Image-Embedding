@@ -8,6 +8,10 @@ CATEGORY_POSTGRES_FAILED 502. Routes are sync, so FastAPI runs them in the threa
 A move or a cuisines change recomputes the scenes of the images below the node in the store's
 transaction; after the commit their payloads are pushed when the retrieval stack is up
 (vector_sync.push_payloads), which never fails the request.
+
+POST /api/categories/import applies a whole tree file node by node through the same use case
+(app.services.retrieval.import_categories); the payloads of every image a cuisines change touched
+are pushed once, after the last node.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from app.api.services.vector_sync import push_payloads
 from app.bootstrap.state import ApplicationState
 from app.core.middleware import get_trace_id
 from app.schemas.categories import CategoryCreateRequest, CategoryUpdateRequest
+from app.services.retrieval.import_categories import ImportCategoriesUseCase
 
 logger = logging.getLogger("svc.categories")
 
@@ -63,6 +68,32 @@ def update_category(
         get_trace_id(request),
     )
     return {"ok": True, "category": category, "scene_sync": scene_sync}
+
+
+def import_categories(
+    runtime: ApplicationState, request: Request, document: dict[str, Any], *, dry_run: bool
+) -> dict[str, Any]:
+    """Apply (dry_run: preview) a category tree file; the body is the import report."""
+    use_case = ImportCategoriesUseCase(require_catalog(runtime).categories_uc)
+    result = use_case.execute(document, dry_run=dry_run)
+    membership = result.pop("scene_membership", None)
+    scene_sync = None
+    if membership is not None:
+        # Committed already: the push is best effort, what is left stays out of sync in the ledger
+        changed = membership["changed_ids"]
+        scene_sync = {"images": membership["images"], "changed": len(changed), **push_payloads(runtime, changed)}
+    summary = result["summary"]
+    logger.info(
+        "category import dry_run=%s total=%s create=%s update=%s unchanged=%s error=%s not_in_file=%s%s | trace_id=%s",
+        dry_run, summary["total"], summary["create"], summary["update"], summary["unchanged"], summary["error"],
+        summary["not_in_file"],
+        "" if scene_sync is None else (
+            " scenes: images={images} changed={changed} pushed={pushed} pending={pending} "
+            "vector_sync={vector_sync}".format(**scene_sync)
+        ),
+        get_trace_id(request),
+    )
+    return {"ok": True, **result, "scene_sync": scene_sync}
 
 
 def delete_category(runtime: ApplicationState, request: Request, category_id: int) -> dict[str, Any]:

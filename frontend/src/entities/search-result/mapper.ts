@@ -26,9 +26,13 @@ import {
 import { toApiSceneCode } from '../scene'
 import { displayCategoryLabel, type SearchImage, type SearchResponse } from './model'
 
-/** Finite score in [-1, 1]; anything else (missing, string, 80 …) is "not returned", never 0. */
+/** Cosine scores can overshoot their bounds slightly after FP32 computation. */
+const SIMILARITY_EPSILON = 1e-6
+
+/** Finite score in [-1, 1], allowing FP32 roundoff; invalid/missing scores stay "not returned". */
 export function parseSimilarity(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) && value >= -1 && value <= 1 ? value : null
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < -1 - SIMILARITY_EPSILON || value > 1 + SIMILARITY_EPSILON) return null
+  return Math.min(1, Math.max(-1, value))
 }
 
 /** The four top-level fields of a result card, read the same way for both channels (§6.1.1). */

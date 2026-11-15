@@ -11,3 +11,8 @@ frontend/dist/
 logs/
 backend/config/*
 backend/.env
+
+# Local acceptance evidence and browser sessions
+.playwright-cli/
+output/playwright/
+backend/output/acceptance/

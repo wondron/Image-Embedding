@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Download, FolderTree, LoaderCircle, Plus, RotateCcw, Search, X } from 'lucide-react'
+import { AlertTriangle, Download, FolderTree, LoaderCircle, Plus, RotateCcw, Search, Upload, X } from 'lucide-react'
 import {
   buildCategoryTree,
   categoryLabel,
@@ -16,13 +16,15 @@ import {
 } from '../../entities/category'
 import { enumValueLabel, useEnumCatalog } from '../../entities/enum'
 import { requestSignal } from '../../shared/lib'
+import { readJsonFile } from '../../shared/lib/saveFile'
 import { EmptyState, notify } from '../../shared/ui'
+import { ImportDialog, importCategoryTree } from '../config-transfer'
 import { CategoryDeleteDialog } from './CategoryDeleteDialog'
 import { CategoryEditorDialog, type CategoryEditorTarget, type CategorySaveRequest } from './CategoryEditorDialog'
+import { CategoryExportDialog } from './CategoryExportDialog'
 import { CategoryTable, rowElementId } from './CategoryTable'
 import { NO_CATEGORY_FILTER, categoryScopeOptions, categoryTableView, type CategoryStatusFilter, type CategoryTableFilter } from './tableModel'
 import { deleteFailureText, loadFailureText, saveFailureText, savedNotice } from './messages'
-import { buildCategoryTreeExport, downloadCategoryTree } from './export'
 import '../../components/ManagementViews.css'
 import './category-config.css'
 
@@ -81,6 +83,11 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
   const [editor, setEditor] = useState<CategoryEditorTarget | null>(null)
   const [removing, setRemoving] = useState<RemoveState | null>(null)
   const [copiedTrace, setCopiedTrace] = useState<string | null>(null)
+  /** 「下载类别树」 is open: the data file and the topology diagrams. */
+  const [exporting, setExporting] = useState(false)
+  /** A file picked for 「上传类别树」, parsed: its preview and import run in the dialog. */
+  const [importing, setImporting] = useState<{ name: string; document: unknown } | null>(null)
+  const importInput = useRef<HTMLInputElement>(null)
 
   const mounted = useRef(true)
   const lifetime = useRef(new AbortController())
@@ -337,14 +344,14 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
     }
   }
 
-  function exportTree() {
-    if (exportDisabled) return
+  /** 「上传类别树」: read the picked file here; what it would change is previewed in the dialog. */
+  async function pickImport(file: File | undefined) {
+    if (!file || busy) return
     try {
-      const file = buildCategoryTreeExport(tree, rootCodes, heatingGroups)
-      downloadCategoryTree(file)
-      notify.success(`已发起类别树下载，共 ${file.count} 个类别。`)
-    } catch {
-      notify.error('类别树文件生成失败，请重试。', { title: '下载失败' })
+      const content = await readJsonFile(file)
+      if (mounted.current) setImporting({ name: file.name, document: content })
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : '文件读取失败，请重试。', { title: '不能用这个文件' })
     }
   }
 
@@ -389,9 +396,28 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
         type="button"
         className="mg-btn mg-secondary"
         disabled={exportDisabled}
-        title="下载完整类别树（JSON），包含停用类别，不受筛选或折叠影响"
-        onClick={exportTree}
+        title="下载完整类别树：数据文件（JSON，可编辑后再上传）和文字、图像版拓扑图；包含停用类别，不受筛选或折叠影响"
+        onClick={() => setExporting(true)}
       ><Download size={17} />下载类别树</button>
+      <button
+        type="button"
+        className="mg-btn mg-secondary"
+        disabled={busy || !loadedOnce || loading}
+        title="上传类别树文件（下载得到的 JSON，可以改过）：按编码新建或更新类别，先预览再确认；不会移动或删除类别"
+        onClick={() => importInput.current?.click()}
+      ><Upload size={17} />上传类别树</button>
+      <input
+        ref={importInput}
+        type="file"
+        accept=".json,application/json"
+        hidden
+        aria-label="选择类别树文件"
+        onChange={event => {
+          const file = event.target.files?.[0]
+          event.target.value = ''  // the same file can be picked again after it was edited
+          void pickImport(file)
+        }}
+      />
       <span className={`mg-status ct-connection${failedEmpty ? ' is-error' : loadedOnce && !listFailure ? ' is-online' : ''}`}><span />{connection}</span>
     </div>
 
@@ -462,6 +488,23 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
       onClose={() => setRemoving(null)}
       onDelete={() => void confirmRemove()}
       onDeactivate={() => void deactivate()}
+    />}
+
+    {exporting && <CategoryExportDialog
+      tree={tree}
+      rootCodes={rootCodes}
+      heatingGroups={heatingGroups}
+      onClose={() => setExporting(false)}
+    />}
+
+    {importing && <ImportDialog
+      title="上传类别树"
+      fileName={importing.name}
+      leftoverNoun="类别"
+      run={({ dryRun }) => importCategoryTree(importing.document, { baseUrl: apiBase, dryRun })}
+      // Written or not known: either way the tree on the server is what counts now
+      onApplied={() => { void reload() }}
+      onClose={() => setImporting(null)}
     />}
   </div>
 }

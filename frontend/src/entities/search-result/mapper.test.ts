@@ -141,4 +141,10 @@ describe('toSearchResponse (§6.1.1 / §6.1.4)', () => {
     expect(response.items[0].source).toBeUndefined()
     expect(response.scene).toBe('oven')
   })
+
+  it('shows an exact-image FP32 cosine overshoot as 100%, while rejecting invalid scores', () => {
+    const scores = [1.0000001192092896, -1.0000001192092896, 1.001, -1.001, '1.0000001', null]
+    const response = toSearchResponse(envelope(scores.map((similarity, index) => ({ similarity, details: { id: `roundoff-${index}` } }))))
+    expect(response.items.map(item => item.similarity)).toEqual([1, -1, null, null, null, null])
+  })
 })

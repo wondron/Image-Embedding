@@ -27,6 +27,7 @@ from app.schemas.scenes import (
     SceneSyncRequest,
     SceneUpdateRequest,
 )
+from app.services.retrieval.import_scenes import ImportScenesUseCase
 
 logger = logging.getLogger("svc.scenes")
 
@@ -117,6 +118,27 @@ def update_rule(
 def delete_rule(runtime: ApplicationState, request: Request, scene_id: int, rule_id: int) -> dict[str, Any]:
     result = require_catalog(runtime).scenes_uc.delete_rule(scene_id, rule_id)
     return _logged(request, "rule deleted", result, rule_id=rule_id)
+
+
+def import_scenes(
+    runtime: ApplicationState, request: Request, document: dict[str, Any], *, dry_run: bool, prune: bool
+) -> dict[str, Any]:
+    """Apply (dry_run: preview) a scene configuration file; the body is the import report.
+    Needs the catalog only: nothing is pushed to the vector store here (sync_required says when
+    POST /api/scenes/sync has to follow)."""
+    catalog = require_catalog(runtime)
+    result = ImportScenesUseCase(catalog.scenes_uc, catalog.categories_uc).execute(
+        document, dry_run=dry_run, prune=prune
+    )
+    summary = result["summary"]
+    logger.info(
+        "scene import dry_run=%s prune=%s total=%s create=%s update=%s delete=%s unchanged=%s error=%s "
+        "not_in_file=%s sync_required=%s | trace_id=%s",
+        dry_run, prune, summary["total"], summary["create"], summary["update"], summary["delete"],
+        summary["unchanged"], summary["error"], summary["not_in_file"], result["sync_required"],
+        get_trace_id(request),
+    )
+    return {"ok": True, **result}
 
 
 def sync_memberships(runtime: ApplicationState, request: Request, body: SceneSyncRequest) -> dict[str, Any]:

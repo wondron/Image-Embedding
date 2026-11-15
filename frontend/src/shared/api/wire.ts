@@ -414,6 +414,122 @@ export interface AutoSearchResponseWire {
   message?: string | null
 }
 
+// -- POST /api/search/batch/* (多图搜索: 自建库; contract §6.7) -------------------------------
+
+/**
+ * schemas/batch_search.py BatchSearchUrlsRequest — the JSON body of POST /api/search/batch/urls;
+ * the files route (multipart) takes `files` (repeated) and the other names as form fields.
+ */
+export interface BatchSearchUrlsRequestWire {
+  /** 1–30 image links. */
+  image_urls: string[]
+  scene?: string | null
+  /** 1–50, default 10, per query image. */
+  top_k?: number
+  /** Omit/null = 0.55; 0 = no threshold; else [0.30, 1]. One for the whole batch. */
+  score_threshold?: number | null
+  trace_id?: string | null
+}
+
+/**
+ * schemas/batch_search.py BatchSearchResult — one query image's outcome. ok=true: source / items
+ * (message when nothing was found); ok=false: error / detail. The other case's fields are absent.
+ */
+export interface BatchSearchResultWire {
+  /** Position in the request, from 0. */
+  index: number
+  /** The file name, or the image link. */
+  input: string
+  ok: boolean
+  source?: 'self' | 'empty' | null
+  items?: SearchHitWire[]
+  message?: string | null
+  /** ok=false: e.g. SEARCH_BAD_IMAGE, EMPTY_FILE, FILE_TOO_LARGE, DOWNLOAD_FAILED. */
+  error?: string | null
+  detail?: string | null
+  /** Reading (or downloading) plus searching this image, in milliseconds. */
+  elapsed_ms?: number | null
+}
+
+/** schemas/batch_search.py BatchSearchResponse. */
+export interface BatchSearchResponseWire {
+  ok: true
+  trace_id: string
+  scene: string
+  outputs_heating: boolean
+  top_k: number
+  /** The effective threshold; 0 = none. */
+  score_threshold: number
+  total: number
+  /** Searched (ok=true), with or without hits. */
+  succeeded: number
+  /** Searched and found something. */
+  matched: number
+  failed: number
+  /** One entry per query image, in request order. */
+  results: BatchSearchResultWire[]
+}
+
+// -- POST /api/categories/import, POST /api/scenes/import (配置导入; contract §6.8) -------------
+
+/** schemas/config_import.py ImportChange. */
+export interface ImportChangeWire {
+  field: string
+  before: string | null
+  after: string | null
+}
+
+/** schemas/config_import.py ImportRow — one item created / updated / deleted, or not imported. */
+export interface ImportRowWire {
+  kind: 'category' | 'scene' | 'label' | 'rule'
+  /** Category code; scene code; 「scene/label」; 「scene/category:code」 or 「scene/cuisine:name」. */
+  key: string
+  action: 'create' | 'update' | 'delete' | 'error'
+  name: string | null
+  scene: string | null
+  /** Its place in the file, e.g. categories[0].children[2]. */
+  where: string | null
+  changes: ImportChangeWire[]
+  error: string | null
+  detail: string | null
+}
+
+/** schemas/config_import.py ImportSummary. */
+export interface ImportSummaryWire {
+  total: number
+  create: number
+  update: number
+  delete: number
+  unchanged: number
+  error: number
+  not_in_file: number
+}
+
+/** schemas/config_import.py ImportLeftover — stored, but not listed in the file. */
+export interface ImportLeftoverWire {
+  id: number
+  code: string
+  name: string | null
+}
+
+/**
+ * schemas/config_import.py CategoryImportResponse / SceneImportResponse (the same report).
+ * scene_sync: categories only; prune / sync_required: scenes only.
+ */
+export interface ImportResponseWire {
+  ok: true
+  /** true: a preview, nothing was written. */
+  dry_run: boolean
+  summary: ImportSummaryWire
+  /** Items with a change or a problem (at most 1000; unchanged ones are only counted). */
+  rows: ImportRowWire[]
+  rows_truncated: boolean
+  not_in_file: ImportLeftoverWire[]
+  scene_sync?: CategorySceneSyncWire | null
+  prune?: boolean
+  sync_required?: boolean
+}
+
 // -- one stored image: GET / PATCH / DELETE /api/images/{id}, POST …/vector-sync ----------
 
 /** schemas/images.py ImageEmbeddingRecord. */

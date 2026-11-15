@@ -6,13 +6,14 @@ import { strFromU8, unzipSync } from 'fflate'
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
 const upload = (name: string) => ({ name, mimeType: 'image/png', buffer: png })
 const rows = [
-  { title: '番茄:红', image_url: 'https://download-fixture.test/tomato.png', similarity: 0.91 },
-  { title: '黄瓜', image_url: 'https://download-fixture.test/cucumber.png', similarity: 0.82 },
-  { title: '失败图片', image_url: 'https://download-fixture.test/failed.png', similarity: 0.73 },
+  { tags: '番茄:红', original_url: 'https://download-fixture.test/tomato.png', similarity: 0.91 },
+  { tags: '黄瓜', original_url: 'https://download-fixture.test/cucumber.png', similarity: 0.82 },
+  { tags: '失败图片', original_url: 'https://download-fixture.test/failed.png', similarity: 0.73 },
 ]
 
 async function searchAndSelect(page: Page, selectedRows = rows) {
-  await page.route('**/api/search/global/file', route => route.fulfill({ json: { result: selectedRows } }))
+  await page.route('**/api/search/global/file*', route => route.fulfill({ json: { result: selectedRows } }))
+  await page.getByRole('button', { name: '现网 Global', exact: true }).click()
   await page.getByLabel('选择查询图片', { exact: true }).setInputFiles(upload('query.png'))
   await page.getByRole('button', { name: '开始搜索', exact: true }).click()
   await expect(page.locator('.result-card')).toHaveCount(selectedRows.length)
@@ -40,7 +41,7 @@ function gate() {
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('food-atlas-api', ''))
-  await page.route('**/api/**', route => route.request().url().endsWith('/api/ping')
+  await page.route(url => url.pathname.startsWith('/api/'), route => route.request().url().endsWith('/api/ping')
     ? route.fulfill({ json: { ok: true } })
     : route.fulfill({ status: 404, json: { detail: 'Controlled endpoint not available' } }))
   await page.route('https://download-fixture.test/**', route => route.fulfill({
@@ -64,8 +65,8 @@ test('ZIP 包保留真实图片、来源清单与失败项，并可只重试失�
   expect(Buffer.from(files['0002-黄瓜.png'])).toEqual(png)
   const manifest = JSON.parse(strFromU8(files['results.json']))
   expect(manifest.results).toHaveLength(2)
-  expect(manifest.results[0]).toMatchObject({ title: '番茄:红', source: rows[0].image_url, similarity: 0.91, bytes: png.length })
-  expect(manifest.failures).toEqual([expect.objectContaining({ title: '失败图片', imageUrl: rows[2].image_url, reason: 'HTTP 404' })])
+  expect(manifest.results[0]).toMatchObject({ title: '番茄:红', source: rows[0].original_url, similarity: 0.91, bytes: png.length })
+  expect(manifest.failures).toEqual([expect.objectContaining({ title: '失败图片', imageUrl: rows[2].original_url, reason: 'HTTP 404' })])
   await expect(dialog.getByRole('heading', { name: '失败记录 · 1', exact: true })).toBeVisible()
   await expect(dialog.getByText('已将含 2 张图片及来源清单的 ZIP 交给浏览器，请查看下载列表确认保存结果。', { exact: true })).toBeVisible()
   await page.screenshot({ path: info.outputPath('desktop-download-partial.png'), fullPage: true })
@@ -89,10 +90,10 @@ test('来源拒绝跨域下载时通过后端下载接口获取图片', async ({
   })
   const dialog = await searchAndSelect(page, [rows[0]])
   const files = await archiveEntries(page, info, () => dialog.getByRole('button', { name: '开始下载', exact: true }).click(), 'proxy-result.zip')
-  expect(proxyUrls).toEqual([rows[0].image_url])
+  expect(proxyUrls).toEqual([rows[0].original_url])
   expect(Buffer.from(files['0001-番茄_红.png'])).toEqual(png)
   const manifest = JSON.parse(strFromU8(files['results.json']))
-  expect(manifest.results[0].source).toBe(rows[0].image_url)
+  expect(manifest.results[0].source).toBe(rows[0].original_url)
   expect(manifest.failures).toEqual([])
 })
 
@@ -181,16 +182,17 @@ test('批量查询停止后可继续，晚到的旧请求不会覆盖恢复后�
   const lateResponse = gate()
   const lateFinished = gate()
   const filenames: string[] = []
-  await page.route('**/api/search/global/file', async route => {
+  await page.route('**/api/search/global/file*', async route => {
     const filename = /filename="([^"]+)"/.exec(route.request().postDataBuffer()?.toString() ?? '')?.[1] ?? ''
     filenames.push(filename)
     const isOldRequest = filenames.length === 1
     if (isOldRequest) await lateResponse.ready
-    await route.fulfill({ json: { result: [{ ...rows[0], title: isOldRequest ? '过期结果' : filename === 'first.png' ? '恢复后的结果' : '第二张结果' }] } }).catch(() => {})
+    await route.fulfill({ json: { result: [{ ...rows[0], tags: isOldRequest ? '过期结果' : filename === 'first.png' ? '恢复后的结果' : '第二张结果' }] } }).catch(() => {})
     if (isOldRequest) lateFinished.release()
   })
   try {
     await page.getByRole('button', { name: '批量搜索', exact: true }).click()
+    await page.getByRole('button', { name: '现网 Global', exact: true }).click()  // a batch searches the chosen target; 自建库 is the default
     await page.getByLabel('选择批量查询图片').setInputFiles([upload('first.png'), upload('second.png')])
     await page.getByRole('button', { name: '开始批量搜索', exact: true }).click()
     await expect.poll(() => filenames).toEqual(['first.png'])

@@ -1,0 +1,87 @@
+/* Upload of a configuration file (category tree, scene configuration): preview, then import. */
+.dialog.dialog-wide:has(.cx-dialog) { width: min(860px, calc(100vw - 30px)); }
+.cx-dialog { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px 18px; background: #fff; color: #223046; font-size: 14px; }
+.cx-dialog code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+
+.cx-file { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0; color: #475569; }
+.cx-file > svg { flex-shrink: 0; color: #7b8899; }
+.cx-file > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.cx-file > em { flex-shrink: 0; margin-left: auto; padding: 1px 8px; border-radius: 999px; background: #eef3fa; color: #5f7ba5; font-size: 12px; font-style: normal; }
+
+.cx-prune { display: flex; align-items: flex-start; gap: 9px; padding: 10px 12px; border: 1px solid #e1e6ee; border-radius: 9px; background: #fafbfd; cursor: pointer; }
+.cx-prune.is-on { border-color: #f0c2bc; background: #fef6f5; }
+.cx-prune input { flex-shrink: 0; width: 16px; height: 16px; margin: 2px 0 0; accent-color: #b42318; cursor: pointer; }
+.cx-prune input:disabled { cursor: default; }
+.cx-prune span { display: grid; gap: 3px; min-width: 0; }
+.cx-prune b { font-size: 13px; font-weight: 600; }
+.cx-prune small { color: #64748b; font-size: 12px; line-height: 1.6; }
+
+.cx-status { display: flex; align-items: center; gap: 7px; margin: 0; color: #64748b; font-size: 13px; }
+.cx-failure { margin: 0; }
+.cx-failure > p { overflow-wrap: anywhere; }
+
+.cx-summary { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; }
+.cx-stat { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 76px; padding: 7px 12px; border: 1px solid #e6ebf3; border-radius: 9px; background: #f8fafc; color: #64748b; font-size: 12px; }
+.cx-stat b { color: #223046; font-size: 19px; font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.cx-stat.is-create b { color: #2f7d4a; }
+.cx-stat.is-update b { color: #2c56a0; }
+.cx-stat.is-delete b { color: #b42318; }
+.cx-stat.is-error { border-color: #f0c2bc; background: #fdf3f1; }
+.cx-stat.is-error b { color: #b42318; }
+.cx-stat-total { align-self: center; margin-left: auto; color: #94a3b8; font-size: 12px; white-space: nowrap; }
+
+.cx-note { display: flex; align-items: flex-start; gap: 7px; margin: 0; color: #475569; font-size: 13px; line-height: 1.6; }
+.cx-note > svg { flex-shrink: 0; margin-top: 3px; }
+.cx-note.is-warn { color: #9a6700; }
+.cx-note.is-ok { color: #2f7d4a; }
+
+.cx-table-scroll { max-height: min(44dvh, 420px); overflow: auto; overscroll-behavior: contain; border: 1px solid #e6ebf3; border-radius: 9px; }
+.cx-table { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; }
+.cx-table thead th { position: sticky; top: 0; z-index: 1; padding: 8px 12px; background: #f6f7f8; color: #334155; font-size: 12px; font-weight: 700; white-space: nowrap; box-shadow: inset 0 -1px 0 #e6ebf3; }
+.cx-table td { padding: 8px 12px; border-bottom: 1px solid #eef1f6; vertical-align: top; }
+.cx-table tbody tr:last-child td { border-bottom: 0; }
+.cx-table tbody tr.is-error { background: #fef8f7; }
+.cx-table td:first-child { color: #64748b; white-space: nowrap; }
+.cx-object { display: flex; flex-direction: column; gap: 2px; min-width: 150px; max-width: 300px; }
+.cx-object b { font-weight: 600; overflow-wrap: anywhere; }
+.cx-object code { color: #64748b; overflow-wrap: anywhere; }
+.cx-action { display: inline-flex; align-items: center; padding: 0 8px; border-radius: 999px; font-size: 12px; line-height: 20px; white-space: nowrap; }
+.cx-action.is-create { background: #eaf5ee; color: #2f7d4a; }
+.cx-action.is-update { background: #eaf2ff; color: #2c56a0; }
+.cx-action.is-delete { background: #fdf0ee; color: #b42318; }
+.cx-action.is-error { background: #fdf0ee; color: #b42318; }
+.cx-changes { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; color: #475569; overflow-wrap: anywhere; }
+.cx-row-error { color: #b42318; overflow-wrap: anywhere; }
+.cx-row-error code { margin-left: 6px; padding: 0 5px; border-radius: 4px; background: #fbe4e1; color: #912018; }
+.cx-row-muted { color: #94a3b8; }
+
+.cx-leftovers { border: 1px solid #e6ebf3; border-radius: 9px; background: #fafbfd; font-size: 13px; }
+.cx-leftovers > summary { padding: 8px 12px; color: #475569; cursor: pointer; }
+.cx-leftovers > ul { display: flex; flex-wrap: wrap; gap: 4px 14px; max-height: 150px; margin: 0; padding: 0 12px 10px; overflow: auto; list-style: none; color: #475569; }
+.cx-leftovers > p { margin: 0; padding: 0 12px 10px; color: #94a3b8; font-size: 12px; }
+.cx-leftovers code { color: #7b8899; }
+
+.dialog-footer:has(.cx-footer) { border-top: 1px solid var(--border); background: #f8f9fc; }
+.cx-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 9px; padding: 11px 16px; }
+.cx-footer-note { margin-right: auto; color: #7b8899; font-size: 12px; }
+.cx-footer .mg-btn { height: 36px; }
+
+/* Download choices (the category tree in several forms) */
+.cx-downloads { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.cx-download { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid #e6ebf3; border-radius: 10px; background: #fff; }
+.cx-download.is-primary { border-color: #cfe0ff; background: #f6f9ff; }
+.cx-download > svg { flex-shrink: 0; color: #5f7ba5; }
+.cx-download > div { display: grid; gap: 2px; min-width: 0; margin-right: auto; }
+.cx-download b { font-size: 14px; font-weight: 600; }
+.cx-download small { color: #64748b; font-size: 12px; line-height: 1.6; }
+.cx-download .mg-btn { flex-shrink: 0; height: 34px; padding: 0 12px; font-size: 13px; }
+.cx-preview { max-height: 220px; margin: 0; padding: 10px 12px; overflow: auto; border: 1px solid #e6ebf3; border-radius: 9px; background: #f8fafc; color: #334155; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Microsoft YaHei', monospace; font-size: 12px; line-height: 1.55; white-space: pre; }
+
+@media (max-width: 580px) {
+  .cx-dialog { padding: 12px; }
+  .cx-stat { flex: 1; min-width: 60px; padding: 6px 9px; }
+  .cx-stat-total { width: 100%; margin-left: 0; }
+  .cx-download { flex-wrap: wrap; }
+  .cx-download .mg-btn { width: 100%; }
+  .cx-footer-note { width: 100%; }
+}

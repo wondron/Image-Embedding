@@ -54,6 +54,8 @@ export function buildCategoryTreeExport(
   const timestamp = exportedAt.toISOString()
   const payload = {
     schema_version: 1,
+    // What the file is: POST /api/categories/import refuses a file of another kind
+    kind: 'category_tree',
     exported_at: timestamp,
     category_count: tree.byId.size,
     root_codes: [...rootCodes],

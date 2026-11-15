@@ -15,11 +15,17 @@ npm.cmd run dev
 
 打开 `http://localhost:5173`，后端需要单独启动。开发服务默认把 `/api` 转发到 `http://127.0.0.1:8320`；配置方式见 [前端说明](frontend/README.md)。
 
-工作台支持单张图片／URL 搜索，也可一次添加最多 30 张图片逐张查询，查看各自结果、失败记录并停止、继续或重试。搜索结果支持跨页多选、ZIP 批量下载，以及在支持目录选择的浏览器中保存到指定目录；每批图片数据合计上限 200 MB，并附带来源清单。
+工作台支持单张图片／URL 搜索，也可一次添加最多 30 张图片查询：自建库每次请求最多 5 张，现网 Global、业务搜图逐张请求。可以查看各自结果、失败记录并停止、继续或重试。搜索结果支持跨页多选、ZIP 批量下载，以及在支持目录选择的浏览器中保存到指定目录；每批图片数据合计上限 200 MB，并附带来源清单。
 
 「现网 Global」的两个输入接口明确命名为 `POST /api/search/global/file`（上传图片文件）和 `POST /api/search/global/url`（图片链接），前端使用这两个地址；两者共用同一套 Global 搜图逻辑。旧 `/api/predict/searchImage_file`、`/api/predict/searchImage_url` 保留为兼容别名，不在 Swagger 中展示，参数和响应保持一致。
 
 给业务方的搜图接口是 `POST /api/search/auto/file`（上传文件）和 `POST /api/search/auto/url`（JSON 图片链接）：先查自建库，没有达到阈值的结果且 `global_fallback=true` 时用现网 Global 兜底，按 `source`（`self` / `global` / `empty`）返回同一种结果卡。参数、响应和错误见 [数据契约 §6.6](docs/image-search-pg-v01-data-contract.md)。
+
+多图搜索接口是 `POST /api/search/batch/files`（multipart，字段名 `files` 重复 1–30 次）和 `POST /api/search/batch/urls`（JSON `image_urls`）：一次请求多张查询图，逐张查自建库，整批共用 `scene`、`top_k`、`score_threshold`；`results[]` 每张图一项，某张图读不出或无法解码只影响它自己。不调用 Global。见 [数据契约 §6.7](docs/image-search-pg-v01-data-contract.md#batch-search)。
+
+类别树和场景配置可以用文件修改和备份：`GET /api/categories`、`GET /api/scenes` 的响应体（或页面上「下载类别树」「下载配置」得到的 JSON）编辑后，用 `POST /api/categories/import`、`POST /api/scenes/import` 传回。按编码 upsert，`dry_run` 默认 `true` 只返回将要发生的变更，`dry_run=false` 才写入；类别不移动、不改编码、不删除，场景可用 `prune=true` 删除文件里没列出的规则和场景类别。导入逐项提交，响应需检查 `summary.error`，中途服务故障时已提交部分保留。见 [数据契约 §6.8](docs/image-search-pg-v01-data-contract.md#config-transfer)。类别树下载还提供 TXT、SVG、PNG 和 ZIP。
+
+本轮的自动化检查、接口调用示例和页面验收步骤见[批量搜索与配置传输验收说明](docs/image-search-batch-config-acceptance.md)，已执行结果及环境限制见[验收记录](docs/image-search-batch-config-verification-2026-11-15.md)。更新后需要重启包含新路由的后端；本轮未新增数据库迁移。
 
 Global 搜索阶段直接保留上游 `image_url`，不下载或验证候选图片。开启 `GLOBAL_FILTER.switch` 后，embedding 计算时才通过 `image_utils.resolve_image_bgr(item)` 获取 `(可用 URL, BGR 图像)`，按原图、large、medium、small、其他缩略图依次尝试；全部失败返回 `(None, None)`，工具不修改输入 item。关闭过滤时由前端在加载或下载图片时回退。
 

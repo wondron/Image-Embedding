@@ -4,21 +4,20 @@ import { expect, test, type Page, type TestInfo } from '@playwright/test'
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
 const upload = (name = 'query.png') => ({ name, mimeType: 'image/png', buffer: png })
 const rows = Array.from({ length: 15 }, (_, index) => ({
-  title: `测试食材${String(index + 1).padStart(2, '0')}`,
-  image_url: `https://images.test/${index === 0 ? 'broken' : `image-${index}`}.png`,
+  tags: `测试食材${String(index + 1).padStart(2, '0')}`,
+  original_url: `https://images.test/${index === 0 ? 'broken' : `image-${index}`}.png`,
+  description: `测试来源说明 ${index + 1}`,
   similarity: index === 0 ? null : 0.4 + index * 0.035,
-  category: index % 2 === 0 ? '蔬菜' : '水果',
   details: {
     site: { Name: '测试食材来源' },
     page_url: `https://source.test/food/${index + 1}`,
-    text_snippets: [`测试来源说明 ${index + 1}`],
     images: [{ thumbnail_url: { large: `https://images.test/thumb-${index}.png` }, width: 640, height: 480 }],
   },
 }))
 const result = { result: rows, trace_id: 'e2e-controlled-fixture' }
 
 async function mockSearch(page: Page, payload: unknown = result, status = 200) {
-  await page.route('**/api/predict/**', route => route.fulfill({ status, json: payload }))
+  await page.route('**/api/search/global/**', route => route.fulfill({ status, json: payload }))
 }
 
 async function urlQuery(page: Page) {
@@ -62,7 +61,7 @@ async function expectNativeFilePicker(page: Page, selector: string) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.route('**/api/**', route => route.request().url().endsWith('/api/ping')
+  await page.route(url => url.pathname.startsWith('/api/'), route => route.request().url().endsWith('/api/ping')
     ? route.fulfill({ json: { ok: true, max_image_bytes: 15 * 1024 * 1024 } })
     : route.abort('blockedbyclient'))
   await page.route('https://images.test/**', route => route.request().url().endsWith('/broken.png')
@@ -73,6 +72,7 @@ test.beforeEach(async ({ page }) => {
       body: png,
     }))
   await page.goto('/')
+  await page.getByRole('button', { name: '现网 Global', exact: true }).click()
 })
 
 test('空页面显示真实连接状态及搜索引导', async ({ page }, info) => {
@@ -90,9 +90,9 @@ test('图片链接搜索显示结果、缺失分数与缩略图回退', async ({
   await search(page)
   const request = await requestPromise
   expect(request.method()).toBe('POST')
-  expect(request.postDataJSON()).toEqual({ img_url: 'https://images.test/query.png' })
+  expect(request.postDataJSON()).toEqual({ img_url: 'https://images.test/query.png', search_num: 20 })
   await expect(page.locator('.result-card')).toHaveCount(12)
-  await expect(page.getByText('共 15 张图片', { exact: true })).toBeVisible()
+  await expect(page.locator('.results-footer > span')).toHaveText('共 15 张图片 · 暂无类别数据')
   await expect(page.locator('.result-card').first().getByText('未返回分数')).toBeVisible()
   await expect(page.locator('.result-card').nth(1).getByText('43.5% 相似')).toBeVisible()
   const fallback = page.locator('.result-card').first().getByRole('img', { name: '测试食材01', exact: true })
@@ -110,8 +110,8 @@ test('使用图片时逐级回退到 medium，成功后不请求 small', async (
       ? route.fulfill({ status: 404, body: 'Controlled unavailable image' })
       : route.fulfill({ contentType: 'image/png', body: png })
   })
-  await mockSearch(page, { result: [{ title: '逐级回退图片', image_url: 'https://images.test/fallback-original.png',
-    thumbnail_url: { large: 'https://images.test/fallback-large.png', medium: 'https://images.test/fallback-medium.png', small: 'https://images.test/fallback-small.png' },
+  await mockSearch(page, { result: [{ tags: '逐级回退图片', original_url: 'https://images.test/fallback-original.png',
+    details: { images: [{ thumbnail_url: { large: 'https://images.test/fallback-large.png', medium: 'https://images.test/fallback-medium.png', small: 'https://images.test/fallback-small.png' } }] },
   }] })
   await search(page)
   const image = page.locator('.result-card').getByRole('img', { name: '逐级回退图片', exact: true })
@@ -125,7 +125,7 @@ test('查询文件以 multipart file 字段提交', async ({ page }) => {
   await mockSearch(page)
   await page.getByLabel('选择查询图片').setInputFiles(upload())
   await expect(page.getByRole('img', { name: '当前查询图片' })).toBeVisible()
-  const requestPromise = page.waitForRequest('**/api/search/global/file')
+  const requestPromise = page.waitForRequest('**/api/search/global/file*')
   await page.getByRole('button', { name: '开始搜索', exact: true }).click()
   const request = await requestPromise
   expect(request.headers()['content-type']).toContain('multipart/form-data; boundary=')
@@ -191,13 +191,14 @@ test('批量上传实际点击后可切预览且返回批量模式恢复结果',
   const gate = new Promise<void>(resolve => { release = resolve })
   page.on('pageerror', error => pageErrors.push(error.message))
   page.on('filechooser', () => { chooserCount += 1 })
-  await page.route('**/api/search/global/file', async route => {
+  await page.route('**/api/search/global/file*', async route => {
     const filename = /filename="([^"]+)"/.exec(route.request().postDataBuffer()?.toString() ?? '')?.[1] ?? ''
     await gate
-    await route.fulfill({ json: { result: [{ ...rows[1], title: filename }] } }).catch(() => {})
+    await route.fulfill({ json: { result: [{ ...rows[1], tags: filename }] } }).catch(() => {})
   })
   try {
     await page.getByRole('button', { name: '批量搜索', exact: true }).click()
+    await page.getByRole('button', { name: '现网 Global', exact: true }).click()  // a batch searches the chosen target; 自建库 is the default
     await expectNativeFilePicker(page, '.batch-upload-trigger')
     const chooser = page.waitForEvent('filechooser')
     await page.locator('.batch-upload-trigger').click()
@@ -210,7 +211,7 @@ test('批量上传实际点击后可切预览且返回批量模式恢复结果',
     await expect(page.getByRole('img', { name: '当前查询图片：second.png', exact: true })).toBeVisible()
     await firstPreview.click()
 
-    const request = page.waitForRequest('**/api/search/global/file')
+    const request = page.waitForRequest('**/api/search/global/file*')
     await page.getByRole('button', { name: '开始批量搜索', exact: true }).click()
     await request
     const results = page.locator('.results-panel')
@@ -241,17 +242,14 @@ test('批量上传实际点击后可切预览且返回批量模式恢复结果',
   } finally { release() }
 })
 
-test('结果支持分页、类别、关键词和相似度排序', async ({ page }) => {
+test('Global 结果支持分页、关键词和相似度排序，类别筛选不可用', async ({ page }) => {
   await mockSearch(page)
   await search(page)
   await expect(page.locator('.result-card')).toHaveCount(12)
   await page.getByRole('button', { name: '下一页', exact: true }).click()
   await expect(page.locator('.result-card')).toHaveCount(3)
   await expect(page.locator('.result-card').first()).toContainText('测试食材13')
-  await page.getByLabel('筛选类别').selectOption('蔬菜')
-  await expect(page.locator('.result-card')).toHaveCount(8)
-  await expect(page.getByText('共 15 张图片 · 筛选后 8 张', { exact: true })).toBeVisible()
-  await page.getByLabel('筛选类别').selectOption('all')
+  await expect(page.getByLabel('筛选类别')).toBeDisabled()
   await page.getByLabel('结果排序').selectOption('similarity')
   await expect(page.locator('.result-card').first()).toContainText('测试食材15')
   await page.getByLabel('搜索结果标题或来源').fill('测试食材02')
@@ -261,6 +259,38 @@ test('结果支持分页、类别、关键词和相似度排序', async ({ page 
   await expect(page.getByRole('heading', { name: '没有符合筛选条件的结果' })).toBeVisible()
   await page.getByRole('button', { name: '清除筛选' }).click()
   await expect(page.locator('.result-card')).toHaveCount(12)
+})
+
+test('自建库按接口类别筛选，并在网格和列表间保留筛选', async ({ page }) => {
+  await page.route('**/api/scenes', route => route.fulfill({ json: {
+    ok: true, default_scene: 'general', scenes: [{ id: 1, code: 'general', name: '通用', description: null,
+      include_all: true, outputs_heating: false, is_active: true, created_at: null, member_count: 15, labels: [], rules: [] }],
+  } }))
+  await page.route('**/api/search', route => route.fulfill({ json: {
+    ok: true, source: 'self', scene: 'general', outputs_heating: false,
+    items: rows.map((row, index) => ({
+      tags: row.tags, original_url: row.original_url, description: row.description, similarity: row.similarity ?? 0.4,
+      details: { id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+        category_id: index % 2 === 0 ? 1 : 2, category: index % 2 === 0 ? '蔬菜' : '水果',
+        scenes: ['general'], label_status: 'verified', images: [{ image_url: row.original_url,
+          thumbnail_url: `https://images.test/thumb-${index}.png`, width: 640, height: 480 }] },
+    })),
+  } }))
+  await page.reload()
+  await expect(page.getByRole('button', { name: '自建库', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await search(page)
+  await expect(page.getByLabel('筛选类别')).toBeEnabled()
+  await page.getByLabel('筛选类别').selectOption('蔬菜')
+  await expect(page.locator('.result-card')).toHaveCount(8)
+  await expect(page.locator('.results-footer > span')).toHaveText('共 15 张图片 · 筛选后 8 张')
+  await page.getByRole('button', { name: '列表展示结果', exact: true }).click()
+  await expect(page.locator('.result-table tbody tr')).toHaveCount(8)
+  await expect(page.getByLabel('筛选类别')).toHaveValue('蔬菜')
+  await page.getByLabel('筛选类别').selectOption('水果')
+  await expect(page.locator('.result-table tbody tr')).toHaveCount(7)
+  await page.getByRole('button', { name: '网格展示结果', exact: true }).click()
+  await expect(page.locator('.result-card')).toHaveCount(7)
+  await expect(page.getByLabel('筛选类别')).toHaveValue('水果')
 })
 
 test('查看详情并从缩略图下载失败原图的图片', async ({ page }, info) => {
@@ -300,10 +330,12 @@ test('网格与列表切换保留筛选、分页和详情入口', async ({ page 
   await gridToggle.click()
   await expect(page.locator('.result-card')).toHaveCount(3)
   await expect(page.locator('.result-card').first()).toContainText('测试食材13')
-  await page.getByLabel('筛选类别').selectOption('水果')
-  await expect(page.locator('.result-card')).toHaveCount(7)
+  await expect(page.getByLabel('筛选类别')).toBeDisabled()
+  await page.getByLabel('搜索结果标题或来源').fill('测试食材0')
+  await expect(page.locator('.result-card')).toHaveCount(9)
   await listToggle.click()
-  await expect(page.locator('.result-table tbody tr')).toHaveCount(7)
+  await expect(page.locator('.result-table tbody tr')).toHaveCount(9)
+  await expect(page.getByLabel('搜索结果标题或来源')).toHaveValue('测试食材0')
   await page.getByRole('button', { name: '查看图片详情：测试食材02', exact: true }).click()
   await expect(page.getByRole('dialog', { name: '图片详情' })).toBeVisible()
   await noHorizontalOverflow(page)
@@ -383,7 +415,7 @@ test('桌面结果区域独立滚动且工具栏分页保持在视口内', async
 
 test('矮屏详情正文独立滚动且关闭下载按钮始终可见', async ({ page }, info) => {
   await page.setViewportSize({ width: 1280, height: 600 })
-  await mockSearch(page, { result: [{ ...rows[0], details: { ...rows[0]!.details, text_snippets: Array.from({ length: 24 }, (_, index) => `详情正文说明 ${index + 1}`) } }] })
+  await mockSearch(page, { result: [{ ...rows[0], description: Array.from({ length: 24 }, (_, index) => `详情正文说明 ${index + 1}`).join('\n') }] })
   await search(page)
   await page.getByRole('button', { name: '查看图片详情：测试食材01', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '图片详情' })
@@ -411,7 +443,7 @@ test('下载被源站拒绝时提供手动保存链接', async ({ page }) => {
   await expect(page.locator('.result-card')).toHaveCount(12)
   await page.route('https://images.test/**', route => route.abort('blockedbyclient'))
   await page.getByRole('button', { name: '下载图片：测试食材01', exact: true }).click()
-  await expect(page.getByRole('alert')).toContainText('图片下载失败')
+  await expect(page.getByRole('alertdialog')).toContainText('图片下载失败')
   await expect(page.getByRole('link', { name: '打开原图', exact: true })).toHaveAttribute('href', 'https://images.test/broken.png')
 })
 
@@ -419,17 +451,17 @@ test('上游空结果和 HTTP 422 错误准确反馈', async ({ page }) => {
   await mockSearch(page, { result: { results: [], status: 'upstream_empty_response', upstream_error: { code: 500, message: 'empty' } }, trace_id: 'empty-fixture' })
   await search(page)
   await expect(page.getByRole('heading', { name: '暂未找到相关图片' })).toBeVisible()
-  await expect(page.getByText('上游搜索服务暂未返回结果，请稍后重试或更换图片。')).toBeVisible()
+  await expect(page.locator('.results-content .no-results')).toContainText('上游搜索服务暂未返回结果，请稍后重试或更换图片。')
   await expect(page.getByLabel('筛选类别')).toBeDisabled()
   await mockSearch(page, { detail: [{ loc: ['body', 'img_url'], msg: 'Invalid image URL', type: 'value_error' }] }, 422)
   await page.getByRole('button', { name: '开始搜索', exact: true }).click()
-  await expect(page.getByRole('alert')).toContainText('HTTP 422')
-  await expect(page.getByRole('alert')).toContainText('body.img_url: Invalid image URL')
+  await expect(page.getByRole('alertdialog')).toContainText('HTTP 422')
+  await expect(page.getByRole('alertdialog')).toContainText('body.img_url: Invalid image URL')
   await expect(page.locator('.result-card')).toHaveCount(0)
 })
 
 test('未提供类别时筛选禁用且不从标题推断', async ({ page }) => {
-  await mockSearch(page, { result: [{ title: '蔬菜西红柿', image_url: 'https://images.test/no-category.png', similarity: null }] })
+  await mockSearch(page, { result: [{ tags: '蔬菜西红柿', original_url: 'https://images.test/no-category.png', similarity: null }] })
   await search(page)
   await expect(page.locator('.result-card')).toHaveCount(1)
   await expect(page.getByLabel('筛选类别')).toBeDisabled()
@@ -440,7 +472,7 @@ test('未提供类别时筛选禁用且不从标题推断', async ({ page }) => 
 test('取消正在等待的请求并忽略迟到结果', async ({ page }) => {
   let release: () => void = () => {}
   const gate = new Promise<void>(resolve => { release = resolve })
-  await page.route('**/api/predict/**', async route => {
+  await page.route('**/api/search/global/**', async route => {
     await gate
     await route.fulfill({ json: result }).catch(() => {})
   })
@@ -457,13 +489,13 @@ test('取消正在等待的请求并忽略迟到结果', async ({ page }) => {
   } finally { release() }
 })
 
-test('图片导入队列支持预览移除且不提交后端', async ({ page }, info) => {
+test('图片入库队列支持预览移除，准备图片不会自动提交后端', async ({ page }, info) => {
   const writes: string[] = []
   page.on('request', request => { if (request.method() !== 'GET') writes.push(request.url()) })
   await navigate(page, '上传与导入')
-  await page.getByLabel('选择待导入图片').setInputFiles([upload('tomato.png'), upload('carrot.png')])
+  await page.getByLabel('选择待入库图片').setInputFiles([upload('tomato.png'), upload('carrot.png')])
   await expect(page.locator('.mg-upload-card')).toHaveCount(2)
-  await expect(page.getByRole('button', { name: '提交入库 · 待接入', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: '开始入库', exact: true })).toBeEnabled()
   await page.getByRole('button', { name: '预览 tomato.png', exact: true }).click()
   await expect(page.getByRole('dialog', { name: '图片预览' }).getByRole('img', { name: 'tomato.png', exact: true })).toBeVisible()
   await page.getByRole('button', { name: '关闭弹窗' }).click()
@@ -541,7 +573,7 @@ test('批量图片查询逐项提交且失败不影响后续查询与结果切�
   const filenames: string[] = []
   let releaseLast: () => void = () => {}
   const gate = new Promise<void>(resolve => { releaseLast = resolve })
-  await page.route('**/api/search/global/file', async route => {
+  await page.route('**/api/search/global/file*', async route => {
     const body = route.request().postDataBuffer()?.toString() ?? ''
     const filename = /filename="([^"]+)"/.exec(body)?.[1] ?? ''
     filenames.push(filename)
@@ -550,10 +582,11 @@ test('批量图片查询逐项提交且失败不影响后续查询与结果切�
       return
     }
     if (filename === 'last.png') await gate
-    await route.fulfill({ json: { result: [{ ...rows[1], title: filename === 'first.png' ? '第一张查询结果' : '第三张查询结果' }] } }).catch(() => {})
+    await route.fulfill({ json: { result: [{ ...rows[1], tags: filename === 'first.png' ? '第一张查询结果' : '第三张查询结果' }] } }).catch(() => {})
   })
   try {
     await page.getByRole('button', { name: '批量搜索', exact: true }).click()
+    await page.getByRole('button', { name: '现网 Global', exact: true }).click()  // a batch searches the chosen target; 自建库 is the default
     await page.getByLabel('选择批量查询图片').setInputFiles([upload('first.png'), upload('failure.png'), upload('last.png')])
     const firstPreview = page.getByRole('button', { name: '预览查询图片：first.png', exact: true })
     const lastPreview = page.getByRole('button', { name: '预览查询图片：last.png', exact: true })

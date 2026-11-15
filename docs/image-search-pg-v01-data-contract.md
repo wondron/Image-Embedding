@@ -448,6 +448,8 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | **Index** `POST /api/index` | 本地 path 入库、scenes JSON、BIGINT id | 收字节或可拉 URL → 算 sha256/uuid → 写 S3 → 写 `images` → embed → upsert **current** collection；场景经规则/`image_scenes`；**无 path**。**2026-11-11**：multipart / JSON 另可传 `label_status`（`auto`/`verified`，要有类别）、`source_type`、`license`（取值见 `/api/enums`，不传为 `user_upload` / `unknown`）；`indexed[].created` 为 `false` 表示相同图片此前已入库、沿用首次的标注 |
 | **Search** `POST /api/search` | `scene` 默认 `normal`；拒识；仅 normal 空→FlyB | `scene` 改为默认 **`general`**（A5）；按 payload `scenes` 过滤；场景标签投票；`outputs_heating` 附加字段；**`score_threshold` 沿用 MVP（A6）**；自建空 → **`source=empty`**；**FlyB 编排 OUT OF SCOPE（A4 / M0）** |
 | **业务搜图** `POST /api/search/auto/file`、`POST /api/search/auto/url`（**2026-11-13 新增**） | 无 | 给业务方的统一入口：自建库优先，自建库没有达到阈值的结果且请求 `global_fallback=true` 时用现网 Global 兜底；`top_k`（1–20）对两个通道都生效；结果卡同 §6.1.1，`source` 为 `self` / `global` / `empty`，`fallback.status` 说明兜底情况；Global 失败不让请求失败。原 `/api/search`、`/api/search/global/*` 不变。见 §6.6 |
+| **多图搜索** `POST /api/search/batch/files`、`POST /api/search/batch/urls`（**2026-11-15 新增**） | 无 | 一次请求 1–30 张查询图，逐张查自建库，整批共用 `scene`、`top_k`（1–50）、`score_threshold`；`results[]` 每张图一项（顺序同请求）：`ok=true` 时是它的结果卡（同 `POST /api/search`），`ok=false` 时是这张图的错误码和说明，不影响其他图片；共用参数不合法、或所有图片都因同一个服务故障失败时整个请求失败。不调用 Global。见 §6.7 |
+| **配置导入** `POST /api/categories/import`、`POST /api/scenes/import`（**2026-11-15 新增**） | 无 | 上传类别树 / 场景配置文件（页面下载的 JSON，或 `GET /api/categories`、`GET /api/scenes` 的响应体，可编辑、可只留要改的部分）：按编码 upsert，逐项走现有管理用例；`dry_run` 默认 `true` 只预览，`false` 才写入；类别不移动、不改编码、不删除；场景 `prune=true` 时删除文件里没列出的规则和场景类别，场景本身不删；响应是逐项报告（`summary` + `rows` + `not_in_file`）。见 §6.8 |
 | **List** `GET /api/images` | 分页、scene、title/category、仅 active | 无 soft-status：未删即在库；scene 成员过滤；返回 `original_url`/`thumb_url`、类别树字段、场景 codes；category 改 ID/code。**2026-11-11**：新增 `category_id`（正整数，这个类别及其所有下级类别，ltree 子树；未标注的图片不匹配）和 `label_status`（`unlabeled`/`auto`/`verified`，非法值 422）筛选；原 `category`（编码 / 名称 / ID，只匹配一个类别）保留 |
 | **单图** `/api/images/{image_id}`（**已落地 2026-11-11**） | 无 | `GET` 详情（全部字段 + 向量写入记录 + 当前 collection 里的向量状态 `synced`/`stale`/`missing`/`unavailable`）、`PATCH` 改类别 / 标注状态 / 描述 / 标签 / 食物标注（提交后推 payload）、`POST …/vector-sync` 重推这张图的 payload、`DELETE` 删除、`GET …/file` 读回存储里的缩略图或原图。见 §6.3。新错误码 `IMAGE_NOT_FOUND` 404 |
 | **类别** `/api/categories`（**已落地 2026-11-10**） | 无独立 API | `GET /api/categories` 返回整棵树（不分页）`{ ok, categories: CategoryItem[], heating_groups: [{id, code, name}], root_codes: string[] }`，节点按「父在子前、同级 `sort_order`、`id`」排好；`POST /api/categories`（201）新建；`PATCH /api/categories/{id}` 只改请求里给了的字段（`parent_id` 换父节点，整棵子树一起移动，并按新父级编码与当前节点最后一段递归更新所有后代编码，`null` 移到根；只改 `code` 时也递归更新后代编码；写入前统一检查大小写冲突和长度，失败整体回滚；`names` 给了就整体替换；`heating_group_id: null` 清空）；`DELETE /api/categories/{id}` 返回 `{ ok, deleted: {id, code} }`。`CategoryItem` = `{ id, code, parent_id, path, name, names: [{lang, name, kind}], cuisines, heating_group, sort_order, is_active, image_count, scene_rule_count, created_at, updated_at }`（`name` 是中文主名；`cuisines` / `heating_group` 是节点自己设的，不含沿用祖先的）。规则：`code` 匹配 `^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)*$`，保留大小写、按 `lower(code)` 全局唯一（迁移 `20261113_0010` 新增唯一表达式索引，历史冲突须手动处理），同一节点仅修改大小写允许；根节点只能用六个域的编码（ingredient / dish / dessert / beverage / mixed / other；新建、移到根、给根改编码时校验），新增或移到根层级时在目录写锁内检查根节点总数最多六个（含停用和旧根节点）；`names` 必须含中文（`zh`）主名，每种语言至多一个主名；不能移到自己或子孙下面；还有子类别、图片或场景规则引用时不能删除（场景规则不再被级联悄悄删掉）。错误码 `CATEGORY_NOT_FOUND` 404、`CATEGORY_CODE_EXISTS` 409、`CATEGORY_IN_USE` 409、`CATEGORY_POSTGRES_FAILED` 502、`VALIDATION_ERROR` 422。成功体不带 `trace_id`（在响应头 `X-Trace-Id`）。字段和上限见 `backend/app/schemas/categories.py`、`backend/app/core/category_rules.py`。加热组只随列表只读返回，管理仍 **TBD**。**2026-11-11 起**移动类别（`parent_id` 变化）或改菜系（集合有变化）时，同一事务里重算标在该节点及其子孙上的图片的 `image_scenes`，有效场景集合变化的图片 `payload_version` +1；提交后检索栈可用时把这些图片的 payload 推到当前 collection（一次请求至多 2000 张，分批），结果在 `PATCH` 成功体的 `scene_sync`：`{ images, changed, pushed, pending, vector_sync: pushed\|partial\|not_ready\|failed, sync_required }`，其余修改为 `null`；推送失败不影响 200，没推上的由后台对账补上（§2.11 同步规则下的「后台对账」） |
@@ -1024,6 +1026,223 @@ curl -X POST "http://<host>:8320/api/search/auto/file" \
 ```
 
 
+<a id="batch-search"></a>
+
+## 6.7 多图搜索：一次请求多张查询图，自建库（2026-11-15 · 本地实现）
+
+自动化验证命令及真实环境验收步骤见[本轮验收说明](image-search-batch-config-acceptance.md)，已执行结果见[验收记录](image-search-batch-config-verification-2026-11-15.md)。
+
+一次请求带多张查询图，逐张在自建库里检索，整批共用一个检测场景、`top_k` 和相似度阈值。不调用现网 Global。原有 `POST /api/search`（单张）不变；每张图的结果和单张接口一样。
+
+代码：路由 `backend/app/api/v1/batch_search.py`，编排 `backend/app/api/services/batch_search.py`，wire `backend/app/schemas/batch_search.py`；检索用例 `SearchImageUseCase` 新增 `check`（先校验整批共用的参数），每张图仍走 `execute`。
+
+### 6.7.1 请求
+
+| 接口 | 请求体 |
+|---|---|
+| `POST /api/search/batch/files` | `multipart/form-data`：字段名 `files` 重复 1–30 次（每张最大 15 MB），加下表其余字段（表单字段） |
+| `POST /api/search/batch/urls` | `application/json`：`image_urls`（1–30 个 http(s) 地址）加下表其余字段；**未知字段返回 422** |
+
+| 参数 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `files` / `image_urls` | 文件（可重复）/ `string[]` | 必填 | 查询图片，1–30 张。数量超限：`files` 返回 `VALIDATION_ERROR` 422（由服务检查），`image_urls` 返回 422（请求体校验） |
+| `scene` | `string` | `general` | 检测场景 code，整批共用；未知或停用返回 `SEARCH_UNKNOWN_SCENE` 422（整个请求失败，不读任何图片） |
+| `top_k` | `integer` | `10` | 每张查询图最多返回多少条，1–50（同 `POST /api/search`） |
+| `score_threshold` | `number` | 0.55 | 整批共用，规则同 `POST /api/search`（§3.2.1）：`0` 不设阈值，其余 0.30–1，超出返回 `SEARCH_BAD_SCORE_THRESHOLD` 422 |
+| `trace_id` | `string` | 服务端生成 | 整批共用一个，规则同 §6.6.1 |
+
+### 6.7.2 流程
+
+1. 先校验整批共用的参数（`top_k`、场景、阈值）；不合法时整个请求按统一错误格式返回，不读任何图片。
+2. 按请求里的顺序逐张处理：读取上传（或下载链接）→ 自建库检索。一次只在内存里放一张图。
+3. 某一张图读不出、下载失败或无法解码，只影响它自己：`results[i].ok=false` 并给出 `error`、`detail`，其余照常，请求仍返回 200。
+4. 整个请求失败的情况：检索服务未就绪（`NOT_READY` 503）、第 1 步的参数错误、图片数量超限，以及**所有图片都因为同一个服务故障而失败**（`SEARCH_QDRANT_FAILED` / `SEARCH_POSTGRES_FAILED` 502、`VECTOR_DIM_MISMATCH` / `EMBEDDING_MODEL_MISMATCH` 503 等）——这时直接返回该错误，而不是在每一项里重复一遍。
+
+### 6.7.3 响应（`BatchSearchResponse`）
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `ok` | `boolean` | 请求完成为 `true`（个别图片失败也是 `true`） |
+| `trace_id` | `string` | 同响应头 `X-Trace-Id` |
+| `scene` | `string` | 实际使用的场景 code |
+| `outputs_heating` | `boolean` | 结果是否带加热信息，按场景配置 |
+| `top_k` / `score_threshold` | `integer` / `number` | 实际使用的值；`score_threshold` 为 `0` 表示没有设阈值 |
+| `total` / `succeeded` / `matched` / `failed` | `integer` | 查询图片数 / 检索完成的（`ok=true`，含没有结果的）/ 其中有结果的 / 没能检索的 |
+| `results` | `array` | 每张查询图一项，顺序同请求 |
+
+`results[]`（`BatchSearchResult`；只出现它那种情况的字段）：
+
+| 字段 | 出现 | 说明 |
+|---|---|---|
+| `index` | 总是 | 这张图在请求里的序号，从 0 开始 |
+| `input` | 总是 | 上传时是文件名，链接时是图片地址 |
+| `ok` | 总是 | `true` 检索完成；`false` 这张图没能检索 |
+| `elapsed_ms` | 总是 | 这张图读取（或下载）加检索的耗时，毫秒 |
+| `source` | `ok=true` | `self` 有结果；`empty` 没有达到阈值的结果 |
+| `items` | `ok=true` | 结果卡，同 `POST /api/search` 的 `items`（§6.1.1），`empty` 时为 `[]` |
+| `message` | `ok=true` 且没有结果 | 给人看的说明 |
+| `error` / `detail` | `ok=false` | 错误码和说明，如 `SEARCH_BAD_IMAGE`、`EMPTY_FILE`、`FILE_TOO_LARGE`、`INVALID_URL`、`FORBIDDEN_HOST`、`DOWNLOAD_FAILED`、`DOWNLOAD_TIMEOUT` |
+
+### 6.7.4 示例
+
+```shell
+curl -X POST "http://<host>:8320/api/search/batch/files" \
+  -F "files=@a.jpg" -F "files=@b.jpg" -F "files=@not-an-image.txt" \
+  -F "scene=oven" -F "top_k=5"
+```
+
+```json
+{"ok": true, "trace_id": "9d1f…", "scene": "oven", "outputs_heating": true, "top_k": 5, "score_threshold": 0.55,
+ "total": 3, "succeeded": 2, "matched": 1, "failed": 1,
+ "results": [
+   {"index": 0, "input": "a.jpg", "ok": true, "source": "self", "items": [{"tags": "带骨", "description": "煎牛排", "original_url": "https://…", "similarity": 0.83, "details": {"id": "0cf457e2-…", "category": "牛排", "…": "…"}}], "elapsed_ms": 182.4},
+   {"index": 1, "input": "b.jpg", "ok": true, "source": "empty", "items": [], "message": "no local matches for scene=oven", "elapsed_ms": 95.1},
+   {"index": 2, "input": "not-an-image.txt", "ok": false, "error": "SEARCH_BAD_IMAGE", "detail": "embed failed: …", "elapsed_ms": 3.2}
+ ]}
+```
+
+```http
+POST /api/search/batch/urls
+Content-Type: application/json
+
+{"image_urls": ["https://example.com/a.jpg", "https://example.com/b.jpg"], "scene": "general", "top_k": 10}
+```
+
+### 6.7.5 前端
+
+「图搜图 → 批量搜索」对队列里的每张图使用所选的搜索目标：**自建库**走本接口（每次请求最多 5 张，队列最多 30 张，每组响应后更新逐图进度）；现网 Global、业务搜图仍然逐张请求原接口。「停止」立即取消前端对当前请求的等待，把进行中的图片标为已停止；服务端已开始的检索可能继续。继续或重试时会重新请求这些未完成的图片。改了目标、场景或阈值后，已有结果保留；「全部重新搜索」按当前设置把队列重跑一遍。
+
+---
+
+<a id="config-transfer"></a>
+
+## 6.8 配置的下载与上传：类别树、场景配置（2026-11-15 · 本地实现）
+
+自动化验证命令及真实环境验收步骤见[本轮验收说明](image-search-batch-config-acceptance.md)，已执行结果见[验收记录](image-search-batch-config-verification-2026-11-15.md)。
+
+用文件修改配置、做备份：把类别树或场景配置下载成 JSON，编辑后再上传；或把备份导入另一套库。
+
+代码：导入用例 `backend/app/services/retrieval/import_categories.py`、`import_scenes.py`（报告 `import_report.py`），HTTP 适配 `backend/app/api/services/categories.py`、`scenes.py`，wire `backend/app/schemas/config_import.py`。导入不走新的写库路径：逐项调用现有的类别 / 场景管理用例（`ManageCategoriesUseCase`、`ManageScenesUseCase`），所以校验、事务、目录写锁都和页面上逐条操作一样。
+
+### 6.8.1 下载（文件格式）
+
+下载由前端从 `GET /api/categories`、`GET /api/scenes` 的数据生成，没有新的下载接口；直接保存这两个 GET 的响应体也是合法的导入文件。
+
+**类别树**（「食材管理 → 下载类别树」，`category-tree-<时间>.json`）：
+
+```json
+{"schema_version": 1, "kind": "category_tree", "exported_at": "2026-11-15T08:00:00.000Z", "category_count": 603,
+ "root_codes": ["ingredient", "dish", "dessert", "beverage", "mixed", "other"],
+ "heating_groups": [{"id": 2, "code": "grill", "name": "烤"}],
+ "categories": [
+   {"id": 1, "parent_id": null, "code": "ingredient", "path": "1", "name": "食材",
+    "names": [{"lang": "zh", "name": "食材", "kind": "primary"}], "cuisines": [], "heating_group": null,
+    "sort_order": 0, "is_active": true, "image_count": 0, "scene_rule_count": 0, "created_at": "…", "updated_at": "…",
+    "children": [{"id": 12, "parent_id": 1, "code": "ingredient.meat", "…": "…", "children": []}]}
+ ]}
+```
+
+同一个对话框还提供给人看的拓扑图（不能导入）：文字版 `category-topology-<时间>.txt`（树形线条，一行一个类别）、图像版 `.svg`（矢量）和 `.png`（位图；类别特别多、超出浏览器画布上限时只有 SVG），以及把四个文件加说明打成一个 ZIP。
+
+**场景配置**（「场景管理 → 下载配置」，`scene-config-<时间>.json`）：
+
+```json
+{"schema_version": 1, "kind": "scene_config", "exported_at": "…", "default_scene": "general", "scene_count": 2,
+ "scenes": [
+   {"id": 2, "code": "oven", "name": "一体机", "description": null, "include_all": false, "outputs_heating": true, "is_active": true,
+    "created_at": "…", "member_count": 1280,
+    "labels": [{"id": 5, "code": "steak", "name": "牛排", "sort_order": 0, "is_active": true, "rule_count": 1}],
+    "rules": [{"id": 9, "category": {"id": 137, "code": "ingredient.meat.beef", "name": "牛肉"}, "cuisine": null, "label": {"id": 5, "code": "steak", "name": "牛排"}},
+              {"id": 10, "category": null, "cuisine": "chinese", "label": null}]}
+ ]}
+```
+
+`schema_version` 和 `kind` 可以没有（GET 的响应体就没有）；有的话 `schema_version` 必须是 `1`，`kind` 必须和接口对应，否则返回 `VALIDATION_ERROR` 422。
+
+### 6.8.2 上传接口
+
+| 接口 | 查询参数 | 请求体 |
+|---|---|---|
+| `POST /api/categories/import` | `dry_run`（默认 `true`） | `application/json`：类别树文件的内容（JSON 对象） |
+| `POST /api/scenes/import` | `dry_run`（默认 `true`）、`prune`（默认 `false`） | `application/json`：场景配置文件的内容（JSON 对象） |
+
+- `dry_run=true`（默认）：什么都不写，返回将要发生的变更；`dry_run=false` 才写入。页面上是「先预览、确认后导入」两步。
+- 逐项写入，每一项是它自己的一个事务：某一项失败只影响它自己（和依赖它的子项），其余照常；**不是整体原子**。重新导入同一份文件是幂等的，会从没做完的地方接着做。写入中途数据库出错时整个请求返回该错误（502），已经写入的保留。
+- 不用文件里的 `id` 匹配数据库记录，一律按编码匹配，所以备份可以导入另一套库（两边 id 不同）。类别平铺文件的 `id` / `parent_id` 只用于还原文件内部的父子关系；`path`、计数、时间等导出信息不参与写入。
+- 类别最多 5000 个节点，最大深度 32（根节点深度为 0）；超过数量或嵌套深度上限时整个请求返回 `VALIDATION_ERROR` 422。通过平铺父级引用形成的过深链或循环，作为相关节点的错误报告。
+- 场景最多 200 个，超过时整个请求返回 `VALIDATION_ERROR` 422。每个场景的 `labels`、`rules` 各最多 5000 项；子列表类型错误或超限时，在报告中记该列表的错误，该列表不导入也不 prune，其余可处理的内容照常。
+- 预览根据当时的目录状态计算，不预留编码或锁定后续写入；确认导入时重新校验，因此并发修改、引用或服务状态变化可能使实际报告和预览不同。
+
+**类别树的规则**（按编码匹配，不分大小写）：
+
+| 文件里的节点 | 行为 |
+|---|---|
+| 编码在库里没有 | 新建在它所嵌套的节点下；字段取文件里的，缺省同 `POST /api/categories`（只给了 `name` 时作为中文主名） |
+| 编码在库里已有 | 只比较文件里**给了**的字段：`names`（整体替换）、`cuisines`、`heating_group`（按加热组的 `code`）、`sort_order`、`is_active`，不同才更新；没给的字段不动 |
+| 库里有、文件没列出 | 不动，在 `not_in_file` 里列出 |
+| 已有类别在文件里换了父节点 | 这一项报错、保持原位（移动会重写整棵子树的编码，请在页面上操作）；它下面的节点照常处理 |
+
+父节点的认定顺序：嵌套在谁的 `children` 里 → 自己的 `parent_code`（`null` 为根）→ `parent_id` 指向本文件里某个节点的 `id`（`GET /api/categories` 的平铺列表就是这种）→ 都没有则为根。嵌套位置与非空字符串 `parent_code` 矛盾，或 `parent_id` 指向文件中不存在的节点时，该节点报错。只保留部分平铺节点时，应保留它们的上级节点，或改用 `parent_code`。不移动、不改编码、不删除类别。改了菜系时同 `PATCH`：其下已入库图片的场景归属在同一事务里重算，全部节点处理完后一次性把有变化的图片推到向量库，结果在 `scene_sync`。
+
+**场景配置的规则**：
+
+| 对象 | 匹配 | 行为 |
+|---|---|---|
+| 场景 | `code` | 没有则新建；已有则把文件里给了且不同的 `name`、`description`、`include_all`、`outputs_heating`、`is_active` 更新（默认场景的保护规则同 `PATCH`，违反时这一项报 `SCENE_PROTECTED`） |
+| 场景类别 | 场景内的 `code` | 没有则新建；已有则更新 `name`、`sort_order`、`is_active` |
+| 规则 | 场景内的目标：`category.code`（不分大小写）或 `cuisine` | 没有则新建；已有则只能改映射的场景类别（`label` 给 `null` 清空，不带 `label` 键则不动） |
+
+规则里的类别必须已经在类别树里（先导入类别树），`label` 必须是本场景的场景类别（文件里的或库里已有的）；`category`、`label` 可以写成 `{"code": "…"}` 或直接写编码字符串。只有类别规则能映射 `label`，菜系规则携带非空 `label` 时该规则报错。文件里没带的 `labels` / `rules` 列表不动。`prune=true` 时，对文件列出的场景，删除文件里没列出的规则（该场景带 `rules` 列表时）和场景类别（带 `labels` 列表时；仍被规则引用的报 `SCENE_IN_USE`）。**场景本身从不删除**，文件没列出的场景在 `not_in_file` 里列出。一个场景内的顺序：场景 → 场景类别 → 规则 →（prune）删规则 → 删场景类别。
+
+### 6.8.3 响应（两个接口同形）
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `ok` | `boolean` | 请求完成为 `true`（有的条目没导入也是 `true`，看 `summary.error` 和 `rows`） |
+| `dry_run` | `boolean` | `true`：只是预览 |
+| `summary` | `object` | `total`（本次遍历到的文件条目数：类别节点；或场景 + 场景类别 + 规则）、`create`、`update`、`delete`、`unchanged`（和库里一致，不出现在 `rows` 里）、`error`、`not_in_file` |
+| `rows` | `array` | 有变更或有问题的条目，最多 1000 行（有问题的优先保留）；超出时 `rows_truncated=true`，`summary` 仍是完整计数 |
+| `rows_truncated` | `boolean` | `rows` 是否因 1000 行上限截断，默认 `false` |
+| `not_in_file` | `array` | 库里有、文件没列出的类别（或场景）`{id, code, name}`，最多 200 个 |
+| `scene_sync` | `object \| null` | 仅类别：写入时改了菜系才有，字段同 `PATCH /api/categories/{id}` 的 `scene_sync` |
+| `prune` / `sync_required` | `boolean` | 仅场景：本次的 `prune`；`sync_required=true` 表示要 `POST /api/scenes/sync` 后才作用到已入库图片（预览时是写入后会得到的值） |
+
+`summary.total` 不含 prune 删除的库内对象；场景本身校验失败时，其下未遍历的 `labels` / `rules` 也不计入。无效子列表可独立产生错误行，因此不要用各 action 的计数之和推算 `total`。
+
+`rows[]`：`kind`（`category` / `scene` / `label` / `rule`）、`key`（类别编码；场景编码；`场景/场景类别编码`；`场景/category:类别编码` 或 `场景/cuisine:菜系`）、`action`（`create` / `update` / `delete` / `error`）、`name`、`scene`、`where`（在文件里的位置，如 `categories[0].children[2]`）、`changes`（`[{field, before, after}]`，值是给人看的字符串）、`error` + `detail`（`action=error` 时的错误码和说明，如 `VALIDATION_ERROR`、`CATEGORY_CODE_EXISTS`、`SCENE_PROTECTED`、`SCENE_IN_USE`）。
+
+### 6.8.4 示例
+
+```shell
+# 备份
+curl "http://<host>:8320/api/categories" -o categories.json
+curl "http://<host>:8320/api/scenes" -o scenes.json
+# 预览（默认 dry_run=true），确认后写入
+curl -X POST "http://<host>:8320/api/categories/import" -H "Content-Type: application/json" --data-binary @categories.json
+curl -X POST "http://<host>:8320/api/categories/import?dry_run=false" -H "Content-Type: application/json" --data-binary @categories.json
+curl -X POST "http://<host>:8320/api/scenes/import?dry_run=false&prune=false" -H "Content-Type: application/json" --data-binary @scenes.json
+```
+
+只改几个节点时，文件可以只留它们（已有节点的上级只需要 `code`）：
+
+```json
+{"categories": [{"code": "ingredient", "children": [{"code": "ingredient.meat", "children": [
+  {"code": "ingredient.meat.beef", "sort_order": 5, "is_active": false},
+  {"code": "ingredient.meat.venison", "name": "鹿肉"}]}]}]}
+```
+
+```json
+{"ok": true, "dry_run": true,
+ "summary": {"total": 4, "create": 1, "update": 1, "delete": 0, "unchanged": 2, "error": 0, "not_in_file": 599},
+ "rows": [
+   {"kind": "category", "key": "ingredient.meat.beef", "action": "update", "name": "牛肉", "scene": null, "where": "categories[0].children[0].children[0]",
+    "changes": [{"field": "sort_order", "before": "0", "after": "5"}, {"field": "is_active", "before": "true", "after": "false"}], "error": null, "detail": null},
+   {"kind": "category", "key": "ingredient.meat.venison", "action": "create", "name": "鹿肉", "scene": null, "where": "categories[0].children[0].children[1]",
+    "changes": [{"field": "names", "before": null, "after": "鹿肉[zh]"}, {"field": "parent", "before": null, "after": "ingredient.meat"}], "error": null, "detail": null}],
+ "rows_truncated": false, "not_in_file": [{"id": 3, "code": "dish", "name": "菜品"}], "scene_sync": null}
+```
+
+
 ## 7. 明确不作本刀范围（含 M0 OUT OF SCOPE）
 
 | 项 | 归属 |
@@ -1074,6 +1293,7 @@ curl -X POST "http://<host>:8320/api/search/auto/file" \
 
 | 日期 | 说明 |
 |---|---|
+| 2026-11-15 | **多图搜索 §6.7、配置的下载与上传 §6.8（本地实现，已做自动化与真实环境联调）**：新增 `POST /api/search/batch/files`、`/urls`（一次请求 1–30 张查询图查自建库，逐张给结果或错误；`SearchImageUseCase.check` 先校验整批共用的场景 / `top_k` / 阈值）；新增 `POST /api/categories/import`、`POST /api/scenes/import`（按编码 upsert，`dry_run` 默认 `true`，逐项报告；类别不移动 / 不改编码 / 不删除，场景可 `prune` 规则和场景类别）。前端：批量搜索按所选目标搜索（自建库走多图搜索接口，默认目标为自建库）；「食材管理」下载类别树改为对话框（JSON 数据文件 + 文字 / SVG / PNG 拓扑图 + ZIP）并新增「上传类别树」；「场景管理」新增「下载配置」「上传配置」；类别树导出文件新增 `kind: "category_tree"`。同时调整搜索结果卡和图库卡片布局；严格校验显式文件元数据，修复同图分数浮点微超 1 的显示。测试对象已清理，URL fake-IP 配置条件与 Global 上游超时详见[验收记录](image-search-batch-config-verification-2026-11-15.md) |
 | 2026-11-11 | **可选 OSS 对象键前缀 `key_prefix` 本地实现（America/Denver）**：按共享规格落地 `IMAGE_STORAGE_CONFIG.key_prefix`；空则键与现网一致，非空规范化后前缀于相对键。启动期非法值 `ValueError`。S3 与 mock 共用 `storage_keys`。已落盘 URL/对象不迁移；读删/reembed 走存库 URL。不改 FE、不加签名 URL、不改业务 DB、不迁移。`config.yaml` 仅补注释式示例，未把本地调试配置改为生产 OSS。实现核对单测不是验收；独立测试按共享规格 §8。未 commit。 |
 | 2026-11-11 | **可选 OSS 对象键前缀 `key_prefix`（America/Denver）**：§5 / A8 增补实施规范（待开发）：`IMAGE_STORAGE_CONFIG` 顶层可选字符串；空则键不变，非空规范化后前缀于 original/thumb/staging（如 `ImageEmbedding/original/{id}.jpg`）。`public_base_url` 仍为桶/CDN URL 根，不与 `key_prefix` 重复书写。已落盘 URL 与对象不迁移；读写删走存库 URL。不改 FE、不加签名 URL、不改运行配置。细字见共享规格，本刀只改文档、未测试、未 commit。 |
 | 2026-11-11 | **入库结果历史最小契约 §6.4（America/Denver）**：按本轮 HEAD 54547ad 及未提交任务链核现有 GET /api/index-tasks 的 wire/分页/全历史 counts/列表内明细；明确逐文件同步终态、best-effort 缺行、当前图片投影及本地上传队列边界。FE 只读历史/刷新/分页/明细待接线，无新增 BE API，不纳清记录/删除清理/异步 job/重试。0008 及并行源码存在不证明已合并/迁移/验收。本刀只改文档、未测试、未 commit。 |

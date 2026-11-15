@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { CheckCircle2, ChevronLeft, ChevronRight, Circle, Clock3, Images, LoaderCircle, Play, RotateCcw, Square, Trash2, UploadCloud, X, XCircle } from 'lucide-react'
-import { searchGlobalImages, type SearchResponse } from '../entities/search-result'
+import { CheckCircle2, ChevronLeft, ChevronRight, Circle, Clock3, Images, LoaderCircle, Play, RefreshCw, RotateCcw, Square, Trash2, UploadCloud, X, XCircle } from 'lucide-react'
+import { searchAutoImages, searchGlobalImages, searchLocalBatch, type SearchResponse } from '../entities/search-result'
 import { maxBatchImages, selectBatchFiles } from '../lib/batch-search'
 import { ImageFilePicker } from './ImageFilePicker'
 import { notify } from '../shared/ui'
@@ -15,6 +15,8 @@ interface SearchJob {
   response?: SearchResponse
   elapsed?: number
   error?: string
+  /** Where the shown result (or failure) came from. */
+  via?: BatchSearchRequest['target']
 }
 
 export interface BatchSearchResult {
@@ -24,22 +26,77 @@ export interface BatchSearchResult {
   elapsed: number
 }
 
+/**
+ * Where a run searches, and with what (read when the run starts, so every image of a run gets the same):
+ * - local: 自建库 through 多图搜索 (POST /api/search/batch/files), LOCAL_BATCH_SIZE images per request;
+ * - global: 现网 Global, one request per image;
+ * - auto: 业务搜图 (自建库优先, Global 兜底), one request per image.
+ */
+export type BatchSearchRequest =
+  | { target: 'local'; scene: string; /** null = the server default; 0 = no threshold. */ scoreThreshold: number | null }
+  | { target: 'global'; /** omitted = the server default. */ searchNum?: number }
+  | { target: 'auto'; scene: string; scoreThreshold: number | null; topK: number; globalFallback: boolean }
+
 interface BatchSearchPanelProps {
   baseUrl: string
-  /** 现网 Global result count for every query of a run (read when the run starts); omitted = server default. */
-  searchNum?: number
+  request: BatchSearchRequest
+  /** A reason a run cannot start now (e.g. the scene catalog is not loaded); shown when one is tried. */
+  blocked?: string | null
   active?: boolean
   onResult: (payload: BatchSearchResult) => void
   onClearResult?: () => void
   onRunningChange?: (running: boolean) => void
 }
 
+/** 自建库: query images sent per request — progress and 「停止」 work between requests. */
+const LOCAL_BATCH_SIZE = 5
+const REQUEST_TIMEOUT_MS = 120_000
+
 const statusText: Record<JobStatus, string> = {
   pending: '等待搜索', running: '正在搜索', success: '搜索完成', error: '搜索失败', cancelled: '已停止，可继续',
 }
+const targetText: Record<BatchSearchRequest['target'], string> = { local: '自建库', global: '现网 Global', auto: '业务搜图' }
+
+type JobOutcome = { response: SearchResponse; elapsed: number } | { error: string; elapsed: number }
+
+/** Search one group of jobs (one request): the outcome of each, by job id. A failed request throws. */
+async function searchGroup(group: readonly SearchJob[], request: BatchSearchRequest, baseUrl: string, signal: AbortSignal): Promise<Map<string, JobOutcome>> {
+  const started = performance.now()
+  const seconds = () => (performance.now() - started) / 1000
+  const outcomes = new Map<string, JobOutcome>()
+  if (request.target === 'local') {
+    const batch = await searchLocalBatch({
+      files: group.map(job => job.file), baseUrl, signal, scene: request.scene, scoreThreshold: request.scoreThreshold,
+    })
+    const share = seconds() / group.length
+    group.forEach((job, index) => {
+      const outcome = batch.outcomes.find(entry => entry.index === index)
+      const elapsed = outcome?.elapsed ?? share
+      outcomes.set(job.id, outcome?.response
+        ? { response: outcome.response, elapsed }
+        : { error: outcome?.error ?? '服务端没有返回这张图片的结果，请重试。', elapsed })
+    })
+    return outcomes
+  }
+  const job = group[0]
+  const response = request.target === 'global'
+    ? await searchGlobalImages({ file: job.file, baseUrl, signal, searchNum: request.searchNum })
+    : await searchAutoImages({
+      file: job.file, baseUrl, signal, scene: request.scene, scoreThreshold: request.scoreThreshold,
+      topK: request.topK, globalFallback: request.globalFallback,
+    })
+  outcomes.set(job.id, { response, elapsed: seconds() })
+  return outcomes
+}
+
+function grouped(jobs: readonly SearchJob[], size: number): SearchJob[][] {
+  const groups: SearchJob[][] = []
+  for (let start = 0; start < jobs.length; start += size) groups.push(jobs.slice(start, start + size))
+  return groups
+}
 
 /** Keep mounted (hide its wrapper) when switching query modes to preserve queued and cached results. */
-export function BatchSearchPanel({ baseUrl, searchNum, active: isActive = true, onResult, onClearResult, onRunningChange }: BatchSearchPanelProps) {
+export function BatchSearchPanel({ baseUrl, request, blocked = null, active: isActive = true, onResult, onClearResult, onRunningChange }: BatchSearchPanelProps) {
   const [jobs, setJobs] = useState<SearchJob[]>([])
   const [running, setRunning] = useState(false)
   const [dragging, setDragging] = useState(false)
@@ -51,16 +108,18 @@ export function BatchSearchPanel({ baseUrl, searchNum, active: isActive = true, 
   const jobsRef = useRef<SearchJob[]>([])
   const mounted = useRef(true)
   const runId = useRef(0)
-  const active = useRef<{ controller: AbortController; jobId: string; timer: number } | null>(null)
+  const active = useRef<{ controller: AbortController; timer: number } | null>(null)
   const isRunning = useRef(false)
   const nextId = useRef(0)
   const baseRef = useRef(baseUrl)
-  const searchNumRef = useRef(searchNum)
+  const requestRef = useRef(request)
+  const blockedRef = useRef(blocked)
   const previousBase = useRef(baseUrl)
   const callbacks = useRef({ onResult, onClearResult, onRunningChange })
   activeMode.current = isActive
   baseRef.current = baseUrl
-  searchNumRef.current = searchNum
+  requestRef.current = request
+  blockedRef.current = blocked
   callbacks.current = { onResult, onClearResult, onRunningChange }
 
   const commit = useCallback((next: SearchJob[]) => {
@@ -190,9 +249,13 @@ export function BatchSearchPanel({ baseUrl, searchNum, active: isActive = true, 
       ? job.status === 'error' || job.status === 'cancelled'
       : job.status === 'pending' || job.status === 'cancelled')
     if (!targets.length) return
+    if (blockedRef.current) {
+      notify.warn(blockedRef.current, { title: '暂时不能搜索' })
+      return
+    }
     const token = ++runId.current
     const requestBase = baseRef.current
-    const requestSearchNum = searchNumRef.current
+    const runRequest = requestRef.current
     let autoShown = false
     isRunning.current = true
     setRunning(true)
@@ -202,38 +265,50 @@ export function BatchSearchPanel({ baseUrl, searchNum, active: isActive = true, 
       callbacks.current.onRunningChange?.(true)
       const selected = jobsRef.current.find(job => job.id === selectedIdRef.current)
       if (selected?.response && selected.elapsed !== undefined) publishJob(selected)
-      for (const target of targets) {
+      for (const group of grouped(targets, runRequest.target === 'local' ? LOCAL_BATCH_SIZE : 1)) {
         if (!currentRun()) break
+        const ids = new Set(group.map(job => job.id))
         const controller = new AbortController()
-        const timer = window.setTimeout(() => controller.abort('timeout'), 120_000)
-        active.current = { controller, jobId: target.id, timer }
-        commit(jobsRef.current.map(job => job.id === target.id ? { ...job, status: 'running', error: undefined } : job))
+        const timer = window.setTimeout(() => controller.abort('timeout'), REQUEST_TIMEOUT_MS)
+        active.current = { controller, timer }
+        commit(jobsRef.current.map(job => ids.has(job.id) ? { ...job, status: 'running', error: undefined } : job))
         const started = performance.now()
-        let completed: SearchJob | null = null
+        const completed: SearchJob[] = []
         try {
-          const response = await searchGlobalImages({ file: target.file, baseUrl: requestBase, signal: controller.signal, searchNum: requestSearchNum })
+          const outcomes = await searchGroup(group, runRequest, requestBase, controller.signal)
           if (!currentRun()) break
           if (controller.signal.aborted) throw new Error('搜索超时')
-          completed = { ...target, status: 'success', response, elapsed: (performance.now() - started) / 1000, error: undefined }
-          commit(jobsRef.current.map(job => job.id === target.id ? completed! : job))
+          commit(jobsRef.current.map((job): SearchJob => {
+            const outcome = outcomes.get(job.id)
+            if (!outcome) return job
+            if ('response' in outcome) {
+              const done: SearchJob = { ...job, status: 'success', response: outcome.response, elapsed: outcome.elapsed, error: undefined, via: runRequest.target }
+              completed.push(done)
+              return done
+            }
+            return { ...job, status: 'error', error: outcome.error, elapsed: outcome.elapsed, response: undefined, via: runRequest.target }
+          }))
         } catch (cause) {
           if (!currentRun()) break
           const error = controller.signal.aborted && controller.signal.reason === 'timeout'
-            ? '搜索超过 120 秒，请稍后重试。'
+            ? `搜索超过 ${REQUEST_TIMEOUT_MS / 1000} 秒，请稍后重试。`
             : cause instanceof Error ? cause.message : '搜索失败，请重试。'
-          commit(jobsRef.current.map(job => job.id === target.id
-            ? { ...job, status: 'error', error, elapsed: (performance.now() - started) / 1000 }
+          const elapsed = (performance.now() - started) / 1000
+          commit(jobsRef.current.map(job => ids.has(job.id)
+            ? { ...job, status: 'error', error, elapsed, via: runRequest.target }
             : job))
         } finally {
           window.clearTimeout(timer)
           if (active.current?.controller === controller) active.current = null
         }
         // Callback exceptions must not turn a completed API query into a failed job.
-        if (completed && currentRun()) {
-          if (selectedIdRef.current === completed.id || (!autoShown && !selectedByUser.current)) {
-            autoShown = true
-            const manual = selectedByUser.current
-            selectJob(completed, manual)
+        if (currentRun()) {
+          for (const done of completed) {
+            if (selectedIdRef.current === done.id || (!autoShown && !selectedByUser.current)) {
+              autoShown = true
+              const manual = selectedByUser.current
+              selectJob(done, manual)
+            }
           }
         }
       }
@@ -244,6 +319,19 @@ export function BatchSearchPanel({ baseUrl, searchNum, active: isActive = true, 
         callbacks.current.onRunningChange?.(false)
       }
     }
+  }
+
+  /** Search every image again with what is set now (another target, scene or threshold). */
+  function restart() {
+    if (isRunning.current || !jobsRef.current.length) return
+    if (blockedRef.current) {
+      notify.warn(blockedRef.current, { title: '暂时不能搜索' })
+      return
+    }
+    commit(jobsRef.current.map(({ id, file, preview }) => ({ id, file, preview, status: 'pending' as const })))
+    displayedResult.current = null
+    callbacks.current.onClearResult?.()
+    void start()
   }
 
   const done = jobs.filter(job => job.status === 'success' || job.status === 'error').length
@@ -277,6 +365,7 @@ export function BatchSearchPanel({ baseUrl, searchNum, active: isActive = true, 
           ? <button type="button" className="btn btn-secondary" onClick={stop}><Square size={15} />停止批量搜索</button>
           : <button type="button" className="btn btn-primary" disabled={!resumable} onClick={() => void start()}><Play size={15} />{hasStarted && resumable ? '继续搜索' : '开始批量搜索'}</button>}
         {!running && retryable && <button type="button" className="btn btn-secondary" onClick={() => void start(true)}><RotateCcw size={15} />重试未完成</button>}
+        {!running && done > 0 && <button type="button" className="btn btn-secondary" title={`按当前设置（${targetText[request.target]}）把队列里的图片全部重新搜索一遍`} onClick={restart}><RefreshCw size={15} />全部重新搜索</button>}
       </div>
     </div>
     {selectedJob && <figure className="batch-selected-preview">
@@ -300,7 +389,7 @@ export function BatchSearchPanel({ baseUrl, searchNum, active: isActive = true, 
         </button>
         <div className="batch-job-info"><b title={job.file.name}>{index + 1}. {job.file.name}</b>
           <span className="batch-job-status">{job.status === 'running' ? <LoaderCircle size={13} className="spin" /> : job.status === 'success' ? <CheckCircle2 size={13} /> : job.status === 'error' ? <XCircle size={13} /> : job.status === 'cancelled' ? <Clock3 size={13} /> : <Circle size={12} />}{statusText[job.status]}</span>
-          {job.response && <span className="batch-job-meta">{job.response.items.length} 个结果 · {job.elapsed?.toFixed(1)} 秒</span>}
+          {job.response && <span className="batch-job-meta">{job.via ? `${targetText[job.via]} · ` : ''}{job.response.items.length} 个结果 · {job.elapsed?.toFixed(1)} 秒</span>}
           {job.error && <p className="batch-job-error">{job.error}</p>}
           {job.response?.message && <p className="batch-job-message">{job.response.message}</p>}
           {job.response && <button type="button" className="text-button batch-view-result" aria-label={`查看结果：${job.file.name}`} aria-pressed={selectedId === job.id} onClick={() => showResult(job)}>{selectedId === job.id ? '正在查看' : '查看结果'}</button>}

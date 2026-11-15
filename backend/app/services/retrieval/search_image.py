@@ -8,6 +8,10 @@ score_threshold: omit→0.55; 0 disables; else {0}∪[0.30,1].
 §6.1 (2026-11-12): items envelope; each hit is the result card shared with FlyB results
 (tags / description / original_url / similarity), every other field in details;
 scene_label string|null; outputs_heating on envelope.
+
+A request with several query images (POST /api/search/batch/*) first checks what they share
+(check: top_k, the scene, the threshold), so a bad one fails the request before any image is read,
+then calls execute image by image.
 """
 
 from __future__ import annotations
@@ -137,18 +141,8 @@ class SearchImageUseCase:
         try:
             if not image_bytes:
                 raise err.validation_error("file or img_url is required")
-            if not (1 <= int(top_k) <= 50):
-                raise err.validation_error("top_k must be in 1..50")
-
-            # The scene first: an unknown or inactive one is refused before any embedding work.
-            scene_meta = lookup_scene(
-                self._metadata,
-                requested_scene_code(scene),
-                unknown=err.search_unknown_scene,
-                failed=err.search_postgres_failed,
-            )
+            scene_meta, effective_t = self._resolve(scene, top_k, score_threshold)
             active_scene = str(scene_meta["code"])
-            effective_t = resolve_score_threshold(score_threshold)
             native_thr = qdrant_score_threshold(effective_t)
             timer.mark(step)
 
@@ -227,6 +221,42 @@ class SearchImageUseCase:
             message = f"自建库耗时：{timer.summary()}"
             logger.log(level, message)
             show_text(message, trace_id=trace_id, logger_level=level)
+
+    def check(
+        self,
+        *,
+        scene: str | None = None,
+        top_k: int = 10,
+        score_threshold: float | None = None,
+    ) -> dict[str, Any]:
+        """What the query images of one request share, checked without touching an image:
+        {scene: the code searched, outputs_heating, score_threshold: the effective one, 0 = off}.
+
+        Raises what execute would for them: VALIDATION_ERROR (top_k), SEARCH_UNKNOWN_SCENE,
+        SEARCH_POSTGRES_FAILED, SEARCH_BAD_SCORE_THRESHOLD.
+        """
+        scene_meta, effective_t = self._resolve(scene, top_k, score_threshold)
+        return {
+            "scene": str(scene_meta["code"]),
+            "outputs_heating": _outputs_heating(scene_meta),
+            "score_threshold": effective_t,
+        }
+
+    def _resolve(
+        self, scene: str | None, top_k: int, score_threshold: float | None
+    ) -> tuple[dict[str, Any], float]:
+        """(the active scene's row, the effective threshold); top_k is checked first."""
+        if not (1 <= int(top_k) <= 50):
+            raise err.validation_error("top_k must be in 1..50")
+
+        # The scene first: an unknown or inactive one is refused before any embedding work.
+        scene_meta = lookup_scene(
+            self._metadata,
+            requested_scene_code(scene),
+            unknown=err.search_unknown_scene,
+            failed=err.search_postgres_failed,
+        )
+        return scene_meta, resolve_score_threshold(score_threshold)
 
     def _scene_labels(
         self, scene_meta: dict[str, Any], rows: Any

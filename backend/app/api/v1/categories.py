@@ -1,10 +1,11 @@
-"""Category tree admin routes: read the whole tree, create / patch / delete one node."""
+"""Category tree admin routes: read the whole tree, create / patch / delete one node, and import
+a tree file (upsert by code)."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Path, Request
+from fastapi import APIRouter, Body, Path, Query, Request
 
 from app.api.services import categories as categories_service
 from app.bootstrap.state import get_application_state
@@ -17,6 +18,7 @@ from app.schemas.categories import (
     CategoryUpdateResponse,
 )
 from app.schemas.common import ErrorResponse
+from app.schemas.config_import import DRY_RUN_DOC, CategoryImportResponse
 
 router = APIRouter(prefix="/api/categories", tags=["categories"])
 
@@ -51,6 +53,30 @@ def list_categories(request: Request) -> Any:
 )
 def create_category(request: Request, body: CategoryCreateRequest) -> Any:
     return categories_service.create_category(get_application_state(request), request, body)
+
+
+@router.post(
+    "/import",
+    response_model=CategoryImportResponse,
+    summary="Import a category tree file",
+    description=(
+        "上传类别树文件做批量修改或恢复备份。请求体就是文件内容（JSON 对象）：「食材管理」页下载的类别树"
+        "（categories 按 children 嵌套），或 GET /api/categories 的响应体（categories 是带 id / parent_id 的平铺列表），"
+        "可以手工编辑，也可以只保留要改的节点。按编码（不分大小写）匹配：库里没有的编码新建在它所嵌套的节点下；"
+        "库里已有的，文件里给了的字段（names、cuisines、heating_group、sort_order、is_active）和库里不同就更新，"
+        "没给的字段不动；库里有而文件没列出的类别不动，在 not_in_file 里列出。不移动、不改编码、不删除："
+        "已有类别在文件里换了父节点时这一项报错并保持原位。文件里的 id、path、计数和时间不读取，"
+        "所以同一份文件可以导入另一套库。dry_run 默认 true，只返回将要发生的变更；dry_run=false 才写入。"
+        "逐个节点写入（各自一个事务，父节点在前），某一项失败不影响其他项，重新导入同一份文件会接着做完。"
+        "改了菜系时，其下已入库图片的场景归属随即重算并同步到向量库（scene_sync）。详见契约 §6.8。"
+    ),
+)
+def import_categories(
+    request: Request,
+    document: dict[str, Any] = Body(..., description="类别树文件的内容"),
+    dry_run: bool = Query(True, description=DRY_RUN_DOC),
+) -> Any:
+    return categories_service.import_categories(get_application_state(request), request, document, dry_run=dry_run)
 
 
 @router.patch(

@@ -107,9 +107,13 @@ export function LibraryResults({ items, layout, loading, categoryPath, sceneName
       </div>
     </div>
   }
+  // A card reads top down: the image (with what needs attention on it), what it is (its category
+  // and how far its labelling got), what was written about it, then where it shows up and its tags.
   return <div className={`mg-library-grid lib-grid is-${layout}${loading ? ' is-loading' : ''}`} aria-busy={loading}>
     {items.map(item => {
       const title = libraryTitle(item)
+      const described = item.description.trim().length > 0
+      const footed = layout === 'large' && (item.scenes.length > 0 || item.tags.length > 0)
       return <article className={`mg-upload-card mg-library-card${selected.has(item.id) ? ' is-selected' : ''}`} key={item.id}>
         <SelectBox item={item} title={title} selected={selected.has(item.id)} onToggle={onToggle} className="lib-card-check" />
         <button type="button" className="mg-upload-preview" onClick={() => onOpen(item)} aria-label={`标注 ${title}`}>
@@ -120,15 +124,17 @@ export function LibraryResults({ items, layout, loading, categoryPath, sceneName
           />
           <span>查看与标注</span>
         </button>
-        <div>
-          <strong title={item.description || item.id}>{title}</strong>
-          <small>
+        <span className="lib-card-flags"><VectorFlag status={item.vectorStatus} /></span>
+        <div className="lib-card-body">
+          <div className="lib-card-head">
             <CategoryChip item={item} {...chip} />
             {item.labelStatus && item.labelStatus !== 'unlabeled' && <span className={`mg-label-status is-${item.labelStatus}`}>{LABEL_STATUS_TEXT[item.labelStatus]}</span>}
-            <VectorFlag status={item.vectorStatus} />
-            {layout === 'large' && item.scenes.map(code => <span className="mg-library-scene" key={code}>{sceneName(code)}</span>)}
-          </small>
-          {layout === 'large' && item.tags.length > 0 && <small className="mg-library-tags"><TagChips tags={item.tags} limit={4} activeTag={activeTag} onTag={onTag} /></small>}
+          </div>
+          <strong className={`lib-card-title${described ? '' : ' is-id'}`} title={item.description || item.id}>{title}</strong>
+          {footed && <div className="lib-card-foot">
+            {item.scenes.length > 0 && <span className="lib-card-scenes">{item.scenes.map(code => <span className="mg-library-scene" key={code}>{sceneName(code)}</span>)}</span>}
+            {item.tags.length > 0 && <span className="mg-library-tags"><TagChips tags={item.tags} limit={4} activeTag={activeTag} onTag={onTag} /></span>}
+          </div>}
         </div>
       </article>
     })}
