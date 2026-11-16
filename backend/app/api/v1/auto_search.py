@@ -12,7 +12,7 @@ from app.api.uploads import read_upload
 from app.bootstrap.state import get_application_state
 from app.clients.image_fetch import read_url_bytes
 from app.core.middleware import bind_trace_id
-from app.core.observability.log_helper import show_text
+from app.core.observability.log_helper import log_timing
 from app.schemas.auto_search import (
     GLOBAL_FALLBACK_DOC,
     MACHINE_INFO_DOC,
@@ -47,17 +47,14 @@ def _log_search_timing(
     input_type: str,
     params: dict[str, Any],
     trace_id: str,
-    step: str,
     completed: bool,
 ) -> None:
-    if not completed:
-        timer.mark(step)
-    summary = timer.summary().replace("|| total ", ", 总耗时 ")
-    params_text = ", ".join(f"{key}={value}" for key, value in params.items())
-    message = f"业务搜图({input_type}), 耗时 {summary}, 参数={params_text} "
-    level = logging.INFO if completed else logging.WARNING
-    logger.log(level, message)
-    show_text(message, trace_id=trace_id, logger_level=level)
+    # 没传的参数（None）不输出
+    params_text = ", ".join(f"{key}={value}" for key, value in params.items() if value is not None)
+    log_timing(
+        logger, f"业务搜图({input_type})", timer,
+        trace_id=trace_id, failed=not completed, extra=f"参数={params_text}",
+    )
 
 
 @router.post(
@@ -85,18 +82,13 @@ async def auto_search_by_file(
         "top_k": top_k,
         "score_threshold": score_threshold,
         "global_fallback": global_fallback,
-        "trace_id": trace_id,
         "machine_info": machine_info,
     }
     timer = timer_tool()
-    step = "图像获取"
     completed = False
     try:
         require_retrieval(runtime)  # NOT_READY before reading the upload
         image_bytes = await read_upload(file, runtime.max_image_bytes)
-        timer.mark(step)
-
-        step = "结果获取"
         result = await run_auto_search(
             runtime,
             image_bytes=image_bytes,
@@ -107,15 +99,12 @@ async def auto_search_by_file(
             machine_info=machine_info,
             trace_id=trace_id,
             input_label=f"file:{file.filename or 'upload'}",
+            timer=timer,
         )
-        timer.mark(step)
         completed = True
         return result
     finally:
-        _log_search_timing(
-            timer, input_type="上传文件", params=params, trace_id=trace_id,
-            step=step, completed=completed,
-        )
+        _log_search_timing(timer, input_type="上传文件", params=params, trace_id=trace_id, completed=completed)
 
 
 @router.post(
@@ -129,20 +118,17 @@ async def auto_search_by_url(request: Request, body: AutoSearchUrlRequest) -> An
     """application/json：{image_url, scene, top_k, score_threshold, global_fallback, trace_id, machine_info}。"""
     runtime = get_application_state(request)
     trace_id = bind_trace_id(request, body.trace_id)
-    params = {**body.model_dump(mode="json"), "trace_id": trace_id}
+    params = body.model_dump(mode="json", exclude={"trace_id"})
     timer = timer_tool()
-    step = "图像获取"
     completed = False
     try:
         require_retrieval(runtime)  # NOT_READY before downloading anything
-        image_bytes = await read_url_bytes(
-            body.image_url,
-            max_image_bytes=runtime.max_image_bytes,
-            timeout_s=runtime.http_timeout,
-        )
-        timer.mark(step)
-
-        step = "结果获取"
+        with timer.step("图像下载"):
+            image_bytes = await read_url_bytes(
+                body.image_url,
+                max_image_bytes=runtime.max_image_bytes,
+                timeout_s=runtime.http_timeout,
+            )
         result = await run_auto_search(
             runtime,
             image_bytes=image_bytes,
@@ -153,12 +139,9 @@ async def auto_search_by_url(request: Request, body: AutoSearchUrlRequest) -> An
             machine_info=body.machine_info,
             trace_id=trace_id,
             input_label=f"url:{body.image_url}",
+            timer=timer,
         )
-        timer.mark(step)
         completed = True
         return result
     finally:
-        _log_search_timing(
-            timer, input_type="图片链接", params=params, trace_id=trace_id,
-            step=step, completed=completed,
-        )
+        _log_search_timing(timer, input_type="图片链接", params=params, trace_id=trace_id, completed=completed)

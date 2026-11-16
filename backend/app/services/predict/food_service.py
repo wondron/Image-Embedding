@@ -8,7 +8,6 @@ Pipeline stages live under domain.pipeline (predict island).
 import logging, cv2
 import numpy as np
 import app.utils.timer as timerUtils
-from app.core.observability.log_helper import show_text
 from app.services.predict.pipeline.b_getGlobalData import GetGlobalData
 from app.services.predict.pipeline.c_embedding import GlobalFilter
 import uuid
@@ -37,29 +36,26 @@ class FoodService:
         self.embeddingTool = embedding
 
 
-    def detect(self, image_data: bytes, search_num: int = None, machine_info: str = "", trace_id: str = "", save_result: bool = False):
-        timer_tools = timerUtils.timer_tool()
-        
+    def detect(self, image_data: bytes, search_num: int = None, machine_info: str = "", trace_id: str = "", save_result: bool = False, timer: timerUtils.timer_tool = None):
+        """timer：接口的计时器，这里记录 global搜索 / 后处理 两步，耗时由接口入口统一输出。"""
+        timer = timer or timerUtils.timer_tool()
+
         img_bgr = None
         if isinstance(image_data, bytes):
             buf = np.frombuffer(image_data, dtype=np.uint8)
             img_bgr = cv2.imdecode(buf, cv2.IMREAD_COLOR)
 
-        res = self.searchTool.detect(image_data, search_num)
-        timer_tools.mark('global_search')
+        with timer.step("global搜索"):
+            res = self.searchTool.detect(image_data, search_num)
 
-        documents = res['results'] if isinstance(res, dict) else res
-        filtered = self.searchFilter.detect(img_bgr, documents)
-        if isinstance(res, dict):
-            res['results'] = filtered
-            res['result_count'] = len(filtered)
-        else:
-            res = filtered
-        timer_tools.mark('clip_dtct')
-
-        timer_summary = "联网搜索：" + timer_tools.summary()
-        logger.info(timer_summary)
-        show_text(timer_summary, trace_id)
+        with timer.step("后处理"):
+            documents = res['results'] if isinstance(res, dict) else res
+            filtered = self.searchFilter.detect(img_bgr, documents)
+            if isinstance(res, dict):
+                res['results'] = filtered
+                res['result_count'] = len(filtered)
+            else:
+                res = filtered
         return res
     
 

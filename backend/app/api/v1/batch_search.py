@@ -96,6 +96,7 @@ async def batch_search_by_urls(request: Request, body: BatchSearchUrlsRequest) -
             read=partial(
                 read_url_bytes, url, max_image_bytes=runtime.max_image_bytes, timeout_s=runtime.http_timeout
             ),
+            download=True,
         )
         for url in body.image_urls
     ]

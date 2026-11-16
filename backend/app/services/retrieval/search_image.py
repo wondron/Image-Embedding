@@ -18,10 +18,9 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from app.core import errors as err
-from app.core.observability.log_helper import show_text
 from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.embedding_validate import validate_embedding
 from app.core.rules.food_fields import FOOD_FIELDS
@@ -131,22 +130,22 @@ class SearchImageUseCase:
         top_k: int = 10,
         score_threshold: float | None = None,
         trace_id: str | None = None,
+        timer: timer_tool | None = None,
     ) -> dict[str, Any]:
-        """Search by query image bytes (the HTTP layer downloads img_url inputs)."""
-        timer = timer_tool()
-        trace_id = trace_id or str(uuid4())
-        step = "前处理"
-        completed = False
-        active_scene = scene
-        try:
-            if not image_bytes:
-                raise err.validation_error("file or img_url is required")
-            scene_meta, effective_t = self._resolve(scene, top_k, score_threshold)
-            active_scene = str(scene_meta["code"])
-            native_thr = qdrant_score_threshold(effective_t)
-            timer.mark(step)
+        """Search by query image bytes (the HTTP layer downloads img_url inputs).
 
-            step = "embedding"
+        timer: the calling interface's timer. The steps embedding推理 / vector搜索 / 后处理 are
+        recorded on it; the interface writes the request's timing line (it logs with trace_id,
+        nothing here does).
+        """
+        timer = timer or timer_tool()
+        if not image_bytes:
+            raise err.validation_error("file or img_url is required")
+        scene_meta, effective_t = self._resolve(scene, top_k, score_threshold)
+        active_scene = str(scene_meta["code"])
+        native_thr = qdrant_score_threshold(effective_t)
+
+        with timer.step("embedding推理"):
             try:
                 vector = self._embedding.embed_bytes(image_bytes)
             except err.AppError:
@@ -154,18 +153,16 @@ class SearchImageUseCase:
             except Exception as exc:
                 raise err.search_bad_image(f"embed failed: {exc}") from exc
             vector = validate_embedding(vector, for_search=True, expected_dim=self._model.dim)
-            timer.mark(step)
 
-            step = "vector搜索"
+        with timer.step("vector搜索"):
             raw_hits = self._vectors.search(
                 vector,
                 top_k=int(top_k),
                 score_threshold=native_thr,
                 scene=active_scene,
             )
-            timer.mark(step)
 
-            step = "后处理"
+        with timer.step("后处理"):
             if effective_t > 0.0:
                 raw_hits = [h for h in raw_hits if float(h.get("score") or 0) >= effective_t]
 
@@ -211,16 +208,7 @@ class SearchImageUseCase:
                     "items": [],
                     "message": f"no local matches for scene={active_scene}",
                 }
-            timer.mark(step)
-            completed = True
-            return body
-        finally:
-            if not completed:
-                timer.mark(f"{step}_failed")
-            level = logging.INFO if completed else logging.WARNING
-            message = f"自建库耗时：{timer.summary()}"
-            logger.log(level, message)
-            show_text(message, trace_id=trace_id, logger_level=level)
+        return body
 
     def check(
         self,

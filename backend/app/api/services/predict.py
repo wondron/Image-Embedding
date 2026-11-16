@@ -18,7 +18,7 @@ from app.bootstrap.state import ApplicationState
 from app.clients.image_fetch import read_url_bytes
 from app.core import errors
 from app.core.errors import AppError
-from app.core.observability.log_helper import show_text
+from app.core.observability.log_helper import log_timing, show_text
 from app.utils.timer import timer_tool
 
 logger = logging.getLogger("svc.predict")
@@ -33,8 +33,13 @@ async def run_predict(
     save_res: bool,
     *,
     search_num: int | None = None,
+    timer: timer_tool | None = None,
 ) -> dict[str, Any]:
-    """Call FoodService.detect with shared logging and upstream error handling."""
+    """Call FoodService.detect with shared logging and upstream error handling.
+
+    timer: the calling interface's timer; FoodService records global搜索 / 后处理 on it and the
+    interface writes the timing line (run_file_predict / run_url_predict, or the business search).
+    """
     svc = require_food_service(runtime)
     if not img_bytes:
         raise errors.empty_file("Image bytes is empty.")
@@ -47,6 +52,7 @@ async def run_predict(
             machine_info=machine_info,
             trace_id=trace_id,
             save_result=save_res,
+            timer=timer,
         )
         return {"result": result, "trace_id": trace_id}
     except AppError as app_err:
@@ -80,6 +86,36 @@ async def run_predict(
         raise AppError("PREDICT_FAILED", f"图像检索失败：{exc}", http_status=500) from exc
 
 
+async def run_file_predict(
+    runtime: ApplicationState,
+    *,
+    img_bytes: bytes,
+    source: str,
+    machine_info: str | None,
+    trace_id: str,
+    save_res: bool,
+    search_num: int | None = None,
+) -> dict[str, Any]:
+    """Run the search for an uploaded input and write the request's timing line."""
+    timer = timer_tool()
+    completed = False
+    try:
+        result = await run_predict(
+            runtime=runtime,
+            img_bytes=img_bytes,
+            search_num=search_num,
+            source=source,
+            machine_info=machine_info,
+            trace_id=trace_id,
+            save_res=save_res,
+            timer=timer,
+        )
+        completed = True
+        return result
+    finally:
+        log_timing(logger, "Global搜图(上传文件)", timer, trace_id=trace_id, failed=not completed)
+
+
 async def run_url_predict(
     runtime: ApplicationState,
     *,
@@ -94,24 +130,25 @@ async def run_url_predict(
     timer = timer_tool()
     source = f"use url |{img_url}"
     show_text(source, trace_id=trace_id)
-    img_bytes = await read_url_bytes(
-        img_url,
-        max_image_bytes=runtime.max_image_bytes,
-        timeout_s=runtime.http_timeout,
-    )
-    timer.mark("read_url")
-
-    result = await run_predict(
-        runtime=runtime,
-        img_bytes=img_bytes,
-        search_num=search_num,
-        source=source,
-        machine_info=machine_info,
-        trace_id=trace_id,
-        save_res=save_res,
-    )
-    timer.mark("predict")
-    message = f"image search URL completed | time={timer.summary()}"
-    logger.info(message)
-    show_text(message, trace_id=trace_id)
-    return result
+    completed = False
+    try:
+        with timer.step("图像下载"):
+            img_bytes = await read_url_bytes(
+                img_url,
+                max_image_bytes=runtime.max_image_bytes,
+                timeout_s=runtime.http_timeout,
+            )
+        result = await run_predict(
+            runtime=runtime,
+            img_bytes=img_bytes,
+            search_num=search_num,
+            source=source,
+            machine_info=machine_info,
+            trace_id=trace_id,
+            save_res=save_res,
+            timer=timer,
+        )
+        completed = True
+        return result
+    finally:
+        log_timing(logger, "Global搜图(图片链接)", timer, trace_id=trace_id, failed=not completed)

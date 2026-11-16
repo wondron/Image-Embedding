@@ -30,8 +30,9 @@ from starlette.concurrency import run_in_threadpool
 from app.api.deps import require_retrieval
 from app.bootstrap.state import ApplicationState
 from app.core import errors as err
-from app.core.observability.log_helper import show_text
+from app.core.observability.log_helper import log_timing
 from app.schemas.batch_search import BATCH_MAX_IMAGES
+from app.utils.timer import timer_tool
 
 logger = logging.getLogger("svc.batch_search")
 
@@ -45,6 +46,7 @@ class QueryImage:
 
     label: str
     read: Callable[[], Awaitable[bytes]]
+    download: bool = False  # read() downloads a URL: timed as 图像下载 (reading an upload is not)
 
 
 def _elapsed_ms(started: float) -> float:
@@ -75,8 +77,11 @@ async def run_batch_search(
     input_type: str,
 ) -> dict[str, Any]:
     """The response body ({ok, trace_id, scene, outputs_heating, top_k, score_threshold, total,
-    succeeded, matched, failed, results}). input_type names the route in the log (files / urls)."""
-    started = time.perf_counter()
+    succeeded, matched, failed, results}). input_type names the route in the log (files / urls).
+
+    One timer for the request: each image adds its steps to it, so the timing line gives every
+    step's total over the batch."""
+    timer = timer_tool()
     stack = require_retrieval(runtime)
     if not images:
         raise err.validation_error("at least one query image is required")
@@ -94,7 +99,11 @@ async def run_batch_search(
         image_started = time.perf_counter()
         entry: dict[str, Any] = {"index": index, "input": image.label}
         try:
-            image_bytes = await image.read()
+            if image.download:
+                with timer.step("图像下载"):
+                    image_bytes = await image.read()
+            else:
+                image_bytes = await image.read()
             found = await run_in_threadpool(
                 stack.search_uc.execute,
                 image_bytes=image_bytes,
@@ -102,6 +111,7 @@ async def run_batch_search(
                 top_k=top_k,
                 score_threshold=score_threshold,
                 trace_id=trace_id,
+                timer=timer,
             )
         except err.AppError as exc:
             failure = exc
@@ -127,14 +137,15 @@ async def run_batch_search(
 
     succeeded = sum(1 for entry in results if entry["ok"])
     matched = sum(1 for entry in results if entry["ok"] and entry["items"])
-    message = (
-        f"批量搜图({input_type}), 总耗时 {_elapsed_ms(started)}ms, 参数=scene={shared['scene']}, top_k={top_k}, "
-        f"score_threshold={shared['score_threshold']}, images={len(results)}, succeeded={succeeded}, "
-        f"matched={matched}, failed={len(results) - succeeded}"
+    log_timing(
+        logger, f"批量搜图({input_type})", timer,
+        trace_id=trace_id,
+        level=logging.WARNING if failures else logging.INFO,
+        extra=(
+            f"参数=scene={shared['scene']}, top_k={top_k}, score_threshold={shared['score_threshold']}, "
+            f"images={len(results)}, succeeded={succeeded}, matched={matched}, failed={len(results) - succeeded}"
+        ),
     )
-    level = logging.WARNING if failures else logging.INFO
-    logger.log(level, "%s | trace_id=%s", message, trace_id)
-    show_text(message, trace_id=trace_id, logger_level=level)
     return {
         "ok": True,
         "trace_id": trace_id,

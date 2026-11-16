@@ -1,5 +1,6 @@
 import random, os, time
 import uuid
+from contextlib import contextmanager
 from typing import Any, Dict, List, Sequence, Set, Iterator
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff"}
@@ -97,35 +98,59 @@ def get_all_image_paths(
 
 
 class timer_tool:
+    """
+    接口计时工具：记录各步骤耗时，summary() 给出一行摘要
+    一次接口调用共用一个实例：入口创建后逐层往下传，各层只记录步骤，由入口统一输出
+    """
+
     def __init__(self) -> None:
         """
         初始化计时器工具
-        设置计时起点和上一个标记点，并初始化一个空列表用于存储时间标记
+        设置计时起点和上一个记录点，并初始化一个空字典用于存储各步骤耗时
         """
-        self._start = time.perf_counter()  # 整个周期的起点
-        self._last = self._start           # 上一个 mark 的时间点
-        self._buf: List[str] = []          # 用于存储时间标记的列表
+        self._start = time.perf_counter()   # 整个周期的起点
+        self._last = self._start            # 上一个记录点（mark 或 step 结束）
+        self._steps: Dict[str, float] = {}  # 步骤名 -> 累计耗时（秒）
+
+    def _add(self, tag: str, cost: float) -> None:
+        # 同名步骤累加（如批量搜图里每张图的同一步），并排到最后：按最近一次出现的顺序输出
+        self._steps[tag] = self._steps.pop(tag, 0.0) + cost
 
     def mark(self, tag: str) -> None:
         """
         添加一个时间标记点
-        计算与上一个标记点的时间差，并将标记信息添加到缓冲区
-        :param tag: 标记点的名称
+        把上一个记录点到现在的耗时记到该步骤上
+        :param tag: 步骤名称
         """
         now = time.perf_counter()
-        self._buf.append(f"{tag} {(now - self._last):.3f}s   ")  # 添加标记信息，包含名称和耗时
-        self._last = now                                        # 更新上一个标记点为当前时间
+        self._add(tag, now - self._last)
+        self._last = now
+
+    @contextmanager
+    def step(self, tag: str) -> Iterator[None]:
+        """
+        只统计 with 代码块内的耗时，记到该步骤上（块外的时间只算进总耗时）
+        代码块抛出异常时记为「{tag}失败」，异常照常抛出
+        :param tag: 步骤名称
+        """
+        start = time.perf_counter()
+        failed = True
+        try:
+            yield
+            failed = False
+        finally:
+            self._last = time.perf_counter()
+            self._add(f"{tag}失败" if failed else tag, self._last - start)
 
     def summary(self) -> str:
-
         """
         生成计时摘要
-        计算总耗时并返回所有标记点信息
-        :return: 包含所有标记点和总耗时的字符串
+        :return: 各步骤耗时和总耗时，如「图像下载 0.120s | embedding推理 0.045s | 总耗时 0.180s」
         """
         total = time.perf_counter() - self._start  # 计算总耗时
-        return "".join(self._buf) + f"|| total {total:.3f}s"
-    
+        steps = [f"{tag} {cost:.3f}s" for tag, cost in list(self._steps.items())]
+        return " | ".join([*steps, f"总耗时 {total:.3f}s"])
+
 
 def show_text(trace_id: str, message: str, image_name:str="", time_spend: str = ""):
     show_dict = {}

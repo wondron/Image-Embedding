@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 from uuid import UUID
 
 from fastapi import FastAPI
@@ -44,7 +44,7 @@ class PredictEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json(), {"ok": True, "result": [], "trace_id": "query-trace"})
         self.assertEqual(self.requests, ["https://query.example/a.png"])
-        self.service.detect.assert_called_once_with(b"query-image", search_num=7, machine_info="", trace_id="query-trace", save_result=False)
+        self.service.detect.assert_called_once_with(b"query-image", search_num=7, machine_info="", trace_id="query-trace", save_result=False, timer=ANY)
 
     def test_url_body_defaults_and_generated_trace_id_are_preserved(self):
         response = self.client.post("/api/search/global/url", json={"img_url": "//images.example/a.png"})
@@ -52,7 +52,7 @@ class PredictEndpointTests(unittest.TestCase):
         trace_id = response.json()["trace_id"]
         self.assertEqual(str(UUID(trace_id)), trace_id)
         self.assertEqual(self.requests, ["https://images.example/a.png"])
-        self.service.detect.assert_called_once_with(b"query-image", search_num=None, machine_info=None, trace_id=trace_id, save_result=False)
+        self.service.detect.assert_called_once_with(b"query-image", search_num=None, machine_info=None, trace_id=trace_id, save_result=False, timer=ANY)
 
     def test_url_body_fills_fields_not_provided_in_query(self):
         response = self.client.post(
@@ -61,7 +61,7 @@ class PredictEndpointTests(unittest.TestCase):
             json={"search_num": 5, "machine_info": "body-machine", "trace_id": "body-trace", "save_res": True},
         )
         self.assertEqual(response.status_code, 200, response.text)
-        self.service.detect.assert_called_once_with(b"query-image", search_num=5, machine_info="body-machine", trace_id="body-trace", save_result=True)
+        self.service.detect.assert_called_once_with(b"query-image", search_num=5, machine_info="body-machine", trace_id="body-trace", save_result=True, timer=ANY)
 
     def test_file_query_search_num_reaches_the_model(self):
         response = self.client.post(
@@ -72,7 +72,7 @@ class PredictEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json(), {"ok": True, "result": [], "trace_id": "file-trace"})
         self.service.detect.assert_called_once_with(
-            b"query-image", search_num=7, machine_info="oven", trace_id="file-trace", save_result=True
+            b"query-image", search_num=7, machine_info="oven", trace_id="file-trace", save_result=True, timer=ANY
         )
         self.assertEqual(self.requests, [])
 
@@ -84,7 +84,7 @@ class PredictEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(self.requests, ["https://images.example/a.png"])
         self.service.detect.assert_called_once_with(
-            b"query-image", search_num=7, machine_info=None, trace_id="url-trace", save_result=False
+            b"query-image", search_num=7, machine_info=None, trace_id="url-trace", save_result=False, timer=ANY
         )
 
     def test_invalid_or_missing_url_never_downloads_or_invokes_model(self):
@@ -119,7 +119,7 @@ class PredictEndpointTests(unittest.TestCase):
                 self.assertEqual((body["ok"], body["result"]), (True, result))
                 self.assertEqual(str(UUID(body["trace_id"])), body["trace_id"])
                 self.service.detect.assert_called_once_with(
-                    b"query-image", search_num=None, machine_info=None, trace_id=body["trace_id"], save_result=False
+                    b"query-image", search_num=None, machine_info=None, trace_id=body["trace_id"], save_result=False, timer=ANY
                 )
 
     def test_file_input_errors_and_unavailable_service_keep_http_statuses(self):
@@ -159,7 +159,7 @@ class PredictEndpointTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200, response.text)
                 self.assertEqual(response.json(), {"ok": True, "result": [], "trace_id": "file-alias"})
                 self.service.detect.assert_called_once_with(
-                    b"query-image", search_num=7, machine_info=None, trace_id="file-alias", save_result=False
+                    b"query-image", search_num=7, machine_info=None, trace_id="file-alias", save_result=False, timer=ANY
                 )
         self.assertEqual(self.requests, [])
 
@@ -176,5 +176,5 @@ class PredictEndpointTests(unittest.TestCase):
                 self.assertEqual(response.json(), {"ok": True, "result": [], "trace_id": "url-alias"})
                 self.assertEqual(self.requests, ["https://images.example/a.png"])
                 self.service.detect.assert_called_once_with(
-                    b"query-image", search_num=5, machine_info=None, trace_id="url-alias", save_result=False
+                    b"query-image", search_num=5, machine_info=None, trace_id="url-alias", save_result=False, timer=ANY
                 )

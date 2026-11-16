@@ -1,7 +1,5 @@
 import base64, requests, logging, io, json
 from PIL import Image
-import logging, time
-import app.utils.timer as timerUtils
 from app.core.observability.log_helper import show_text
 from app.utils.image import iter_image_urls
 
@@ -36,7 +34,6 @@ class FlyBSearch:
         if image_data is None:
             return None
         try:
-            start_time = time.time()
             image = Image.open(io.BytesIO(image_data))
             image = image.convert('RGB')
             buffered = io.BytesIO()
@@ -44,8 +41,6 @@ class FlyBSearch:
             encode_image = base64.b64encode(buffered.getvalue())
             encode_image_text = encode_image.decode("utf-8")
             base64_qwen = f"{encode_image_text}"
-            end_time = time.time() - start_time
-            logger.info('图像base转换时间：%s', end_time)
             return base64_qwen
         except Exception as e:
             logger.error(f"Error processing image: {e}")
@@ -83,8 +78,6 @@ class FlyBSearch:
     def get_result(self, image_data=None, search_num=None, is_url=False, query=None, roi=None):
         if image_data is None:
             raise ValueError("search global 输入图像数据为空！")
-        time_tool = timerUtils.timer_tool()
-        time_tool.mark("start")
         image_query = self.build_image_query(image_data, is_url, roi)
         payload = {
             "SearchType": "visual",
@@ -93,7 +86,6 @@ class FlyBSearch:
             "MaxSnippetLength": self.max_lenth,
             "EnableWaiting": self.enable
         }
-        time_tool.mark("payload_created")
         if query:
             if len(query) > 100:
                 raise ValueError("QUERY 最多 100 个字符")
@@ -107,14 +99,7 @@ class FlyBSearch:
             logger.warning("Global search upstream HTTP error | status=%s | request_id=%s", response.status_code, response.headers.get("X-Request-Id"),)
             raise
         data = response.json()
-        time_tool.mark("response_received")
-        
-        res = self.parse_results(data)
-        time_tool.mark("results_parsed")
-        
-        timer_summary = time_tool.summary()
-        logger.info(f"FLYB search completed time={timer_summary}")
-        return res
+        return self.parse_results(data)
 
 
     def parse_results(self, data: dict) -> list[dict] | dict:

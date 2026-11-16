@@ -9,7 +9,7 @@ from fastapi import APIRouter, Body, File, Query, Request, UploadFile
 
 from app.schemas.predict import PingResponse, PredictResponse, PredictUrlBody
 from app.api.uploads import read_upload
-from app.api.services.predict import run_predict, run_url_predict
+from app.api.services.predict import run_file_predict, run_url_predict
 from app.bootstrap.state import get_application_state
 from app.core import errors
 from app.core.middleware import bind_trace_id
@@ -51,7 +51,7 @@ async def search_global_by_file(
     runtime = get_application_state(request)
     trace_id = bind_trace_id(request, trace_id)
     img_bytes = await read_upload(file, runtime.max_image_bytes)
-    return await run_predict(
+    return await run_file_predict(
         runtime=runtime,
         img_bytes=img_bytes,
         search_num=search_num,

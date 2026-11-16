@@ -26,9 +26,11 @@ from app.api.uploads import form_upload, read_upload
 from app.bootstrap.state import ApplicationState
 from app.clients.image_fetch import read_url_bytes
 from app.core.middleware import bind_trace_id
+from app.core.observability.log_helper import log_timing
 from app.core.rules.food_fields import FOOD_FIELDS
 from app.schemas.retrieval import IndexJsonRequest, SearchJsonRequest
 from app.core import errors as err
+from app.utils.timer import timer_tool
 
 logger = logging.getLogger("svc.retrieval")
 
@@ -218,21 +220,30 @@ async def search_from_request(runtime: ApplicationState, request: Request) -> Di
 
     stack = require_retrieval(runtime)
     image_bytes = params.image_bytes
-    if image_bytes is None:
-        image_bytes = await read_url_bytes(
-            params.image_url,
-            max_image_bytes=runtime.max_image_bytes,
-            timeout_s=runtime.http_timeout,
+    input_type = "图片链接" if image_bytes is None else "上传文件"
+    timer = timer_tool()
+    completed = False
+    try:
+        if image_bytes is None:
+            with timer.step("图像下载"):
+                image_bytes = await read_url_bytes(
+                    params.image_url,
+                    max_image_bytes=runtime.max_image_bytes,
+                    timeout_s=runtime.http_timeout,
+                )
+        result = await run_in_threadpool(
+            stack.search_uc.execute,
+            image_bytes=image_bytes,
+            scene=params.scene,
+            top_k=params.top_k,
+            score_threshold=params.score_threshold,
+            trace_id=trace_id,
+            timer=timer,
         )
-    result = await run_in_threadpool(
-        stack.search_uc.execute,
-        image_bytes=image_bytes,
-        scene=params.scene,
-        top_k=params.top_k,
-        score_threshold=params.score_threshold,
-        trace_id=trace_id,
-    )
-    return {"ok": True, "trace_id": trace_id, **result}
+        completed = True
+        return {"ok": True, "trace_id": trace_id, **result}
+    finally:
+        log_timing(logger, f"自建库搜图({input_type})", timer, trace_id=trace_id, failed=not completed)
 
 
 async def _search_params(request: Request, max_bytes: int) -> _SearchParams:

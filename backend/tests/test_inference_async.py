@@ -107,7 +107,8 @@ class AsyncInferenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(model.args, (b"query-image",))
         self.assertEqual(
             model.kwargs,
-            {"search_num": 7, "machine_info": "oven", "trace_id": "trace-async", "save_result": True},
+            # timer: the interface's timer (none here: run_predict is called on its own)
+            {"search_num": 7, "machine_info": "oven", "trace_id": "trace-async", "save_result": True, "timer": None},
         )
 
     async def test_predict_maps_upstream_timeout_from_worker(self):
