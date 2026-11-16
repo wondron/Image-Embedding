@@ -11,6 +11,7 @@ export {
   type ImageDeletionRun,
   INDEX_TASK_STATUSES,
   INDEX_TASK_IMAGE_STATES,
+  newImageCount,
   parseIndexTaskStatus,
   parseIndexTaskImageState,
   toIndexTask,

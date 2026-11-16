@@ -3,6 +3,13 @@
 .index-tasks .mg-page-toolbar { gap: 10px; }
 .index-tasks .mg-tabs { flex-wrap: wrap; overflow: visible; }
 .index-tasks .mg-btn { height: auto; min-height: 38px; padding-block: 8px; white-space: normal; }
+/* Four outcomes: new images, repeats, deleted since, failures */
+.index-tasks .mg-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+/* Why the succeeded records outnumber the new images: only shown when there are repeats */
+.index-tasks-note { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 10px; margin: 0 0 14px; padding: 9px 12px; border: 1px solid #e9d6bd; border-radius: 10px; background: #fffcf7; color: #7a5a2f; font-size: 13px; line-height: 1.7; }
+.index-tasks-note > svg { flex-shrink: 0; margin-top: 4px; color: #9a6700; }
+.index-tasks-note > span { flex: 1 1 320px; min-width: 0; overflow-wrap: anywhere; }
+.index-tasks-note > .mg-text-button { flex-shrink: 0; align-self: center; white-space: nowrap; }
 .index-tasks-caption { margin: 10px 0; color: var(--muted); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
 .index-tasks-status { display: grid; gap: 8px; margin-bottom: 12px; font-size: 13px; }
 .index-tasks-status p { margin: 0; line-height: 1.7; overflow-wrap: anywhere; }
@@ -21,6 +28,8 @@
 .index-task-placeholder.is-deleted { color: #98a2b3; background: #f2f4f7; border-style: dashed; }
 .index-tasks-row.is-image-deleted .index-tasks-file strong { color: var(--muted); }
 .index-tasks .index-tasks-status-deleted { color: #667085; }
+/* A repeat: the upload succeeded but stored nothing new (the same tone as the upload card's note about it) */
+.index-tasks .index-tasks-status-repeated { color: #9a6700; }
 .mg-btn.index-tasks-danger { border-color: #c2412f; background: #c2412f; color: #fff; }
 .mg-btn.index-tasks-danger:hover:not(:disabled) { border-color: #a8382a; background: #a8382a; }
 .mg-btn.index-tasks-danger-quiet { border-color: #f1c4be; background: #fdf0ee; color: #b42318; }
@@ -31,6 +40,8 @@
 .index-tasks-confirm { margin: 0; padding: 4px 4px 8px; font-size: 14px; line-height: 1.8; }
 .index-task-details .index-task-deleted-note { display: flex; align-items: flex-start; gap: 6px; color: #475467; }
 .index-task-deleted-note svg { flex-shrink: 0; margin-top: 4px; }
+.index-task-details .index-task-repeat-note { display: flex; align-items: flex-start; gap: 6px; margin: 0 0 12px; padding: 9px 12px; border: 1px solid #e9d6bd; border-radius: 10px; background: #fffcf7; color: #7a5a2f; font-size: 13px; }
+.index-task-repeat-note svg { flex-shrink: 0; margin-top: 4px; color: #9a6700; }
 .index-tasks-meta { display: contents; }
 .index-tasks-label { display: none; color: var(--muted); }
 .index-tasks .mg-job-status { margin-left: 0; }
@@ -44,6 +55,9 @@
 .index-task-details dd { min-width: 0; margin: 0; white-space: pre-wrap; }
 .index-task-details h3 { margin: 12px 0; font-size: 14px; }
 .index-task-details p { margin: 12px 0; color: var(--muted); }
+@container index-tasks (max-width: 1039px) {
+  .index-tasks .mg-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 @container index-tasks (max-width: 719px) {
   .index-tasks-head { display: none; }
   .index-tasks-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }

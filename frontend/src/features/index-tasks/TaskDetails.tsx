@@ -1,14 +1,13 @@
 import { useState } from 'react'
-import { ImageIcon, ImageOff, LoaderCircle, Trash2 } from 'lucide-react'
+import { Copy, ImageIcon, ImageOff, LoaderCircle, Trash2 } from 'lucide-react'
 import { Dialog } from '../../components/Dialog'
 import { StoredImage } from '../../entities/image'
 import type { IndexTask } from '../../entities/task'
-import { taskDuration, taskNewImage, taskTime } from './presentation'
+import { TASK_STATE_TEXT, taskDuration, taskNewImage, taskState, taskTime } from './presentation'
 
-/** 成功 / 图片已删除 (succeeded, the image deleted since) / 失败. */
+/** 成功 / 重复上传 (succeeded, the image was already stored) / 图片已删除 (succeeded, the image deleted since) / 失败. */
 export function taskStateText(task: IndexTask): string {
-  if (task.status === 'failed') return '失败'
-  return task.imageState === 'deleted' ? '图片已删除' : '成功'
+  return TASK_STATE_TEXT[taskState(task)]
 }
 
 /**
@@ -63,6 +62,7 @@ export function TaskDetails({ task, readTraceId, onClose, onDelete }: {
   </div>
   return <Dialog title="入库记录详情" size="sm" onClose={onClose} dismissDisabled={busy} footer={footer}>
     <div className="index-task-details">
+      {taskState(task) === 'repeated' && <p className="index-task-repeat-note"><Copy size={15} aria-hidden />这次上传的文件和图库里已有的一张图片完全相同，所以没有新增图片，标注沿用原来的，也不计入「新入库图片」。如果同一个文件有两条成功记录，通常是上一次上传被取消或等待超时，但服务端其实已经入库，之后又传了一次。</p>}
       <dl>{fields.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
       <h3>当前图片（不是历史快照）</h3>
       {task.image ? <><TaskThumbnail url={task.image.imageUrl} /><dl>

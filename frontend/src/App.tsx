@@ -70,7 +70,7 @@ const navigation = [
   { key: 'tasks' as const, name: '入库任务', icon: Workflow, description: '任务进度与失败记录' },
   // The category tree: every food item is a category under one of the six domains (?view=categories)
   { key: 'categories' as const, name: '食材管理', icon: Tags, description: '类别树：名称、别名与属性' },
-  { key: 'scenes' as const, name: '场景管理', icon: Layers3, description: '目录、标签、规则与全量同步' },
+  { key: 'scenes' as const, name: '场景管理', icon: Layers3, description: '搜图范围：收录规则、场景标签与全量同步' },
   { key: 'enums' as const, name: '枚举配置', icon: ListTree, description: '查看取值并追加' },
   // Embedding model versions: register the configured model, build its vectors, switch, roll back (?view=models)
   { key: 'models' as const, name: '模型版本', icon: Cpu, description: '换模型：生成向量、切换与回滚' },

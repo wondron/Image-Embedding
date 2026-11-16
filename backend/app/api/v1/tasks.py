@@ -32,6 +32,9 @@ _IMAGE_STATE_HELP = "present：图片仍在图库的成功记录 / deleted：图
         "入库记录：POST /api/index 和 /api/index/file 每处理一个文件记一条（成功带图片 id，失败带错误码和原因），"
         "新的在前。整个请求被拒的情况（服务未就绪、文件过大、请求格式错误）没有记录。"
         "删除图片时记录保留：image 为 null、image_state=deleted，可按 image_state 筛选、清理。"
+        "记录按上传次数记，不是图片张数：同一张图再次上传也成功，但 new_image=false、不新增图片"
+        "（例如上一次请求被浏览器取消或超时，服务端其实已经入库）。counts.repeated 是这类记录的条数，"
+        "可用 new_image 筛选；succeeded - image_deleted - repeated 是新入库且仍在图库的图片数。"
         "只读 PostgreSQL，检索栈未就绪时也能用。"
     ),
 )
@@ -39,12 +42,15 @@ def list_index_tasks(
     request: Request,
     status: Optional[IndexTaskStatus] = Query(default=None, description="succeeded / failed；不传为全部"),
     image_state: Optional[IndexTaskImageState] = Query(default=None, description=f"{_IMAGE_STATE_HELP}；不传不筛"),
+    new_image: Optional[bool] = Query(
+        default=None, description="true：新入库的成功记录 / false：重复上传（相同图片此前已入库）的成功记录；不传不筛"
+    ),
     page: int = Query(default=1, ge=1, le=1_000_000),
     page_size: int = Query(default=50, ge=1, le=MAX_PAGE_SIZE),
 ) -> Any:
     return tasks_service.list_index_tasks(
         get_application_state(request), status=status.value if status else None, image_state=image_state,
-        page=page, page_size=page_size,
+        new_image=new_image, page=page, page_size=page_size,
     )
 
 

@@ -12,6 +12,11 @@ Deleting an image keeps its records (they tell what was indexed when): such a su
 reads image_state=deleted, can be listed on its own (image_state filter) and cleared on its own
 (DELETE ?image_state=deleted), or one by one (DELETE /api/index-tasks/{id}). Clearing only ever
 removes records, never images.
+
+A record is one upload, not one image: uploading the same bytes again succeeds again without
+storing anything (new_image false). counts.repeated says how many such records there are for
+images still stored, and the new_image filter lists them apart from the uploads that stored a
+new image, so the number of new images can be read off the records.
 """
 
 from __future__ import annotations
@@ -40,6 +45,12 @@ def _image_state(value: Any) -> str | None:
     if value not in IMAGE_STATES:
         raise err.validation_error(f"image_state must be one of {', '.join(IMAGE_STATES)}, got {value!r}")
     return value
+
+
+def _new_image(value: Any) -> bool | None:
+    if value is None or isinstance(value, bool):
+        return value
+    raise err.validation_error(f"new_image must be true or false, got {value!r}")
 
 
 def index_task_item(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -93,27 +104,31 @@ class TaskCenterUseCase:
         self._catalog = catalog
 
     def list_index_tasks(
-        self, *, status: Any = None, image_state: Any = None, page: Any = 1, page_size: Any = 50
+        self, *, status: Any = None, image_state: Any = None, new_image: Any = None, page: Any = 1, page_size: Any = 50
     ) -> dict[str, Any]:
         """Newest first; `status` filters (succeeded / failed), `image_state` the succeeded records
-        (present / deleted). counts are over all records."""
+        (present / deleted), `new_image` the succeeded records too (True: stored a new image /
+        False: a repeat of one already stored). counts are over all records."""
         wanted = coerce_optional_enum(IndexTaskStatus, status, field="status")
         state = _image_state(image_state)
+        fresh = _new_image(new_image)
         page = _bounded(page, field="page", low=1, high=1_000_000)
         page_size = _bounded(page_size, field="page_size", low=1, high=MAX_PAGE_SIZE)
         result = self._catalog.list_index_tasks(
-            status=wanted.value if wanted else None, image_state=state, page=page, page_size=page_size
+            status=wanted.value if wanted else None, image_state=state, new_image=fresh, page=page, page_size=page_size
         )
         counts = dict(result.get("counts") or {})
         return {
             "status": wanted.value if wanted else None,
             "image_state": state,
+            "new_image": fresh,
             "page": page,
             "page_size": page_size,
             "total": int(result.get("total") or 0),
             "counts": {
                 **{member.value: int(counts.get(member.value) or 0) for member in IndexTaskStatus},
                 "image_deleted": int(counts.get("image_deleted") or 0),
+                "repeated": int(counts.get("repeated") or 0),
             },
             "items": [index_task_item(row) for row in result.get("items") or []],
         }

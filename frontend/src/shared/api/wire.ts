@@ -675,18 +675,25 @@ export interface IndexTaskWire {
   image: IndexTaskImageWire | null
 }
 
-/** GET /api/index-tasks?status=&image_state=&page=&page_size= (newest first). */
+/** GET /api/index-tasks?status=&image_state=&new_image=&page=&page_size= (newest first). */
 export interface IndexTaskListResponseWire {
   ok: true
   status: IndexTaskStatusWire | null
   /** The image-state filter (succeeded records only); null: not filtered. */
   image_state: IndexTaskImageStateWire | null
+  /** The new-image filter (succeeded records only): true stored a new image / false a repeat; null: not filtered. Absent from an older server. */
+  new_image?: boolean | null
   page: number
   page_size: number
   /** Records matching the filter. */
   total: number
-  /** Every record, whatever the filter; image_deleted: succeeded records whose image was deleted (also in succeeded). */
-  counts: Record<IndexTaskStatusWire, number> & { image_deleted: number }
+  /**
+   * Every record, whatever the filter. A record is one upload, not one image. image_deleted:
+   * succeeded records whose image was deleted; repeated: succeeded records of a still-stored image
+   * that was stored before that upload (absent from an older server). Both are in succeeded too
+   * and never overlap.
+   */
+  counts: Record<IndexTaskStatusWire, number> & { image_deleted: number; repeated?: number }
   items: IndexTaskWire[]
 }
 

@@ -23,10 +23,16 @@ logger = logging.getLogger("svc.tasks")
 
 
 def list_index_tasks(
-    runtime: ApplicationState, *, status: str | None, image_state: str | None, page: int, page_size: int
+    runtime: ApplicationState,
+    *,
+    status: str | None,
+    image_state: str | None,
+    new_image: bool | None = None,
+    page: int,
+    page_size: int,
 ) -> dict[str, Any]:
     result = require_catalog(runtime).tasks_uc.list_index_tasks(
-        status=status, image_state=image_state, page=page, page_size=page_size
+        status=status, image_state=image_state, new_image=new_image, page=page, page_size=page_size
     )
     return {"ok": True, **result}
 

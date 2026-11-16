@@ -446,11 +446,20 @@ class CatalogStorePort(ABC):
 
     @abstractmethod
     def list_index_tasks(
-        self, *, status: str | None = None, image_state: str | None = None, page: int = 1, page_size: int = 50
+        self,
+        *,
+        status: str | None = None,
+        image_state: str | None = None,
+        new_image: bool | None = None,
+        page: int = 1,
+        page_size: int = 50,
     ) -> dict[str, Any]:
-        """Newest first: {items, total, counts: {succeeded, failed, image_deleted}}; each item carries
-        its image's thumb_url / category while the image still exists (image_exists). image_state
-        filters the succeeded records: present (image still stored) / deleted (deleted since)."""
+        """Newest first: {items, total, counts: {succeeded, failed, image_deleted, repeated}}; each
+        item carries its image's thumb_url / category while the image still exists (image_exists).
+        image_state filters the succeeded records: present (image still stored) / deleted (deleted
+        since); new_image those that stored a new image (True) / repeated one already stored
+        (False). counts.repeated: succeeded records of a still-stored image that was stored
+        before (new_image false); with image_deleted it is part of succeeded."""
         raise NotImplementedError
 
     @abstractmethod

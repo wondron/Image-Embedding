@@ -3,6 +3,7 @@
 
 - index records: newest first, a status filter, counts over everything, the image as it is now;
 - a deleted image leaves its record (image_state=deleted), listed and cleared on its own;
+- a repeat upload (new_image false, the image still stored) is counted apart and listed on its own;
 - clearing needs a status or an image state; one record can be deleted by its id;
 - the deletion queue is readable without the retrieval stack; cleaning it needs the stack, and a
   failure stays queued with a client-safe reason (the cause only in the log).
@@ -58,20 +59,25 @@ class FakeTaskStore:
         self.calls = []
 
     @staticmethod
-    def matches(record, status, image_state):
+    def matches(record, status, image_state, new_image=None):
         if status is not None and record["status"] != status:
             return False
-        if image_state is not None:
-            return record["status"] == "succeeded" and record["image_exists"] == (image_state == "present")
+        succeeded = record["status"] == "succeeded"
+        if image_state is not None and not (succeeded and record["image_exists"] == (image_state == "present")):
+            return False
+        if new_image is not None and not (succeeded and (record["new_image"] is not False) == new_image):
+            return False
         return True
 
-    def list_index_tasks(self, *, status=None, image_state=None, page=1, page_size=50):
-        self.calls.append(("list", status, image_state, page, page_size))
-        rows = [r for r in self.records if self.matches(r, status, image_state)]
-        counts = {"succeeded": 0, "failed": 0, "image_deleted": 0}
+    def list_index_tasks(self, *, status=None, image_state=None, new_image=None, page=1, page_size=50):
+        self.calls.append(("list", status, image_state, new_image, page, page_size))
+        rows = [r for r in self.records if self.matches(r, status, image_state, new_image)]
+        counts = {"succeeded": 0, "failed": 0, "image_deleted": 0, "repeated": 0}
         for r in self.records:
             counts[r["status"]] += 1
-            counts["image_deleted"] += r["status"] == "succeeded" and not r["image_exists"]
+            if r["status"] == "succeeded":
+                counts["image_deleted"] += not r["image_exists"]
+                counts["repeated"] += r["image_exists"] and r["new_image"] is False
         start = (page - 1) * page_size
         return {"items": rows[start:start + page_size], "total": len(rows), "counts": counts}
 
@@ -137,8 +143,9 @@ class TaskEndpointTests(unittest.TestCase):
 
     def test_records_come_newest_first_with_the_image_as_it_is_now(self):
         body = self.ok(self.client.get("/api/index-tasks"))
-        self.assertEqual((body["status"], body["image_state"], body["page"], body["page_size"], body["total"]), (None, None, 1, 50, 3))
-        self.assertEqual(body["counts"], {"succeeded": 2, "failed": 1, "image_deleted": 1})
+        self.assertEqual((body["status"], body["image_state"], body["new_image"]), (None, None, None))
+        self.assertEqual((body["page"], body["page_size"], body["total"]), (1, 50, 3))
+        self.assertEqual(body["counts"], {"succeeded": 2, "failed": 1, "image_deleted": 1, "repeated": 0})
         stored, failed, deleted = body["items"]
         self.assertEqual(stored["image"], {"id": IMG_A, "thumb_url": "https://cdn/t/a.webp", "category_id": 12,
                                            "category": "牛排", "label_status": "verified"})
@@ -149,13 +156,13 @@ class TaskEndpointTests(unittest.TestCase):
         # the image was deleted since: the record keeps its id and says so
         self.assertEqual((deleted["status"], deleted["image_id"], deleted["image"], deleted["image_state"]),
                          ("succeeded", IMG_B, None, "deleted"))
-        self.assertEqual(self.store.calls[-1], ("list", None, None, 1, 50))
+        self.assertEqual(self.store.calls[-1], ("list", None, None, None, 1, 50))
 
     def test_a_status_filter_and_paging_reach_the_store(self):
         body = self.ok(self.client.get("/api/index-tasks", params={"status": "failed", "page": 1, "page_size": 10}))
         self.assertEqual((body["status"], body["total"], [i["id"] for i in body["items"]]), ("failed", 1, [2]))
-        self.assertEqual(body["counts"], {"succeeded": 2, "failed": 1, "image_deleted": 1})  # counts ignore the filter
-        self.assertEqual(self.store.calls[-1], ("list", "failed", None, 1, 10))
+        self.assertEqual(body["counts"], {"succeeded": 2, "failed": 1, "image_deleted": 1, "repeated": 0})  # counts ignore the filter
+        self.assertEqual(self.store.calls[-1], ("list", "failed", None, None, 1, 10))
 
     def test_the_image_state_splits_the_succeeded_records(self):
         for state, ids in (("deleted", [1]), ("present", [3])):
@@ -165,9 +172,30 @@ class TaskEndpointTests(unittest.TestCase):
         body = self.ok(self.client.get("/api/index-tasks", params={"status": "succeeded", "image_state": "deleted"}))
         self.assertEqual((body["status"], body["image_state"], [i["id"] for i in body["items"]]), ("succeeded", "deleted", [1]))
 
+    def test_a_repeat_upload_is_counted_apart_from_the_new_images(self):
+        # the same file sent twice (the first request abandoned by the browser, finished by the server):
+        # two succeeded records for one stored image, only the first of them stored it
+        self.store.records.insert(0, {**RECORDS[0], "id": 4, "new_image": False, "trace_id": "t-4"})
+        body = self.ok(self.client.get("/api/index-tasks"))
+        self.assertEqual(body["counts"], {"succeeded": 3, "failed": 1, "image_deleted": 1, "repeated": 1})
+        counts = body["counts"]
+        self.assertEqual(counts["succeeded"] - counts["image_deleted"] - counts["repeated"], 1)  # one new image
+        for new_image, ids in ((True, [3]), (False, [4])):
+            with self.subTest(new_image=new_image):
+                body = self.ok(self.client.get("/api/index-tasks", params={
+                    "status": "succeeded", "image_state": "present", "new_image": new_image}))
+                self.assertEqual((body["new_image"], body["total"], [i["id"] for i in body["items"]]), (new_image, 1, ids))
+                self.assertEqual(self.store.calls[-1], ("list", "succeeded", "present", new_image, 1, 50))
+        # a repeat whose image was deleted since is a deleted-image record, not a repeat
+        body = self.ok(self.client.get("/api/index-tasks", params={"image_state": "deleted", "new_image": False}))
+        self.assertEqual([i["id"] for i in body["items"]], [1])
+        # a failed record is neither new nor a repeat
+        body = self.ok(self.client.get("/api/index-tasks", params={"status": "failed", "new_image": True}))
+        self.assertEqual((body["total"], body["items"]), (0, []))
+
     def test_bad_list_parameters_are_validation_errors(self):
         for params in ({"status": "running"}, {"page": 0}, {"page_size": 0}, {"page_size": 101}, {"page": "x"},
-                       {"image_state": "gone"}):
+                       {"image_state": "gone"}, {"new_image": "maybe"}):
             with self.subTest(params=params):
                 self.error(self.client.get("/api/index-tasks", params=params), 422, "VALIDATION_ERROR")
         self.assertEqual(self.store.calls, [])
@@ -256,7 +284,7 @@ class TaskCenterUseCaseTests(unittest.TestCase):
     def test_bounds_are_checked_whatever_the_caller(self):
         uc = TaskCenterUseCase(FakeTaskStore())
         for kwargs in ({"page": 0}, {"page": True}, {"page_size": 101}, {"page_size": "10"}, {"status": "running"},
-                       {"image_state": "gone"}):
+                       {"image_state": "gone"}, {"new_image": "false"}, {"new_image": 0}):
             with self.subTest(kwargs=kwargs), self.assertRaises(err.AppError) as ctx:
                 uc.list_index_tasks(**kwargs)
             self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")

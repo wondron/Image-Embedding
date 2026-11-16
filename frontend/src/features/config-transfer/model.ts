@@ -133,7 +133,7 @@ export function importChangeCount(summary: ImportSummary): number {
 }
 
 export const IMPORT_KIND_TEXT: Readonly<Record<ImportRowKind, string>> = {
-  category: '类别', scene: '场景', label: '场景类别', rule: '规则',
+  category: '类别', scene: '场景', label: '场景标签', rule: '规则',
 }
 
 export const IMPORT_ACTION_TEXT: Readonly<Record<ImportAction, string>> = {
@@ -152,7 +152,7 @@ const FIELD_TEXT: Readonly<Record<string, string>> = {
   description: '描述',
   include_all: '包含全部图片',
   outputs_heating: '输出加热信息',
-  label: '映射的场景类别',
+  label: '对应的场景标签',
 }
 
 const VALUE_TEXT: Readonly<Record<string, string>> = { true: '是', false: '否' }

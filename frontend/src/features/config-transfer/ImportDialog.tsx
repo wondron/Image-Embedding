@@ -134,7 +134,7 @@ export function ImportDialog({ title, fileName, run, prunable = false, leftoverN
 
       {prunable && <label className={`cx-prune${prune ? ' is-on' : ''}`}>
         <input type="checkbox" checked={prune} disabled={phase !== 'preview'} onChange={event => setPrune(event.target.checked)} />
-        <span><b>同时删除文件里没有列出的规则和场景类别</b><small>只作用于文件里出现的场景，按文件完全覆盖它们；场景本身从不删除。不勾选时只新建和更新。</small></span>
+        <span><b>同时删除文件里没有列出的规则和场景标签</b><small>只作用于文件里出现的场景，按文件完全覆盖它们；场景本身从不删除。不勾选时只新建和更新。</small></span>
       </label>}
 
       {phase === 'previewing' && <p className="cx-status" role="status"><LoaderCircle size={15} className="spin" />正在对照库里的内容生成预览…</p>}

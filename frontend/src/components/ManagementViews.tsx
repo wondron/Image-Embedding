@@ -45,6 +45,13 @@ type IndexJob = {
 const MAX_IMAGE_SIZE = 15 * 1024 * 1024
 const MAX_QUEUE = 100
 const INDEX_TIMEOUT_MS = 120_000
+/**
+ * 「取消入库」 takes the place of 「开始入库」 on the same button, so the second click of a
+ * double-click lands on it: a cancel this soon after the start is ignored. Otherwise the first
+ * image's request is given up by the browser while the server still finishes it, and 「继续入库」
+ * then sends that image again (a second succeeded record for one image).
+ */
+const CANCEL_GUARD_MS = 600
 const taskStatuses = ['全部任务', '处理中', '已完成', '失败记录']
 const jobStatusText: Record<IndexJobStatus, string> = {
   pending: '待入库', running: '正在入库', success: '已入库', error: '入库失败', cancelled: '已取消，可继续',
@@ -119,6 +126,8 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
   const [preview, setPreview] = useState<IndexJob | null>(null)
   const [indexing, setIndexing] = useState(false)
   const indexingRef = useRef(false)
+  /** When the current run started (performance.now()), for CANCEL_GUARD_MS. */
+  const runStartedAt = useRef(0)
   const runToken = useRef(0)
   const activeIndex = useRef<{ controller: AbortController; jobId: string; timer: number } | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -251,6 +260,12 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     setIndexing(false)
   }
 
+  /** 「取消入库」 as clicked by a person (see CANCEL_GUARD_MS). */
+  function cancelIndexing() {
+    if (performance.now() - runStartedAt.current < CANCEL_GUARD_MS) return
+    stopIndexing()
+  }
+
   async function startIndexing(retryFailed = false) {
     if (indexingRef.current) return
     if (!importReady) { notify.warn(blockers[0] ?? '标注里有需要修改的内容。', { title: '暂时不能入库' }); return }
@@ -268,6 +283,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
     const tree = categoryTree.tree
     const scenes = sceneCatalog.active
     indexingRef.current = true
+    runStartedAt.current = performance.now()
     setIndexing(true)
     setEditing(null)
     const currentRun = () => runToken.current === token && apiBaseRef.current === requestBase
@@ -429,7 +445,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
       {!indexing && (resumable || retryable) && blockers.length > 0 && <ul className="mg-import-blockers" role="alert">{blockers.map(text => <li key={text}>{text}</li>)}</ul>}
       <div className="mg-index-actions">
         {indexing
-          ? <button type="button" className="mg-btn mg-secondary mg-full" onClick={stopIndexing}><Square size={15} />取消入库</button>
+          ? <button type="button" className="mg-btn mg-secondary mg-full" onClick={cancelIndexing}><Square size={15} />取消入库</button>
           : <button type="button" className="mg-btn mg-primary mg-full" disabled={!resumable || !importReady} onClick={() => void startIndexing(false)}><CloudUpload size={17} />{hasStarted && resumable ? '继续入库' : '开始入库'}</button>}
         {!indexing && retryable && <button type="button" className="mg-btn mg-secondary mg-full" disabled={!importReady} onClick={() => void startIndexing(true)}><RotateCcw size={15} />仅重试失败</button>}
       </div>

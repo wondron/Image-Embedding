@@ -622,7 +622,11 @@ class PgLiveTests(unittest.TestCase):
         store.enqueue_image_deletion(gone)
 
         result = store.list_index_tasks()
-        self.assertEqual((result["total"], result["counts"]), (3, {"succeeded": 2, "failed": 1, "image_deleted": 1}))
+        # x…: the kept image indexed again (new_image false): a repeat, its image still stored
+        self.assertEqual(
+            (result["total"], result["counts"]),
+            (3, {"succeeded": 2, "failed": 1, "image_deleted": 1, "repeated": 1}),
+        )
         newest, failed, deleted = result["items"]
         self.assertEqual((len(newest["filename"]), newest["filename"][-1]), (255, "…"))  # clipped
         self.assertEqual(
@@ -636,12 +640,20 @@ class PgLiveTests(unittest.TestCase):
 
         page = store.list_index_tasks(status="succeeded", page=2, page_size=1)
         self.assertEqual((page["total"], [r["filename"] for r in page["items"]]), (2, ["gone.jpg"]))
-        self.assertEqual(page["counts"], {"succeeded": 2, "failed": 1, "image_deleted": 1})
+        self.assertEqual(page["counts"], {"succeeded": 2, "failed": 1, "image_deleted": 1, "repeated": 1})
         # the image state splits the succeeded records: still stored / deleted since
         for state, ids in (("present", [newest["id"]]), ("deleted", [deleted["id"]])):
             listed = store.list_index_tasks(image_state=state)
             self.assertEqual((listed["total"], [r["id"] for r in listed["items"]]), (1, ids))
         listed = store.list_index_tasks(status="failed", image_state="deleted")
+        self.assertEqual((listed["total"], listed["items"]), (0, []))
+        # new_image splits them too: the uploads that stored an image / the repeats of a stored one
+        for new_image, ids in ((False, [newest["id"]]), (True, [deleted["id"]])):
+            listed = store.list_index_tasks(new_image=new_image)
+            self.assertEqual((listed["total"], [r["id"] for r in listed["items"]]), (1, ids))
+        listed = store.list_index_tasks(status="succeeded", image_state="present", new_image=True)
+        self.assertEqual((listed["total"], listed["items"]), (0, []))  # the only stored image's record is a repeat
+        listed = store.list_index_tasks(status="failed", new_image=True)
         self.assertEqual((listed["total"], listed["items"]), (0, []))
 
         with self.assertRaises(AppError) as ctx:  # a succeeded record names its image
@@ -651,9 +663,9 @@ class PgLiveTests(unittest.TestCase):
 
         # clearing takes exactly what the same filter lists, and only records
         self.assertEqual(store.clear_index_tasks(image_state="deleted"), 1)
-        self.assertEqual(store.list_index_tasks()["counts"], {"succeeded": 1, "failed": 1, "image_deleted": 0})
+        self.assertEqual(store.list_index_tasks()["counts"], {"succeeded": 1, "failed": 1, "image_deleted": 0, "repeated": 1})
         self.assertEqual(store.clear_index_tasks(status="failed"), 1)
-        self.assertEqual(store.list_index_tasks()["counts"], {"succeeded": 1, "failed": 0, "image_deleted": 0})
+        self.assertEqual(store.list_index_tasks()["counts"], {"succeeded": 1, "failed": 0, "image_deleted": 0, "repeated": 1})
         with self.assertRaises(ValueError):
             store.clear_index_tasks()
         self.assertEqual((store.delete_index_task(newest["id"]), store.delete_index_task(newest["id"])), (1, 0))

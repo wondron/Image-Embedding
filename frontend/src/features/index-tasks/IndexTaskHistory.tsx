@@ -1,22 +1,23 @@
 import { useEffect, useState } from 'react'
-import { Check, ChevronLeft, ChevronRight, ImageOff, ListChecks, LoaderCircle, RefreshCw, Trash2, XCircle } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Copy, ImageOff, ImagePlus, ListChecks, LoaderCircle, RefreshCw, Trash2, XCircle } from 'lucide-react'
 import { EmptyState, Metric, notify } from '../../shared/ui'
-import { clearIndexTasks, deleteIndexTask, type IndexTask, type IndexTaskCounts } from '../../entities/task'
+import { clearIndexTasks, deleteIndexTask, newImageCount, type IndexTask, type IndexTaskCounts } from '../../entities/task'
 import { ClearRecordsDialog, type ClearScope } from './ClearRecordsDialog'
 import { TaskDetails, TaskThumbnail, taskStateText } from './TaskDetails'
-import { taskDuration, taskNewImage, taskTime } from './presentation'
+import { taskDuration, taskNewImage, taskState, taskTime, type TaskState } from './presentation'
 import { TASK_PAGE_SIZE, useIndexTaskHistory, type TaskView } from './useIndexTaskHistory'
 import './index-tasks.css'
 
 const views: { view: TaskView; label: string }[] = [
-  { view: 'all', label: '全部' }, { view: 'succeeded', label: '成功' },
+  { view: 'all', label: '全部' }, { view: 'stored', label: '新入库' }, { view: 'repeated', label: '重复上传' },
   { view: 'deleted', label: '图片已删除' }, { view: 'failed', label: '失败' },
 ]
 
 /** How many records a view holds, from the counts (which ignore the current view). */
 function viewCount(view: TaskView, counts: IndexTaskCounts): number {
   if (view === 'all') return counts.succeeded + counts.failed
-  if (view === 'succeeded') return counts.succeeded - counts.imageDeleted
+  if (view === 'stored') return newImageCount(counts)
+  if (view === 'repeated') return counts.repeated
   return view === 'deleted' ? counts.imageDeleted : counts.failed
 }
 
@@ -24,13 +25,20 @@ function failure(cause: unknown): string {
   return cause instanceof Error ? cause.message : '请稍后重试。'
 }
 
+const STATUS_CLASS: Readonly<Record<TaskState, string>> = {
+  stored: 'mg-job-status-success', repeated: 'index-tasks-status-repeated',
+  deleted: 'index-tasks-status-deleted', failed: 'mg-job-status-error',
+}
+
 function statusClass(task: IndexTask): string {
-  if (task.status === 'failed') return 'mg-job-status-error'
-  return task.imageState === 'deleted' ? 'index-tasks-status-deleted' : 'mg-job-status-success'
+  return STATUS_CLASS[taskState(task)]
 }
 
 /**
- * 服务端入库记录. Deleting an image keeps its records (they tell what was indexed when): they read
+ * 服务端入库记录. A record is one upload, not one image: the same image uploaded again succeeds
+ * again without adding anything (「重复上传」), so the headline counts the uploads that stored a new
+ * image (「新入库图片」, what compares with the library) and the repeats apart.
+ * Deleting an image keeps its records (they tell what was indexed when): they read
  * 「图片已删除」, have their own view, and are cleared on demand, like the failures, or one by one.
  */
 export function IndexTaskHistory({ apiBase }: { apiBase: string }) {
@@ -77,13 +85,21 @@ export function IndexTaskHistory({ apiBase }: { apiBase: string }) {
     ? { title: '暂无服务端入库记录', description: '这里只含接入后实际记录的逐文件结果；写记录可能缺行，不表示图库没有图片，也不承诺永久保留。' }
     : query.view === 'deleted'
       ? { title: '没有图片已删除的记录', description: '从图库删除图片后，它的入库记录会留在这里，标为「图片已删除」，可以清理。' }
-      : { title: '当前筛选无记录', description: '全历史仍有记录，当前结果筛选没有匹配项。' }
+      : query.view === 'repeated'
+        ? { title: '没有重复上传的记录', description: '同一张图片再次上传时不会新增图片，那次上传会记在这里。' }
+        : { title: '当前筛选无记录', description: '全历史仍有记录，当前结果筛选没有匹配项。' }
   return <section className="index-tasks" aria-label="服务端入库记录">
     <div className="mg-metrics">
-      <Metric label="成功（图片在库）" value={counts ? String(counts.succeeded - counts.imageDeleted) : '—'} detail="成功入库，图片仍在图库" icon={Check} />
+      <Metric label="新入库图片" value={counts ? String(newImageCount(counts)) : '—'} detail="这些上传新增到图库、现在仍在库的图片，每张只算一次" icon={ImagePlus} />
+      <Metric label="重复上传" value={counts ? String(counts.repeated) : '—'} detail="图片本来就在图库：没有新增图片，沿用原有标注" icon={Copy} />
       <Metric label="图片已删除" value={counts ? String(counts.imageDeleted) : '—'} detail="入库成功过，图片之后被删除；记录保留，可清理" icon={ImageOff} />
       <Metric label="失败记录" value={counts ? String(counts.failed) : '—'} detail="可重新上传；处理完可以清空" icon={XCircle} />
     </div>
+    {counts && counts.repeated > 0 && <p className="index-tasks-note" role="note">
+      <Copy size={15} aria-hidden />
+      <span>有 {counts.repeated} 条成功记录是重复上传：同一张图片被上传了不止一次（常见于上传被取消或等待超时后又重传，其实服务端第一次已经入库）。图库里不会多出图片，所以它们不计入「新入库图片」。</span>
+      {query.view !== 'repeated' && <button type="button" className="mg-text-button" onClick={() => history.filter('repeated')}>查看这 {counts.repeated} 条</button>}
+    </p>}
     <div className="mg-page-toolbar">
       <div className="mg-tabs" role="group" aria-label="历史结果筛选">{views.map(({ view, label }) => <button type="button" key={view} className={query.view === view ? 'active' : ''} aria-pressed={query.view === view} onClick={() => history.filter(view)}>{label}{counts ? `（${viewCount(view, counts)}）` : ''}</button>)}</div>
       <button type="button" className="mg-btn mg-secondary" disabled={loading} onClick={history.refresh}><RefreshCw size={15} />刷新</button>
@@ -108,7 +124,7 @@ export function IndexTaskHistory({ apiBase }: { apiBase: string }) {
       {data.items.length > 0 ? <>
         <div className="index-tasks-head" aria-hidden="true"><span>文件名</span><span>状态</span><span>是否新图</span><span>耗时</span><span>记录时间（MST）</span><span>详情</span></div>
         <div role="list">{data.items.map(task => {
-          const deleted = task.imageState === 'deleted'
+          const deleted = taskState(task) === 'deleted'
           return <article className={`index-tasks-row${deleted ? ' is-image-deleted' : ''}`} role="listitem" key={task.id}>
             <div className="index-tasks-file"><TaskThumbnail url={task.image?.imageUrl ?? null} id={task.image ? task.imageId : null} deleted={deleted} /><strong title={task.filename}>{task.filename}</strong></div>
             <span className={`mg-job-status ${statusClass(task)}`}>{taskStateText(task)}</span>
@@ -128,6 +144,7 @@ export function IndexTaskHistory({ apiBase }: { apiBase: string }) {
         <div><span>每页 {TASK_PAGE_SIZE} 条</span><button type="button" aria-label="上一页记录" disabled={loading || query.page <= 1} onClick={() => history.page(query.page - 1)}><ChevronLeft size={16} /></button><span>{query.page} / {pages}</span><button type="button" aria-label="下一页记录" disabled={loading || query.page >= pages || query.page >= 1_000_000} onClick={() => history.page(query.page + 1)}><ChevronRight size={16} /></button></div>
       </div>
     </section>}
+    <p className="index-tasks-caption">每条记录是一次上传，不是一张图片：同一张图片重复上传会多出成功记录，只有第一次算「新入库」，其余算「重复上传」，图库里不会多出图片。和「图片数据」的数量对照时看「新入库图片」（图库里早于入库记录就有的图片不在其中）。</p>
     <p className="index-tasks-caption">删除图片不会删除它的入库记录：记录保留并标为「图片已删除」，用来追溯哪天入过哪些文件；不需要时用上方按钮清理，或在详情里删除单条。清理只删记录，不动图片。</p>
     <p className="index-tasks-caption">同步逐文件终态，不是后台任务或实时进度；人工场景调整不计入此记录。读取 trace：{data?.readTraceId ?? '—'}。记录时间为插入时刻（America/Denver）。</p>
     {selected && <TaskDetails task={selected} readTraceId={data?.readTraceId ?? null} onClose={() => setSelectedId(null)} onDelete={() => removeRecord(selected)} />}

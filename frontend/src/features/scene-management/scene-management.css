@@ -1,24 +1,7 @@
-.scene-layout { display: grid; grid-template-columns: minmax(200px, 270px) minmax(0, 1fr); gap: 20px; min-height: 0; flex: 1; align-items: stretch; }
-.scene-directory { align-self: start; padding: 8px; }
-.scene-directory-item { display: grid; width: 100%; text-align: left; padding: 12px; gap: 5px; border: 1px solid transparent; background: transparent; color: inherit; border-radius: 8px; cursor: pointer; }
-.scene-directory-item.active { border-color: var(--primary); }
-.scene-directory-item code, .scene-directory-item small { overflow-wrap: anywhere; }
-.scene-details { container-type: inline-size; container-name: scene-details; min-width: 0; min-height: 0; padding: 16px; display: flex; flex-direction: column; overflow: hidden; }
+/* ==== shared with features/scene-memberships (the image's scene panel in the library and the search detail) ==== */
 .scene-table-scroll { overflow-x: auto; }
 .scene-table { border-collapse: collapse; width: 100%; text-align: left; }
 .scene-table td, .scene-table th { padding: 12px 16px; border-bottom: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere; }
-.scene-actions { display: flex; flex-wrap: wrap; gap: 10px; }
-.scene-form { display: grid; gap: 16px; padding: 20px; }
-.scene-form fieldset { border: 0; padding: 0; display: grid; gap: 14px; }
-.scene-form label { display: grid; gap: 6px; }
-.scene-form label:has(input[type=checkbox]), .scene-form label:has(input[type=radio]) { display: flex; align-items: center; gap: 8px; }
-.scene-form input:not([type=checkbox]):not([type=radio]), .scene-form select, .scene-form textarea { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font: inherit; color: inherit; background: var(--surface); }
-.scene-form legend { padding: 0; margin-bottom: 4px; font-weight: 600; }
-/* The rule's category picker (category-picker) keeps its own field look inside the form */
-.scene-form .cp { margin-top: 0; }
-.scene-form .cp-label { color: inherit; font-size: inherit; line-height: inherit; }
-.scene-form .cp-combo input:not([type=checkbox]):not([type=radio]) { width: auto; padding: 0; border: 0; border-radius: 0; background: transparent; }
-.rule-kind { display: flex; flex-wrap: wrap; gap: 8px 20px; }
 .scene-membership-panel { margin-top: 20px; }
 .scene-membership-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .scene-membership-head h4 { margin: 0; }
@@ -27,62 +10,209 @@
 .scene-membership-actions button[aria-pressed=true] { font-weight: 600; text-decoration: underline; }
 .scene-membership-source.is-manual { font-weight: 600; }
 .scene-inactive-tag { margin-left: 6px; font-size: 12px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 999px; }
-.scene-back { display: none; }
-@media (max-width: 800px) {
-  /* One pane at a time, filling the height left under the toolbar; each scrolls on its own.
-     (Stacked, the list spilled out of its shrunken row and showed through the details.) */
-  .scene-layout { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr); }
-  .scene-layout[data-pane=detail] > .scene-directory, .scene-layout[data-pane=list] > .scene-details { display: none; }
-  .scene-layout > .scene-directory { align-self: stretch; overflow: auto; }
-  .scene-back { display: inline-block; }
-  .scene-details .mg-tabs { display: flex; flex-wrap: wrap; }
-}
+.scene-membership-panel > p { margin-block: 12px; }
 /* Reuse the existing sm/lg Dialog shell; scope the scene sm geometry to this feature only. */
 .scene-management .dialog:not(.dialog-wide), .scene-membership-panel .dialog:not(.dialog-wide) { width: min(700px, calc(100vw - 30px)); }
 .scene-management .dialog.dialog-wide, .scene-membership-panel .dialog.dialog-wide { width: min(80vw, 980px); }
-.scene-directory-item:hover { background: var(--hover); }
-.scene-management > p, .scene-membership-panel > p { margin-block: 12px; }
 
-.scene-management { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
-.scene-management .scene-status-stack { display: grid; gap: 8px; margin: 0 0 12px; }
-.scene-management .scene-status-stack > p { margin: 0; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
-.scene-management .scene-loading { display: flex; align-items: center; gap: 8px; }
-.scene-management .scene-detail-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
-.scene-management .scene-details[data-sticky-heading=true] .scene-detail-scroll { scroll-padding-top: calc(var(--scene-heading-height, 0px) + var(--scene-tabs-height, 0px)); }
-.scene-management .scene-details[data-sticky-heading=false] .scene-detail-scroll { scroll-padding-top: var(--scene-tabs-height, 0px); }
-.scene-management .scene-scoped-status:empty { display: none; }
-.scene-management .scene-detail-header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 16px; background: var(--panel-bg); }
-.scene-management .scene-heading-text { flex: 1; min-width: 0; }
-.scene-management .scene-detail-name { margin: 0; font-size: 18px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; color: var(--text); }
-.scene-management .scene-detail-code { display: block; margin-top: 4px; font-size: 12px; line-height: 1.4; color: var(--muted); overflow-wrap: anywhere; background: none; }
-.scene-management .scene-detail-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-.scene-management .scene-detail-badge { font-size: 12px; line-height: 1.4; padding: 1px 6px; border: 1px solid var(--border); border-radius: 999px; }
-.scene-management .scene-detail-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; flex: 0 1 auto; }
-.scene-management .scene-detail-primary-actions, .scene-management .scene-detail-danger-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.scene-management .scene-detail-tabs { flex-wrap: wrap; gap: 16px 25px; white-space: normal; min-width: 0; background: var(--panel-bg); }
-.scene-management .scene-detail-tabs button { white-space: normal; overflow-wrap: anywhere; }
-.scene-management .scene-details[data-sticky-heading=true] .scene-detail-header { position: sticky; top: 0; z-index: 2; }
-.scene-management .scene-details[data-sticky-heading=true] .scene-detail-tabs { position: sticky; top: var(--scene-heading-height, 0px); z-index: 1; }
-.scene-management .scene-details[data-sticky-heading=false] .scene-detail-tabs { position: sticky; top: 0; z-index: 1; }
-.scene-management .scene-tab-body { padding-top: 16px; min-width: 0; }
-.scene-management .scene-overview { display: grid; gap: 24px; }
-.scene-management .scene-overview-group { display: grid; gap: 8px; min-width: 0; }
-.scene-management .scene-overview-group h4, .scene-management .scene-tab-toolbar h4 { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.4; }
-.scene-management .scene-group-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
-.scene-management .scene-description, .scene-management .scene-detail-caption { margin: 0; overflow-wrap: anywhere; }
-.scene-management .scene-detail-caption { font-size: 12px; line-height: 1.4; color: var(--muted); }
-.scene-management .scene-member-count { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.scene-management .scene-summary { display: grid; gap: 8px; margin: 0; }
-.scene-management .scene-summary > div { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); gap: 8px; align-items: start; min-width: 0; }
-.scene-management .scene-summary dt, .scene-management .scene-summary dd { margin: 0; overflow-wrap: anywhere; }
-.scene-management .scene-tab-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-.scene-management .scene-tab-empty { padding: 16px; }
-.scene-management .scene-table-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.scene-management .scene-detail-trace { display: block; margin-top: 16px; color: var(--muted); overflow-wrap: anywhere; }
-.scene-management .scene-sync-panel { display: grid; gap: 14px; min-width: 0; }
-.scene-management .scene-sync-panel h3 { margin: 0; font-size: 16px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+/* ==== the scene, label and rule dialogs ==== */
+.scene-form { display: grid; gap: 16px; padding: 18px 20px 20px; }
+.scene-form fieldset { min-width: 0; margin: 0; padding: 0; border: 0; display: grid; gap: 14px; }
+.scene-form legend { padding: 0; margin-bottom: 6px; color: #475569; font-size: 13px; font-weight: 600; }
+.scene-form label { display: grid; gap: 6px; color: #475569; font-size: 13px; font-weight: 600; }
+.scene-form label:has(input[type=checkbox]), .scene-form label:has(input[type=radio]) { display: flex; align-items: flex-start; gap: 8px; color: #223046; font-size: 14px; font-weight: 400; line-height: 1.6; }
+.scene-form label:has(input[type=checkbox]) > input, .scene-form label:has(input[type=radio]) > input { flex-shrink: 0; margin: 4px 0 0; }
+.scene-form input:not([type=checkbox]):not([type=radio]), .scene-form select, .scene-form textarea { width: 100%; padding: 8px 10px; border: 1px solid #d7e0ee; border-radius: 10px; font: inherit; font-size: 14px; font-weight: 400; color: #223046; background: #fff; }
+.scene-form textarea { min-height: 76px; resize: vertical; line-height: 1.6; }
+.scene-form input[readonly] { background: #f3f5f8; color: #64748b; }
+.scene-form input[aria-invalid=true] { border-color: #e2b4b4; background: #fff8f7; }
+.scene-form input::placeholder, .scene-form textarea::placeholder { color: #9aa6b6; }
+/* What a field or a switch does, under it */
+.scene-form .scene-hint { display: block; color: var(--muted); font-size: 12px; font-weight: 400; line-height: 1.65; }
+.scene-form .scene-option { display: grid; gap: 2px; }
+.scene-form .scene-options { display: grid; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: #fafbfd; }
+.scene-form .scene-form-note { margin: 0; padding: 9px 12px; border: 1px solid #f1d9b5; border-radius: 10px; background: #fffaf2; color: #7a5a2f; font-size: 13px; line-height: 1.7; }
+.scene-form .scene-form-note p { margin: 0; }
+.scene-form .scene-form-note p + p { margin-top: 4px; }
+.scene-form .mg-form-error { margin: 0; }
+.scene-form .mg-help { margin: 0 !important; }
+.scene-form .dialog-actions { margin-top: 4px; }
+/* The rule's category picker (category-picker) keeps its own field look inside the form */
+.scene-form .cp { margin-top: 0; }
+.scene-form .cp-label { color: #475569; font-size: 13px; font-weight: 600; line-height: 1.6; }
+.scene-form .cp-combo input:not([type=checkbox]):not([type=radio]) { width: auto; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.rule-kind { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+
+/* ==== the page ==== */
+.scene-management {
+  --scene-panel: #fdfdfe;        /* the panel surface, opaque: what a sticky bar covers its content with */
+  --scene-track: #e9edf3;
+  display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%;
+  color: var(--text); font-size: 14px;
+}
+.scene-management code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+/* What the page is for, and what applies to every scene */
+.scene-page-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; margin-bottom: 12px; }
+.scene-lead { flex: 1 1 320px; min-width: 0; max-width: 60em; margin: 0; color: #334155; font-size: 14px; line-height: 1.7; }
+.scene-page-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.scene-page-actions .mg-btn[aria-pressed=true] { border-color: #b7d1ff; background: #deebff; color: #1d4ed8; }
+
+.scene-callouts { display: grid; gap: 8px; margin-bottom: 12px; }
+.scene-callouts:empty { display: none; }
+.scene-callout { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 10px; margin: 0; padding: 9px 12px; border: 1px solid #d7e2ff; border-radius: 10px; background: #f5f8ff; color: #334155; font-size: 13px; line-height: 1.7; }
+.scene-callout > svg { flex-shrink: 0; margin-top: 3px; color: var(--primary); }
+.scene-callout > span { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
+.scene-callout > .text-button { flex-shrink: 0; align-self: center; padding: 0; font-weight: 600; }
+.scene-callout.is-warn { border-color: #f1d9b5; background: #fffaf2; color: #7a5a2f; }
+.scene-callout.is-warn > svg { color: #b45309; }
+.scene-callout.is-error { border-color: #f1c4be; background: #fdf3f1; color: #8a2a1f; }
+.scene-callout.is-error > svg { color: #b42318; }
+
+.scene-layout { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 14px; flex: 1; min-height: 420px; }
+
+/* ---- the list ---- */
+.scene-list { display: flex; flex-direction: column; align-self: start; min-width: 0; min-height: 0; max-height: 100%; }
+.scene-list-head { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--border); }
+.scene-list-head h2 { display: flex; align-items: center; gap: 8px; margin: 0; color: #334155; font-size: 15px; font-weight: 700; }
+.scene-list-total { padding: 0 7px; border-radius: 999px; background: #eef2f7; color: #64748b; font-size: 12px; font-weight: 600; line-height: 20px; font-variant-numeric: tabular-nums; }
+.scene-list-loading { display: inline-flex; color: var(--primary); }
+.scene-list-head .mg-btn { height: 32px; padding: 0 10px; font-size: 13px; }
+.scene-list-items { display: grid; gap: 2px; min-height: 0; margin: 0; padding: 6px; overflow: auto; overscroll-behavior: contain; list-style: none; }
+.scene-list-item { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 3px 10px; width: 100%; padding: 10px 12px 12px 16px; border-radius: 9px; color: inherit; text-align: left; }
+.scene-list-item:hover { background: var(--hover); }
+.scene-list-item.is-selected { background: var(--active); }
+/* Which scene the right side is about */
+.scene-list-item.is-selected::before { content: ''; position: absolute; left: 5px; top: 11px; bottom: 11px; width: 3px; border-radius: 3px; background: var(--primary); }
+.scene-list-name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; }
+.scene-list-name strong { color: #1f2a3a; font-size: 15px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.scene-list-count { color: #1f2a3a; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.scene-list-count small { margin-left: 2px; color: var(--muted); font-size: 12px; font-weight: 400; }
+.scene-list-code { grid-column: 1 / -1; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.scene-list-scope { grid-column: 1 / -1; display: grid; gap: 5px; margin-top: 5px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.scene-list-item.is-off .scene-list-name strong, .scene-list-item.is-off .scene-list-count { color: #7b8494; }
+.scene-list-blank { display: flex; align-items: center; gap: 8px; margin: 0; padding: 18px 16px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.scene-list .mg-empty { padding: 28px 18px 30px; }
+
+/* Which part of the library a scene holds */
+.scene-meter { display: block; height: 4px; border-radius: 999px; background: var(--scene-track); overflow: hidden; }
+.scene-meter > span { display: block; height: 100%; border-radius: inherit; background: var(--primary); }
+.scene-meter.is-wide { flex: 1 1 160px; max-width: 260px; height: 6px; }
+.scene-list-item.is-selected .scene-meter { background: rgba(44, 86, 160, .16); }
+
+.scene-tag { display: inline-flex; align-items: center; gap: 4px; padding: 0 7px; border-radius: 999px; background: #eef2f7; color: #475569; font-size: 11px; font-weight: 500; line-height: 19px; white-space: nowrap; }
+.scene-tag.is-on { background: #eaf5ee; color: #2f7d4a; }
+.scene-tag.is-off { background: #eef0f3; color: #7b8494; }
+.scene-tag.is-default { background: var(--primary-soft); color: var(--primary); }
+.scene-tag.is-heat { background: #fff4e5; color: #9a6700; }
+
+/* ---- the detail: a scene, the guide, or the full sync ---- */
+.scene-detail { container: scene-detail / inline-size; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.scene-detail-scroll { flex: 1; min-width: 0; min-height: 0; padding: 18px 20px 20px; overflow: auto; overscroll-behavior: contain; scroll-padding-top: 56px; }
+.scene-back, .scene-sync-close { align-items: center; gap: 4px; margin: -4px 0 10px; padding: 0; }
+.scene-back { display: none; }
+.scene-sync-close { display: inline-flex; }
+
+.scene-hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 10px 16px; }
+.scene-hero-main { display: grid; gap: 9px; min-width: 0; }
+.scene-hero-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; min-width: 0; }
+.scene-hero-name { margin: 0; color: #161a1d; font-size: 22px; font-weight: 700; line-height: 1.3; letter-spacing: .01em; overflow-wrap: anywhere; }
+.scene-code { padding: 1px 7px; border: 1px solid var(--border); border-radius: 6px; background: #f6f7f8; color: #475569; font-size: 12px; overflow-wrap: anywhere; }
+.scene-hero-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.scene-hero-tags .scene-tag { font-size: 12px; line-height: 22px; padding: 0 9px; }
+.scene-hero-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.scene-hero-description { grid-column: 1 / -1; max-width: 64em; margin: 0; color: #334155; font-size: 14px; line-height: 1.75; overflow-wrap: anywhere; white-space: pre-wrap; }
+.scene-hero-note { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 6px; max-width: 64em; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.scene-hero-note > svg { flex-shrink: 0; margin-top: 4px; }
+
+/* The scene in a sentence: what a search in it looks through and what its results show */
+.scene-brief { display: flex; gap: 10px; margin-top: 16px; padding: 13px 16px; border: 1px solid #d7e2ff; border-radius: 12px; background: #f5f8ff; color: #334155; }
+.scene-brief > svg { flex-shrink: 0; margin-top: 4px; color: var(--primary); }
+.scene-brief-body { display: grid; gap: 10px; min-width: 0; }
+.scene-brief-body > p { max-width: 62em; margin: 0; font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; }
+.scene-brief.is-off { border-color: var(--border); background: #f6f7f8; color: #475569; }
+.scene-brief.is-off > svg { color: #94a3b8; }
+.scene-coverage { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; color: #475569; font-size: 13px; }
+.scene-coverage-figure strong { color: #1f2a3a; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.scene-coverage-note { color: var(--muted); font-size: 12px; }
+
+/* Rules and labels: the tabs stay in view while a long table scrolls under them */
+.scene-management .scene-tabs { position: sticky; top: 0; z-index: 2; flex-wrap: wrap; gap: 0 26px; margin-top: 16px; padding: 0; border-top: 0; border-bottom: 1px solid var(--border); background: var(--scene-panel); overflow: visible; }
+.scene-management .scene-tabs button { display: inline-flex; align-items: center; gap: 6px; margin-bottom: -1px; padding: 12px 0 10px; font-size: 14px; font-weight: 600; }
+.scene-tab-count { padding: 0 6px; border-radius: 999px; background: #eef2f7; color: #64748b; font-size: 12px; font-weight: 600; line-height: 18px; font-variant-numeric: tabular-nums; }
+.scene-tabs button.active .scene-tab-count { background: var(--primary-soft); color: var(--primary); }
+
+.scene-pane { min-width: 0; padding-top: 14px; }
+.scene-pane-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 20px; margin-bottom: 12px; }
+.scene-pane-head > p { flex: 1 1 320px; min-width: 0; max-width: 60em; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.75; }
+.scene-pane-head > .mg-btn { flex-shrink: 0; }
+.scene-pane-empty { border: 1px dashed #d5dce7; border-radius: 12px; }
+.scene-pane-empty .mg-empty { padding: 30px 20px 26px; }
+.scene-pane-empty .mg-empty p { margin-bottom: 0; }
+
+.scene-management .scene-table-scroll { border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+.scene-management .scene-table { min-width: 460px; font-size: 13px; }
+.scene-management .scene-table th { padding: 9px 14px; background: #f6f7f8; color: #475569; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.scene-management .scene-table td { padding: 11px 14px; vertical-align: middle; }
+.scene-management .scene-table tbody tr:last-child td { border-bottom: 0; }
+.scene-management .scene-table tbody tr:hover { background: #fafbfe; }
+.scene-management .scene-table tr.is-off td { color: #7b8494; }
+.scene-rule-target, .scene-rule-label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 8px; min-width: 0; }
+.scene-rule-target strong { color: #1f2a3a; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.scene-rule-target code, .scene-rule-label code { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.scene-rule-target small, .scene-rule-label small { color: var(--muted); font-size: 12px; }
+.scene-rule-kind { align-self: center; padding: 0 7px; border-radius: 6px; font-size: 11px; font-weight: 600; line-height: 19px; white-space: nowrap; }
+.scene-rule-kind.is-category { background: var(--primary-soft); color: var(--primary); }
+.scene-rule-kind.is-cuisine { background: #eaf5ee; color: #2f7d4a; }
+.scene-label-chip { align-self: center; padding: 0 9px; border: 1px solid #cfe0ff; border-radius: 999px; background: #f4f8ff; color: #1d4ed8; font-size: 12px; font-weight: 600; line-height: 20px; overflow-wrap: anywhere; }
+.scene-label-chip.is-off { border-color: var(--border); background: #f3f4f6; color: #7b8494; }
+.scene-muted { color: #94a3b8; }
+.scene-number { font-variant-numeric: tabular-nums; }
+.scene-state { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.scene-state::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.scene-state.is-on { color: #2f7d4a; }
+.scene-state.is-off { color: #7b8494; }
+/* The actions take the room they need; the rest goes to what the row is about */
+.scene-rules-table th:last-child, .scene-rules-table td:last-child, .scene-labels-table th:last-child, .scene-labels-table td:last-child { width: 1%; }
+.scene-table-actions { display: flex; gap: 2px 14px; }
+.scene-table-actions .text-button { padding: 2px 0; white-space: nowrap; }
+.scene-table-actions .text-button.is-danger { color: #b42318; }
+.scene-table-actions .text-button:disabled { color: var(--muted); }
+
+.scene-created, .scene-trace { display: block; margin: 16px 0 0; color: #94a3b8; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.scene-created + .scene-trace { margin-top: 2px; }
+
+.scene-management .mg-btn.scene-danger { border-color: #c2412f; background: #c2412f; color: #fff; }
+.scene-management .mg-btn.scene-danger:hover:not(:disabled) { border-color: #a8382a; background: #a8382a; }
+.scene-management .mg-btn.scene-danger-quiet { border-color: #f1c4be; background: #fdf0ee; color: #b42318; }
+.scene-management .mg-btn.scene-danger-quiet:hover:not(:disabled) { border-color: #e9a59c; background: #fbe4e0; }
+.scene-management .scene-confirm { margin: 0; padding: 16px 18px; color: #1f2f4d; font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; }
+.scene-management .scene-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid rgba(148, 163, 184, .22); }
+
+/* ---- nothing picked: how a scene takes part in a search ---- */
+.scene-guide { display: grid; gap: 16px; max-width: 1000px; }
+.scene-guide h2 { margin: 0; color: #1f2a3a; font-size: 18px; font-weight: 700; line-height: 1.4; }
+.scene-flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 12px; background: #fff; list-style: none; overflow: hidden; }
+.scene-flow li { position: relative; display: grid; align-content: start; gap: 6px; min-width: 0; padding: 16px 16px 18px 22px; }
+.scene-flow li + li { border-left: 1px solid var(--border); }
+/* Each step feeds the next: the joint points at it */
+.scene-flow li + li::before { content: ''; position: absolute; left: -7px; top: 26px; width: 12px; height: 12px; border-top: 1px solid #c9d3e0; border-right: 1px solid #c9d3e0; background: #fff; transform: rotate(45deg); }
+.scene-flow-icon { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; background: var(--primary-soft); color: var(--primary); }
+.scene-flow strong { color: #1f2a3a; font-size: 15px; font-weight: 700; }
+.scene-flow p { margin: 0; color: #5b6676; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.scene-effects { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.scene-effects > div { min-width: 0; padding: 13px 16px; border: 1px solid #c6e7d2; border-radius: 12px; background: #f3fbf6; }
+.scene-effects > div.is-sync { border-color: #f1d9b5; background: #fffaf2; }
+.scene-effects h3 { margin: 0 0 4px; color: #15803d; font-size: 14px; font-weight: 700; }
+.scene-effects .is-sync h3 { color: #92400e; }
+.scene-effects p { margin: 0; color: #334155; font-size: 13px; line-height: 1.75; overflow-wrap: anywhere; }
+.scene-guide-hint { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.75; }
+
+/* ---- the full sync ---- */
+.scene-management .scene-sync-panel { display: grid; gap: 14px; min-width: 0; max-width: 1000px; }
+.scene-management .scene-sync-panel h2 { margin: 0; color: #1f2a3a; font-size: 18px; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
 .scene-management .scene-sync-intro, .scene-management .scene-sync-progress { display: grid; gap: 8px; min-width: 0; }
-.scene-management .scene-sync-intro p { margin: 0; color: #334155; font-size: 14px; line-height: 1.8; }
+.scene-management .scene-sync-intro p { max-width: 62em; margin: 0; color: #334155; font-size: 14px; line-height: 1.8; }
 .scene-management .scene-sync-intro .scene-sync-when { color: var(--muted); font-size: 13px; }
 .scene-management .scene-sync-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .scene-management .scene-sync-state { display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 999px; background: #eef2f7; color: #64748b; font-size: 12px; line-height: 26px; }
@@ -109,28 +239,38 @@
 .scene-management .scene-sync-repair-result .is-ok { color: #2f7d4a; }
 .scene-management .scene-sync-repair-result .is-warn { color: #9a6700; }
 .scene-management .scene-sync-repair-result ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: 12px; line-height: 1.8; }
-.scene-management .scene-sync-repair-result code { margin-right: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; overflow-wrap: anywhere; }
+.scene-management .scene-sync-repair-result code { margin-right: 8px; font-size: 11px; overflow-wrap: anywhere; }
 .scene-management .scene-sync-limit { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; color: #334155; }
 .scene-management .scene-sync-limit input { width: 90px; height: 32px; padding: 0 8px; border: 1px solid #d7e0ee; border-radius: 8px; font: inherit; }
 .scene-management .scene-sync-confirm { padding: 16px; font-size: 14px; line-height: 1.8; }
 .scene-management .scene-sync-confirm p { margin: 0; }
-@media (max-width: 760px) {
+
+/* ---- narrower detail pane ---- */
+@container scene-detail (max-width: 760px) {
+  .scene-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .scene-flow li:nth-child(3) { border-left: 0; }
+  .scene-flow li:nth-child(n + 3) { border-top: 1px solid var(--border); }
+  .scene-flow li:nth-child(3)::before { display: none; }
   .scene-management .scene-sync-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+@container scene-detail (max-width: 560px) {
+  .scene-hero { grid-template-columns: minmax(0, 1fr); }
+  .scene-hero-actions { justify-content: flex-start; }
+  .scene-effects { grid-template-columns: minmax(0, 1fr); }
+  .scene-flow { grid-template-columns: minmax(0, 1fr); }
+  .scene-flow li + li { border-top: 1px solid var(--border); border-left: 0; }
+  /* Stacked, the joint points down */
+  .scene-flow li + li::before, .scene-flow li:nth-child(3)::before { display: block; left: 32px; top: -7px; transform: rotate(135deg); }
+  .scene-management .scene-sync-controls { flex-direction: column; align-items: stretch; }
+}
 
-@container scene-details (max-width: 719px) {
-  .scene-detail-header, .scene-detail-actions { width: 100%; }
+@media (max-width: 800px) {
+  /* One pane at a time, filling the height left under the page head; each scrolls on its own. */
+  .scene-layout { grid-template-columns: minmax(0, 1fr); }
+  .scene-layout[data-pane=detail] > .scene-list, .scene-layout[data-pane=list] > .scene-detail { display: none; }
+  .scene-layout > .scene-list { align-self: stretch; }
+  .scene-back { display: inline-flex; }
+  .scene-sync-close { display: none; }
+  .scene-detail-scroll { padding: 14px 14px 16px; }
+  .scene-hero-name { font-size: 20px; }
 }
-@container scene-details (max-width: 479px) {
-  .scene-detail-actions, .scene-detail-primary-actions { display: flex; flex-direction: column; align-items: stretch; width: 100%; }
-  .scene-detail-danger-actions { width: 100%; }
-  .scene-summary > div { grid-template-columns: 1fr; }
-  .scene-sync-controls { flex-direction: column; align-items: stretch; }
-}
-.scene-management .scene-details[data-scene-width=medium] .scene-detail-header,
-.scene-management .scene-details[data-scene-width=medium] .scene-detail-actions { width: 100%; }
-.scene-management .scene-details[data-scene-width=compact] .scene-detail-actions,
-.scene-management .scene-details[data-scene-width=compact] .scene-detail-primary-actions { display: flex; flex-direction: column; align-items: stretch; width: 100%; }
-.scene-management .scene-details[data-scene-width=compact] .scene-detail-danger-actions { width: 100%; }
-.scene-management .scene-details[data-scene-width=compact] .scene-summary > div { grid-template-columns: 1fr; }
-.scene-management .scene-details[data-scene-width=compact] .scene-sync-controls { flex-direction: column; align-items: stretch; }

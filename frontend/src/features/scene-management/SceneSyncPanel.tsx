@@ -30,9 +30,9 @@ export function SceneSyncPanel({ apiBase, configBusy }: { apiBase: string; confi
 
   return <section className="scene-sync-panel">
     <div className="scene-sync-intro">
-      <h3>全量同步到向量库</h3>
-      <p>按当前的场景规则重新计算每张已入库图片的场景归属，再把它的类别、场景、食物状态和标注状态写进向量库，让检索过滤和数据库一致。</p>
-      <p className="scene-sync-when">什么时候需要：改了场景规则、移动了类别或改了菜系之后；或者图片数据页出现「待同步」的图片。单张图片的修改在保存时已经自动同步，不用跑这里。</p>
+      <h2>全量同步到向量库</h2>
+      <p>按当前的场景配置重新计算每张已入库图片的场景归属，再把它的类别、场景、食物状态和标注状态写进向量库，让检索过滤和数据库一致。对全部场景、全部已入库的图片生效，不是只同步某一个场景。</p>
+      <p className="scene-sync-when">什么时候需要：增删了收录规则或改了规则的类别、菜系，启用、停用了场景或开关了全包含之后；图片数据页出现「待同步」的图片，或者移动类别、改菜系后有图片没同步完，也在这里补上。单张图片的修改在保存时已经自动同步，不用跑这里。</p>
     </div>
 
     <div className="scene-sync-controls">

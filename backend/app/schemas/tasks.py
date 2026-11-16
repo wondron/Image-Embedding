@@ -47,15 +47,25 @@ class IndexTaskItem(BaseModel):
 
 
 class IndexTaskCounts(BaseModel):
-    succeeded: int
+    succeeded: int = Field(..., description="成功记录的条数：一次上传记一条，不是图片张数（同一张图重复上传会有多条）")
     failed: int
     image_deleted: int = Field(..., description="成功记录里图片之后被删除了的条数（也算在 succeeded 里）")
+    repeated: int = Field(
+        ...,
+        description=(
+            "成功记录里的重复上传：图片仍在图库，但它在这次上传之前就已经入库（new_image=false），这次没有新增图片。"
+            "也算在 succeeded 里，和 image_deleted 不重叠；succeeded - image_deleted - repeated 就是新入库且仍在图库的图片数"
+        ),
+    )
 
 
 class IndexTaskListResponse(BaseModel):
     ok: Literal[True] = True
     status: IndexTaskStatus | None = Field(..., description="本次的结果筛选；null 表示全部")
     image_state: IndexTaskImageState | None = Field(..., description="本次的图片状态筛选（只选成功记录）；null 表示不筛")
+    new_image: bool | None = Field(
+        ..., description="本次的是否新图筛选（只选成功记录）：true 新入库 / false 重复上传；null 表示不筛"
+    )
     page: int
     page_size: int
     total: int = Field(..., description="符合筛选的记录数")

@@ -39,6 +39,8 @@ export interface ListIndexTasksOptions extends TaskRequestOptions {
   status?: IndexTaskStatus | null
   /** Succeeded records whose image is still stored / was deleted since; null / undefined: not filtered. */
   imageState?: IndexTaskImageState | null
+  /** Succeeded records that stored a new image (true) / repeated one already stored (false); null / undefined: not filtered. */
+  newImage?: boolean | null
   page?: number
   pageSize?: number
 }
@@ -53,24 +55,33 @@ function unreadable(status: number, traceId: string | null): ApiError {
   return new ApiError('任务接口返回的数据格式不正确，请刷新后重试。', { status, traceId, code: 'TASK_PROTOCOL_ERROR' })
 }
 
-/** GET /api/index-tasks: one record per indexed file, newest first. */
-export async function listIndexTasks({ status, imageState, page = 1, pageSize = 20, baseUrl, signal }: ListIndexTasksOptions = {}): Promise<IndexTaskPage> {
+/**
+ * GET /api/index-tasks: one record per indexed file, newest first. A record is one upload: the
+ * same image uploaded twice has two succeeded records (the second with `newImage` false), so
+ * `counts.succeeded` is not a number of images; `newImageCount(counts)` is.
+ */
+export async function listIndexTasks({ status, imageState, newImage, page = 1, pageSize = 20, baseUrl, signal }: ListIndexTasksOptions = {}): Promise<IndexTaskPage> {
   const query = new URLSearchParams({ page: String(page), page_size: String(Math.min(pageSize, MAX_TASK_PAGE_SIZE)) })
   if (status) query.set('status', status)
   if (imageState) query.set('image_state', imageState)
+  if (typeof newImage === 'boolean') query.set('new_image', String(newImage))
   const result = await requestJsonResult('/api/index-tasks', { baseUrl, signal, query, labels: TASK_LABELS })
   const body = untrusted<IndexTaskListResponseWire>(result.body)
   const counts = untrusted<IndexTaskListResponseWire['counts']>(body?.counts)
   const nonnegative = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
   const imageDeleted = counts?.image_deleted ?? 0
+  // An older server does not count the repeats: none are told apart then
+  const repeated = counts?.repeated ?? 0
   const ids = new Set<number>()
   // Validate before the existing mapper can default numbers or drop malformed rows.
   if (body?.ok !== true || !Array.isArray(body.items)
     || !nonnegative(body.total) || !nonnegative(counts?.succeeded) || !nonnegative(counts?.failed)
-    || !nonnegative(imageDeleted) || imageDeleted > counts.succeeded
+    || !nonnegative(imageDeleted) || !nonnegative(repeated) || imageDeleted + repeated > counts.succeeded
     || !nonnegative(body.page) || body.page < 1 || body.page !== page
     || !nonnegative(body.page_size) || body.page_size < 1 || body.page_size !== Math.min(pageSize, MAX_TASK_PAGE_SIZE)
-    || body.status !== (status ?? null) || (body.image_state ?? null) !== (imageState ?? null)) throw unreadable(result.status, result.traceId)
+    || body.status !== (status ?? null) || (body.image_state ?? null) !== (imageState ?? null)
+    // A server that ignores the filter (an older build) would list every succeeded record under this view
+    || (body.new_image ?? null) !== (newImage ?? null)) throw unreadable(result.status, result.traceId)
   for (const raw of body.items) {
     const item = untrusted<{ id: number }>(raw)
     if (!nonnegative(item?.id) || item.id < 1 || ids.has(item.id)) throw unreadable(result.status, result.traceId)

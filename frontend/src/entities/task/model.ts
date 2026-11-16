@@ -49,11 +49,29 @@ export interface IndexTask {
   image: IndexTaskImage | null
 }
 
+/**
+ * Records by outcome. A record is one upload, not one image: the same image uploaded again
+ * succeeds again without adding anything to the library.
+ */
 export interface IndexTaskCounts {
+  /** Every succeeded record: uploads, not images. */
   succeeded: number
   failed: number
   /** Succeeded records whose image was deleted since (counted in `succeeded` too). */
   imageDeleted: number
+  /**
+   * Succeeded records of an image still in the library that was already stored before that upload
+   * (`new_image` false): repeats. Counted in `succeeded` too, never in `imageDeleted`.
+   */
+  repeated: number
+}
+
+/**
+ * How many images the recorded uploads put in the library and are still there: the succeeded
+ * records that stored a new image. This, not `succeeded`, is what compares with the library.
+ */
+export function newImageCount(counts: IndexTaskCounts): number {
+  return Math.max(0, counts.succeeded - counts.imageDeleted - counts.repeated)
 }
 
 export interface IndexTaskPage {
@@ -62,6 +80,8 @@ export interface IndexTaskPage {
   status: IndexTaskStatus | null
   /** The image-state filter of this page; null: not filtered. */
   imageState: IndexTaskImageState | null
+  /** The new-image filter of this page (true: stored a new image / false: repeats); null: not filtered. */
+  newImage: boolean | null
   page: number
   pageSize: number
   /** Records matching the filter. */
@@ -158,10 +178,16 @@ export function toIndexTaskPage(payload: unknown): IndexTaskPage | null {
   return {
     status: parseIndexTaskStatus(body.status),
     imageState: parseIndexTaskImageState(body.image_state),
+    newImage: asBoolean(body.new_image) ?? null,
     page: page !== null && page >= 1 ? page : 1,
     pageSize: pageSize !== null && pageSize >= 1 ? pageSize : 20,
     total: count(body.total),
-    counts: { succeeded: count(counts?.succeeded), failed: count(counts?.failed), imageDeleted: count(counts?.image_deleted) },
+    counts: {
+      succeeded: count(counts?.succeeded),
+      failed: count(counts?.failed),
+      imageDeleted: count(counts?.image_deleted),
+      repeated: count(counts?.repeated),
+    },
     items: untrustedList<IndexTaskWire>(body.items).map(toIndexTask).filter((task): task is IndexTask => task !== null),
   }
 }

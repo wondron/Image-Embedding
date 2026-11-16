@@ -5,15 +5,18 @@ import { ApiError } from '../../shared/api'
 export const TASK_PAGE_SIZE = 20
 
 /**
- * What the history shows. A deleted image keeps its record, so the succeeded records split in two:
- * 成功 (the image is still in the library) and 图片已删除 (it was deleted since).
+ * What the history shows. Every record is in exactly one view besides 全部. The succeeded records
+ * split in three: 新入库 (the upload stored a new image, still in the library), 重复上传 (the image
+ * was already stored: nothing was added) and 图片已删除 (the image was deleted since; its record
+ * is kept). Only 新入库 counts images: the other two would count one image twice or not at all.
  */
-export type TaskView = 'all' | 'succeeded' | 'deleted' | 'failed'
-export const TASK_VIEWS: Readonly<Record<TaskView, { status: IndexTaskStatus | null; imageState: IndexTaskImageState | null }>> = {
-  all: { status: null, imageState: null },
-  succeeded: { status: 'succeeded', imageState: 'present' },
-  deleted: { status: 'succeeded', imageState: 'deleted' },
-  failed: { status: 'failed', imageState: null },
+export type TaskView = 'all' | 'stored' | 'repeated' | 'deleted' | 'failed'
+export const TASK_VIEWS: Readonly<Record<TaskView, { status: IndexTaskStatus | null; imageState: IndexTaskImageState | null; newImage: boolean | null }>> = {
+  all: { status: null, imageState: null, newImage: null },
+  stored: { status: 'succeeded', imageState: 'present', newImage: true },
+  repeated: { status: 'succeeded', imageState: 'present', newImage: false },
+  deleted: { status: 'succeeded', imageState: 'deleted', newImage: null },
+  failed: { status: 'failed', imageState: null, newImage: null },
 }
 
 interface Query { view: TaskView; page: number; revision: number; corrected: boolean }
