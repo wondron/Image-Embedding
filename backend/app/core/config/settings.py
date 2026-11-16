@@ -1,26 +1,29 @@
 """进程级设置，以及从生效配置里解析连接参数。
 
-参数只有两个来源：
-- app.core.config.constant：项目定下来后基本不变的值（服务名、端口、Nacos 接入点、驱动名……）；
+参数有三个来源：
+- app.core.config.constant：项目定下来后基本不变的值（服务名、端口、Nacos 读哪些 dataId、驱动名……）；
+- 环境变量：NACOS_ENV（环境标识）和 Nacos 接入参数 NACOS_*（NacosSettings）。它们决定去哪里读配置，
+  没法放进配置本身。本地调试写在 backend/.env（模板 .env.example，import 本模块时读入），
+  docker compose 部署写在 compose 文件的 environment 里（镜像里没有 .env）；
 - 生效配置：Nacos 逐键覆盖本地 YAML（config/param/config.yaml），见 app.core.config.nacos。
   密码、连接参数、模型等随环境变化的都在这里。
 
-Settings 只由常量组成，import 时创建一次。连接参数在用到时从生效配置解析：
+Settings 由常量和环境变量组成，import 时创建一次。连接参数在用到时从生效配置解析：
 PostgresSettings.from_config（POSTGRES_CONFIG）、ImageStorageSettings.from_config
 （IMAGE_STORAGE_CONFIG）；Qdrant 直接用 QDRANT_CONFIG（app.clients.qdrant.QdrantConnection）。
-
-环境变量只剩 Nacos 自己的引导参数（NACOS_ENV 选 prod / test 等）：它们决定去哪个
-namespace 读配置，没法放进配置本身。
 """
 
 from __future__ import annotations
 
 import ipaddress
+import math
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, TypeVar
 
+from dotenv import load_dotenv
 from sqlalchemy.engine import URL
 
 from app.core.config.constant import (
@@ -32,25 +35,29 @@ from app.core.config.constant import (
     IMAGE_STORAGE_DEFAULT_PUBLIC_BASE_URL,
     IMAGE_STORAGE_DEFAULT_REGION,
     LOGGER_NAME,
-    NACOS_CONFIG_PROFILES,
-    NACOS_CONNECT_TIMEOUT_SECONDS,
-    NACOS_ENABLED,
-    NACOS_POLL_ENABLED,
-    NACOS_POLL_INTERVAL_SECONDS,
-    NACOS_REQUEST_TIMEOUT_SECONDS,
-    NACOS_RETRY_INTERVAL_SECONDS,
+    NACOS_DATA_ID_LIST,
     PG_CONNECT_TIMEOUT_SECONDS,
     PG_DEFAULT_PORT,
     PG_DRIVER,
     SERVICE_NAME,
     VERSION,
-    NacosProfile,
 )
 from app.core.config.key_prefix import normalize_key_prefix
+
+ENV_FILE = Path(__file__).resolve().parents[3] / ".env"  # backend/.env
+
+
+def load_env_file(path: Path = ENV_FILE) -> None:
+    """把 .env 里的变量补进环境变量（本地调试用）。已经设置的不覆盖：命令行、compose 传进来的优先。"""
+    load_dotenv(path, override=False)
+
+
+load_env_file()  # 必须在下面 Settings() 读环境变量之前
 
 _T = TypeVar("_T")
 _TRUE = {"1", "true", "yes", "y", "on"}
 _FALSE = {"0", "false", "no", "n", "off", ""}
+_ENVS = ("prod", "test")
 
 
 def _parse_bool(value: Any, what: str) -> bool:
@@ -65,25 +72,44 @@ def _parse_bool(value: Any, what: str) -> bool:
     raise ValueError(f"{what} must be true or false, got {value!r}")
 
 
-def _env_bool(name: str, default: bool = False) -> bool:
-    value = os.getenv(name)
+def _env_text(env: Mapping[str, str], name: str) -> str:
+    return (env.get(name) or "").strip()
+
+
+def _env_flag(env: Mapping[str, str], name: str, default: bool) -> bool:
+    value = env.get(name)
     return default if value is None else _parse_bool(value, name)
 
 
-def _nacos_profile_name() -> str:
-    """NACOS_ENV 选中的 profile（prod / test），也就是本进程的运行环境。"""
+def _env_seconds(env: Mapping[str, str], name: str, default: float) -> float:
+    text = _env_text(env, name)
+    if not text:
+        return default
+    try:
+        return float(text)
+    except ValueError:
+        raise ValueError(f"{name} must be a number of seconds, got {text!r}") from None
+
+
+def _env_name() -> str:
+    """NACOS_ENV：本进程的运行环境（prod / test），未设置或为空时按 prod。"""
     return os.getenv("NACOS_ENV", "").strip().lower() or "prod"
 
 
 @dataclass(frozen=True, slots=True)
 class ApplicationSettings:
     service_name: str = SERVICE_NAME
-    # 和 Nacos profile 一致（prod / test），日志、/version、/config_info 都报这个
-    env: str = field(default_factory=_nacos_profile_name)
+    # 环境标识（NACOS_ENV）：日志、/version、/config_info 都报这个，reset_data 在 prod 下拒绝执行。
+    # 它只是标识，连哪个 Nacos 环境看 NACOS_NAMESPACE 等，两者要成套设置
+    env: str = field(default_factory=_env_name)
     version: str = VERSION
     host: str = "0.0.0.0"
     port: int = DEFAULT_PORT
     reload: bool = True
+
+    def __post_init__(self) -> None:
+        if self.env not in _ENVS:
+            raise ValueError(f"NACOS_ENV must be 'prod' or 'test', got {self.env!r}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,43 +169,73 @@ class ConcurrencySettings:
     thread_name_prefix: str = "det-pool"
 
 
-_NACOS_ENV_OVERRIDES = (
-    ("server_addresses", "NACOS_SERVER_ADDR"),
-    ("namespace", "NACOS_NAMESPACE"),
-    ("username", "NACOS_USERNAME"),
-    ("password", "NACOS_PASSWORD"),
-    ("group", "NACOS_GROUP"),
+_NACOS_SECONDS = (  # (字段, 环境变量)
+    ("poll_interval_seconds", "NACOS_POLL_INTERVAL_SECONDS"),
+    ("retry_interval_seconds", "NACOS_RETRY_INTERVAL_SECONDS"),
+    ("connect_timeout_seconds", "NACOS_CONNECT_TIMEOUT_SECONDS"),
+    ("request_timeout_seconds", "NACOS_REQUEST_TIMEOUT_SECONDS"),
 )
-
-
-def _nacos_profiles() -> tuple[NacosProfile, ...]:
-    """Built-in profiles with NACOS_* environment overrides (credentials belong in env)."""
-    overrides = {key: os.getenv(env, "").strip() for key, env in _NACOS_ENV_OVERRIDES}
-    data_ids = [item.strip() for item in os.getenv("NACOS_DATA_IDS", "").split(",") if item.strip()]
-    profiles = []
-    for base in NACOS_CONFIG_PROFILES:
-        profile = dict(base)
-        profile.update({key: value for key, value in overrides.items() if value})
-        if data_ids:
-            profile["data_id_list"] = data_ids
-        profiles.append(profile)
-    return tuple(profiles)  # type: ignore[return-value]
 
 
 @dataclass(frozen=True, slots=True)
 class NacosSettings:
-    profile: str = field(default_factory=_nacos_profile_name)
-    enabled: bool = field(default_factory=lambda: _env_bool("NACOS_ENABLED", NACOS_ENABLED))
-    poll_enabled: bool = field(default_factory=lambda: _env_bool("NACOS_POLL_ENABLED", NACOS_POLL_ENABLED))
-    connect_timeout_seconds: float = NACOS_CONNECT_TIMEOUT_SECONDS
-    request_timeout_seconds: float = NACOS_REQUEST_TIMEOUT_SECONDS
-    poll_interval_seconds: float = NACOS_POLL_INTERVAL_SECONDS
-    retry_interval_seconds: float = NACOS_RETRY_INTERVAL_SECONDS
-    profiles: tuple[NacosProfile, ...] = field(default_factory=_nacos_profiles)
+    """Nacos 接入参数。读哪些 dataId 在 constant.NACOS_DATA_ID_LIST，其余都来自环境变量（from_env）：
+
+    NACOS_ENABLED          是否读 Nacos。默认 false：只用本地 YAML，下面的都可以不设
+    NACOS_SERVER_ADDR      地址，如 http://nacos.example.com:8848  ┐
+    NACOS_NAMESPACE        namespace ID                            ├ 开启时必填
+    NACOS_GROUP            group                                   ┘
+    NACOS_USERNAME / NACOS_PASSWORD   账号密码；Nacos 没开鉴权时留空
+    NACOS_POLL_ENABLED     启动后是否定时重读（默认 true）
+    NACOS_POLL_INTERVAL_SECONDS / NACOS_RETRY_INTERVAL_SECONDS     重读间隔 / 失败后重试间隔（默认 10 / 5）
+    NACOS_CONNECT_TIMEOUT_SECONDS / NACOS_REQUEST_TIMEOUT_SECONDS  HTTP 连接 / 读取超时（默认 2 / 3）
+    """
+
+    enabled: bool = False
+    server_addr: str = ""
+    namespace: str = ""
+    group: str = ""
+    username: str = ""
+    password: str = field(default="", repr=False)
+    data_ids: tuple[str, ...] = tuple(NACOS_DATA_ID_LIST)
+    poll_enabled: bool = True
+    poll_interval_seconds: float = 10.0
+    retry_interval_seconds: float = 5.0
+    connect_timeout_seconds: float = 2.0
+    request_timeout_seconds: float = 3.0
 
     def __post_init__(self) -> None:
-        if self.profile not in {"prod", "test"}:
-            raise ValueError("NACOS_ENV must be 'prod' or 'test'")
+        for key, env_name in _NACOS_SECONDS:
+            value = getattr(self, key)
+            if not (value > 0 and math.isfinite(value)):  # NaN、inf 也不行
+                raise ValueError(f"{env_name} must be a positive number of seconds, got {value!r}")
+        if not self.enabled:
+            return
+        required = (("NACOS_SERVER_ADDR", self.server_addr), ("NACOS_NAMESPACE", self.namespace),
+                    ("NACOS_GROUP", self.group))
+        missing = [name for name, value in required if not value]
+        if missing:
+            raise ValueError(
+                f"NACOS_ENABLED=true 但没有设置 {', '.join(missing)}：本地调试写在 backend/.env，"
+                "docker compose 写在 environment 里；不读 Nacos 就设 NACOS_ENABLED=false"
+            )
+        if not self.data_ids:
+            raise ValueError("NACOS_DATA_ID_LIST in app/core/config/constant.py is empty")
+
+    @classmethod
+    def from_env(cls, environ: Mapping[str, str] | None = None) -> NacosSettings:
+        env = os.environ if environ is None else environ
+        defaults = cls()
+        return cls(
+            enabled=_env_flag(env, "NACOS_ENABLED", defaults.enabled),
+            server_addr=_env_text(env, "NACOS_SERVER_ADDR"),
+            namespace=_env_text(env, "NACOS_NAMESPACE"),
+            group=_env_text(env, "NACOS_GROUP"),
+            username=_env_text(env, "NACOS_USERNAME"),
+            password=_env_text(env, "NACOS_PASSWORD"),
+            poll_enabled=_env_flag(env, "NACOS_POLL_ENABLED", defaults.poll_enabled),
+            **{key: _env_seconds(env, name, getattr(defaults, key)) for key, name in _NACOS_SECONDS},
+        )
 
 
 # -- 生效配置（Nacos / 本地 YAML）里的连接参数 ------------------------------------------
@@ -388,7 +444,7 @@ class Settings:
     predict: PredictSettings = field(default_factory=PredictSettings)
     http_client: HttpClientSettings = field(default_factory=HttpClientSettings)
     concurrency: ConcurrencySettings = field(default_factory=ConcurrencySettings)
-    nacos: NacosSettings = field(default_factory=NacosSettings)
+    nacos: NacosSettings = field(default_factory=NacosSettings.from_env)
     allowed_content_types: frozenset[str] = field(
         default_factory=lambda: frozenset(
             {

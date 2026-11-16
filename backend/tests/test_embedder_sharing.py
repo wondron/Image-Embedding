@@ -69,7 +69,7 @@ class EmbedderSharingTests(unittest.TestCase):
         return embedder
 
     def reload(self, config):
-        snapshot = SimpleNamespace(config=config, profile={"profile": "test", "data_id_list": []})
+        snapshot = SimpleNamespace(config=config, data_ids=())
         return lifespan.apply_nacos_config_update(self.runtime, self.provider, snapshot)
 
     def test_startup_loads_one_model_for_predict_and_retrieval(self):

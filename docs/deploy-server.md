@@ -1,22 +1,25 @@
 # 后端部署到服务器（PostgreSQL / Qdrant / OSS 走远程）
 
 服务器上只跑一个 API 容器（用 GPU），PostgreSQL、Qdrant、OSS 都是远程服务。连接参数和密码由 Nacos 提供：
-容器用环境变量 `NACOS_ENV`（prod / test）选环境，读 dataId `roki-ai-image-search`，按键覆盖镜像里的
-`config/param/config.yaml`。
+Nacos 的开关、地址、namespace、账号是写在 `docker-compose.server.yml` 里的环境变量（prod / test 各一套），
+读的 dataId 在 `backend/app/core/config/constant.py` 的 `NACOS_DATA_ID_LIST`（现在是 `roki-ai-image-search`），
+按键覆盖镜像里的 `config/param/config.yaml`。
 
 | 文件 | 作用 |
 |---|---|
 | `backend/Dockerfile` | 构建镜像：CUDA 12.4 + cuDNN 9 + Python 3.11，代码、模型、配置都打进去 |
 | `backend/.dockerignore` | 不打进镜像的内容（日志、验收截图、测试等） |
-| `backend/docker-compose.server.yml` | 服务器用：只有 `api`，不带 postgres / qdrant |
+| `backend/docker-compose.server.yml` | 服务器用：只有 `api`，不带 postgres / qdrant；Nacos 接入参数写在里面 |
 | `backend/docker-compose.yml` | 本地开发用（带 postgres / qdrant 容器），服务器不用 |
 | `backend/config/`（不在 git 里） | 模型权重（约 3.5 GB）、`config.yaml`、`enums.yaml`；构建镜像的机器上必须有 |
-| 服务器上的 `.env` | `IMAGE`、`NACOS_ENV` 等，供 docker compose 替换变量（后端程序本身不读 `.env`） |
+| 服务器上的 `.env` | 只放 `IMAGE`、`GPU_ID`，供 docker compose 替换变量（后端只认 compose `environment` 里的值） |
 
 ## 1. 先定下来的事
 
 - **配置走 Nacos 还是挂载 YAML。** 默认走 Nacos（项目原本的设计）。服务器连不了 Nacos 时，把填好远程地址的
-  `config.yaml` 挂进容器、`.env` 里设 `NACOS_ENABLED=false`（compose 里有注释好的挂载行）。
+  `config.yaml` 挂进容器、compose 里把 `NACOS_ENABLED` 设为 `"false"`（compose 里有注释好的挂载行）。
+- **这台机器是 prod 还是 test。** compose 里默认 `<<: *nacos-prod`；测试机改成 `<<: *nacos-test`，
+  `NACOS_ENV` 和 namespace、账号一起切换。
 - **镜像怎么到服务器。** `backend/config/` 不在 git 里，服务器上 `git clone` 后直接构建会缺模型。
   推荐在有 `config/` 的机器上构建，再推镜像仓库或 `docker save` 拷过去（第 5 步）。
 - **远程库是新库，还是要带上现有数据。** 新库按第 7 步初始化。要带本地数据：PostgreSQL 用 `pg_dump` / `pg_restore`，
@@ -49,8 +52,8 @@
 
 ## 4. 在 Nacos 里填配置
 
-所选环境的 namespace 见 `backend/app/core/config/constant.py` 的 `NACOS_CONFIG_PROFILES`，dataId `roki-ai-image-search`，
-group `ROKI_AI_GROUP`。按 `config.yaml` 的结构只写要覆盖的键，没写的键沿用镜像里的 `config.yaml`：
+所选环境的 namespace 见 `docker-compose.server.yml` 的 `x-nacos-prod` / `x-nacos-test`，dataId `roki-ai-image-search`
+（`NACOS_DATA_ID_LIST`），group `ROKI_AI_GROUP`。按 `config.yaml` 的结构只写要覆盖的键，没写的键沿用镜像里的 `config.yaml`：
 
 ```yaml
 POSTGRES_CONFIG:
@@ -99,16 +102,15 @@ IMAGE_STORAGE_CONFIG:
 
 ```
 /opt/image-embedding/
-├── docker-compose.server.yml   # 从 backend/ 拷过来
+├── docker-compose.server.yml   # 从 backend/ 拷过来；测试机把 <<: *nacos-prod 改成 *nacos-test
 ├── .env
 └── output/                     # 日志，对应容器里的 /app/output
 ```
 
-`.env`（`NACOS_ENV` 必填，不填 compose 会拒绝启动，避免测试机连上生产库）：
+`.env`（只给 compose 替换变量用，Nacos 参数不放这里）：
 
 ```
 IMAGE=roki-ai-image-embedding:20261115
-NACOS_ENV=prod
 # GPU_ID=0          # 多卡时选用哪张
 ```
 
@@ -167,8 +169,15 @@ curl -s http://127.0.0.1:8320/api/health        # 200，embedding / qdrant / pos
 
 | 现象 | 先看 |
 |---|---|
+<<<<<<< HEAD
 | `/api/config_info` 的 `source` 是 `yaml` | 跑 `check_nacos_connectivity.py`（先核对脚本顶部环境及配置）；`output/logs/app.log` 里搜「Nacos 不可用」 |
 | `/api/health` 503，qdrant 不 ok | 跑 `check_qdrant_connectivity.py`；6333 / 6334 是否放通，`api_key`，`prefer_grpc` |
+=======
+| `/api/config_info` 的 `source` 是 `yaml` | 服务器到 Nacos 8848 不通，或账号、namespace 不对；`output/logs/app.log` 里搜「Nacos 不可用」 |
+| 容器一启动就退出，日志里有 `NACOS_ENABLED=true 但没有设置 …` | compose 的 `environment` 里缺了列出的变量 |
+| `/api/config_info` 的 `app_env` 和 `nacos_namespace` 对不上 | compose 里单独改了 `NACOS_ENV`：用 `<<: *nacos-prod` / `*nacos-test` 成套切换 |
+| `/api/health` 503，qdrant 不 ok | 6333 / 6334 是否放通，`api_key`，`prefer_grpc` |
+>>>>>>> 3d45480 (修改nacos读取逻辑)
 | `/api/health` 503，postgres 不 ok | 白名单、账号；跑 `check_postgres_connectivity.py` |
 | `NOT_READY`：没有 current 的 embedding 模型 | 第 7 步登记模型 |
 | `EMBEDDING_MODEL_MISMATCH` | 镜像里没有当前版本的权重（用了缺模型的镜像，或权重文件被换过） |
@@ -183,6 +192,6 @@ curl -s http://127.0.0.1:8320/api/health        # 200，embedding / qdrant / pos
   `multitask_seg.onnx`）。确认 Nacos 里也没有指向它之后，可以在 `.dockerignore` 里排除，镜像小 1.2 GB。
 - 本地 `docker-compose.yml` 现在起不来：它引用的 `docker-entrypoint-compose.sh` 不在仓库里（git 里也从来没有过）；
   另外 `./save_images:/app/save_imagesoutput` 的容器路径多了 `output`。
-- `app/core/config/constant.py` 里有 prod / test 的 Nacos 密码，在 git 里。可以改用 `NACOS_USERNAME` / `NACOS_PASSWORD`
-  环境变量（server compose 已经透传），并考虑换掉现有密码。
+- prod / test 的 Nacos 密码从 `constant.py` 挪到了 `docker-compose.server.yml`：镜像里不再有，但仍在 git 里
+  （git 历史里也有）。不想放 git：把 `NACOS_PASSWORD` 改成 `${NACOS_PASSWORD}`，值放服务器的 `.env`；并考虑换掉现有密码。
 - README「Docker 本地后台构建」一节说 compose 用的是远端 Harbor 镜像，和现在的 `docker-compose.yml` 不一致。

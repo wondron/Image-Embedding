@@ -61,14 +61,16 @@ class BaseDataDefinitionTests(unittest.TestCase):
         from scripts import reset_data
         from scripts.seed_data import Target
 
-        target = Target(config={}, pg=None, profile="prod", nacos_enabled=True)
+        target = Target(config={}, pg=None, env="prod", nacos_enabled=True)
         target.describe = lambda: "prod target"  # type: ignore[method-assign]
         with patch.object(reset_data, "load_target", return_value=target), \
                 patch.object(reset_data, "create_db_engine") as engine, \
                 contextlib.redirect_stderr(io.StringIO()) as err, contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(reset_data.main(["--yes"]), 2)
         engine.assert_not_called()
-        self.assertIn("NACOS_ENV=test", err.getvalue())
+        # NACOS_ENV is only a label: the advice must be to switch the connection too, not to relabel
+        self.assertIn("NACOS_NAMESPACE", err.getvalue())
+        self.assertIn("--allow-prod", err.getvalue())
 
 
 class QdrantClearTests(unittest.TestCase):

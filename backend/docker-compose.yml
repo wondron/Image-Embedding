@@ -27,12 +27,12 @@ services:
     image: roki-ai-image-embedding:local
     container_name: roki-imageembedding
     environment:
-      # Set NACOS_ENV=test to use test; unset or empty defaults to prod.
-      NACOS_ENV: ${NACOS_ENV:-test}
-      # Local compose stack talks to sibling postgres/qdrant via the entrypoint
-      # (it rewrites hosts from the mounted Windows config.yaml). Keep Nacos
-      # off unless you explicitly want it to overlay connection settings.
-      NACOS_ENABLED: ${NACOS_ENABLED:-false}
+      # 本地 compose 连旁边的 postgres / qdrant 容器（entrypoint 改写挂载的 config.yaml 里的地址），默认不读 Nacos。
+      # 要读 Nacos：NACOS_ENABLED 改成 "true"，并照 docker-compose.server.yml 的 x-nacos-test 补上
+      # NACOS_SERVER_ADDR / NACOS_NAMESPACE / NACOS_GROUP / NACOS_USERNAME / NACOS_PASSWORD。
+      # 这里写死值、不用 ${...}：同目录的 .env 是本机调试用的，compose 会拿它做变量替换
+      NACOS_ENV: test
+      NACOS_ENABLED: "false"
     volumes:
       - ./save_images:/app/save_imagesoutput
       - ./output:/app/output

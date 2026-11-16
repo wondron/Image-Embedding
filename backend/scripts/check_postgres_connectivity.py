@@ -104,8 +104,9 @@ def main(argv: list[str] | None = None) -> int:
 
     timeout = max(2, math.ceil(pg.connect_timeout))
     print(f"配置来源：{source.get('source')}；本地文件：{config_path}")
-    if source.get("nacos_profile"):
-        print(f"Nacos 环境：{source['nacos_profile']}")
+    print(f"环境：NACOS_ENV={settings.application.env}")
+    if source.get("nacos_namespace"):
+        print(f"Nacos namespace：{source['nacos_namespace']}")
     if source.get("nacos_status"):
         print(f"Nacos 状态：{source['nacos_status']}")
     print(f"目标：host={pg.host} port={pg.port} database={pg.database} user={pg.user}")

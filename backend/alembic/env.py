@@ -39,13 +39,13 @@ def _database_url() -> URL:
 
     app_config = load_config_once(settings.nacos, settings.config.yaml_path)
     url = PostgresSettings.from_config(app_config).url()
-    # NACOS_ENV defaults to prod: say which database is about to be migrated (password masked)
+    # say which database is about to be migrated (password masked) and where its settings came from
     nacos = settings.nacos
     logging.getLogger("alembic.env").info(
         "target database %s | NACOS_ENV=%s, %s",
         url,
-        nacos.profile,
-        "Nacos over local YAML" if nacos.enabled else "Nacos disabled, local YAML only",
+        settings.application.env,
+        f"Nacos namespace {nacos.namespace} over local YAML" if nacos.enabled else "Nacos disabled, local YAML only",
     )
     return url
 

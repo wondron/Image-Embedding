@@ -13,8 +13,8 @@
 - 全部写入在一个事务里，并持有类别 / 场景配置的写锁（和管理页面的写入互斥），
   要么全部补上，要么什么都不改。
 
-连接哪个库和后端、Alembic 一样：本地 YAML 打底、NACOS_ENV 所选 Nacos 环境覆盖（NACOS_ENV 默认 prod）。
-本机执行前先设 NACOS_ENV=test，或用 NACOS_ENABLED=0 只读本地 YAML。
+连接哪个库和后端、Alembic 一样：本地 YAML 打底，NACOS_ENABLED=true 时 NACOS_* 环境变量指定的 Nacos 覆盖
+（本机写在 backend/.env）；NACOS_ENABLED=false 只读本地 YAML。
 退出码：0 基础数据已齐全；1 有基础数据补不上（见 FAIL 行）或写库失败；2 配置 / 连接 / 表结构问题。
 """
 
@@ -230,14 +230,14 @@ def seed_base_data(conn: Any) -> SeedReport:
 class Target:
     config: dict[str, Any]
     pg: Any  # app.core.config.settings.PostgresSettings
-    profile: str
+    env: str  # NACOS_ENV
     nacos_enabled: bool
 
     def describe(self) -> str:
         source = "Nacos 覆盖本地 YAML" if self.nacos_enabled else "Nacos 已关闭，只读本地 YAML"
         return (
             f"PostgreSQL {self.pg.host}:{self.pg.port}/{self.pg.database}（用户 {self.pg.user}）"
-            f" | NACOS_ENV={self.profile}，{source}"
+            f" | NACOS_ENV={self.env}，{source}"
         )
 
 
@@ -254,9 +254,9 @@ def load_target() -> Target:
         raise SetupError(f"配置不可用：{exc}") from exc
     except Exception as exc:  # YAML 解析错误可能带原文（含密码），不打印细节
         raise SetupError(
-            f"无法加载配置（{type(exc).__name__}）；检查 NACOS_ENV / NACOS_ENABLED 和 config/param/config.yaml"
+            f"无法加载配置（{type(exc).__name__}）；检查 NACOS_* 环境变量（backend/.env）和 config/param/config.yaml"
         ) from exc
-    return Target(config=config, pg=pg, profile=settings.nacos.profile, nacos_enabled=settings.nacos.enabled)
+    return Target(config=config, pg=pg, env=settings.application.env, nacos_enabled=settings.nacos.enabled)
 
 
 def create_db_engine(target: Target) -> Any:

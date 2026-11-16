@@ -1,7 +1,8 @@
-# 服务器部署：只起 API 容器。PostgreSQL / Qdrant / OSS 都是远程服务，连接参数由 Nacos 提供
-# （NACOS_ENV 选 prod / test）。完整步骤见 docs/deploy-server.md。在本文件所在目录执行：
+# 服务器部署：只起 API 容器。PostgreSQL / Qdrant / OSS 都是远程服务，连接参数由 Nacos 提供。
+# Nacos 接入参数（开关、地址、namespace、账号）直接写在下面；读哪些 dataId 在
+# app/core/config/constant.py 的 NACOS_DATA_ID_LIST。完整步骤见 docs/deploy-server.md。在本文件所在目录执行：
 #   docker compose -f docker-compose.server.yml up -d
-# IMAGE、NACOS_ENV 等变量写在同目录的 .env 里，由 docker compose 替换进本文件；后端程序本身不读 .env。
+# 同目录的 .env 只放 IMAGE、GPU_ID 这类给 compose 替换的变量；后端只认 environment 里的值（镜像里没有 .env）。
 # 本地开发（连本机的 postgres / qdrant 容器）仍用 docker-compose.yml。
 
 # 固定项目名：和同目录 docker-compose.yml（项目名 backend）分开，互不当作孤儿容器
@@ -14,21 +15,35 @@ x-logging: &logging
       max-size: "50m"
       max-file: "5"
 
+# 两套 Nacos 环境，在 api.environment 里用 <<: 选一套。NACOS_ENV 是环境标识（日志、/version、
+# reset_data 的 prod 保护看它），和 namespace、账号放在一起成套切换，不要单独改其中一行。
+# 本文件在 git 里，这些密码也就在 git 里；值里有 $ 要写成 $$（compose 会做变量替换）。
+x-nacos-prod: &nacos-prod
+  NACOS_ENV: prod
+  NACOS_NAMESPACE: 239acdd2-c154-4d07-ba96-6d52ebc0dccb
+  NACOS_USERNAME: roki-ai-prod
+  NACOS_PASSWORD: IsAbprjbEGj2ME77jxiOR
+
+x-nacos-test: &nacos-test
+  NACOS_ENV: test
+  NACOS_NAMESPACE: adfc3ec2-a1ea-4b31-9b1a-fafb4228c8ca
+  NACOS_USERNAME: roki-ai-test
+  NACOS_PASSWORD: Q65ILEBfsAmqnPbJqcSig
+
 services:
   api:
     image: ${IMAGE:-roki-ai-image-embedding:local}
     container_name: roki-imageembedding
     environment:
-      # 必填 prod / test。后端不设时默认 prod，这里强制显式选择，避免测试机连上生产库
-      NACOS_ENV: ${NACOS_ENV:?NACOS_ENV must be prod or test}
-      # 远程地址都在 Nacos 里，必须开着。改用下面挂载的 config.yaml 时设为 false
-      NACOS_ENABLED: ${NACOS_ENABLED:-true}
-      # 可选：覆盖 app/core/config/constant.py 里内置的 Nacos 账号；留空就用内置值
-      NACOS_USERNAME: ${NACOS_USERNAME:-}
-      NACOS_PASSWORD: ${NACOS_PASSWORD:-}
+      <<: *nacos-prod  # 测试机改成 *nacos-test
+      # 远程地址都在 Nacos 里，必须开着。改用下面挂载的 config.yaml 时设为 "false"
+      NACOS_ENABLED: "true"
+      NACOS_SERVER_ADDR: http://nacos.myroki.com:8848
+      NACOS_GROUP: ROKI_AI_GROUP
+      # 可选：NACOS_POLL_INTERVAL_SECONDS 等轮询、超时参数，见 backend/.env.example
     volumes:
       - ./output:/app/output  # 日志 output/logs/app.log、platform.log
-      # 可选：不用 Nacos 时，挂载一份填好远程地址的 config.yaml（同时把 NACOS_ENABLED 设为 false）
+      # 可选：不用 Nacos 时，挂载一份填好远程地址的 config.yaml（同时把 NACOS_ENABLED 设为 "false"）
       # - ./config.yaml:/app/config/param/config.yaml:ro
       # 可选：保留接口追加的枚举取值（不挂载时重建容器就丢）。首次挂载前先从仓库复制一份过来
       # - ./enums.yaml:/app/config/param/enums.yaml

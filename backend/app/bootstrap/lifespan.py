@@ -291,7 +291,7 @@ def apply_nacos_config_update(runtime: ApplicationState, provider: NacosConfigPr
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
         runtime.record_config_reload_error(error)
-        logger.exception("Nacos配置重读失败 | profile=%s | error=%s", snapshot.profile["profile"], error)
+        logger.exception("Nacos配置重读失败 | data_ids=%s | error=%s", list(snapshot.data_ids), error)
         return False
 
     config_info = {
@@ -301,7 +301,7 @@ def apply_nacos_config_update(runtime: ApplicationState, provider: NacosConfigPr
         **provider.source_info(snapshot),
     }
     runtime.replace_configuration(snapshot.config, config_info, service, embedder)
-    logger.info("Nacos配置重读成功| profile=%s | data_ids=%s", snapshot.profile["profile"], snapshot.profile["data_id_list"],)
+    logger.info("Nacos配置重读成功 | data_ids=%s", list(snapshot.data_ids))
     return True
 
 

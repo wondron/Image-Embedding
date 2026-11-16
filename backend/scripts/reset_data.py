@@ -16,8 +16,8 @@
 保留：KEPT_TABLES（模型版本登记 embedding_models、加热组 heating_groups）和表结构；对象存储里的原图 / 缩略图
 不删除（图片 ID 是内容哈希，重新上传同一张图会覆盖同一个文件）。
 
-安全：NACOS_ENV 为 prod（未设置时的默认值）时拒绝执行，除非加 --allow-prod；
-在测试环境执行前先设 NACOS_ENV=test（PowerShell：$env:NACOS_ENV='test'）。
+安全：NACOS_ENV 为 prod（未设置时的默认值）时拒绝执行，除非加 --allow-prod。NACOS_ENV 只是标识，
+连哪个库由 NACOS_NAMESPACE 等决定（本机写在 backend/.env）：切到测试环境要把它们成套换掉，只改 NACOS_ENV 不算数。
 退出码：0 成功；1 执行失败或取消；2 配置 / 连接 / 表结构问题或被安全检查拒绝。
 """
 
@@ -183,10 +183,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"FAIL {exc}", file=sys.stderr)
         return 2
     print(f"目标：{target.describe()}")
-    if target.profile == "prod" and not args.allow_prod:
+    if target.env == "prod" and not args.allow_prod:
         print(
-            "FAIL NACOS_ENV 是 prod（未设置时默认 prod），拒绝清空。测试环境请先设 NACOS_ENV=test"
-            "（PowerShell：$env:NACOS_ENV='test'）；确实要清空 prod 配置指向的库时加 --allow-prod。",
+            "FAIL NACOS_ENV 是 prod（未设置时默认 prod），拒绝清空。要清测试库：把 backend/.env 里的 NACOS_ENV、"
+            "NACOS_NAMESPACE、NACOS_USERNAME、NACOS_PASSWORD 成套换成测试环境的值（只改 NACOS_ENV 连的还是原来的库）；"
+            "确实要清空上面这个库时加 --allow-prod。",
             file=sys.stderr,
         )
         return 2

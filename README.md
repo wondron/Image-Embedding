@@ -38,10 +38,11 @@ Global 搜索阶段直接保留上游 `image_url`，不下载或验证候选图�
 类别编码允许大小写并保留原样（例如 `ingredient.HongSu`），按小写判重；`ingredient.hongsu` 与它视为同一编码。
 更新到此版本后，先在 `backend` 目录用启动后端的 Python 环境执行 `python -m alembic upgrade head`（迁移 `20261113_0010` 新增大小写不敏感的唯一索引），再启动服务。已有编码转小写后重复时，迁移会报告冲突并停止，需要手动处理后重试。
 
-后端参数只有两个来源，不读 `.env`：
+后端参数有三个来源：
 
-- `backend/app/core/config/constant.py`：项目定下来后基本不变的值（服务名、端口、Nacos 接入点、PG 驱动名等）；
-- 生效配置：本地 `backend/config/param/config.yaml` 打底，所选 Nacos 环境的 dataId 逐键覆盖。密码、连接参数、模型等都在这里。
+- `backend/app/core/config/constant.py`：项目定下来后基本不变的值（服务名、端口、PG 驱动名等）；Nacos 只在这里定读哪些 dataId（`NACOS_DATA_ID_LIST`）；
+- 环境变量：`NACOS_ENV` 和 Nacos 接入参数 `NACOS_*`（开关、地址、namespace、账号），见下面「Nacos 配置」；
+- 生效配置：本地 `backend/config/param/config.yaml` 打底，Nacos 开启时 dataId 逐键覆盖。数据库密码、连接参数、模型等都在这里。
 
 枚举取值（数据库、接口、Qdrant payload 共用）单独放在 `backend/config/param/enums.yaml`，不走 Nacos，规则见文件头。
 `source_type` / `license` / `food_state` / `food_processing`（加工状态）可以直接改文件（不用重启），也可以调
@@ -75,13 +76,13 @@ Global 搜索阶段直接保留上游 `image_url`，不下载或验证候选图�
 
 同一个模型的判断看预处理、权重文件 hash 和固定测试图输出，挪目录、改名不算换模型。重启时如果当前版本的权重已经不在镜像里（或被覆盖），检索会暂停并报 `EMBEDDING_MODEL_MISMATCH`，同样在这个页面登记、生成、切换即可恢复。升级到这一版先执行 `alembic upgrade head`（迁移 `0009` 加 `embedding_models.fingerprint`），首次启动会核对并记录当前版本的编码器指纹。细节见契约 §6.5。
 
-Alembic 和 workers 也按 `NACOS_ENV` 取库，而它默认是 prod：本机执行 `alembic upgrade head` 前先设
-`NACOS_ENV=test`，或用 `NACOS_ENABLED=0` 只读本地 YAML。Alembic 会在日志里打印目标库（密码已隐去）。
+Alembic 和 workers 也按同一套 `NACOS_*` 环境变量取库（本机读 `backend/.env`）。执行 `alembic upgrade head` 前
+确认 `.env` 指向要迁移的环境，或临时 `$env:NACOS_ENABLED='false'` 只读本地 YAML。Alembic 会在日志里打印目标库（密码已隐去）。
 
 ## 数据库初始化与数据重置
 
 Alembic 管表结构，Seed 管基础数据，Reset 管业务数据清理。三条命令都在 `backend` 目录、用启动后端的 Python 环境执行，
-连接的库和后端、Alembic 一样（`NACOS_ENV` 默认 prod，本机先设 `NACOS_ENV=test` 或 `NACOS_ENABLED=0`）：
+连接的库和后端、Alembic 一样（本机看 `backend/.env` 里的 `NACOS_*`；`NACOS_ENABLED=false` 时只读本地 YAML）：
 
 | 命令 | 作用 | 什么时候用 |
 |---|---|---|
@@ -92,26 +93,37 @@ Alembic 管表结构，Seed 管基础数据，Reset 管业务数据清理。三�
 - 基础数据定义在 `backend/scripts/seed_data.py` 顶部（`BASE_SCENES`、`ROOT_CATEGORIES`），要增减就改那里。Seed 可以重复执行：
   按编码判断，缺的插入，已有的不改（和定义不同只提示），不删除其他数据；`--dry-run` 只列出会补哪些。
 - Reset 先列出目标库、每张表的行数和要清的 Qdrant collection，输入数据库名确认后执行（`--yes` 跳过确认，`--dry-run` 只看不改）。
-  PostgreSQL 的清空和补齐在一个事务里，失败则什么都不改。`NACOS_ENV=prod` 时拒绝执行（`--allow-prod` 才放行）。
+  PostgreSQL 的清空和补齐在一个事务里，失败则什么都不改。`NACOS_ENV=prod`（未设置时的默认值）时拒绝执行（`--allow-prod` 才放行）。
   保留模型版本登记（`embedding_models`）和加热组；对象存储里的文件不删除。`--keep-catalog` 只清图片和任务记录，保留类别树和场景配置；
   `--keep-vectors` 不动 Qdrant。执行前先停掉连着这个库的后端，否则可能等锁超时（10 秒后放弃、不做修改）。
 - 迁移 `0001` 以前会插入六个场景，现在不再插入；已经迁移过的库保留原有场景。空库部署要在 `upgrade head` 之后执行一次 seed。
 
-## Nacos 配置环境
+## Nacos 配置
 
-通过环境变量 `NACOS_ENV` 选择 Nacos 环境，这是部署时唯一需要指定的变量：未设置或为空时默认 `prod`，
-设置为 `test` 时只读取 test 配置。启动时如果所选 Nacos 环境不可用、配置为空或
-配置解析失败，则只使用本地 `backend/config/param/config.yaml`，不再尝试其他环境。
-本地 YAML 也必须存在且有效。轮询同样只读取所选环境。日志里的 `env` 和 `/version` 的 `app_env` 与它一致。
+读哪些 dataId 写在 `backend/app/core/config/constant.py` 的 `NACOS_DATA_ID_LIST`（按顺序覆盖本地 YAML，后面的覆盖前面的），
+其余都是环境变量（完整列表和默认值见 `backend/.env.example`）：
 
-Docker Compose 中直接修改 `backend/docker-compose.yml` 的 `NACOS_ENV`（默认 `test`），
-或在执行 compose 的终端里设置该变量。修改后重新创建容器：
+| 变量 | 说明 |
+|---|---|
+| `NACOS_ENABLED` | 是否读 Nacos，默认 `false`：只用本地 `config.yaml`，其余 `NACOS_*` 都可以不设 |
+| `NACOS_SERVER_ADDR`、`NACOS_NAMESPACE`、`NACOS_GROUP` | `NACOS_ENABLED=true` 时必填，缺了启动直接报错并列出缺哪几个 |
+| `NACOS_USERNAME`、`NACOS_PASSWORD` | Nacos 账号；没开鉴权时留空 |
+| `NACOS_ENV` | 环境标识 `prod` / `test`，未设置时 `prod`。日志里的 `env`、`/version` 的 `app_env` 显示它，`reset_data` 在 prod 下拒绝执行。它只是标识，连哪个环境由 `NACOS_NAMESPACE` 和账号决定，切换时成套修改 |
+| `NACOS_POLL_ENABLED` 等 | 可选：轮询开关、轮询间隔、超时，默认值见 `.env.example` |
+
+- **本地调试**：把 `backend/.env.example` 复制成 `backend/.env` 填好（`.env` 不提交）。API、Alembic、workers、scripts
+  启动时都会读它；已经设置的环境变量优先，临时切换可以直接 `$env:NACOS_ENABLED='false'`。
+- **docker compose 部署**：变量直接写在 compose 文件的 `environment` 里，镜像里没有 `.env`。
+  `backend/docker-compose.server.yml` 里有 prod / test 两套（`x-nacos-prod` / `x-nacos-test`），`<<: *nacos-prod` 换成
+  `*nacos-test` 就切到测试环境；`backend/docker-compose.yml`（本地 postgres / qdrant）默认不读 Nacos。改完重新创建容器：
 
 ```shell
-docker compose -f backend/docker-compose.yml up -d --force-recreate
+docker compose -f backend/docker-compose.server.yml up -d --force-recreate
 ```
 
-使用包含这些代码的镜像后，环境选择逻辑才会生效。
+启动时 Nacos 不可用、配置为空或解析失败，只使用本地 `backend/config/param/config.yaml`（必须存在且有效）。
+之后轮询到 Nacos 恢复，predict 的配置会切过去，但连接参数（PG / Qdrant / OSS）只在启动时读，要重启才生效。
+
 ## Docker 本地后台构建
 
 在 `backend` 目录用 Dockerfile 后台构建本地镜像（不阻塞当前终端）：

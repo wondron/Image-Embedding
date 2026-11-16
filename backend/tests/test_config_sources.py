@@ -223,12 +223,17 @@ class SwitchAndEnvironmentTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             config_flag({"TOTAL_CONFIG": "yes"}, "TOTAL_CONFIG", "retrieval_enabled", True)
 
-    def test_env_is_the_nacos_profile(self):
+    def test_env_label_comes_from_nacos_env_and_defaults_to_prod(self):
         with patch.dict(os.environ, {"NACOS_ENV": " Test "}):
             self.assertEqual(ApplicationSettings().env, "test")
+        with patch.dict(os.environ, {"NACOS_ENV": ""}):
+            self.assertEqual(ApplicationSettings().env, "prod")
         with patch.dict(os.environ):
             os.environ.pop("NACOS_ENV", None)
             self.assertEqual(ApplicationSettings().env, "prod")
+        # a typo must not slip past the prod-only guards (reset_data)
+        with patch.dict(os.environ, {"NACOS_ENV": "prd"}), self.assertRaisesRegex(ValueError, "NACOS_ENV"):
+            ApplicationSettings()
 
 
 class AlembicEnvTests(unittest.TestCase):

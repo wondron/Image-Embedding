@@ -40,7 +40,7 @@ class OfflineOssConnectivityTests(unittest.TestCase):
         )
         prefix = probe.inspect_key_prefix({}, settings)
         lines = probe.summarize_effective(
-            source={"source": "yaml", "nacos_status": "disabled", "nacos_enabled": False, "nacos_profile": "test"},
+            source={"source": "yaml", "nacos_status": "disabled", "nacos_enabled": False, "app_env": "test"},
             settings_obj=settings,
             prefix_info=prefix,
         )
@@ -162,7 +162,7 @@ class OfflineOssConnectivityTests(unittest.TestCase):
         lines = probe.summarize_effective(
             source={
                 "source": "nacos",
-                "nacos_profile": "test",
+                "app_env": "test",
                 "yaml_base": True,
                 "nacos_namespace": "should-not-need-to-print-secrets",
             },
@@ -171,7 +171,7 @@ class OfflineOssConnectivityTests(unittest.TestCase):
         )
         blob = "\n".join(lines)
         self.assertIn("config_source=nacos", blob)
-        self.assertIn("nacos_profile=test", blob)
+        self.assertIn("app_env=test", blob)
 
 
 if __name__ == "__main__":

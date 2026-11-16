@@ -178,11 +178,10 @@ def summarize_effective(
         extra.append(f"nacos_status={source.get('nacos_status', '')}")
         extra.append(f"nacos_enabled={source.get('nacos_enabled')}")
     else:
-        extra.append(f"nacos_profile={source.get('nacos_profile', '')}")
         extra.append(f"yaml_base={source.get('yaml_base')}")
     lines = [
         "=== 生效配置摘要（不含密钥）===",
-        f"config_source={src}  nacos_profile={source.get('nacos_profile', '')}  "
+        f"config_source={src}  app_env={source.get('app_env', '')}  "
         + "  ".join(str(x) for x in extra if x is not None),
         f"use_boto3={getattr(settings_obj, 'use_boto3', None)}",
         f"endpoint_url={_empty_display(getattr(settings_obj, 'endpoint_url', ''))}",
@@ -308,6 +307,7 @@ def load_effective_storage_config() -> tuple[dict[str, Any], dict[str, Any], Any
         config, source = provider.load(app_settings.config.yaml_path)
     finally:
         provider.close()
+    source = {"app_env": app_settings.application.env, **source}  # 同 /api/config_info 的 app_env
     storage = ImageStorageSettings.from_config(config)
     section = config.get("IMAGE_STORAGE_CONFIG") if isinstance(config, Mapping) else None
     return config, source, storage, section

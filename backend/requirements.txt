@@ -22,6 +22,7 @@ requests==2.34.2
 treelib==1.8.0                 # app/utils/gen_foodtree.py
 scikit-learn==1.5.2
 PyYAML==6.0.3
+python-dotenv==1.2.2           # backend/.env for local runs (app/core/config/settings.py); containers get env from compose
 pillow==13.0.0
 six==1.17.0                    # app/utils/tokenizer.py
 
