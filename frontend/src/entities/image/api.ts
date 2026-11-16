@@ -86,7 +86,8 @@ export async function listImages({ baseUrl, signal, ...query }: ListImagesOption
 
 // -- POST /api/index ----------------------------------------------------------------------
 
-export const MAX_INDEX_FILES = 100
+/** Files one POST /api/index request may carry (the server's MAX_INDEX_FILES). */
+export const MAX_INDEX_FILES = 500
 
 /** The optional food annotation of an index request (image_foods); omitted fields stay empty. */
 export interface IndexFoodFields {
@@ -127,7 +128,7 @@ export interface IndexOptions extends IndexFoodFields {
 }
 
 /**
- * Index via POST /api/index — multipart `file` (one) or `files` (≤100) plus the shared
+ * Index via POST /api/index — multipart `file` (one) or `files` (≤ MAX_INDEX_FILES) plus the shared
  * category / tags / scenes / description / labelling / food fields. Throws when nothing was stored.
  */
 export async function indexImage({

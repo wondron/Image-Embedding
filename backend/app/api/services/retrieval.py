@@ -32,7 +32,9 @@ from app.core import errors as err
 
 logger = logging.getLogger("svc.retrieval")
 
-MAX_INDEX_FILES = 100
+# Files one POST /api/index request may carry. All of them are read into memory before indexing
+# starts (up to MAX_INDEX_FILES x max_image_bytes) and indexed one after another in the request.
+MAX_INDEX_FILES = 500
 # Optional food annotation an index request may carry; the use case validates it.
 FOOD_KEYS = FOOD_FIELDS
 # Labelling an index request may set; omitted: label_status follows the category, source_type
@@ -121,7 +123,7 @@ async def index_from_upload(
 
 
 async def index_from_request(runtime: ApplicationState, request: Request) -> Dict[str, Any]:
-    """multipart file/files (<= 100) or JSON {path, description, category, tags, scene, scenes,
+    """multipart file/files (<= MAX_INDEX_FILES) or JSON {path, description, category, tags, scene, scenes,
     label_status, source_type, license, and the optional food fields FOOD_KEYS}."""
     trace_id = bind_trace_id(request)
     if _is_json(request):

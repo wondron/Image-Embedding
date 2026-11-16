@@ -1,5 +1,5 @@
 export { BatchEditDialog, type BatchEditDialogProps } from './BatchEditDialog'
-export { BatchDeleteDialog, TYPED_CONFIRM_FROM, type BatchDeleteDialogProps } from './BatchDeleteDialog'
+export { BatchDeleteDialog, MAX_BATCH_DELETE, TYPED_CONFIRM_FROM, type BatchDeleteDialogProps } from './BatchDeleteDialog'
 export { BatchProgress, SelectionStrip } from './BatchProgress'
 export { useBatchRun, type BatchRun, type BatchPhase, type BatchWork } from './useBatchRun'
 export { useLibrarySelection } from './useLibrarySelection'

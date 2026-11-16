@@ -212,6 +212,24 @@ test('少量删除不用输入确认；换筛选条件会清空选择', async ({
   await expect(bar(page)).toContainText('可勾选图片后批量操作')  // another result set: nothing stays picked
 })
 
+test('批量删除：一次最多 500 张，选多了先提示分批，选择保留', async ({ page }) => {
+  const { calls } = await mockApi(page, { count: 501 })
+  await openLibrary(page)
+  await bar(page).getByRole('button', { name: '选择全部 501 张' }).click()
+  await expect(bar(page)).toContainText('已选 501 张')
+  await bar(page).getByRole('button', { name: '批量删除' }).click()
+  await acknowledgeNotice(page, '一次最多删除 500 张', 'warn')
+  await expect(page.getByRole('dialog', { name: /^批量删除/ })).toHaveCount(0)
+  expect(calls.deletes).toEqual([])
+  await expect(bar(page)).toContainText('已选 501 张')  // kept, to be narrowed down
+
+  await pick(page, 1).click()
+  await expect(bar(page)).toContainText('已选 500 张')
+  await bar(page).getByRole('button', { name: '批量删除' }).click()
+  await expect(page.getByRole('dialog', { name: '批量删除（500 张）' })).toBeVisible()
+  expect(calls.deletes).toEqual([])  // nothing goes before it is confirmed
+})
+
 test('选择全部：超过 1000 张时请先缩小筛选范围', async ({ page }) => {
   await mockApi(page, { total: 1500 })
   await openLibrary(page)

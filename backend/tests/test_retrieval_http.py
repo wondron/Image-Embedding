@@ -105,6 +105,21 @@ class RetrievalHttpTests(unittest.TestCase):
         # the task records of this request carry its trace id
         self.assertEqual(self.calls["index"]["trace_id"], response.json()["trace_id"])
 
+    def test_index_takes_at_most_500_files_per_request(self):
+        def upload(count):
+            return [("files", (f"{n}.png", f"image-{n}".encode(), "image/png")) for n in range(count)]
+
+        response = self.client.post("/api/index", files=upload(500))
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(self.calls["index"]["items"]), 500)
+
+        self.calls.clear()
+        response = self.client.post("/api/index", files=upload(501))
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(response.json()["error"], "VALIDATION_ERROR")
+        self.assertIn("max 500", response.json()["detail"])
+        self.assertNotIn("index", self.calls)  # refused before any file is indexed
+
     def test_index_without_files_is_400(self):
         response = self.client.post("/api/index", data={"category": "x"})
         self.assertEqual(response.status_code, 400)

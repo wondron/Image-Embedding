@@ -11,6 +11,8 @@ import './library-batch.css'
 
 /** From this many images on, the person types 「删除」 to confirm. */
 export const TYPED_CONFIRM_FROM = 20
+/** At most this many images per batch delete; a larger selection is deleted in several batches. */
+export const MAX_BATCH_DELETE = 500
 const CONFIRM_WORD = '删除'
 
 export interface BatchDeleteDialogProps {

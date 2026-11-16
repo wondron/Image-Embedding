@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { buildListImagesQuery, deleteImage, getImage, indexImage, listImages, payloadDifferences, pushImageVector, reembedImage, updateImage } from '.'
+import { MAX_INDEX_FILES, buildListImagesQuery, deleteImage, getImage, indexImage, listImages, payloadDifferences, pushImageVector, reembedImage, updateImage } from '.'
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status })
 const png = (name = 'a.png') => new File(['image-data'], name, { type: 'image/png' })
@@ -114,7 +114,8 @@ describe('indexImage (POST /api/index)', () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
     await expect(indexImage({})).rejects.toThrow('请选择至少一张')
-    await expect(indexImage({ files: Array.from({ length: 101 }, (_, i) => png(`${i}.png`)) })).rejects.toThrow('最多入库 100 张')
+    expect(MAX_INDEX_FILES).toBe(500)  // the server's limit per request
+    await expect(indexImage({ files: Array.from({ length: MAX_INDEX_FILES + 1 }, (_, i) => png(`${i}.png`)) })).rejects.toThrow('最多入库 500 张')
     await expect(indexImage({ file: new File([], 'empty.png') })).rejects.toThrow('empty.png：图片文件为空')
     expect(fetchMock).not.toHaveBeenCalled()
   })

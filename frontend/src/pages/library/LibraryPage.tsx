@@ -26,7 +26,7 @@ import {
 } from '../../features/library-filters'
 import { LIBRARY_LAYOUTS, LibraryPagination, LibraryResults, useLibraryList, type LibraryLayout } from '../../features/library-list'
 import { useSceneSelection } from '../../features/scene-catalog'
-import { BatchDeleteDialog, BatchEditDialog, useLibrarySelection, type BatchOutcome } from '../../features/library-batch'
+import { BatchDeleteDialog, BatchEditDialog, MAX_BATCH_DELETE, useLibrarySelection, type BatchOutcome } from '../../features/library-batch'
 import './library-page.css'
 
 /** 「选择全部筛选结果」 reads them page by page; beyond this many the person narrows the filters first. */
@@ -196,6 +196,16 @@ export function LibraryPage({ apiBase, filters, setFilters, page, setPage, categ
     else notify.success(result.cleanup === 'done' ? '已删除图片，向量和原图、缩略图已清理。' : '已删除图片；向量和图片文件稍后由清理任务删除。')
   }, [refreshCategories])
 
+  /** 批量删除 of the selection, at most MAX_BATCH_DELETE images at a time. */
+  function deleteSelected() {
+    const count = selection.selected.size
+    if (count > MAX_BATCH_DELETE) {
+      notify.warn(`已选 ${count.toLocaleString('zh-CN')} 张，一次最多删除 ${MAX_BATCH_DELETE} 张。请减少勾选或缩小筛选范围，分几批删除。`, { title: '图片太多' })
+      return
+    }
+    setBatch({ kind: 'delete', items: [...selection.selected.values()] })
+  }
+
   /** Pick every image the filters match, read page by page (up to SELECT_ALL_LIMIT). */
   async function selectAllResults() {
     if (list.total > SELECT_ALL_LIMIT) {
@@ -318,7 +328,7 @@ export function LibraryPage({ apiBase, filters, setFilters, page, setPage, categ
         {selection.selected.size > 0 && <button type="button" className="mg-text-button" onClick={selection.clear}>清空选择</button>}
         <span className="lib-selection-actions">
           <button type="button" className="mg-btn mg-secondary" disabled={!selection.selected.size} onClick={() => setBatch({ kind: 'edit', items: [...selection.selected.values()] })}><PencilLine size={15} />批量修改</button>
-          <button type="button" className="mg-btn lb-danger" disabled={!selection.selected.size} onClick={() => setBatch({ kind: 'delete', items: [...selection.selected.values()] })}><Trash2 size={15} />批量删除</button>
+          <button type="button" className="mg-btn lb-danger" disabled={!selection.selected.size} onClick={deleteSelected}><Trash2 size={15} />批量删除</button>
         </span>
       </div>}
 

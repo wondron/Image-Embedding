@@ -43,7 +43,7 @@ type IndexJob = {
   outcome?: JobOutcome
 }
 const MAX_IMAGE_SIZE = 15 * 1024 * 1024
-const MAX_QUEUE = 100
+const MAX_QUEUE = 500
 const INDEX_TIMEOUT_MS = 120_000
 /**
  * 「取消入库」 takes the place of 「开始入库」 on the same button, so the second click of a
@@ -195,7 +195,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
       } else if (existing.has(key)) {
         issues.push(`${file.name}：已在待入库列表中`)
       } else if (jobsRef.current.length + additions.length >= MAX_QUEUE) {
-        issues.push(`${file.name}：单次最多准备 100 张图片`)
+        issues.push(`${file.name}：单次最多准备 ${MAX_QUEUE} 张图片`)
       } else {
         existing.add(key)
         additions.push({ id: draftId(), file, preview: URL.createObjectURL(file), status: 'pending' })
@@ -379,7 +379,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
 
   return <div className={`mg-page${view === 'library' ? ' mg-page-library' : view === 'import' ? ' mg-page-import' : ''}`}>
     {view === 'import' && <div className="mg-import-meta">
-      <span className="mg-toolbar-summary">JPG、PNG、WebP · 每张最大 15 MB · 最多 100 张</span>
+      <span className="mg-toolbar-summary">JPG、PNG、WebP · 每张最大 15 MB · 最多 {MAX_QUEUE} 张</span>
       <span className="mg-status"><span />{indexing ? '入库进行中' : '自建入库已接入'}</span>
     </div>}
 
@@ -413,7 +413,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
         const shownCategory = item.outcome ? item.outcome.categoryId : annotation.categoryId
         const extras = item.outcome ? 0 : filledExtras(annotation)
         return <article className={`mg-upload-card mg-job-${item.status}`} key={item.id}>
-          <button className="mg-upload-preview" onClick={() => setPreview(item)} aria-label={`预览 ${item.file.name}`}><img src={item.preview} alt={item.file.name} /><span>查看图片</span></button>
+          <button className="mg-upload-preview" onClick={() => setPreview(item)} aria-label={`预览 ${item.file.name}`}><img src={item.preview} alt={item.file.name} loading="lazy" decoding="async" /><span>查看图片</span></button>
           {!indexing && <button className="mg-remove-image" aria-label={`移除 ${item.file.name}`} onClick={() => removeJob(item.id)}><X size={14} /></button>}
           <div><strong title={item.file.name}>{item.file.name}</strong>
             <small>{(item.file.size / 1024 / 1024).toFixed(2)} MB <span className={`mg-job-status mg-job-status-${item.status}`}>{item.status === 'running' ? <LoaderCircle size={12} className="spin" /> : item.status === 'success' ? <CheckCircle2 size={12} /> : item.status === 'error' ? <XCircle size={12} /> : item.status === 'cancelled' ? <Clock3 size={12} /> : <Circle size={11} />}{jobStatusText[item.status]}</span></small>
@@ -467,7 +467,7 @@ export function ManagementViews({ view, onNavigate, apiBase = '' }: Props) {
         {taskRows.length === 0
           ? <EmptyState icon={ListChecks} title={taskStatus === '失败记录' ? '暂无可查看的失败记录' : taskStatus === '处理中' ? '暂无正在处理的任务' : taskStatus === '已完成' ? '暂无已完成的任务' : '暂无入库任务'} description={jobs.length ? '当前筛选下没有匹配的本会话任务。' : '在「上传与导入」开始入库后，这里会显示本会话进度与失败原因。'}><button className="mg-btn mg-secondary" onClick={() => onNavigate('import')}>先准备一批图片<ArrowRight size={16} /></button></EmptyState>
           : <div className="mg-task-list" role="list">{taskRows.map(job => <div className={`mg-task-row mg-job-${job.status}`} role="listitem" key={job.id}>
-            <div className="mg-task-name"><img src={job.preview} alt="" className="mg-task-thumb" /><strong title={job.file.name}>{job.file.name}</strong></div>
+            <div className="mg-task-name"><img src={job.preview} alt="" className="mg-task-thumb" loading="lazy" decoding="async" /><strong title={job.file.name}>{job.file.name}</strong></div>
             <div className="mg-task-progress">{job.elapsed !== undefined ? `${job.elapsed.toFixed(1)} 秒` : indexing && job.status === 'running' ? '进行中…' : '—'}</div>
             <div className={`mg-job-status mg-job-status-${job.status}`}>{job.status === 'running' ? <LoaderCircle size={13} className="spin" /> : job.status === 'success' ? <CheckCircle2 size={13} /> : job.status === 'error' ? <XCircle size={13} /> : job.status === 'cancelled' ? <Clock3 size={13} /> : <Circle size={12} />}{jobStatusText[job.status]}</div>
             <div className="mg-task-detail" title={job.remoteId ?? job.error ?? ''}>{job.remoteId ? `id: ${job.remoteId}` : job.error ? job.error : '—'}</div>

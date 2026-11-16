@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Request, type TestInfo } from '@playwright/test'
+import { acknowledgeNotice } from './notice'
 
 // Fixtures only: every API request is answered below; nothing reaches a real backend.
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
@@ -197,6 +198,17 @@ test('批量标注：类别来自数据库，场景按规则预览并可人工�
   expect(api.membershipCalls).toEqual([{ path: '00000000-0000-4000-8000-000000000001/3', body: { is_member: true } }])
   await expect(page.locator('.mg-upload-card').first().locator('.mg-job-scenes')).toContainText('中国饮食')
   await screenshot(page, info, 'import-done')
+})
+
+test('待入库队列一次最多 500 张：多出来的不加入并说明', async ({ page }) => {
+  await mockApi(page)
+  await openImport(page)
+  await expect(page.locator('.mg-toolbar-summary')).toContainText('最多 500 张')
+  await page.getByLabel('选择待入库图片').setInputFiles(Array.from({ length: 501 }, (_, i) => upload(`q${i + 1}.png`)))
+  await acknowledgeNotice(page, '已添加 500 张，另有 1 张没有添加', 'warn')
+  await expect(page.locator('.mg-queue-heading h3 span')).toHaveText('500')
+  await expect(page.locator('.mg-upload-card')).toHaveCount(500)
+  await expect(page.getByLabel('预览 q501.png')).toHaveCount(0)
 })
 
 test('相同图片已在库中：提示沿用原有标注，不写场景调整', async ({ page }) => {
