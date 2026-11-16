@@ -35,8 +35,8 @@ class StorageReadTests(unittest.TestCase):
             # A restarted process keeps only the mirror
             again = MockImageStorage(settings)
             self.assertEqual(again.read_by_url_or_key(url), b"png-bytes")
-            self.assertEqual(again.read_by_url_or_key(f"original/{IMAGE}.png"), b"png-bytes")  # a key works too
-            Path(mirror, "original", f"{IMAGE}.png").unlink()
+            self.assertEqual(again.read_by_url_or_key(f"original/{IMAGE[:2]}/{IMAGE}.png"), b"png-bytes")  # a key works too
+            Path(mirror, "original", IMAGE[:2], f"{IMAGE}.png").unlink()
             with self.assertRaises(err.AppError) as ctx:
                 again.read_by_url_or_key(url)
             self.assertEqual(ctx.exception.code, "IMAGE_FILE_UNAVAILABLE")

@@ -5,12 +5,15 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
 const imageId = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const SCENES = [{ id: 1, code: 'general', name: '通用', description: null, include_all: true, outputs_heating: false, is_active: true, created_at: null, member_count: 0, labels: [], rules: [] }]
 
+/** Where the backend stores a self-built image: under the id's first two hex characters (its SHA-256's). */
+const originalPath = (n: number) => `/original/${imageId(n).slice(0, 2)}/${imageId(n)}.jpg`
+const thumbPath = (n: number) => `/thumb/${imageId(n).slice(0, 2)}/${imageId(n)}.webp`
 /** A self-built hit (§6.1.1 result card): original and 512 px thumbnail under `host`. */
 const hit = (n: number, host = 'https://cdn.test') => ({
-  tags: '', description: '', original_url: `${host}/original/${n}.jpg`, similarity: 0.9 - n * 0.01,
+  tags: '', description: '', original_url: `${host}${originalPath(n)}`, similarity: 0.9 - n * 0.01,
   details: {
     id: imageId(n), category_id: 1, category: `食材${n}`, scenes: ['general'], scene_label: null, label_status: 'verified',
-    images: [{ image_url: `${host}/original/${n}.jpg`, thumbnail_url: `${host}/thumb/${n}.webp`, width: 1600, height: 1200 }],
+    images: [{ image_url: `${host}${originalPath(n)}`, thumbnail_url: `${host}${thumbPath(n)}`, width: 1600, height: 1200 }],
   },
 })
 /** A FlyB result card (the same card, FlyB details). */
@@ -77,7 +80,7 @@ test('自建库结果：列表只加载 512px 缩略图；点开详情先显示�
   const cards = page.locator('.result-card')
   await expect(cards).toHaveCount(12)
   const first = cards.first().getByRole('img', { name: '食材1', exact: true })
-  await expect(first).toHaveAttribute('src', 'https://cdn.test/thumb/1.webp')
+  await expect(first).toHaveAttribute('src', `https://cdn.test${thumbPath(1)}`)
   await expect.poll(() => first.evaluate(img => (img as HTMLImageElement).naturalWidth)).toBe(1)
   const images = () => mock.requested.filter(path => path !== '/query.png')
   expect(images().length).toBeGreaterThan(0)
@@ -85,15 +88,15 @@ test('自建库结果：列表只加载 512px 缩略图；点开详情先显示�
 
   await cards.first().getByRole('button', { name: '查看图片详情：食材1' }).click()
   const dialog = page.getByRole('dialog', { name: '图片详情' })
-  await expect(dialog.locator('.progressive-image-preview')).toHaveAttribute('src', 'https://cdn.test/thumb/1.webp')
+  await expect(dialog.locator('.progressive-image-preview')).toHaveAttribute('src', `https://cdn.test${thumbPath(1)}`)
   await expect(dialog.getByText('正在加载原图')).toBeVisible()
-  await expect.poll(images).toContain('/original/1.jpg')
+  await expect.poll(images).toContain(originalPath(1))
 
   mock.releaseOriginals()
-  await expect(dialog.locator('.progressive-image-full.is-loaded')).toHaveAttribute('src', 'https://cdn.test/original/1.jpg')
+  await expect(dialog.locator('.progressive-image-full.is-loaded')).toHaveAttribute('src', `https://cdn.test${originalPath(1)}`)
   await expect(dialog.getByText('正在加载原图')).toHaveCount(0)
   await expect(dialog.locator('.progressive-image-preview')).toHaveCount(0)
-  expect(images().filter(path => path.startsWith('/original/'))).toEqual(['/original/1.jpg'])  // only the one opened
+  expect(images().filter(path => path.startsWith('/original/'))).toEqual([originalPath(1)])  // only the one opened
 })
 
 test('现网结果：列表用缩略图（大图失败退到中图），原图只在详情里加载；原图打不开时保留缩略图并说明', async ({ page }) => {
@@ -129,7 +132,7 @@ test('自建库图片的存储地址打不开：列表用后端读出的缩略�
   const dialog = page.getByRole('dialog', { name: '图片详情' })
   await expect(dialog.locator('.progressive-image-full.is-loaded')).toHaveAttribute('src', `/api/images/${imageId(1)}/file?variant=original`)
   // The placeholder host failed once for the thumbnail; the original went to the API straight away
-  expect(mock.unreachable).toEqual(['/image-embedding/thumb/1.webp'])
+  expect(mock.unreachable).toEqual([`/image-embedding${thumbPath(1)}`])
   expect(mock.files.filter(file => file.endsWith(':original'))).toEqual([`${imageId(1)}:original`])
 })
 

@@ -490,12 +490,14 @@ class RouteOrderTests(unittest.TestCase):
 
 
 class FakeQueueStore:
-    def __init__(self, *, stored_again=False):
+    def __init__(self, *, stored_again=False, urls=None):
+        """urls: the original_url / thumb_url of the row stored again."""
         self.stored_again = stored_again
+        self.urls = urls or {}
         self.completed = []
 
     def get_by_id(self, image_id):
-        return {"id": image_id} if self.stored_again else None
+        return {"id": image_id, **self.urls} if self.stored_again else None
 
     def complete_deletion(self, image_id):
         self.completed.append(image_id)
@@ -503,6 +505,9 @@ class FakeQueueStore:
 
 class DeletionCleanupTests(unittest.TestCase):
     ROW = {"image_id": IMAGE, "original_url": "https://cdn/o.jpg", "thumb_url": "https://cdn/t.webp"}
+    # The same image's files before the shard directory (flat) and in it
+    FLAT = {"original_url": f"https://cdn/original/{IMAGE}.jpg", "thumb_url": f"https://cdn/thumb/{IMAGE}.webp"}
+    SHARDED = {"original_url": f"https://cdn/original/0c/{IMAGE}.jpg", "thumb_url": f"https://cdn/thumb/0c/{IMAGE}.webp"}
 
     def test_the_point_the_files_then_the_row(self):
         store, vectors, storage = FakeQueueStore(), Mock(), Mock()
@@ -518,6 +523,26 @@ class DeletionCleanupTests(unittest.TestCase):
         vectors.delete.assert_not_called()
         storage.delete_by_url_or_key.assert_not_called()
         self.assertEqual(store.completed, [IMAGE])
+
+    def test_an_image_stored_again_under_the_shard_directory_loses_only_its_old_files(self):
+        store, vectors, storage = FakeQueueStore(stored_again=True, urls=self.SHARDED), Mock(), Mock()
+        self.assertTrue(DeletionWorker(store, vectors, storage).clean_up({"image_id": IMAGE, **self.FLAT}))
+        vectors.delete.assert_not_called()  # the point is the new row's too
+        self.assertEqual([c.args[0] for c in storage.delete_by_url_or_key.call_args_list], list(self.FLAT.values()))
+        self.assertEqual(store.completed, [IMAGE])
+
+    def test_an_image_stored_again_under_the_same_keys_keeps_them_whatever_the_url_root(self):
+        moved = {field: url.replace("https://cdn/", "https://old-cdn.example/bucket/") for field, url in self.SHARDED.items()}
+        store, storage = FakeQueueStore(stored_again=True, urls=self.SHARDED), Mock()
+        self.assertTrue(DeletionWorker(store, Mock(), storage).clean_up({"image_id": IMAGE, **moved}))
+        storage.delete_by_url_or_key.assert_not_called()
+        self.assertEqual(store.completed, [IMAGE])
+
+    def test_an_old_file_that_cannot_be_deleted_leaves_the_row_queued(self):
+        store, storage = FakeQueueStore(stored_again=True, urls=self.SHARDED), Mock()
+        storage.delete_by_url_or_key.side_effect = RuntimeError("s3 down")
+        self.assertFalse(DeletionWorker(store, Mock(), storage).clean_up({"image_id": IMAGE, **self.FLAT}))
+        self.assertEqual(store.completed, [])
 
     def test_a_failure_leaves_the_row_queued(self):
         store, vectors, storage = FakeQueueStore(), Mock(), Mock()

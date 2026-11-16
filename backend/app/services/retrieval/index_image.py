@@ -4,7 +4,8 @@ Flow: bytes → sha256/uuid → validate labels → embed (no side effects yet) 
 S3 original+thumb → one PostgreSQL write transaction: insert images, recompute
 image_scenes, read a consistent payload snapshot, stage its embedding ledger,
 upsert Qdrant, then commit. Failed writes roll back without deleting another
-request's image.
+request's image. A re-upload keeps the stored row; when that row's files are under other keys
+(stored before the shard directory or a key_prefix change), the copies just written are removed.
 
 Path-based local disk store is legacy MVP; when storage is present we prefer
 put_original_and_thumb and DB https URLs (no path column in PG).
@@ -47,8 +48,8 @@ from app.repositories.ports import (
 )
 from app.core.rules.scene_membership import build_qdrant_payload
 from app.services.retrieval.scenes import resolve_index_scenes
-from app.utils.storage_keys import guess_ext_from_bytes_header
-from app.services.retrieval.storage_upload import put_original_and_thumb
+from app.utils.storage_keys import guess_ext_from_bytes_header, original_key, public_url, thumb_key
+from app.services.retrieval.storage_upload import drop_unused_upload, put_original_and_thumb
 from app.core.rules.text_fields import normalize_description, normalize_tags
 
 logger = logging.getLogger("retrieval.index")
@@ -215,8 +216,8 @@ class IndexImageUseCase:
         else:
             # TODO(M5+): require ImageStoragePort in production; stub https for dry-run
             base = "https://cdn.example.local/image-embedding"
-            original_url = f"{base}/original/{image_id}.{ext}"
-            thumb_url = f"{base}/thumb/{image_id}.webp"
+            original_url = public_url(base, original_key(image_id, ext))
+            thumb_url = public_url(base, thumb_key(image_id))
             logger.warning(
                 "index without ImageStoragePort; stub URLs id=%s (wire storage in stack)",
                 image_id,
@@ -262,6 +263,10 @@ class IndexImageUseCase:
                 raise
             except Exception as exc:
                 raise err.index_qdrant_failed(f"{type(exc).__name__}: {exc}") from exc
+
+        if not indexed.created and self._storage is not None:
+            # Committed: the stored row won, and its URLs are the image's files from now on.
+            drop_unused_upload(self._storage, image_id, written=row, stored=stored)
 
         return {
             "id": str(image_id),

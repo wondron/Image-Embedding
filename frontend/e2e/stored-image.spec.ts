@@ -16,9 +16,11 @@ const SCENES = [{ id: 1, code: 'general', name: '通用', description: null, inc
 async function mockApi(page: Page, count = 3, { holdOriginals = false } = {}) {
   const calls = { direct: [] as string[], files: [] as string[], releaseOriginals: () => {} }
   const released = new Promise<void>(resolve => { calls.releaseOriginals = resolve })
+  // Object keys as the backend writes them: under the id's first two hex characters (its SHA-256's)
+  const key = (dir: 'original' | 'thumb', n: number, ext: string) => `${dir}/${imageId(n).slice(0, 2)}/${imageId(n)}.${ext}`
   const item = (n: number) => ({
-    id: imageId(n), original_url: `https://cdn.example.local/image-embedding/original/${n}.png`,
-    thumb_url: `https://cdn.example.local/image-embedding/thumb/${n}.webp`, category_id: 1, category: '牛排', scenes: ['general'],
+    id: imageId(n), original_url: `https://cdn.example.local/image-embedding/${key('original', n, 'png')}`,
+    thumb_url: `https://cdn.example.local/image-embedding/${key('thumb', n, 'webp')}`, category_id: 1, category: '牛排', scenes: ['general'],
     label_status: 'auto', description: `图片${n}`, tags: [], width: 640, height: 480, created_at: '2026-11-10T08:00:00+00:00', updated_at: null,
     vector_status: 'synced',
   })

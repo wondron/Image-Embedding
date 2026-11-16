@@ -8,9 +8,12 @@ import unittest
 import uuid
 from contextlib import contextmanager
 from copy import deepcopy
+from unittest.mock import Mock
 
 from PIL import Image as PILImage
 
+from app.clients.image_storage import MockImageStorage
+from app.core.config.settings import ImageStorageSettings
 from app.repositories.ports import ImageIndexResult, VECTOR_DIM
 from app.services.retrieval.active_model import ActiveModel
 from app.core.errors import AppError
@@ -375,6 +378,75 @@ class IndexTaskRecordTests(unittest.TestCase):
     def test_execute_one_records_nothing(self):
         self.use_case().execute_one(image_bytes=_png((7, 7, 7)))
         self.assertEqual(self.meta.tasks, [])
+
+
+class ShardedStorageTests(unittest.TestCase):
+    """With object storage: an image's files go to the directory of its SHA-256's first two hex
+    characters, and a re-upload that kept a row stored under other keys leaves no copies behind."""
+
+    BASE = "https://cdn.test/image-embedding"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.meta = FakeMetadata()
+        self.storage = MockImageStorage(ImageStorageSettings(public_base_url=self.BASE))
+
+    def use_case(self):
+        return IndexImageUseCase(
+            FakeEmbedding(), FakeVectors(), self.meta, model=MODEL, storage=self.storage, indexed_dir=self.tmp.name
+        )
+
+    def stored_before_the_shard_directory(self, data):
+        """A row and its files as an upload before the shard directory left them."""
+        image_id = str(uuid.UUID(bytes=hashlib.sha256(data).digest()[:16]))
+        urls = {"original_url": f"{self.BASE}/original/{image_id}.png", "thumb_url": f"{self.BASE}/thumb/{image_id}.webp"}
+        self.meta.insert_image({
+            "id": image_id, **urls, "width": 8, "height": 6, "category_id": None,
+            "label_status": "unlabeled", "source_type": "user_upload", "license": "unknown",
+        })
+        self.storage._objects.update({f"original/{image_id}.png": data, f"thumb/{image_id}.webp": b"old thumb"})
+        return image_id, urls
+
+    def test_the_files_go_to_the_directory_of_the_first_two_sha256_hex_characters(self):
+        data = _png()
+        out = self.use_case().execute_one(image_bytes=data)
+        shard = hashlib.sha256(data).hexdigest()[:2]
+        self.assertEqual(out["original_url"], f"{self.BASE}/original/{shard}/{out['id']}.png")
+        self.assertEqual(out["thumb_url"], f"{self.BASE}/thumb/{shard}/{out['id']}.webp")
+        self.assertEqual(set(self.storage._objects), {f"original/{shard}/{out['id']}.png", f"thumb/{shard}/{out['id']}.webp"})
+        self.assertEqual(self.storage._objects[f"original/{shard}/{out['id']}.png"], data)
+
+    def test_a_reupload_in_the_same_layout_keeps_its_files(self):
+        data = _png()
+        first = self.use_case().execute_one(image_bytes=data)
+        again = self.use_case().execute_one(image_bytes=data)
+        self.assertFalse(again["created"])
+        self.assertEqual((again["original_url"], again["thumb_url"]), (first["original_url"], first["thumb_url"]))
+        self.assertEqual(self.storage._deleted, [])
+        self.assertEqual(len(self.storage._objects), 2)
+
+    def test_a_reupload_of_an_image_stored_before_the_shard_directory_removes_the_new_copies(self):
+        data = _png()
+        image_id, urls = self.stored_before_the_shard_directory(data)
+        out = self.use_case().execute_one(image_bytes=data)
+        self.assertFalse(out["created"])
+        self.assertEqual({key: out[key] for key in urls}, urls)  # the stored row wins
+        shard = image_id[:2]
+        self.assertEqual(sorted(self.storage._deleted), [f"original/{shard}/{image_id}.png", f"thumb/{shard}/{image_id}.webp"])
+        self.assertEqual(set(self.storage._objects), {f"original/{image_id}.png", f"thumb/{image_id}.webp"})
+        self.assertEqual(self.storage.read_by_url_or_key(urls["original_url"]), data)
+
+    def test_a_copy_that_cannot_be_removed_does_not_fail_the_upload(self):
+        data = _png()
+        _, urls = self.stored_before_the_shard_directory(data)
+        self.storage.delete_by_url_or_key = Mock(side_effect=RuntimeError("s3 down"))
+        with self.assertLogs("retrieval.storage_upload", level="WARNING") as logs:
+            out = self.use_case().execute_one(image_bytes=data)
+        self.assertFalse(out["created"])
+        self.assertEqual({key: out[key] for key in urls}, urls)
+        self.assertEqual(self.storage.delete_by_url_or_key.call_count, 2)
+        self.assertTrue(all("not removed" in line for line in logs.output))
 
 
 if __name__ == "__main__":

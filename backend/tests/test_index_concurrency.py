@@ -15,6 +15,7 @@ from app.core.errors import AppError
 from app.repositories.ports import ImageIndexResult
 from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.index_image import IndexImageUseCase
+from app.utils.storage_keys import original_key, thumb_key
 
 
 MODEL = ActiveModel(
@@ -35,11 +36,19 @@ class Embedding:
 
 
 class Storage:
+    """Real object keys, no bytes; records what is deleted."""
+
+    def __init__(self):
+        self.deleted = []
+
     def put_original(self, image_id, data, *, ext, content_type=None):
-        return f"https://storage.example/original/{image_id}.{ext}"
+        return f"https://storage.example/{original_key(image_id, ext)}"
 
     def put_thumb(self, image_id, data, *, content_type=None):
-        return f"https://storage.example/thumb/{image_id}.webp"
+        return f"https://storage.example/{thumb_key(image_id)}"
+
+    def delete_by_url_or_key(self, url_or_key):
+        self.deleted.append(url_or_key)
 
 
 class TransactionalMetadata:
@@ -156,10 +165,11 @@ class IndexConcurrencyTests(unittest.TestCase):
         self.data = png_bytes()
         self.image_id = str(UUID(bytes=hashlib.sha256(self.data).digest()[:16]))
         self.metadata = TransactionalMetadata()
+        self.storage = Storage()
 
     def use_case(self, vectors):
         return IndexImageUseCase(
-            Embedding(), vectors, self.metadata, model=MODEL, storage=Storage()
+            Embedding(), vectors, self.metadata, model=MODEL, storage=self.storage
         )
 
     def execute(self, vectors, *, category_id=7):
@@ -195,6 +205,9 @@ class IndexConcurrencyTests(unittest.TestCase):
         self.assertTrue(
             all(payload["category_id"] == 7 for _, payload in vectors.calls)
         )
+        # Both wrote the same keys, which the stored row names: the follower deletes nothing
+        self.assertEqual(second_result["original_url"], first_result["original_url"])
+        self.assertEqual(self.storage.deleted, [])
 
     def test_failed_creator_rolls_back_before_the_successful_follower_inserts(self):
         vectors = Vectors(self.metadata, block_first=True, fail_call=1)
@@ -267,6 +280,12 @@ class IndexConcurrencyTests(unittest.TestCase):
         self.assertEqual(response["scenes"], ["general", "oven"])
         self.assertEqual(response["description"], "stored annotation")
         self.assertEqual(response["tags"], ["stored"])
+        # The stored row keeps its files; the copies this upload wrote under other keys go
+        self.assertEqual(response["original_url"], "https://storage.example/original/stored.png")
+        self.assertEqual(
+            self.storage.deleted,
+            [f"https://storage.example/{original_key(self.image_id, 'png')}", f"https://storage.example/{thumb_key(self.image_id)}"],
+        )
         self.assertEqual(
             vectors.points[self.image_id],
             {

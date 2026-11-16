@@ -149,7 +149,7 @@ def prefix_report(key: str, prefix_info: Mapping[str, Any]) -> tuple[bool, str]:
         )
         return ok, detail
     detail = (
-        "当前键规则：生产对象键为 original|thumb|staging/{id}.ext，"
+        "当前键规则：生产对象键为 original|thumb/{sha256前2位}/{id}.ext、staging/{id}.ext，"
         "无已落地的非空 key_prefix。"
         f"本探测对象因此放在可识别目录 {PROBE_DIR}/ 下（不写入 original/thumb/staging），"
         f"实际 key={key}。"

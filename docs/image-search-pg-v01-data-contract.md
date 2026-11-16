@@ -426,16 +426,20 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 
 | 对象键（相对） | 内容 | 落库字段 |
 |---|---|---|
-| `original/{image_id}.{ext}` | 原图 | `images.original_url` |
-| `thumb/{image_id}.webp` | 缩略图，长边 512 | `images.thumb_url` |
+| `original/{shard}/{image_id}.{ext}` | 原图 | `images.original_url` |
+| `thumb/{shard}/{image_id}.webp` | 缩略图，长边 512 | `images.thumb_url` |
 | `staging/{candidate_id}.{ext}` | 外部候选暂存 | `external_candidates.staged_url` |
 
-**可选对象键前缀 `key_prefix`**（本刀实施规范 · 本地已实现，待独立验收，非「总裁已拍」细字）：`IMAGE_STORAGE_CONFIG` 顶层可选字符串，与 `bucket` / `public_base_url` 同层。省略、`null`、空串或规范化后为空则不上前缀，键即上表，行为与现网一致。非空时去首尾空白与斜杠、把反斜杠/全角斜杠换成 `/` 并压缩重复斜杠，作为所有 `original` / `thumb` / `staging` 键的前缀，例如 `ImageEmbedding/original/{image_id}.jpg`。规范化拒绝 `.` / `..` 段、段名恰好为 `original`/`thumb`/`staging`、中间空白与非法字符、以及过长值（实施默认 128，报错不裁剪）；允许多级目录；以 `/` 开头只去掉首斜杠，不当文件系统绝对路径。大小写保持原样。不要把桶名、账号或密钥写进默认值。
+**分片目录 `{shard}`**（2026-11-15）：原图 SHA-256 的前 2 位十六进制字符（小写，`00`–`ff` 共 256 个目录），避免单目录堆积。按 A7，`image_id` 即 SHA-256 前 16 字节，所以 `{shard}` 也就是 `image_id` 的前 2 个字符，原图和缩略图落在同一目录，例如 `original/a3/{image_id}.jpg`、`thumb/a3/{image_id}.webp`。`staging` 不分片：`candidate_id` 是随机 uuid，不是内容哈希。
+
+**可选对象键前缀 `key_prefix`**（本刀实施规范 · 本地已实现，待独立验收，非「总裁已拍」细字）：`IMAGE_STORAGE_CONFIG` 顶层可选字符串，与 `bucket` / `public_base_url` 同层。省略、`null`、空串或规范化后为空则不上前缀，键即上表，行为与现网一致。非空时去首尾空白与斜杠、把反斜杠/全角斜杠换成 `/` 并压缩重复斜杠，作为所有 `original` / `thumb` / `staging` 键的前缀，例如 `ImageEmbedding/original/{shard}/{image_id}.jpg`。规范化拒绝 `.` / `..` 段、段名恰好为 `original`/`thumb`/`staging`、中间空白与非法字符、以及过长值（实施默认 128，报错不裁剪）；允许多级目录；以 `/` 开头只去掉首斜杠，不当文件系统绝对路径。大小写保持原样。不要把桶名、账号或密钥写进默认值。
 
 **ASSUMPTION A8**：bucket/CDN 前缀由部署配置拼进完整 URL；契约不绑死域名。  
 此处「bucket/CDN 前缀」指 `public_base_url`（桶或 CDN 的 URL 根），**不是**对象键前缀。公开 URL 为 `public_base_url.rstrip("/") + "/" + key.lstrip("/")`，其中 `key` 已是可能带 `key_prefix` 的对象键。同一前缀不要既写进 `public_base_url` 又写进 `key_prefix`，否则 URL 路径会加倍。真传 OSS/S3 SDK、凭证与生命周期 **另刀**（本契约只定键与字段）。
 
-已落盘对象与已入库的 `original_url` / `thumb_url` / `staged_url` **不迁移**；`key_prefix` 只影响新写入键。读取、删除、reembed 走存库 URL（或已记录的键），不得用当前前缀回推旧键。前端只消费接口已有完整 URL，本轮不改 FE，不加签名 URL。
+已落盘对象与已入库的 `original_url` / `thumb_url` / `staged_url` **不迁移**；`key_prefix` 与分片目录只影响新写入键（分片之前的图仍在 `original/{image_id}.{ext}`）。读取、删除、reembed 走存库 URL（或已记录的键），不得用当前前缀或分片回推旧键。前端只消费接口已有完整 URL，不拼对象键，不加签名 URL。
+
+同一张图（同字节、同 id）在键规则变化前后的键不同，因此：① 重复上传先写了新键，库里那行保留首次 URL；两者相对键不同时，本次写的新键副本不被任何行引用，提交后尽力删除（失败只记日志，不影响入库结果）。② 删图清理时这张图已被重新入库：向量点和新行引用的文件保留，队列里相对键与新行不同的旧文件照删。「相对键」从 URL 路径里最后一个 `original` / `thumb` / `staging` 段取起（`key_prefix` 不得含这些段，URL 根在它之前）；取不到或相同则按可能是同一对象处理，一律不删。
 
 ---
 
@@ -1009,9 +1013,9 @@ curl -X POST "http://<host>:8320/api/search/auto/file" \
 
 ```json
 {"ok": true, "trace_id": "biz-20261113-0001", "source": "self", "scene": "oven", "outputs_heating": true,
- "items": [{"tags": "带骨", "description": "煎牛排", "original_url": "https://cdn.example.com/original/0cf457e2.jpg", "similarity": 0.83,
+ "items": [{"tags": "带骨", "description": "煎牛排", "original_url": "https://cdn.example.com/original/0c/0cf457e2.jpg", "similarity": 0.83,
             "details": {"id": "0cf457e2-4a47-9f02-fd4d-34540389f720", "category_id": 12, "category": "牛排", "scenes": ["general", "oven"],
-                        "label_status": "verified", "images": [{"image_url": "https://cdn.example.com/original/0cf457e2.jpg", "thumbnail_url": "https://cdn.example.com/thumb/0cf457e2.webp", "width": 640, "height": 480}],
+                        "label_status": "verified", "images": [{"image_url": "https://cdn.example.com/original/0c/0cf457e2.jpg", "thumbnail_url": "https://cdn.example.com/thumb/0c/0cf457e2.webp", "width": 640, "height": 480}],
                         "food_state": "raw", "food_processing": null, "food_count": null, "total_mass_g": null, "water_mass_g": null, "main_ingredient_mass_g": null,
                         "heating_group": {"id": 2, "code": "grill", "name": "烤"}}}],
  "fallback": {"status": "not_needed"}}
@@ -1263,7 +1267,7 @@ curl -X POST "http://<host>:8320/api/scenes/import?dry_run=false&prune=false" -H
 | MySQL / MVP | PG v0.1 | 备注 |
 |---|---|---|
 | `images.id` BIGINT | 新 `uuid` = hash(文件字节) | **不能**数值对翻 |
-| `images.path` | S3 `original/{id}.ext` + 完整 https | 无本地 path 列 |
+| `images.path` | S3 `original/{shard}/{id}.ext` + 完整 https | 无本地 path 列；`{shard}` 见 §5 |
 | `images.url` | `original_url` / `thumb_url` | |
 | `images.title` | **无对等列** | 产品是否另表 **TBD** |
 | `images.tags` JSON | `images.tags text[]`（迁移 `0007`） | 2026-11-09 起有列；空数组表示未标注 |
@@ -1324,6 +1328,7 @@ curl -X POST "http://<host>:8320/api/scenes/import?dry_run=false&prune=false" -H
 | 2026-11-13 | **重新生成向量与删图并发**（无表结构变化、无新迁移）：`POST /api/images/{image_id}/reembed` 读原图、算向量不加锁；写点和记账时锁住这张图片的行（`lock_image_for_vector`，同入库时的写法），在同一事务里按锁住后读到的 payload 写点、记账后提交。删图在此之前已提交的，不再写点，返回 `IMAGE_NOT_FOUND`；在此之后的删图等这次写完再删，它的清理会删掉刚写的点。此前删图若在算向量期间提交并清理完，点会被写回，而图片、删除队列、记账都已没有它，对账清不掉。顺带：写入的 payload 和记账的版本取锁住时的数据，算向量期间的编辑不再让这张图显示「待同步」；编辑要等这次写点完成（一次单点写入，通常是毫秒级）。 |
 | 2026-11-13 | **业务搜图接口**（无表结构变化、无新迁移）：新增 `POST /api/search/auto/file`（multipart）、`POST /api/search/auto/url`（JSON），先查自建库，没有达到阈值的结果且 `global_fallback=true` 时用现网 Global 兜底。参数 `scene`、`top_k`（1–20，默认 10，对应 Global 的 `search_num`）、`score_threshold`、`global_fallback`（默认 false）、`trace_id`、`machine_info`；响应 `source`（self / global / empty）+ 同形结果卡 + `fallback.status`。Global 失败返回空结果和原因，不让请求失败；自建库出错照常报错。原 `/api/search`、`/api/search/global/*` 不变。本地实现，未测试。见 §6.6 |
 | 2026-11-15 | **入库记录统计：新入库图片与重复上传分开**（无表结构变化、无新迁移）：现象是一次上传 47 张、失败的重传后全部成功，「成功」却显示 48。原因：记录按上传次数记，同一张图有两条成功记录——第一张的请求被浏览器放弃（开始后随即取消再继续），服务端仍把它入库并记了成功，重传那次 `new_image=false` 又记一条；页面把成功记录条数当成了图片数。BE：`GET /api/index-tasks` 的 `counts` 加 `repeated`（图片仍在图库、`new_image=false` 的成功记录，与 `image_deleted` 不重叠），新增 `new_image` 筛选并在响应里回显。FE「服务端入库记录」：指标改为 新入库图片 / 重复上传 / 图片已删除 / 失败，筛选 全部 / 新入库 / 重复上传 / 图片已删除 / 失败，重复上传的行和详情单独标注，有重复上传时说明原因；「上传与导入」开始入库后 600ms 内的「取消入库」点击忽略（两个按钮在同一位置，双击会先开始再取消）。本地实现，未测试。见 §6.4.1 |
+| 2026-11-15 | **对象键加分片目录**（无表结构变化、无新迁移、无接口变化）：新写入的原图、缩略图键为 `original/{shard}/{image_id}.{ext}`、`thumb/{shard}/{image_id}.webp`，`{shard}` 为原图 SHA-256 前 2 位十六进制（小写，即 `image_id` 前 2 个字符），`key_prefix` 照旧加在最前，如 `ImageEmbedding/original/a3/{image_id}.jpg`；`staging` 不变。已有对象与 URL 不迁移，读、删、reembed 仍走存库 URL。键规则变化后同一张图新旧键不同：重复上传保留首次 URL，并删掉本次写入、不被引用的新键副本；删图清理时若图已重新入库，相对键不同的旧文件照删（之前一律保留）。FE 只用接口给的完整 URL，无运行时改动，e2e 模拟数据改成分片地址。见 §5 |
 
 ---
 

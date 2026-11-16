@@ -21,6 +21,7 @@ from uuid import UUID
 
 from app.core import errors as err
 from app.repositories.ports import MetadataStorePort, ImageStoragePort, VectorStorePort
+from app.utils.storage_keys import different_objects
 
 logger = logging.getLogger("retrieval.delete")
 
@@ -59,19 +60,22 @@ def _clean_up(
     its two files, then its queue row.
 
     Raises on failure, leaving the row for a retry. An image stored again since it was deleted
-    (same bytes: same id, point and object keys) keeps its point and files; only the row goes.
+    (same bytes: same id and point) keeps its point and the files its new row names. A queued
+    file under another key than the new row's (stored before the shard directory or a
+    key_prefix change) is no file of the new row, and is still deleted.
     """
     image_id = row.get("image_id")
-    if metadata.get_by_id(image_id) is None:
+    stored_again = metadata.get_by_id(image_id)
+    if stored_again is None:
         vectors.delete(image_id)
         for other in others():
             other.delete(image_id)
-        for url_field in ("original_url", "thumb_url"):
-            url = str(row.get(url_field) or "").strip()
-            if url:
-                storage.delete_by_url_or_key(url)
     else:
-        logger.warning("image %s was stored again after its deletion; its point and files are kept", image_id)
+        logger.warning("image %s was stored again after its deletion; its point and current files are kept", image_id)
+    for url_field in ("original_url", "thumb_url"):
+        url = str(row.get(url_field) or "").strip()
+        if url and (stored_again is None or different_objects(url, stored_again.get(url_field))):
+            storage.delete_by_url_or_key(url)
     metadata.complete_deletion(image_id)
 
 

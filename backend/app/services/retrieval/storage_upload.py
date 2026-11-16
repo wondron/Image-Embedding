@@ -14,6 +14,7 @@ from app.core import errors as err
 from app.repositories.ports import ImageStoragePort
 from app.utils.storage_keys import (
     THUMB_LONG_EDGE,
+    different_objects,
     guess_ext_from_bytes_header,
     guess_ext_from_content_type,
 )
@@ -57,7 +58,8 @@ def put_original_and_thumb(
 ) -> dict[str, Any]:
     """Upload original + thumb; return {original_url, thumb_url, ext, thumb_bytes}.
 
-    Keys: original/{id}.{ext}, thumb/{id}.webp — no scene/category in key; an optional IMAGE_STORAGE_CONFIG.key_prefix is applied by the storage port via storage_keys.
+    Keys: original/{shard}/{id}.{ext}, thumb/{shard}/{id}.webp, shard = SHA-256[0:2] hex (the
+    id's first two characters) — no scene/category in key; an optional IMAGE_STORAGE_CONFIG.key_prefix is applied by the storage port via storage_keys.
     """
     if not image_bytes:
         raise err.index_bad_image("empty image bytes")
@@ -80,3 +82,29 @@ def put_original_and_thumb(
         "ext": resolved_ext,
         "thumb_bytes": thumb_bytes,
     }
+
+
+def drop_unused_upload(
+    storage: ImageStoragePort,
+    image_id: UUID | str,
+    *,
+    written: dict[str, Any],
+    stored: dict[str, Any],
+) -> None:
+    """After a re-upload kept the stored row: remove the files just written that the row does
+    not name, best effort (a failure is logged).
+
+    The row keeps its own URLs, so when they are under other keys (an image stored before the
+    shard directory or a key_prefix change) the new copies belong to no row. A file that may be
+    the row's own (same relative key, or a URL form without one) is always kept.
+    """
+    for field in ("original_url", "thumb_url"):
+        url = str(written.get(field) or "")
+        if not different_objects(url, stored.get(field)):
+            continue
+        try:
+            storage.delete_by_url_or_key(url)
+        except Exception:
+            logger.warning("re-upload id=%s: unused %s not removed: %s", image_id, field, url, exc_info=True)
+        else:
+            logger.info("re-upload id=%s kept its stored %s; removed the unused copy %s", image_id, field, url)

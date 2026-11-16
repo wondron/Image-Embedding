@@ -561,7 +561,8 @@ class ImageStoragePort(ABC):
         ext: str,
         content_type: str | None = None,
     ) -> str:
-        """Upload original/{image_id}.{ext} (optional key_prefix); return full https original_url."""
+        """Upload original/{shard}/{image_id}.{ext} (shard: SHA-256[0:2] hex; optional key_prefix);
+        return full https original_url."""
         raise NotImplementedError
 
     @abstractmethod
@@ -572,7 +573,8 @@ class ImageStoragePort(ABC):
         *,
         content_type: str | None = "image/webp",
     ) -> str:
-        """Upload thumb/{image_id}.webp (optional key_prefix); return full https thumb_url."""
+        """Upload thumb/{shard}/{image_id}.webp (the original's shard; optional key_prefix);
+        return full https thumb_url."""
         raise NotImplementedError
 
     @abstractmethod
