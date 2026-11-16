@@ -124,7 +124,9 @@ docker run --rm --gpus all roki-ai-image-embedding:20261115 nvidia-smi   # 容�
 数据库要在启动 API **之前**初始化：类别、场景和检索只在启动时初始化一次，启动时表还没建好的话，建完表也要重启 API。
 
 ```bash
-# 1) 连通性：PG、Qdrant 只做只读查询；OSS 会写一个探测对象再删掉
+# 1) 连通性：Nacos 检查参数直接修改 check_nacos_connectivity.py 顶部的环境及配置
+# Nacos、PG、Qdrant 只做只读查询；OSS 会写一个探测对象再删掉
+dc run --rm api python scripts/check_nacos_connectivity.py
 dc run --rm api python scripts/check_postgres_connectivity.py
 dc run --rm api python scripts/check_qdrant_connectivity.py
 dc run --rm api python scripts/check_oss_connectivity.py
@@ -165,7 +167,7 @@ curl -s http://127.0.0.1:8320/api/health        # 200，embedding / qdrant / pos
 
 | 现象 | 先看 |
 |---|---|
-| `/api/config_info` 的 `source` 是 `yaml` | 服务器到 Nacos 8848 不通，或账号、namespace 不对；`output/logs/app.log` 里搜「Nacos 不可用」 |
+| `/api/config_info` 的 `source` 是 `yaml` | 跑 `check_nacos_connectivity.py`（先核对脚本顶部环境及配置）；`output/logs/app.log` 里搜「Nacos 不可用」 |
 | `/api/health` 503，qdrant 不 ok | 跑 `check_qdrant_connectivity.py`；6333 / 6334 是否放通，`api_key`，`prefer_grpc` |
 | `/api/health` 503，postgres 不 ok | 白名单、账号；跑 `check_postgres_connectivity.py` |
 | `NOT_READY`：没有 current 的 embedding 模型 | 第 7 步登记模型 |
