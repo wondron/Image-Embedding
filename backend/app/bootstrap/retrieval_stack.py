@@ -35,6 +35,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Optional
 
+from app.bootstrap.dependency_logging import dependency_initialization, redact_text
 from app.clients.inference import Embedder, config_for_fingerprint, weights_status
 from app.clients.qdrant import QdrantConnection, QdrantStore
 from app.clients.image_storage import build_image_storage
@@ -150,28 +151,36 @@ def build_retrieval_infra(
     version it is about to make current, before PostgreSQL says so).
     """
     # Parse every section before opening anything: a config error fails fast with nothing to release.
-    pg = PostgresSettings.from_config(config) if metadata is None else None
-    connection = _qdrant_connection(config)
+    with dependency_initialization(logger, config, "POSTGRES_CONFIG", stage="配置解析"):
+        pg = PostgresSettings.from_config(config) if metadata is None else None
+    with dependency_initialization(logger, config, "QDRANT_CONFIG", stage="配置解析"):
+        connection = _qdrant_connection(config)
     storage_settings = ImageStorageSettings.from_config(config)
 
     owns_metadata = metadata is None
     if metadata is None:
-        metadata = PgMetadataStore(url=pg.url(), connect_timeout=pg.connect_timeout)
+        with dependency_initialization(logger, config, "POSTGRES_CONFIG", stage="创建连接"):
+            metadata = PgMetadataStore(url=pg.url(), connect_timeout=pg.connect_timeout)
     vectors: QdrantVectorStore | None = None
     try:
-        metadata.ensure_schema()
+        with dependency_initialization(logger, config, "POSTGRES_CONFIG", stage="连接及 schema 检查"):
+            metadata.ensure_schema()
         if model is None:
             model = ActiveModel.from_row(metadata.get_current_embedding_model())
-        vectors = QdrantVectorStore(
-            QdrantStore(
-                connection,
-                collection=model.collection,
-                vector_dim=model.dim,
-                distance=model.distance,
+        with dependency_initialization(
+            logger, config, "QDRANT_CONFIG", stage="连接及 collection 检查",
+            collection=model.collection, dim=model.dim, distance=model.distance,
+        ):
+            vectors = QdrantVectorStore(
+                QdrantStore(
+                    connection,
+                    collection=model.collection,
+                    vector_dim=model.dim,
+                    distance=model.distance,
+                )
             )
-        )
-        existed = vectors.collection_exists()
-        vectors.ensure_collection(recreate=False)
+            existed = vectors.collection_exists()
+            vectors.ensure_collection(recreate=False)
         if not existed:
             # A collection made anew holds no point: whatever the ledger says, nothing is in it
             forgotten = metadata.clear_embeddings(model.id)
@@ -192,7 +201,7 @@ def build_retrieval_infra(
         "Retrieval 基础设施已就绪 | postgres=%s/%s | qdrant=%s | model=%s | id=%s | collection=%s | dim=%s | distance=%s",
         metadata.host,
         metadata.database,
-        connection.url,
+        redact_text(connection.url, config),
         model.space_id,
         model.id,
         model.collection,

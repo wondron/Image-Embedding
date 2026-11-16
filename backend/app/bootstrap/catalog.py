@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.bootstrap.dependency_logging import dependency_initialization
 from app.clients.image_storage import build_image_storage
 from app.core.config.settings import ImageStorageSettings, PostgresSettings
 from app.repositories.metadata import PgMetadataStore
@@ -56,13 +57,14 @@ class CatalogServices:
 
 def build_catalog(config: Mapping[str, Any]) -> CatalogServices:
     """POSTGRES_CONFIG -> store (schema checked) -> admin use cases."""
-    pg = PostgresSettings.from_config(config)
-    store = PgMetadataStore(url=pg.url(), connect_timeout=pg.connect_timeout)
-    try:
-        store.ensure_schema()
-    except BaseException:
-        store.close()
-        raise
+    with dependency_initialization(logger, config, "POSTGRES_CONFIG", stage="Catalog 配置及连接检查"):
+        pg = PostgresSettings.from_config(config)
+        store = PgMetadataStore(url=pg.url(), connect_timeout=pg.connect_timeout)
+        try:
+            store.ensure_schema()
+        except BaseException:
+            store.close()
+            raise
     logger.info("Catalog 已就绪 | postgres=%s/%s", store.host, store.database)
     return CatalogServices(
         store=store,

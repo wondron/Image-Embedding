@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 from sqlalchemy.engine import make_url
 
-from app.bootstrap import retrieval_stack as rs
+from app.bootstrap import lifespan, retrieval_stack as rs
 from app.bootstrap.state import ApplicationState
 from app.core.config.settings import ImageStorageSettings
 from app.services.retrieval.active_model import ActiveModel
@@ -160,6 +160,80 @@ class BuildStackTests(unittest.TestCase):
             rs.build_retrieval_infra(CONFIG)
         self.vectors.close.assert_called_once()
         self.metadata.close.assert_called_once()
+
+    def test_postgres_connection_failure_logs_only_its_config_and_preserves_error(self):
+        failure = AppError("INDEX_POSTGRES_FAILED", "connection timeout expired", http_status=502)
+        self.metadata.ensure_schema.side_effect = failure
+        with self.assertLogs("retrieval", level="ERROR") as logs, self.assertRaises(AppError) as ctx:
+            rs.build_retrieval_infra(CONFIG)
+        message = "\n".join(logs.output)
+        self.assertIs(ctx.exception, failure)
+        for value in ("PostgreSQL", "message=", "connection timeout expired", "POSTGRES_CONFIG", "pg.internal", '"port": 5432'):
+            self.assertIn(value, message)
+        self.assertNotIn("QDRANT_CONFIG", message)
+        self.assertNotIn(CONFIG["POSTGRES_CONFIG"]["password"], message)
+        self.metadata.close.assert_called_once()
+        rs.QdrantStore.assert_not_called()
+
+    def test_qdrant_connection_failure_logs_endpoint_and_collection(self):
+        failure = AppError("INDEX_QDRANT_FAILED", "connection refused", http_status=502)
+        self.vectors.collection_exists.side_effect = failure
+        with self.assertLogs("retrieval", level="ERROR") as logs, self.assertRaises(AppError) as ctx:
+            rs.build_retrieval_infra(CONFIG)
+        message = "\n".join(logs.output)
+        self.assertIs(ctx.exception, failure)
+        for value in ("Qdrant", "message=", "connection refused", "QDRANT_CONFIG", "http://q:6333", "c_dino_v2", '"dim": 1024'):
+            self.assertIn(value, message)
+        self.assertNotIn("POSTGRES_CONFIG", message)
+        self.assertIn('"api_key": "***"', message)
+        self.vectors.close.assert_called_once()
+        self.metadata.close.assert_called_once()
+
+    def test_qdrant_collection_mismatch_logs_its_message_and_config(self):
+        self.vectors.ensure_collection.side_effect = AppError("VECTOR_DIM_MISMATCH", "size=768 expected 1024", http_status=503)
+        with self.assertLogs("retrieval", level="ERROR") as logs, self.assertRaises(AppError):
+            rs.build_retrieval_infra(CONFIG)
+        self.assertIn("size=768 expected 1024", logs.output[0])
+        self.assertIn("QDRANT_CONFIG", logs.output[0])
+
+    def test_qdrant_invalid_timeout_logs_supplied_fields_before_opening_connections(self):
+        config = {**CONFIG, "QDRANT_CONFIG": {"url": "http://q:6333", "timeout": "bad-timeout"}}
+        with self.assertLogs("retrieval", level="ERROR") as logs, self.assertRaises(ValueError):
+            rs.build_retrieval_infra(config)
+        self.assertIn("QDRANT_CONFIG", logs.output[0])
+        self.assertIn('"timeout": "bad-timeout"', logs.output[0])
+        rs.PgMetadataStore.assert_not_called()
+
+    def test_retrieval_startup_masks_credentials_and_keeps_the_existing_error_code(self):
+        config = {**CONFIG, "QDRANT_CONFIG": {"url": "http://q:6333", "api_key": "private-api-key"}}
+        runtime = SimpleNamespace(config=config, settings=SETTINGS, catalog=None)
+        self.vectors.collection_exists.side_effect = AppError(
+            "INDEX_QDRANT_FAILED", "connection refused api_key=private-api-key", http_status=502,
+        )
+        with self.assertLogs(level="WARNING") as logs:
+            lifespan.initialize_retrieval(runtime, self.embedder)
+        message = "\n".join(logs.output)
+        self.assertIn("QDRANT_CONFIG", message)
+        self.assertIn("connection refused", message)
+        self.assertNotIn("private-api-key", message)
+        self.assertIsNone(runtime.retrieval)
+        self.assertEqual(runtime.retrieval_error_code, "INDEX_QDRANT_FAILED")
+
+    def test_missing_configs_are_logged_before_any_connections_are_opened(self):
+        for section in ("POSTGRES_CONFIG", "QDRANT_CONFIG"):
+            config = {key: value for key, value in CONFIG.items() if key != section}
+            with self.subTest(section=section), self.assertLogs("retrieval", level="ERROR") as logs:
+                with self.assertRaises(ValueError):
+                    rs.build_retrieval_infra(config)
+            self.assertIn(section, logs.output[0])
+            self.assertIn('"status": "missing"', logs.output[0])
+        rs.PgMetadataStore.assert_not_called()
+
+    def test_no_active_model_is_not_logged_as_a_database_connection_failure(self):
+        self.metadata.get_current_embedding_model.side_effect = AppError("NOT_READY", "no current", http_status=503)
+        with patch.object(rs.logger, "error") as log, self.assertRaises(AppError):
+            rs.build_retrieval_infra(CONFIG)
+        log.assert_not_called()
 
     def test_no_current_model_closes_pg(self):
         self.metadata.get_current_embedding_model.side_effect = AppError("NOT_READY", "no current", http_status=503)

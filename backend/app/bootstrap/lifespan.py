@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI
 
+from app.bootstrap.dependency_logging import log_startup_exception, redact_text
 from app.bootstrap.reconciler import start_reconciler
 from app.bootstrap.state import ApplicationState
 from app.core import errors
@@ -187,9 +188,10 @@ def initialize_catalog(runtime: ApplicationState) -> None:
         else:
             runtime.catalog_error = f"{type(exc).__name__}: {exc}"
         if _is_infra_unreachable(exc):
-            logger.warning("Catalog 不可用（基础设施） | %s: %s | %s", type(exc).__name__, exc, _retrieval_local_debug_hint())
+            logger.warning("Catalog 不可用（基础设施） | message=%s | %s",
+                           redact_text(f"{type(exc).__name__}: {exc}", runtime.config), _retrieval_local_debug_hint())
         else:
-            logger.exception("Catalog 初始化失败：%s", exc)
+            log_startup_exception(logger, "Catalog 初始化失败", exc, runtime.config)
 
 
 def initialize_retrieval(runtime: ApplicationState, embedder) -> None:
@@ -236,9 +238,10 @@ def initialize_retrieval(runtime: ApplicationState, embedder) -> None:
         else:
             runtime.retrieval_error = f"{type(exc).__name__}: {exc}"
         if _is_infra_unreachable(exc):
-            logger.warning("Retrieval 栈不可用（基础设施） | %s: %s | %s", type(exc).__name__, exc, _retrieval_local_debug_hint())
+            logger.warning("Retrieval 栈不可用（基础设施） | message=%s | %s",
+                           redact_text(f"{type(exc).__name__}: {exc}", runtime.config), _retrieval_local_debug_hint())
         else:
-            logger.exception("Retrieval 栈初始化失败：%s", exc)
+            log_startup_exception(logger, "Retrieval 栈初始化失败", exc, runtime.config)
         return
 
     model = runtime.retrieval.model  # endpoints are logged by build_retrieval_infra
