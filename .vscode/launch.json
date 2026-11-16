@@ -27,6 +27,15 @@
             "cwd": "${workspaceFolder}/backend",
             "console": "integratedTerminal",
             "justMyCode": true
+        },
+        {
+            "name": "Python: Index Folder Images",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/backend/scripts/index_folder.py",
+            "cwd": "${workspaceFolder}/backend",
+            "console": "integratedTerminal",
+            "justMyCode": true
         }
     ]
 }

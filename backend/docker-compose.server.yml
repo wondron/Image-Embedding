@@ -1,0 +1,53 @@
+# 服务器部署：只起 API 容器。PostgreSQL / Qdrant / OSS 都是远程服务，连接参数由 Nacos 提供
+# （NACOS_ENV 选 prod / test）。完整步骤见 docs/deploy-server.md。在本文件所在目录执行：
+#   docker compose -f docker-compose.server.yml up -d
+# IMAGE、NACOS_ENV 等变量写在同目录的 .env 里，由 docker compose 替换进本文件；后端程序本身不读 .env。
+# 本地开发（连本机的 postgres / qdrant 容器）仍用 docker-compose.yml。
+
+# 固定项目名：和同目录 docker-compose.yml（项目名 backend）分开，互不当作孤儿容器
+name: roki-image-embedding
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "5"
+
+services:
+  api:
+    image: ${IMAGE:-roki-ai-image-embedding:local}
+    container_name: roki-imageembedding
+    environment:
+      # 必填 prod / test。后端不设时默认 prod，这里强制显式选择，避免测试机连上生产库
+      NACOS_ENV: ${NACOS_ENV:?NACOS_ENV must be prod or test}
+      # 远程地址都在 Nacos 里，必须开着。改用下面挂载的 config.yaml 时设为 false
+      NACOS_ENABLED: ${NACOS_ENABLED:-true}
+      # 可选：覆盖 app/core/config/constant.py 里内置的 Nacos 账号；留空就用内置值
+      NACOS_USERNAME: ${NACOS_USERNAME:-}
+      NACOS_PASSWORD: ${NACOS_PASSWORD:-}
+    volumes:
+      - ./output:/app/output  # 日志 output/logs/app.log、platform.log
+      # 可选：不用 Nacos 时，挂载一份填好远程地址的 config.yaml（同时把 NACOS_ENABLED 设为 false）
+      # - ./config.yaml:/app/config/param/config.yaml:ro
+      # 可选：保留接口追加的枚举取值（不挂载时重建容器就丢）。首次挂载前先从仓库复制一份过来
+      # - ./enums.yaml:/app/config/param/enums.yaml
+    ports:
+      # 接口没有鉴权：只给 nginx / 内网用时改成 "127.0.0.1:8320:8320"，并用安全组限制来源
+      - "8320:8320"
+    healthcheck:
+      # 只说明进程活着；能不能入库、检索看 GET /api/health
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8320/api/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 180s  # 加载两个模型 + 预热
+      retries: 5
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${GPU_ID:-0}"]  # 宿主机上的 GPU 编号；容器里总是 0，和 TOTAL_CONFIG.device_id 对应
+              capabilities: ["gpu"]
+    restart: unless-stopped
+    <<: *logging

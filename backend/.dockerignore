@@ -16,3 +16,8 @@ build/
 .vscode/
 *.log
 alembic/versions/__pycache__/
+# 运行时生成或只在本机用：日志、验收截图、本地镜像目录、测试（镜像里没装 pytest）
+output/
+logs/
+save_images/
+tests/
