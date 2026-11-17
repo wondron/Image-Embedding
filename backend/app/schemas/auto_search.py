@@ -1,9 +1,10 @@
 """Business search wire (POST /api/search/auto/file, POST /api/search/auto/url).
 
-The self-built library first; when it has nothing that reaches the threshold, the global search
-as an optional fallback (app.api.services.auto_search). items[] are the result cards both channels
-share (app.schemas.search_hit): source says which channel they came from, fallback what happened to
-the global search.
+The self-built library and, when RECIPE_DETECT_CONFIG turns it on, the recipe detection, in
+parallel and merged; when neither has anything, the global search as an optional fallback
+(app.api.services.auto_search). items[] are the result cards every channel shares
+(app.schemas.search_hit): each card's source says which channel it came from, the envelope's
+source sums them up, fallback says what happened to the global search.
 """
 
 from typing import Any, Literal
@@ -23,15 +24,15 @@ SCENE_DOC = (
 )
 TOP_K_DOC = (
     f"最多返回多少条，1～{TOP_K_MAX}，默认 {TOP_K_DEFAULT}。自建库：相似度达到 score_threshold 的前 top_k 条；"
-    "Global 兜底：向上游要 top_k 条"
+    "Global 兜底：向上游要 top_k 条。菜谱识别的那一条结果卡不占这个数量"
 )
 SCORE_THRESHOLD_DOC = (
     "自建库的相似度阈值：不传为 0.55；0 表示不设阈值（总是返回最相近的 top_k 条，也就不会走兜底）；"
     "其余取值 0.30～1，超出范围返回 SEARCH_BAD_SCORE_THRESHOLD"
 )
 GLOBAL_FALLBACK_DOC = (
-    "自建库没有达到阈值的结果时，是否用现网 Global 搜图兜底；默认 false，直接返回空结果。"
-    "Global 是外部付费服务，开启后没命中的请求会多花几秒"
+    "自建库没有达到阈值的结果、菜谱识别（开启时）也没有识别到菜名时，是否用现网 Global 搜图兜底；"
+    "默认 false，直接返回空结果。Global 是外部付费服务，开启后没命中的请求会多花几秒"
 )
 TRACE_ID_DOC = (
     "请求追踪 ID，1～64 位字母、数字或 . _ : -；原样出现在响应体 trace_id 和响应头 X-Trace-Id，"
@@ -58,7 +59,8 @@ class AutoSearchUrlRequest(BaseModel):
 
 
 class AutoSearchHit(SearchHitBase):
-    """One result card: the four card fields, the rest in details (as the channel gives them)."""
+    """One result card: the four card fields, the rest in details (as the channel gives them),
+    and the channel it came from."""
 
     details: dict[str, Any] = Field(
         default_factory=dict,
@@ -66,7 +68,14 @@ class AutoSearchHit(SearchHitBase):
             "其余字段，内容按来源。source=self：同 POST /api/search 的 details——id、category_id、category、"
             "scenes、scene_label（场景有标签映射时）、label_status、images[]；场景 outputs_heating 时另有"
             "六个食物字段和 heating_group。source=global：同 Global 搜图的 details——rank、page_url、site、"
-            "images[]、document_info"
+            "images[]、document_info。source=recipe：{}"
+        ),
+    )
+    source: Literal["self", "recipe", "global"] | None = Field(
+        default=None,
+        description=(
+            "这条结果卡来自哪里：self 自建库；recipe 菜谱识别——tags 是识别出的菜名（用「、」连接），"
+            "description 为空字符串，original_url、similarity 为 null，details 为 {}；global 现网 Global（兜底）"
         ),
     )
 
@@ -77,7 +86,7 @@ class AutoSearchFallback(BaseModel):
     status: Literal["not_needed", "disabled", "hit", "empty", "failed"] = Field(
         ...,
         description=(
-            "not_needed：自建库有结果，没有走兜底；disabled：自建库没有结果，global_fallback=false；"
+            "not_needed：自建库或菜谱识别有结果，没有走兜底；disabled：两者都没有结果，global_fallback=false；"
             "hit：Global 有结果；empty：Global 也没有结果；failed：Global 搜图失败（原因见 error、detail），"
             "按没有结果返回"
         ),
@@ -91,20 +100,28 @@ class AutoSearchFallback(BaseModel):
 class AutoSearchResponse(BaseModel):
     ok: bool = True
     trace_id: str
-    source: Literal["self", "global", "empty"] = Field(
-        ..., description="items 来自哪里：self 自建库；global 现网 Global（兜底）；empty 没有结果"
+    source: Literal["self", "recipe", "global", "empty"] = Field(
+        ...,
+        description=(
+            "items 来自哪里：self 自建库有结果（菜谱识别也识别出菜名时，items 最后还有一条 source=recipe 的结果卡）；"
+            "recipe 自建库没有结果，只有菜谱识别的那一条；global 现网 Global（兜底）；empty 没有结果。"
+            "每条结果卡自己的 source 说明它来自哪里"
+        ),
     )
     scene: str = Field(..., description="实际使用的检测场景 code")
     outputs_heating: bool = Field(
         default=False,
         description=(
-            "items 是否带加热信息（details 里的六个食物字段和 heating_group）：自建库结果和空结果按场景配置；"
-            "Global 结果总是 false"
+            "items 是否带加热信息（details 里的六个食物字段和 heating_group）：自建库结果和空结果按场景配置"
+            "（只有自建库的结果卡带，菜谱识别的那一条不带）；source 为 recipe、global 时总是 false"
         ),
     )
     items: list[AutoSearchHit] = Field(
         default_factory=list,
-        description="结果卡：自建库按相似度从高到低，Global 按上游排名；source=empty 时为 []",
+        description=(
+            "结果卡：自建库按相似度从高到低，菜谱识别的一条排在自建库结果之后；Global 按上游排名；"
+            "source=empty 时为 []"
+        ),
     )
     fallback: AutoSearchFallback
     message: str | None = Field(default=None, description="没有结果时给人看的说明")

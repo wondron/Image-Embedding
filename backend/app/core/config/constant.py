@@ -28,6 +28,9 @@ IMAGE_STORAGE_DEFAULT_BUCKET = "image-embedding"
 IMAGE_STORAGE_DEFAULT_PUBLIC_BASE_URL = "https://cdn.example.local/image-embedding"
 IMAGE_STORAGE_DEFAULT_REGION = "us-east-1"
 
+# 菜谱识别（业务搜图的并行步骤）：开关和地址在配置的 RECIPE_DETECT_CONFIG 里，没写 timeout 时用这个值
+RECIPE_DETECT_TIMEOUT_SECONDS = 5.0
+
 # Nacos 读哪些 dataId：按顺序逐个覆盖本地 YAML，后面的覆盖前面的。
 # 开关、地址、namespace、group、账号等都是环境变量 NACOS_*（app.core.config.settings.NacosSettings）
 NACOS_DATA_ID_LIST = ["roki-ai-image-search"]

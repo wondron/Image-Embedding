@@ -142,6 +142,16 @@ class timer_tool:
             self._last = time.perf_counter()
             self._add(f"{tag}失败" if failed else tag, self._last - start)
 
+    def record(self, tag: str, cost: float, failed: bool = False) -> None:
+        """
+        记一段已经量好的耗时：给和其他步骤并行执行的步骤用（它自己计时，结束后再记进来，位置固定）
+        并行步骤和其他步骤的时间重叠，所以各步骤相加可能超过总耗时
+        :param tag: 步骤名称
+        :param cost: 耗时（秒）
+        :param failed: 该步骤失败，记为「{tag}失败」
+        """
+        self._add(f"{tag}失败" if failed else tag, cost)
+
     def summary(self) -> str:
         """
         生成计时摘要

@@ -370,7 +370,7 @@ export interface PredictHitDetailsWire {
 /** schemas/predict.py PredictHit — the same card as a self-built hit (SearchHitWire). */
 export type PredictHitWire = SearchHitBaseWire<PredictHitDetailsWire>
 
-// -- POST /api/search/auto/* (业务搜图: 自建库优先, 现网 Global 兜底; contract §6.6) ---------
+// -- POST /api/search/auto/* (业务搜图: 自建库 + 菜谱识别, 现网 Global 兜底; contract §6.6) ---
 
 /**
  * schemas/auto_search.py AutoSearchUrlRequest — the JSON body of POST /api/search/auto/url; the
@@ -383,7 +383,7 @@ export interface AutoSearchUrlRequestWire {
   top_k?: number
   /** 自建库 only. Omit/null = 0.55; 0 = no threshold (never falls back); else [0.30, 1]. */
   score_threshold?: number | null
-  /** Ask 现网 Global when the self-built library has nothing; default false. */
+  /** Ask 现网 Global when the self-built library and 菜谱识别 (if on) both have nothing; default false. */
   global_fallback?: boolean
   trace_id?: string | null
   /** The caller's device, for the logs; at most 128 characters. */
@@ -399,17 +399,29 @@ export interface AutoSearchFallbackWire {
 }
 
 /**
- * schemas/auto_search.py AutoSearchResponse: items are self-built hits when source=self (as
- * POST /api/search answers) and Global results when source=global (as POST /api/search/global/*).
+ * schemas/auto_search.py AutoSearchHit — the shared card plus `source`, the channel that card came
+ * from: a self-built hit (as POST /api/search answers), a Global result (as POST
+ * /api/search/global/*), or 菜谱识别's one card: `tags` are the recognised dish names joined with
+ *「、」, `description` is "", `original_url` and `similarity` are null, `details` is {}.
+ */
+export type AutoSearchHitWire = (SearchHitWire | PredictHitWire | SearchHitBaseWire<Record<string, never>>) & {
+  /** Absent from servers older than 菜谱识别: every card then comes from the envelope's `source`. */
+  source?: 'self' | 'recipe' | 'global' | null
+}
+
+/**
+ * schemas/auto_search.py AutoSearchResponse. `source` sums the cards up: self = self-built hits
+ * (with 菜谱识别's card after them when it recognised dishes), recipe = that card alone, global =
+ * the fallback's results, empty = nothing.
  */
 export interface AutoSearchResponseWire {
   ok: true
   trace_id: string
-  source: 'self' | 'global' | 'empty'
+  source: 'self' | 'recipe' | 'global' | 'empty'
   scene: string
-  /** false for Global results (they carry no heating information). */
+  /** false when source is recipe or global (those cards carry no heating information). */
   outputs_heating: boolean
-  items: Array<SearchHitWire | PredictHitWire>
+  items: AutoSearchHitWire[]
   fallback: AutoSearchFallbackWire
   message?: string | null
 }

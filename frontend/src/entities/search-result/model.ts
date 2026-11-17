@@ -4,10 +4,11 @@ import type { FoodState, HeatingGroup, LabelStatus } from '../image'
 
 /**
  * Search channel for badges. Self-built search reports only self | empty (§6.1.1); 业务搜图
- * (POST /api/search/auto/*, §6.6) also 'global', for results of its 现网 Global fallback.
- * 'flyb' is kept for the legacy UI branches (contract W5) and is not produced for new results.
+ * (POST /api/search/auto/*, §6.6) also 'recipe', for the card of its 菜谱识别 step (the dish names
+ * recognised in the query image: text only, no image), and 'global', for results of its 现网 Global
+ * fallback. 'flyb' is kept for the legacy UI branches (contract W5) and is not produced for new results.
  */
-export type SearchChannel = 'self' | 'empty' | 'flyb' | 'global'
+export type SearchChannel = 'self' | 'empty' | 'flyb' | 'global' | 'recipe'
 
 /** 业务搜图: what happened to the Global fallback (envelope `fallback.status`). */
 export type SearchFallbackStatus = 'not_needed' | 'disabled' | 'hit' | 'empty' | 'failed'
@@ -25,13 +26,13 @@ export interface SearchFallback {
  * `original_url` / `similarity` at the top level, everything else in `details.*`.
  */
 export interface SearchImage {
-  /** 自建 ← `details.id`; FlyB results have none: 「image-N」. */
+  /** 自建 ← `details.id`; FlyB results have none: 「image-N」; 菜谱识别's card: 「recipe-N」. */
   id: string
-  /** Display name. 自建: scene_label → category → tags → 「未命名图片 N」; FlyB: tags (its title) → image alt → 「未命名图片 N」. */
+  /** Display name. 自建: scene_label → category → tags → 「未命名图片 N」; FlyB: tags (its title) → image alt → 「未命名图片 N」; 菜谱识别: its tags. */
   title: string
-  /** ← `tags`: 自建 the image's tags joined with「、」, FlyB the result title; "" when none. */
+  /** ← `tags`: 自建 the image's tags joined with「、」, FlyB the result title, 菜谱识别 the dish names joined with「、」; "" when none. */
   tags: string
-  /** Full image ← `original_url`. */
+  /** Full image ← `original_url`; always null for 菜谱识别's card (see hasImage). */
   imageUrl: string | null
   /** Thumbnail ← `details.images[]` `thumbnail_url` (自建: the 512 px WebP; FlyB: the largest size). */
   thumbnailUrl: string | null
@@ -68,7 +69,10 @@ export interface SearchResponse {
   traceId: string | null
   /** Text for people, e.g. why the result is empty. */
   message?: string
-  /** Envelope channel: self | empty (自建), self | global | empty (业务搜图); absent for 现网 Global. */
+  /**
+   * Envelope channel: self | empty (自建), self | recipe | global | empty (业务搜图: `self` items may
+   * end with 菜谱识别's card, `recipe` is that card alone); absent for 现网 Global.
+   */
   source?: SearchChannel
   /** Scene actually searched (envelope `scene`). */
   scene?: string
@@ -76,6 +80,14 @@ export interface SearchResponse {
   outputsHeating?: boolean
   /** 业务搜图 only: what happened to the Global fallback. */
   fallback?: SearchFallback
+}
+
+/**
+ * Whether a result stands for an image. 菜谱识别's card does not: it is the dish names recognised
+ * in the query image, so it has nothing to show, select or download.
+ */
+export function hasImage(item: Pick<SearchImage, 'source'>): boolean {
+  return item.source !== 'recipe'
 }
 
 /** Prefer scene_label when present; else generic category. */

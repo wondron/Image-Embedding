@@ -22,6 +22,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, TypeVar
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 from sqlalchemy.engine import URL
@@ -39,6 +40,7 @@ from app.core.config.constant import (
     PG_CONNECT_TIMEOUT_SECONDS,
     PG_DEFAULT_PORT,
     PG_DRIVER,
+    RECIPE_DETECT_TIMEOUT_SECONDS,
     SERVICE_NAME,
     VERSION,
 )
@@ -430,6 +432,39 @@ class ReconcileSettings:
         for key in ("max_verifications", "max_embeddings"):
             if getattr(settings, key) < 0:
                 raise ValueError(f"{name}.{key} must not be negative (0 turns it off), got {getattr(settings, key)!r}")
+        return settings
+
+
+@dataclass(frozen=True, slots=True)
+class RecipeDetectSettings:
+    """Recipe detection, the step the business search runs beside the self-built search
+    (app.api.services.auto_search), from RECIPE_DETECT_CONFIG.
+
+    Parsed on every request, so a change in Nacos (the switch, the address) applies without a
+    restart. Without the section the step is off. url and timeout are checked only when it is on.
+    """
+
+    enabled: bool = False
+    url: str = ""  # the detection endpoint itself, e.g. http://host:8866/detect_recipe_onnx
+    timeout: float = RECIPE_DETECT_TIMEOUT_SECONDS  # seconds for one call, as a whole
+
+    @classmethod
+    def from_config(cls, config: Mapping[str, Any]) -> RecipeDetectSettings:
+        name = "RECIPE_DETECT_CONFIG"
+        section = _section(config, name)
+        defaults = cls()
+        settings = cls(
+            enabled=_flag(section, name, "enabled", defaults.enabled),
+            url=_text(section, "url"),
+            timeout=_number(section, name, "timeout", defaults.timeout, float),
+        )
+        if not settings.enabled:
+            return settings
+        address = urlsplit(settings.url)
+        if address.scheme not in ("http", "https") or not address.netloc:
+            raise ValueError(f"{name}.url must be an http(s) address when {name}.enabled is true, got {settings.url!r}")
+        if not (settings.timeout > 0 and math.isfinite(settings.timeout)):
+            raise ValueError(f"{name}.timeout must be a positive number of seconds, got {settings.timeout!r}")
         return settings
 
 

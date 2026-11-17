@@ -34,14 +34,16 @@ export interface ResultMetadataProps {
  * What a result card says under its image, as captioned rows so the stored category, the scene's
  * label and the tags stay apart even when their values match. The first row is the card's heading
  * and carries the action; rows that do not apply to a channel are left out, not shown empty.
+ * 菜谱识别's card (业务搜图) is headed by the dish names it recognised in the query image.
  */
 export function ResultMetadata({ item, onDetail, action, footer }: ResultMetadataProps) {
   const library = isLibraryHit(item)
+  const recipe = item.source === 'recipe'
   const heading = library ? item.category ?? '未分类' : item.title
   return <>
     <dl className="result-labels">
       <div className="result-heading-row">
-        <dt>{library ? '类别' : '标题'}</dt>
+        <dt>{library ? '类别' : recipe ? '菜名' : '标题'}</dt>
         <dd>
           <h3><button type="button" className={library && !item.category ? 'is-empty' : ''} onClick={onDetail} title={heading}>{heading}</button></h3>
           {action}
@@ -60,9 +62,11 @@ export function ResultMetadata({ item, onDetail, action, footer }: ResultMetadat
         </>
         : <div>
           <dt>来源</dt>
-          <dd>{item.siteName?.trim()
-            ? <span className="result-site" title={item.siteName}>{item.siteName}</span>
-            : <span className="result-field-empty">未提供</span>}</dd>
+          <dd>{recipe
+            ? <span className="result-site" title="菜谱识别在查询图里识别出的菜名，不是图库里的图片">查询图里识别出的菜</span>
+            : item.siteName?.trim()
+              ? <span className="result-site" title={item.siteName}>{item.siteName}</span>
+              : <span className="result-field-empty">未提供</span>}</dd>
         </div>}
     </dl>
     {footer && <div className="result-card-meta">{footer}</div>}

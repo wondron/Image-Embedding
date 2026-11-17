@@ -455,6 +455,16 @@ main { flex: 1; min-height: 0; width: 100%; max-width: none; padding: 14px; marg
   background: #f3f4f6;
   border-color: #e5e7eb;
 }
+/* 业务搜图: the dish names 菜谱识别 recognised in the query image — a card without an image */
+.source-badge-recipe {
+  color: #1f7a4d;
+  background: #e9f7ef;
+  border-color: #bfe5cf;
+}
+.recipe-mark { height: 100%; min-height: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; font-size: 13px; background: #f1f8f4; color: #4f9a74; }
+.table-image .recipe-mark { min-height: 0; }
+.table-image .recipe-mark span { display: none; }
+.table-image .recipe-mark svg { width: 22px; }
 /* 业务搜图: a result of the 现网 Global fallback (the self-built library had nothing) */
 .source-badge-global {
   color: #8a5a00;

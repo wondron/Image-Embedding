@@ -169,15 +169,8 @@ curl -s http://127.0.0.1:8320/api/health        # 200，embedding / qdrant / pos
 
 | 现象 | 先看 |
 |---|---|
-<<<<<<< HEAD
 | `/api/config_info` 的 `source` 是 `yaml` | 跑 `check_nacos_connectivity.py`（先核对脚本顶部环境及配置）；`output/logs/app.log` 里搜「Nacos 不可用」 |
 | `/api/health` 503，qdrant 不 ok | 跑 `check_qdrant_connectivity.py`；6333 / 6334 是否放通，`api_key`，`prefer_grpc` |
-=======
-| `/api/config_info` 的 `source` 是 `yaml` | 服务器到 Nacos 8848 不通，或账号、namespace 不对；`output/logs/app.log` 里搜「Nacos 不可用」 |
-| 容器一启动就退出，日志里有 `NACOS_ENABLED=true 但没有设置 …` | compose 的 `environment` 里缺了列出的变量 |
-| `/api/config_info` 的 `app_env` 和 `nacos_namespace` 对不上 | compose 里单独改了 `NACOS_ENV`：用 `<<: *nacos-prod` / `*nacos-test` 成套切换 |
-| `/api/health` 503，qdrant 不 ok | 6333 / 6334 是否放通，`api_key`，`prefer_grpc` |
->>>>>>> 3d45480 (修改nacos读取逻辑)
 | `/api/health` 503，postgres 不 ok | 白名单、账号；跑 `check_postgres_connectivity.py` |
 | `NOT_READY`：没有 current 的 embedding 模型 | 第 7 步登记模型 |
 | `EMBEDDING_MODEL_MISMATCH` | 镜像里没有当前版本的权重（用了缺模型的镜像，或权重文件被换过） |

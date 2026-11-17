@@ -213,3 +213,66 @@ test('业务搜图传递兜底开关，兜底失败作为搜索提示显示', as
     expect.objectContaining({ image_url: 'https://fixture.test/query.png', global_fallback: false, top_k: 10 }),
   ])
 })
+
+test('业务搜图把菜谱识别的菜名显示成一张没有图片的结果卡，不能勾选和下载', async ({ page }) => {
+  const recipe = { tags: '荷塘小炒、凉拌猪耳、清蒸鲈鱼', description: '', original_url: null, similarity: null, details: {}, source: 'recipe' }
+  let selfBuiltHits = true
+  await page.route('**/api/search/auto/url', route => route.fulfill({ json: selfBuiltHits
+    ? { ok: true, trace_id: 'recipe-1', source: 'self', scene: 'general', outputs_heating: false,
+      items: [{ ...hit, source: 'self' }, recipe], fallback: { status: 'not_needed' } }
+    : { ok: true, trace_id: 'recipe-2', source: 'recipe', scene: 'general', outputs_heating: false,
+      items: [recipe], fallback: { status: 'not_needed' } } }))
+  await page.goto('/')
+  await page.getByRole('button', { name: '业务搜图', exact: true }).click()
+  await page.getByRole('button', { name: '图片链接', exact: true }).click()
+  await page.getByLabel('图片地址').fill('https://fixture.test/query.png')
+  await page.getByRole('button', { name: '开始搜索', exact: true }).click()
+
+  // The self-built hit, then the recipe card: its dish names, its badge, no image controls
+  const cards = page.locator('.result-card')
+  await expect(cards).toHaveCount(2)
+  await expect(cards.nth(0)).toContainText('披萨')
+  await expect(cards.nth(0).locator('.source-badge')).toHaveText('自建')
+  await expect(cards.nth(1)).toContainText('荷塘小炒、凉拌猪耳、清蒸鲈鱼')
+  await expect(cards.nth(1).locator('.source-badge')).toHaveText('菜谱识别')
+  await expect(cards.nth(1).locator('.recipe-mark')).toBeVisible()
+  await expect(cards.nth(1).getByRole('checkbox')).toHaveCount(0)
+  await expect(cards.nth(1).getByRole('button', { name: /^下载图片/ })).toHaveCount(0)
+  await expect(cards.nth(0).getByRole('checkbox')).toHaveCount(1)
+  await expect(page.locator('.results-footer')).toContainText('共 1 张图片 · 另有 1 条菜谱识别结果')
+  await expect(page.locator('.search-bottom-note')).toContainText('检索通道：自建 + 菜谱识别')
+
+  // Selecting everything takes the image only
+  await page.getByRole('button', { name: '选择全部结果', exact: true }).click()
+  await expect(page.locator('.selection-count')).toHaveText('已选择 1 张')
+  await page.getByRole('checkbox', { name: '选择本页', exact: true }).uncheck()
+  await expect(page.locator('.selection-count')).toHaveText('已选择 0 张')
+
+  // Its detail has the dish names and the channel, and nothing to download
+  await cards.nth(1).getByRole('button', { name: /^查看图片详情/ }).click()
+  const detail = page.getByRole('dialog', { name: '菜谱识别结果', exact: true })
+  await expect(detail).toContainText('荷塘小炒、凉拌猪耳、清蒸鲈鱼')
+  await expect(detail).toContainText('菜谱识别（查询图里识别出的菜名）')
+  await expect(detail.getByRole('button', { name: '下载图片' })).toHaveCount(0)
+  await expect(detail.getByRole('button', { name: '保存选项' })).toHaveCount(0)
+  await detail.getByRole('button', { name: '关闭', exact: true }).last().click()
+
+  // The table lists it the same way
+  await page.getByRole('button', { name: '列表展示结果', exact: true }).click()
+  const rows = page.locator('.result-table tbody tr')
+  await expect(rows).toHaveCount(2)
+  await expect(rows.nth(1)).toContainText('荷塘小炒、凉拌猪耳、清蒸鲈鱼')
+  await expect(rows.nth(1).getByRole('checkbox')).toHaveCount(0)
+  await expect(rows.nth(1).getByRole('button', { name: /^下载图片/ })).toHaveCount(0)
+  await expect(rows.nth(0).getByRole('button', { name: /^下载图片/ })).toHaveCount(1)
+
+  // The dish names alone are a result, not the "nothing found" state
+  selfBuiltHits = false
+  await page.getByRole('button', { name: '网格展示结果', exact: true }).click()
+  await page.getByRole('button', { name: '开始搜索', exact: true }).click()
+  await expect(cards).toHaveCount(1)
+  await expect(cards.first().locator('.source-badge')).toHaveText('菜谱识别')
+  await expect(page.locator('.results-footer')).toContainText('共 0 张图片 · 另有 1 条菜谱识别结果')
+  await expect(page.locator('.search-bottom-note')).toContainText('检索通道：自建库没有结果，菜谱识别出了菜名')
+  await expect(page.locator('.selection-count')).toHaveText('已选择 0 张')
+})

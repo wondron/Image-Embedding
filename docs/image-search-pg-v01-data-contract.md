@@ -451,7 +451,7 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 |---|---|---|
 | **Index** `POST /api/index` | 本地 path 入库、scenes JSON、BIGINT id | 收字节或可拉 URL → 算 sha256/uuid → 写 S3 → 写 `images` → embed → upsert **current** collection；场景经规则/`image_scenes`；**无 path**。**2026-11-11**：multipart / JSON 另可传 `label_status`（`auto`/`verified`，要有类别）、`source_type`、`license`（取值见 `/api/enums`，不传为 `user_upload` / `unknown`）；`indexed[].created` 为 `false` 表示相同图片此前已入库、沿用首次的标注 |
 | **Search** `POST /api/search` | `scene` 默认 `normal`；拒识；仅 normal 空→FlyB | `scene` 改为默认 **`general`**（A5）；按 payload `scenes` 过滤；场景标签投票；`outputs_heating` 附加字段；**`score_threshold` 沿用 MVP（A6）**；自建空 → **`source=empty`**；**FlyB 编排 OUT OF SCOPE（A4 / M0）** |
-| **业务搜图** `POST /api/search/auto/file`、`POST /api/search/auto/url`（**2026-11-13 新增**） | 无 | 给业务方的统一入口：自建库优先，自建库没有达到阈值的结果且请求 `global_fallback=true` 时用现网 Global 兜底；`top_k`（1–20）对两个通道都生效；结果卡同 §6.1.1，`source` 为 `self` / `global` / `empty`，`fallback.status` 说明兜底情况；Global 失败不让请求失败。原 `/api/search`、`/api/search/global/*` 不变。见 §6.6 |
+| **业务搜图** `POST /api/search/auto/file`、`POST /api/search/auto/url`（**2026-11-13 新增**） | 无 | 给业务方的统一入口：自建库优先，自建库没有达到阈值的结果且请求 `global_fallback=true` 时用现网 Global 兜底；`top_k`（1–20）对两个通道都生效；结果卡同 §6.1.1，`source` 为 `self` / `global` / `empty`，`fallback.status` 说明兜底情况；Global 失败不让请求失败。原 `/api/search`、`/api/search/global/*` 不变。**2026-11-16**：配置 `RECIPE_DETECT_CONFIG.enabled` 开启时并行调用菜谱识别，菜名作为一条 `source=recipe` 的结果卡并入 `items`，`source` 增加 `recipe`，每条结果卡带自己的 `source`。见 §6.6 |
 | **多图搜索** `POST /api/search/batch/files`、`POST /api/search/batch/urls`（**2026-11-15 新增**） | 无 | 一次请求 1–30 张查询图，逐张查自建库，整批共用 `scene`、`top_k`（1–50）、`score_threshold`；`results[]` 每张图一项（顺序同请求）：`ok=true` 时是它的结果卡（同 `POST /api/search`），`ok=false` 时是这张图的错误码和说明，不影响其他图片；共用参数不合法、或所有图片都因同一个服务故障失败时整个请求失败。不调用 Global。见 §6.7 |
 | **配置导入** `POST /api/categories/import`、`POST /api/scenes/import`（**2026-11-15 新增**） | 无 | 上传类别树 / 场景配置文件（页面下载的 JSON，或 `GET /api/categories`、`GET /api/scenes` 的响应体，可编辑、可只留要改的部分）：按编码 upsert，逐项走现有管理用例；`dry_run` 默认 `true` 只预览，`false` 才写入；类别不移动、不改编码、不删除；场景 `prune=true` 时删除文件里没列出的规则和场景类别，场景本身不删；响应是逐项报告（`summary` + `rows` + `not_in_file`）。见 §6.8 |
 | **List** `GET /api/images` | 分页、scene、title/category、仅 active | 无 soft-status：未删即在库；scene 成员过滤；返回 `original_url`/`thumb_url`、类别树字段、场景 codes；category 改 ID/code。**2026-11-11**：新增 `category_id`（正整数，这个类别及其所有下级类别，ltree 子树；未标注的图片不匹配）和 `label_status`（`unlabeled`/`auto`/`verified`，非法值 422）筛选；原 `category`（编码 / 名称 / ID，只匹配一个类别）保留 |
@@ -941,9 +941,9 @@ PATCH 字段（不传 = 不变）：
 
 ## 6.6 业务搜图：自建库优先，Global 兜底（2026-11-13 · 本地实现，未测试）
 
-给业务方（设备、业务后台）的一个搜图入口：先查自建库；自建库没有达到阈值的结果、且请求开启了兜底时，再用现网 Global 搜图，返回最终结果。原有 `POST /api/search`（只查自建库，`source` 只有 `self` / `empty`）和 `POST /api/search/global/file`、`/url` 不变。
+给业务方（设备、业务后台）的一个搜图入口：先查自建库；自建库没有达到阈值的结果、且请求开启了兜底时，再用现网 Global 搜图，返回最终结果。**2026-11-16 起**：配置开启时，和自建库搜索并行调用菜谱识别，识别出的菜名作为一条结果卡和自建库结果合并返回；合并后没有结果才走兜底（§6.6.2、§6.6.6）。原有 `POST /api/search`（只查自建库，`source` 只有 `self` / `empty`）和 `POST /api/search/global/file`、`/url` 不变。
 
-代码：路由 `backend/app/api/v1/auto_search.py`，编排 `backend/app/api/services/auto_search.py`，wire `backend/app/schemas/auto_search.py`。两个通道都走现有链路：自建库同 `POST /api/search` 的用例，Global 同 `POST /api/search/global/*`（`FLAB_CONFIG`，相似度过滤按 `GLOBAL_FILTER`）。查询图只读一次（上传或下载），两个通道共用。
+代码：路由 `backend/app/api/v1/auto_search.py`，编排 `backend/app/api/services/auto_search.py`，wire `backend/app/schemas/auto_search.py`。两个通道都走现有链路：自建库同 `POST /api/search` 的用例，Global 同 `POST /api/search/global/*`（`FLAB_CONFIG`，相似度过滤按 `GLOBAL_FILTER`）。查询图只读一次（上传或下载），各通道共用。菜谱识别的调用在 `backend/app/clients/recipe_detect.py`，配置段 `RECIPE_DETECT_CONFIG`（`backend/app/core/config/settings.py` 的 `RecipeDetectSettings`）。
 
 ### 6.6.1 请求
 
@@ -956,17 +956,20 @@ PATCH 字段（不传 = 不变）：
 |---|---|---|---|
 | `file` / `image_url` | 文件 / `string` | 必填 | 查询图片，最大 15 MB。`image_url` 由服务端下载，只允许公网 http(s)，规则同其他按 URL 搜图的接口 |
 | `scene` | `string` | `general` | 检测场景 code（`GET /api/scenes`），如 `oven`（一体机）、`range_hood`（抽油烟机）。只作用于自建库：按场景过滤，场景类别名和加热信息也按它；未知或停用的场景返回 `SEARCH_UNKNOWN_SCENE` 422。Global 不分场景 |
-| `top_k` | `integer` | `10` | 最多返回多少条，1–20。自建库：相似度达到阈值的前 `top_k` 条；Global：向上游要 `top_k` 条（即 Global 接口的 `search_num`）。上限 20 是 Global 的上限 |
+| `top_k` | `integer` | `10` | 最多返回多少条，1–20。自建库：相似度达到阈值的前 `top_k` 条；Global：向上游要 `top_k` 条（即 Global 接口的 `search_num`）。上限 20 是 Global 的上限。菜谱识别的那一条结果卡不占这个数量 |
 | `score_threshold` | `number` | 0.55 | 自建库的相似度阈值，规则同 `POST /api/search`（§3.2.1）：`0` 表示不设阈值（总是有结果，不会走兜底），其余 0.30–1，超出返回 `SEARCH_BAD_SCORE_THRESHOLD` 422 |
-| `global_fallback` | `boolean` | `false` | 自建库没有结果时是否用 Global 兜底。Global 是外部付费服务，没命中的请求会多花几秒：上游超时 `FLAB_CONFIG.Timeout`，开了 `GLOBAL_FILTER.switch` 还要下载候选图做比对 |
+| `global_fallback` | `boolean` | `false` | 自建库没有结果、菜谱识别（开启时）也没有识别到菜名时，是否用 Global 兜底。Global 是外部付费服务，没命中的请求会多花几秒：上游超时 `FLAB_CONFIG.Timeout`，开了 `GLOBAL_FILTER.switch` 还要下载候选图做比对 |
 | `trace_id` | `string` | 服务端生成 | 1–64 位字母、数字或 `. _ : -`，原样回在响应体 `trace_id` 和响应头 `X-Trace-Id`；不传或不合规时由服务端生成。也可以用请求头 `X-Trace-Id` 传；参数校验失败（422）的响应只认请求头 |
 | `machine_info` | `string` | — | 调用方设备信息（如设备型号），只写日志，最长 128 个字符 |
 
 ### 6.6.2 流程
 
-1. 自建库：按 `scene` 过滤，取相似度 ≥ 阈值的前 `top_k` 条。有结果 → `source=self`。
-2. 自建库没有结果：`global_fallback=false` → `source=empty`；`true` → 用同一张图查 Global，有结果 → `source=global`，没有 → `source=empty`。
-3. 只有「自建库查询成功但没有结果」才兜底。自建库出错（未知场景、图片无法解码、检索服务未就绪、向量库 / 数据库失败）按统一错误格式返回，不走 Global。Global 兜底失败不让请求失败：返回空结果，`fallback.status=failed` 并给出错误码，调用方能区分「没找到」和「兜底没跑成」。
+1. 自建库：按 `scene` 过滤，取相似度 ≥ 阈值的前 `top_k` 条。
+2. 菜谱识别（`RECIPE_DETECT_CONFIG.enabled=true` 时，§6.6.6）：和第 1 步**并行**调用识别接口。识别出菜名时生成一条结果卡：`source=recipe`，`tags` 为菜名用「、」连接，`description` 为 `""`，`original_url`、`similarity` 为 `null`，`details` 为 `{}`。
+3. 合并：自建库结果在前（按相似度从高到低），菜谱识别的一条排在最后，不占 `top_k`。自建库有结果 → `source=self`；只有菜谱识别的一条 → `source=recipe`。
+4. 合并后没有结果：`global_fallback=false` → `source=empty`；`true` → 用同一张图查 Global，有结果 → `source=global`，没有 → `source=empty`。
+5. 只有「自建库查询成功但没有结果、菜谱识别也没有识别到菜名」才兜底。自建库出错（未知场景、图片无法解码、检索服务未就绪、向量库 / 数据库失败）按统一错误格式返回，不走 Global，还在进行的菜谱识别调用会被取消。Global 兜底失败不让请求失败：返回空结果，`fallback.status=failed` 并给出错误码，调用方能区分「没找到」和「兜底没跑成」。
+6. 菜谱识别失败（超时、连接不上、识别服务报错、配置有误）也不让请求失败：按没有识别到菜名处理，原因写日志（§6.6.6）；这时如果最终没有结果，`message` 里会写「菜谱识别失败」。
 
 ### 6.6.3 响应（`AutoSearchResponse`）
 
@@ -974,24 +977,24 @@ PATCH 字段（不传 = 不变）：
 |---|---|---|
 | `ok` | `boolean` | 成功为 `true`；没有结果、兜底失败也是 `true` |
 | `trace_id` | `string` | 同响应头 `X-Trace-Id` |
-| `source` | `"self" \| "global" \| "empty"` | `items` 来自哪里 |
+| `source` | `"self" \| "recipe" \| "global" \| "empty"` | `items` 来自哪里：`self` 自建库有结果（菜谱识别也识别出菜名时，`items` 最后还有一条 `source=recipe` 的结果卡）；`recipe` 自建库没有结果，只有菜谱识别的那一条；`global` 现网 Global（兜底）；`empty` 没有结果 |
 | `scene` | `string` | 实际使用的场景 code |
-| `outputs_heating` | `boolean` | `items` 是否带加热信息：`self`、`empty` 按场景配置；`global` 总是 `false`（Global 结果没有类别和加热信息） |
-| `items` | `array` | 结果卡（§6.1.1，两个通道同形：顶层 `tags` / `description` / `original_url` / `similarity`，其余在 `details`）。`source=self` 的 `details` 同 `POST /api/search`（`id`、`category`、`scene_label`、加热信息等）；`source=global` 的同 Global 搜图（`rank`、`page_url`、`site`、`images[]` 等）。自建库按相似度从高到低，Global 按上游排名；`empty` 时为 `[]` |
+| `outputs_heating` | `boolean` | `items` 是否带加热信息：`self`、`empty` 按场景配置（只有自建库的结果卡带，菜谱识别的那一条不带）；`recipe`、`global` 总是 `false`（这两种结果没有类别和加热信息） |
+| `items` | `array` | 结果卡（§6.1.1，两个通道同形：顶层 `tags` / `description` / `original_url` / `similarity`，其余在 `details`）。`source=self` 的 `details` 同 `POST /api/search`（`id`、`category`、`scene_label`、加热信息等）；`source=global` 的同 Global 搜图（`rank`、`page_url`、`site`、`images[]` 等）。**每条结果卡另有自己的 `source`**（`self` / `recipe` / `global`，2026-11-16 起）：`recipe` 是菜谱识别的那一条，`tags` 为识别出的菜名（「、」连接），`description` 为 `""`，`original_url`、`similarity` 为 `null`，`details` 为 `{}`。自建库按相似度从高到低，菜谱识别的一条排在自建库结果之后；Global 按上游排名；`empty` 时为 `[]` |
 | `fallback` | `object` | 总是出现：`status` 见下表；`status=failed` 时另有 `error`（错误码）和 `detail`（说明） |
 | `message` | `string` | 没有结果时给人看的说明，可选 |
 
 | `fallback.status` | `source` | 含义 |
 |---|---|---|
-| `not_needed` | `self` | 自建库有结果，没有走兜底 |
-| `disabled` | `empty` | 自建库没有结果，`global_fallback=false` |
+| `not_needed` | `self` / `recipe` | 自建库或菜谱识别有结果，没有走兜底 |
+| `disabled` | `empty` | 自建库和菜谱识别都没有结果，`global_fallback=false` |
 | `hit` | `global` | Global 有结果 |
 | `empty` | `empty` | Global 也没有结果（含上游的空结果响应） |
 | `failed` | `empty` | Global 失败，`error` 如 `UPSTREAM_TIMEOUT`、`UPSTREAM_ERROR`、`NOT_READY`（Global 服务没有初始化）、`PREDICT_FAILED` |
 
 ### 6.6.4 错误
 
-统一错误格式（§6）：`VALIDATION_ERROR` 422（参数不合法，如 `top_k` 超范围、JSON 里有未知字段）、`SEARCH_BAD_SCORE_THRESHOLD` 422、`SEARCH_UNKNOWN_SCENE` 422、`SEARCH_BAD_IMAGE` 422、`EMPTY_FILE` 400、`FILE_TOO_LARGE` 413、`INVALID_URL` 422、`FORBIDDEN_HOST` 403、`DOWNLOAD_FAILED` 502、`DOWNLOAD_TIMEOUT` 504、`SEARCH_QDRANT_FAILED` / `SEARCH_POSTGRES_FAILED` 502、`NOT_READY` 503（自建检索未就绪）。Global 的失败不在这里，见 `fallback.status=failed`。
+统一错误格式（§6）：`VALIDATION_ERROR` 422（参数不合法，如 `top_k` 超范围、JSON 里有未知字段）、`SEARCH_BAD_SCORE_THRESHOLD` 422、`SEARCH_UNKNOWN_SCENE` 422、`SEARCH_BAD_IMAGE` 422、`EMPTY_FILE` 400、`FILE_TOO_LARGE` 413、`INVALID_URL` 422、`FORBIDDEN_HOST` 403、`DOWNLOAD_FAILED` 502、`DOWNLOAD_TIMEOUT` 504、`SEARCH_QDRANT_FAILED` / `SEARCH_POSTGRES_FAILED` 502、`NOT_READY` 503（自建检索未就绪）。Global 的失败不在这里，见 `fallback.status=failed`；菜谱识别的失败也不在这里，只写日志（§6.6.6）。
 
 ### 6.6.5 示例
 
@@ -1028,6 +1031,46 @@ curl -X POST "http://<host>:8320/api/search/auto/file" \
  "fallback": {"status": "failed", "error": "UPSTREAM_TIMEOUT", "detail": "上游搜索服务响应超时，请稍后重试。"},
  "message": "自建库没有达到阈值的结果，Global 兜底失败"}
 ```
+
+自建库命中，菜谱识别也识别出菜名（`details` 从略）：
+
+```json
+{"ok": true, "trace_id": "biz-20261116-0001", "source": "self", "scene": "general", "outputs_heating": false,
+ "items": [{"tags": "清蒸", "description": "", "original_url": "https://cdn.example.com/original/7a/7a41c9d2.jpg", "similarity": 0.81,
+            "details": {"id": "7a41c9d2-0000-4000-8000-000000000001", "category": "清蒸鲈鱼"}, "source": "self"},
+           {"tags": "荷塘小炒、凉拌猪耳、清蒸鲈鱼", "description": "", "original_url": null, "similarity": null, "details": {}, "source": "recipe"}],
+ "fallback": {"status": "not_needed"}}
+```
+
+自建库没有结果，只有菜谱识别的结果（不走兜底）：
+
+```json
+{"ok": true, "trace_id": "biz-20261116-0002", "source": "recipe", "scene": "general", "outputs_heating": false,
+ "items": [{"tags": "荷塘小炒、凉拌猪耳、清蒸鲈鱼", "description": "", "original_url": null, "similarity": null, "details": {}, "source": "recipe"}],
+ "fallback": {"status": "not_needed"}}
+```
+
+### 6.6.6 菜谱识别（2026-11-16）
+
+和自建库搜索并行的一步：调用外部的菜谱识别接口，识别查询图里的菜名。配置段（Nacos / 本地 YAML，**每次请求都读**，改了不用重启）：
+
+| `RECIPE_DETECT_CONFIG` | 默认 | 说明 |
+|---|---|---|
+| `enabled` | `false` | 是否调用；没有这一节也是不调用。关闭时业务搜图和 2026-11-16 之前一样（结果卡多一个 `source` 字段） |
+| `url` | — | 识别接口地址，如 `http://<host>:8866/detect_recipe_onnx`；`enabled=true` 时必填，必须是 http(s) 地址 |
+| `timeout` | `5` | 一次调用的总时限（秒，含上传），超时按识别失败处理 |
+
+调用方式：`POST /api/search/auto/url` 把请求里的图片链接转给识别接口（JSON `{"image_url": "...", "traceId": "<trace_id>"}`，识别服务自己下载；链接先通过了本服务的下载校验）；`POST /api/search/auto/file` 没有链接，把图片原样作为 multipart 的 `file` 上传（另带 `traceId`）。识别接口返回 `{"code": "200", "success": true, "message": "识别成功", "traceId": "...", "model": "detect_recipe_onnx", "data": ["荷塘小炒", "凉拌猪耳", "清蒸鲈鱼"]}`，只用 `data`：去掉空白项和重复项后用「、」连接成结果卡的 `tags`；`data` 为空表示没有识别到菜名，不生成结果卡。HTTP 非 2xx、`success` 不是 `true`、`data` 不是列表、超时、连接不上都算失败。
+
+日志：识别的耗时作为「菜谱识别」一步写进这次请求的耗时行（失败时为「菜谱识别失败」；它和自建库的几步并行，所以各步骤相加可能超过总耗时）；结果另写一行（logger `svc.auto_search`，同时写平台日志）：
+
+```text
+菜谱识别完成 | 结果=["荷塘小炒", "凉拌猪耳", "清蒸鲈鱼"] | 耗时 1.368s | 输入=图片链接 | trace_id=biz-20261116-0001
+业务搜图(图片链接) | 图像下载 0.120s | embedding推理 0.045s | vector搜索 0.012s | 后处理 0.003s | 菜谱识别 1.368s | 总耗时 1.490s | 参数=image_url=..., top_k=10, global_fallback=False | trace_id=biz-20261116-0001
+菜谱识别失败 | UPSTREAM_TIMEOUT: 菜谱识别服务 5 秒内没有返回 | 耗时 5.003s | 输入=图片内容 | trace_id=biz-20261116-0003
+```
+
+前端：「图搜图 → 业务搜图」把菜谱识别的那一条显示成一张标「菜谱识别」的结果卡（没有图片，不能勾选和下载），底部统计把它和图片分开计数。
 
 
 <a id="batch-search"></a>
@@ -1330,6 +1373,7 @@ curl -X POST "http://<host>:8320/api/scenes/import?dry_run=false&prune=false" -H
 | 2026-11-15 | **入库记录统计：新入库图片与重复上传分开**（无表结构变化、无新迁移）：现象是一次上传 47 张、失败的重传后全部成功，「成功」却显示 48。原因：记录按上传次数记，同一张图有两条成功记录——第一张的请求被浏览器放弃（开始后随即取消再继续），服务端仍把它入库并记了成功，重传那次 `new_image=false` 又记一条；页面把成功记录条数当成了图片数。BE：`GET /api/index-tasks` 的 `counts` 加 `repeated`（图片仍在图库、`new_image=false` 的成功记录，与 `image_deleted` 不重叠），新增 `new_image` 筛选并在响应里回显。FE「服务端入库记录」：指标改为 新入库图片 / 重复上传 / 图片已删除 / 失败，筛选 全部 / 新入库 / 重复上传 / 图片已删除 / 失败，重复上传的行和详情单独标注，有重复上传时说明原因；「上传与导入」开始入库后 600ms 内的「取消入库」点击忽略（两个按钮在同一位置，双击会先开始再取消）。本地实现，未测试。见 §6.4.1 |
 | 2026-11-15 | **对象键加分片目录**（无表结构变化、无新迁移、无接口变化）：新写入的原图、缩略图键为 `original/{shard}/{image_id}.{ext}`、`thumb/{shard}/{image_id}.webp`，`{shard}` 为原图 SHA-256 前 2 位十六进制（小写，即 `image_id` 前 2 个字符），`key_prefix` 照旧加在最前，如 `ImageEmbedding/original/a3/{image_id}.jpg`；`staging` 不变。已有对象与 URL 不迁移，读、删、reembed 仍走存库 URL。键规则变化后同一张图新旧键不同：重复上传保留首次 URL，并删掉本次写入、不被引用的新键副本；删图清理时若图已重新入库，相对键不同的旧文件照删（之前一律保留）。FE 只用接口给的完整 URL，无运行时改动，e2e 模拟数据改成分片地址。见 §5 |
 | 2026-11-15 | **入库与批量删除数量上限改为 500**（无表结构变化、无新迁移）：BE：`POST /api/index` multipart 一次最多 500 个文件（原 100），超出 422 `VALIDATION_ERROR`（`too many files (max 500)`），不入库任何一张；整批文件先全部读入内存再逐张入库，最坏约 500 × 15 MB，单个请求耗时随张数增长。FE：「上传与导入」待入库队列最多 500 张（原 100），仍逐张请求；队列缩略图改为懒加载。图库「批量删除」每批最多 500 张，选多了提示分批、不打开确认框（原来只受「选择全部」1000 张限制）；「选择全部」与「批量修改」仍为 1000。删除队列（`/api/image-deletions` 的 `limit` ≤ 200）不变 |
+| 2026-11-16 | **业务搜图并行调用菜谱识别**（无表结构变化、无新迁移）：`POST /api/search/auto/file`、`/url` 在查自建库的同时并行调用菜谱识别接口（新配置段 `RECIPE_DETECT_CONFIG`：`enabled` 开关、`url` 接口地址、`timeout`，每次请求都读），识别出的菜名作为一条结果卡并入 `items`（`source=recipe`，`tags` 为菜名用「、」连接，`description` 为空字符串，其余字段为空），排在自建库结果之后、不占 `top_k`；合并后没有结果才按 `global_fallback` 走 Global，之后的逻辑不变。响应：`source` 增加 `recipe`（只有菜谱识别的结果）；每条结果卡增加自己的 `source`（`self` / `recipe` / `global`）。菜谱识别失败不让请求失败，耗时和结果写日志（耗时行多一步「菜谱识别」）。FE：结果卡标「菜谱识别」，没有图片，不能勾选和下载。见 §6.6.2、§6.6.6 |
 
 ---
 

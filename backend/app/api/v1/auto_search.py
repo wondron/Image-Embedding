@@ -1,6 +1,6 @@
-"""Business search routes: the self-built library first, the global search as an optional
-fallback (app.api.services.auto_search). One route per input, like the global search routes:
-an uploaded file (multipart) or an image URL (JSON)."""
+"""Business search routes: the self-built library and the recipe detection in parallel, the
+global search as an optional fallback (app.api.services.auto_search). One route per input, like
+the global search routes: an uploaded file (multipart) or an image URL (JSON)."""
 
 from __future__ import annotations
 import logging
@@ -10,7 +10,7 @@ from app.api.deps import require_retrieval
 from app.api.services.auto_search import run_auto_search
 from app.api.uploads import read_upload
 from app.bootstrap.state import get_application_state
-from app.clients.image_fetch import read_url_bytes
+from app.clients.image_fetch import clean_url, read_url_bytes
 from app.core.middleware import bind_trace_id
 from app.core.observability.log_helper import log_timing
 from app.schemas.auto_search import (
@@ -33,9 +33,12 @@ router = APIRouter(prefix="/api/search/auto", tags=["business-search"])
 
 _DESCRIPTION = (
     "给业务方用的搜图接口：先查自建库（按检测场景过滤，取相似度达到阈值的前 top_k 条）；"
-    "自建库没有结果且 global_fallback=true 时，再用现网 Global 搜图兜底（取 top_k 条），返回最终结果。"
-    "两个通道的结果是同一种结果卡，source 说明来自哪里（self / global / empty），"
-    "fallback.status 说明兜底的情况。Global 兜底失败不会让请求失败：返回空结果，fallback.status=failed 并给出原因。"
+    "配置 RECIPE_DETECT_CONFIG.enabled 开启时，同时并行调用菜谱识别，识别出的菜名作为一条结果卡"
+    "（source=recipe，菜名在 tags 里）排在自建库结果之后。"
+    "两者都没有结果且 global_fallback=true 时，再用现网 Global 搜图兜底（取 top_k 条），返回最终结果。"
+    "各通道的结果是同一种结果卡，source 说明来自哪里（self / recipe / global / empty，每条结果卡也有自己的 source），"
+    "fallback.status 说明兜底的情况。Global 兜底失败不会让请求失败：返回空结果，fallback.status=failed 并给出原因；"
+    "菜谱识别失败也不会让请求失败，按没有识别到菜名处理。"
     "自建库出错（未知场景 SEARCH_UNKNOWN_SCENE、图片无法解码 SEARCH_BAD_IMAGE、检索服务未就绪 NOT_READY 等）"
     "按统一错误格式返回，不走兜底。详见契约 §6.6。"
 )
@@ -61,7 +64,7 @@ def _log_search_timing(
     "/file",
     response_model=AutoSearchResponse,
     response_model_exclude_unset=True,  # fallback.error / detail and message only when set
-    summary="业务搜图（上传文件）：自建库优先，可选 Global 兜底",
+    summary="业务搜图（上传文件）：自建库 + 菜谱识别，可选 Global 兜底",
     description=_DESCRIPTION,
 )
 async def auto_search_by_file(
@@ -111,7 +114,7 @@ async def auto_search_by_file(
     "/url",
     response_model=AutoSearchResponse,
     response_model_exclude_unset=True,
-    summary="业务搜图（图片链接）：自建库优先，可选 Global 兜底",
+    summary="业务搜图（图片链接）：自建库 + 菜谱识别，可选 Global 兜底",
     description=_DESCRIPTION + " 请求体为 JSON，未知字段返回 422。",
 )
 async def auto_search_by_url(request: Request, body: AutoSearchUrlRequest) -> Any:
@@ -132,6 +135,7 @@ async def auto_search_by_url(request: Request, body: AutoSearchUrlRequest) -> An
         result = await run_auto_search(
             runtime,
             image_bytes=image_bytes,
+            image_url=clean_url(body.image_url),  # as it was downloaded; the recipe service fetches it too
             scene=body.scene,
             top_k=body.top_k,
             score_threshold=body.score_threshold,

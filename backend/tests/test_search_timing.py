@@ -127,6 +127,17 @@ class TimerToolTests(unittest.TestCase):
         timer.mark("后处理")  # since the step ended
         self.assertEqual(timer.summary(), "图像下载 0.500s | 后处理 1.000s | 总耗时 3.000s")
 
+    def test_a_duration_measured_elsewhere_is_recorded_like_a_step(self):
+        self.clock(0.0, 1.0, 1.5, 2.0)
+        timer = timer_tool()
+        with timer.step("后处理"):
+            pass
+        # A step that ran beside the others times itself: the clock is not read, and the steps
+        # may add up to more than the total
+        timer.record("菜谱识别", 1.75)
+        timer.record("global搜索", 0.25, failed=True)
+        self.assertEqual(timer.summary(), "后处理 0.500s | 菜谱识别 1.750s | global搜索失败 0.250s | 总耗时 2.000s")
+
 
 class RecordedStepsTests(unittest.TestCase):
     """What each layer records on the timer it is given; none of them writes a timing line."""

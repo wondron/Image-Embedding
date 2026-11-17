@@ -19,7 +19,7 @@ npm.cmd run dev
 
 「现网 Global」的两个输入接口明确命名为 `POST /api/search/global/file`（上传图片文件）和 `POST /api/search/global/url`（图片链接），前端使用这两个地址；两者共用同一套 Global 搜图逻辑。旧 `/api/predict/searchImage_file`、`/api/predict/searchImage_url` 保留为兼容别名，不在 Swagger 中展示，参数和响应保持一致。
 
-给业务方的搜图接口是 `POST /api/search/auto/file`（上传文件）和 `POST /api/search/auto/url`（JSON 图片链接）：先查自建库，没有达到阈值的结果且 `global_fallback=true` 时用现网 Global 兜底，按 `source`（`self` / `global` / `empty`）返回同一种结果卡。参数、响应和错误见 [数据契约 §6.6](docs/image-search-pg-v01-data-contract.md)。
+给业务方的搜图接口是 `POST /api/search/auto/file`（上传文件）和 `POST /api/search/auto/url`（JSON 图片链接）：先查自建库；配置 `RECIPE_DETECT_CONFIG.enabled` 开启时同时并行调用菜谱识别，识别出的菜名作为一条 `source=recipe` 的结果卡（菜名在 `tags` 里）排在自建库结果之后；两者都没有结果且 `global_fallback=true` 时用现网 Global 兜底。按 `source`（`self` / `recipe` / `global` / `empty`，每条结果卡也有自己的 `source`）返回同一种结果卡。参数、响应和错误见 [数据契约 §6.6](docs/image-search-pg-v01-data-contract.md)。
 
 多图搜索接口是 `POST /api/search/batch/files`（multipart，字段名 `files` 重复 1–30 次）和 `POST /api/search/batch/urls`（JSON `image_urls`）：一次请求多张查询图，逐张查自建库，整批共用 `scene`、`top_k`、`score_threshold`；`results[]` 每张图一项，某张图读不出或无法解码只影响它自己。不调用 Global。见 [数据契约 §6.7](docs/image-search-pg-v01-data-contract.md#batch-search)。
 
@@ -62,8 +62,9 @@ Global 搜索阶段直接保留上游 `image_url`，不下载或验证候选图�
 | `TOTAL_CONFIG.retrieval_enabled` | 设为 `false` 时只跑 predict，不初始化 PG / Qdrant |
 | `IMAGE_DOWNLOAD_CONFIG.trusted_networks` | 远程图片下载只允许公网地址；这里列出的网段也放行。生产留空，本机代理为 fake-IP 模式时填 `198.18.0.0/15`、`2001:2::/48` |
 | `RECONCILE_CONFIG` | API 进程里的后台对账：`enabled`（默认 true）、`interval_seconds`（默认 300，至少 10）、`initial_delay_seconds`（默认 30）、`max_payloads`（每轮最多补推的向量 payload，默认 2000）、`max_deletions`（每轮最多清理的删除队列条数，默认 200）、`max_verifications`（每轮对照向量库核对的写入记录条数，默认 2000，0 关闭）、`max_embeddings`（每轮为当前模型版本补上的缺向量图片数，默认 100，0 关闭）。每轮把数据库里比向量库新的过滤信息补推到 Qdrant，核对一段写入记录（向量库里点已不在的作废），为没有向量的图片生成向量，再清理已删除图片留下的向量和文件；多个进程同时开着时只有一个在跑。关掉后可以用 `python -m app.workers.reconcile` 定时执行（没有编码器，只核对不补向量） |
+| `RECIPE_DETECT_CONFIG` | 业务搜图（`/api/search/auto/*`）里和自建库搜索并行的菜谱识别：`enabled`（默认 false，没有这一节也不调用）、`url`（识别接口地址，开启时必填，如 `http://<host>:8866/detect_recipe_onnx`）、`timeout`（一次调用的总时限，默认 5 秒；超时或出错按没有识别到处理，不影响搜索）。每次请求都读，改了不用重启 |
 
-这些连接参数只在启动时读取，Nacos 里修改后需要重启服务；predict 的模型配置仍支持热更新。
+这些连接参数只在启动时读取，Nacos 里修改后需要重启服务（`RECIPE_DETECT_CONFIG` 除外）；predict 的模型配置仍支持热更新。
 
 ### 换 embedding 模型
 
