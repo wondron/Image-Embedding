@@ -1,6 +1,8 @@
-"""把一个文件夹里的图片逐张入库：每张图发一次 POST /api/index（multipart 只带一个 file）。
+"""把单张图片或文件夹里的图片逐张入库：每张图发一次 POST /api/index。
 
-参数不走命令行，改下面「参数」一节即可。先启动后端（launch.json 的「Python: Backend」），
+参数不走命令行，改下面「参数」一节即可；IMAGE_FILE / IMAGE_DIR 二选一。
+直接上传本机文件的字节，后端可以运行在另一台机器上，无需启动前端。
+先启动后端（launch.json 的「Python: Backend」），
 再用 launch.json 的「Python: Index Folder Images」调试，或在 backend 目录执行：
   python scripts/index_folder.py
 
@@ -19,18 +21,23 @@
 from __future__ import annotations
 
 import json
+import math
 import mimetypes
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import requests
 
 # ==== 参数 ==========================================================================
 
-# 待入库的图片文件夹，例如 r"E:\dataset\红薯叶"
+# 输入二选一，另一个留空；使用 r"..." 填写 Windows 路径。
+# 待入库的单张图片，例如 r"E:\dataset\红薯叶\001.jpg"
+IMAGE_FILE = r""
+# 待入库的图片文件夹，例如 r"E:\dataset\红薯叶"；相对路径统一相对于 backend 目录
 IMAGE_DIR = r""
 # True：连同子文件夹；False：只取这一层
 RECURSIVE = True
@@ -46,6 +53,8 @@ FORM_FIELDS: dict[str, Any] = {
     "category": None,  # 类别编码（categories.code），如 "dish.pizza"，不区分大小写
     "label_status": None,  # "auto" / "verified"，要同时填 category；不填时有类别为 auto，否则 unlabeled
     "tags": None,  # 标签列表，如 ["红薯叶"]
+    "scene": None,  # 可选场景编码；服务端校验是否存在，实际归属由类别与场景规则决定
+    "scenes": None,  # 可选场景编码列表，如 ["general"]，与 scene 一样仅作校验
     "description": None,  # 图片描述
     "source_type": None,  # 取值见 GET /api/enums/source_type，默认 user_upload
     "license": None,  # 取值见 GET /api/enums/license，默认 unknown
@@ -71,6 +80,8 @@ MAX_SERVER_FAILURES = 3
 
 # ==== 以下一般不用改 ==================================================================
 
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+
 # 200 响应里这张图在 failed 中时，这些错误码是服务端的问题（5xx），值得重试
 SERVER_ERRORS = frozenset({"INTERNAL_ERROR", "NOT_READY", "INDEX_QDRANT_FAILED", "INDEX_POSTGRES_FAILED"})
 # 表单字段的问题：每张图带的是同一组字段，后面的图片都会同样失败
@@ -89,7 +100,7 @@ class Outcome:
 
 
 def api(path: str) -> str:
-    return BASE_URL.rstrip("/") + path
+    return BASE_URL.strip().rstrip("/") + path
 
 
 def json_object(resp: requests.Response) -> dict[str, Any]:
@@ -107,15 +118,62 @@ def find_images(root: Path) -> list[Path]:
     return sorted(p for p in candidates if p.is_file() and p.suffix.lower() in exts)
 
 
+def validate_config() -> None:
+    """配置写错时在上传前停止，避免静默漏传或直接抛出调用栈。"""
+    url = urlsplit(BASE_URL.strip())
+    if url.scheme not in {"http", "https"} or not url.hostname or url.query or url.fragment:
+        raise ValueError("BASE_URL 应为后端 HTTP(S) 地址，例如 http://127.0.0.1:8320")
+    if url.port is not None and not 1 <= url.port <= 65535:
+        raise ValueError("BASE_URL 端口应在 1～65535 之间")
+    for name, value, minimum in (("RETRIES", RETRIES, 0), ("MAX_SERVER_FAILURES", MAX_SERVER_FAILURES, 1)):
+        if type(value) is not int or value < minimum:
+            raise ValueError(f"{name} 必须是大于等于 {minimum} 的整数")
+    if LIMIT is not None and (type(LIMIT) is not int or LIMIT <= 0):
+        raise ValueError("LIMIT 必须是正整数或 None")
+    if (isinstance(TIMEOUT_SECONDS, bool) or not isinstance(TIMEOUT_SECONDS, (int, float))
+            or not math.isfinite(TIMEOUT_SECONDS) or TIMEOUT_SECONDS <= 0):
+        raise ValueError("TIMEOUT_SECONDS 必须是有限的正数")
+    if not IMAGE_EXTS or any(not isinstance(ext, str) or not ext.startswith(".") for ext in IMAGE_EXTS):
+        raise ValueError('IMAGE_EXTS 必须是扩展名列表，例如 (".jpg", ".png")')
+
+
+def resolve_input() -> tuple[Path, list[Path]]:
+    """返回用于显示相对文件名的根目录和待上传图片列表。"""
+    image_file, image_dir = IMAGE_FILE.strip(), IMAGE_DIR.strip()
+    if bool(image_file) == bool(image_dir):
+        raise ValueError("请在脚本顶部设置 IMAGE_FILE 或 IMAGE_DIR，且只填写其中一个")
+    source = Path(image_file or image_dir).expanduser()
+    if not source.is_absolute():
+        source = BACKEND_DIR / source
+    source = source.resolve()
+    if image_file:
+        if not source.is_file():
+            raise ValueError(f"图片文件不存在：{source}")
+        if source.suffix.lower() not in {ext.lower() for ext in IMAGE_EXTS}:
+            raise ValueError(f"图片扩展名不支持：{source.suffix}；允许 {' / '.join(IMAGE_EXTS)}")
+        return source.parent, [source]
+    if not source.is_dir():
+        raise ValueError(f"文件夹不存在：{source}")
+    paths = find_images(source)
+    if LIMIT is not None:
+        paths = paths[:LIMIT]
+    if not paths:
+        raise ValueError(f"{source} 下没有 {' / '.join(IMAGE_EXTS)} 图片")
+    return source, paths
+
+
 def build_form(fields: dict[str, Any]) -> dict[str, str]:
-    """FORM_FIELDS -> multipart 文本字段：None 和空值不传，tags 编成 JSON 数组。"""
+    """FORM_FIELDS -> multipart 文本字段：None 和空值不传，tags / scenes 编成 JSON 数组。"""
     form: dict[str, str] = {}
     for key, value in fields.items():
         if value is None:
             continue
-        if key == "tags":
-            tags = [value] if isinstance(value, str) else list(value)
-            text = json.dumps(tags, ensure_ascii=False) if tags else ""
+        if key in {"tags", "scenes"}:
+            values = [value] if isinstance(value, str) else value
+            if not isinstance(values, (list, tuple)) or any(not isinstance(item, str) for item in values):
+                raise ValueError(f"FORM_FIELDS[{key!r}] 必须是字符串或字符串列表")
+            values = [item.strip() for item in values if item.strip()]
+            text = json.dumps(values, ensure_ascii=False) if values else ""
         else:
             text = str(value).strip()
         if text:
@@ -195,14 +253,19 @@ def post_image(session: requests.Session, name: str, data: bytes, form: dict[str
             detail=str(body.get("detail") or resp.text[:200]),
             server_side=resp.status_code == 429 or resp.status_code >= 500,
         )
-    indexed = body.get("indexed") or []
-    if indexed:  # created=false：字节相同的图片之前入过库
+    indexed, failed = body.get("indexed"), body.get("failed")
+    if (body.get("ok") is True and isinstance(indexed, list) and len(indexed) == 1
+            and isinstance(indexed[0], dict) and indexed[0].get("id") and not failed):
+        # created=false：字节相同的图片之前入过库
         item = indexed[0]
         status = "existed" if item.get("created") is False else "created"
         return Outcome(status, image_id=str(item.get("id", "")))
-    failed = (body.get("failed") or [{}])[0]  # 200，但这张图没有入库
-    error = str(failed.get("error") or "NO_RESULT")
-    return Outcome("failed", error=error, detail=str(failed.get("detail", "")), server_side=error in SERVER_ERRORS)
+    if not indexed and isinstance(failed, list) and len(failed) == 1 and isinstance(failed[0], dict):
+        # 200，但这张图没有入库
+        item = failed[0]
+        error = str(item.get("error") or "NO_RESULT")
+        return Outcome("failed", error=error, detail=str(item.get("detail", "")), server_side=error in SERVER_ERRORS)
+    return Outcome("failed", error="INVALID_RESPONSE", detail=f"入库接口返回格式不正确：{resp.text[:200]}")
 
 
 def upload(session: requests.Session, name: str, data: bytes, form: dict[str, str]) -> Outcome:
@@ -270,22 +333,18 @@ def run(session: requests.Session, root: Path, paths: list[Path], form: dict[str
 
 
 def main() -> int:
-    if not IMAGE_DIR.strip():
-        print("先在脚本顶部设置 IMAGE_DIR（待入库的图片文件夹）")
-        return 2
-    root = Path(IMAGE_DIR.strip())
-    if not root.is_dir():
-        print(f"文件夹不存在：{root}")
-        return 2
-    paths = find_images(root)
-    if LIMIT is not None:
-        paths = paths[:LIMIT]
-    if not paths:
-        print(f"{root} 下没有 {' / '.join(IMAGE_EXTS)} 图片")
+    try:
+        validate_config()
+        root, paths = resolve_input()
+        form = build_form(FORM_FIELDS)
+    except (ValueError, OSError) as exc:
+        print(f"参数或输入文件有误：{exc}")
         return 2
 
-    form = build_form(FORM_FIELDS)
-    print(f"文件夹：{root}（{'含' if RECURSIVE else '不含'}子文件夹），{len(paths)} 张图片")
+    if IMAGE_FILE.strip():
+        print(f"图片：{paths[0]}")
+    else:
+        print(f"文件夹：{root}（{'含' if RECURSIVE else '不含'}子文件夹），{len(paths)} 张图片")
     print(f"标注：{form or '不带'}")
     if DRY_RUN:
         for path in paths:

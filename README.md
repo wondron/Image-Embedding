@@ -33,6 +33,34 @@ Global 搜索阶段直接保留上游 `image_url`，不下载或验证候选图�
 
 本次新增 `GET /api/images/download?url=…`，用于第三方图片跨域读取失败时的下载回退。接口仅访问公网 HTTP(S) 图片、80/443 端口，逐次校验重定向，限制单图 15 MB 并验证图片格式。**需要重启包含本次代码的后端；Docker 部署需使用重新构建或已包含新代码的镜像。** 该接口不提供图片入库功能。
 
+## 脚本调用接口入库（无需前端）
+
+使用 `backend/scripts/index_folder.py`，参数全部在脚本顶部设置，不使用命令行 args：
+
+```python
+IMAGE_FILE = r""  # 单张图片时填写文件路径，IMAGE_DIR 留空
+IMAGE_DIR = r"E:\dataset\红薯叶"  # 文件夹入库时填写，IMAGE_FILE 留空
+BASE_URL = "http://127.0.0.1:8320"  # 已启动的后端；可改为远程地址
+RECURSIVE = True  # 包含子文件夹
+DRY_RUN = False  # True 只预览文件列表，不访问后端
+LIMIT = None  # 调试时可设为 1，只上传一张
+```
+
+需要标注时修改 `FORM_FIELDS` 中的 `category`（类别编码）、`tags`（如 `["红薯叶"]`）、
+`description` 等字段；不需要的字段保留 `None`。相对文件路径统一相对于 `backend` 目录。
+
+在 VS Code 中先运行 `.vscode/launch.json` 的 **Python: Backend**（后端已启动时跳过），
+再选择 **Python: Index Folder Images** 按 F5，可在脚本中打断点。也可以从项目根目录直接运行：
+
+```powershell
+python backend/scripts/index_folder.py
+```
+
+脚本使用 `requests`（已列入后端依赖），逐张向 `POST /api/index` 发送 multipart 文件字节，
+不要求图片位于后端所在机器。上传前检查后端健康状态和配置的类别编码；打印每张图片的入库结果、ID 和失败汇总，
+网络异常及服务故障会自动重试。字节相同的图片由后端去重，重复上传保留首次入库的标注。
+退出码：`0` 全部成功或已存在，`1` 有失败或中断，`2` 配置错误或后端未就绪。
+
 ## 配置来源
 
 类别编码允许大小写并保留原样（例如 `ingredient.HongSu`），按小写判重；`ingredient.hongsu` 与它视为同一编码。

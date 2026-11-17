@@ -35,7 +35,10 @@
             "program": "${workspaceFolder}/backend/scripts/index_folder.py",
             "cwd": "${workspaceFolder}/backend",
             "console": "integratedTerminal",
-            "justMyCode": true
+            "justMyCode": true,
+            "env": {
+                "PYTHONIOENCODING": "utf-8"
+            }
         }
     ]
 }
