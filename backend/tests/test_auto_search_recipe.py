@@ -4,6 +4,9 @@ The detection runs beside the self-built search. The dish names it recognises ar
 one result card (source=recipe) after the self-built hits, and the global fallback only runs when
 neither has anything. Its time and its result are logged, and its failure never fails the request.
 
+Where a result came from is on each card (its source, the first field), not on the envelope; a
+self-built card's details say whether they carry the heating information (outputs_heating).
+
     业务搜图(图片链接) | 图像下载 0.120s | embedding推理 0.045s | vector搜索 0.012s | 后处理 0.003s | 菜谱识别 1.684s | 总耗时 1.810s
 """
 
@@ -37,9 +40,10 @@ RECIPE_URL = "http://recipe.test:8866/detect_recipe_onnx"
 DISHES = ["荷塘小炒", "凉拌猪耳", "清蒸鲈鱼"]
 # The one card the detection adds: the names as its tags, every other card field empty
 RECIPE_CARD = {
-    "tags": "荷塘小炒、凉拌猪耳、清蒸鲈鱼", "description": "", "original_url": None, "similarity": None,
-    "details": {}, "source": "recipe",
+    "source": "recipe", "tags": "荷塘小炒、凉拌猪耳、清蒸鲈鱼", "description": "", "original_url": None,
+    "similarity": None, "details": {},
 }
+CARD_KEYS = ["source", "tags", "description", "original_url", "similarity", "details"]  # in wire order
 GLOBAL_CARD = {"tags": "番茄", "description": "", "original_url": "https://img.example/a.jpg", "similarity": 0.8, "details": {}}
 FOOD_CONFIG = {
     "FLAB_CONFIG": {
@@ -205,7 +209,10 @@ class FakeMetadata:
         return ["general", "oven"]
 
     def get_active_by_ids(self, ids, scene=None):
-        return {i: {"id": i, "category_id": None, "original_url": "https://cdn/o.jpg", "tags": ["牛排"]} for i in ids}
+        return {
+            i: {"id": i, "category_id": None, "original_url": "https://cdn/o.jpg", "tags": ["牛排"], "food_state": "raw"}
+            for i in ids
+        }
 
     def map_categories_to_scene_labels(self, scene_id, category_ids):
         return {}
@@ -279,12 +286,12 @@ class BusinessSearchRecipeTests(unittest.TestCase):
 
     def test_the_dish_names_are_one_card_after_the_self_built_hits(self):
         body, _ = self.by_url(trace_id="t-9", global_fallback=True)
-        self.assertEqual((body["source"], body["fallback"]), ("self", {"status": "not_needed"}))
+        self.assertEqual(body["fallback"], {"status": "not_needed"})
         hit, recipe = body["items"]
         self.assertEqual((hit["source"], hit["tags"], hit["similarity"]), ("self", "牛排", 0.9))
         self.assertEqual(hit["details"]["id"], ROW_ID)
         self.assertEqual(recipe, RECIPE_CARD)
-        self.assertEqual(set(hit), set(recipe))  # one card shape, whatever the source
+        self.assertEqual((list(hit), list(recipe)), (CARD_KEYS, CARD_KEYS))  # one card shape, the source first
         self.assertNotIn("message", body)
         self.food.searchTool.detect.assert_not_called()
 
@@ -312,27 +319,50 @@ class BusinessSearchRecipeTests(unittest.TestCase):
     def test_dish_names_alone_are_an_answer_and_the_fallback_stays_off(self):
         self.vectors.hits = []
         body, _ = self.by_url(scene="oven", global_fallback=True)
-        self.assertEqual(body["items"], [RECIPE_CARD])
-        self.assertEqual((body["source"], body["fallback"]), ("recipe", {"status": "not_needed"}))
-        self.assertFalse(body["outputs_heating"])  # the scene outputs heating, the recipe card carries none
+        self.assertEqual(body["items"], [RECIPE_CARD])  # the scene outputs heating, the recipe card carries none
+        self.assertEqual(body["fallback"], {"status": "not_needed"})
         self.assertNotIn("message", body)
         self.food.searchTool.detect.assert_not_called()
 
-        self.vectors.hits = [{"id": ROW_ID, "score": 0.9}]
+    def test_the_envelope_leaves_the_source_and_the_heating_flag_to_the_cards(self):
+        body, _ = self.by_url(trace_id="t-9")
+        self.assertEqual(list(body), ["ok", "trace_id", "scene", "items", "fallback"])
+        self.assertEqual((body["ok"], body["trace_id"], body["scene"]), (True, "t-9", "general"))
+        hit, recipe = body["items"]
+        # A scene without heating output: the flag says so, and the heating fields stay out
+        self.assertIs(hit["details"]["outputs_heating"], False)
+        self.assertEqual(list(hit["details"])[-1], "outputs_heating")
+        self.assertFalse({"food_state", "heating_group"} & set(hit["details"]))
+        self.assertEqual(recipe["details"], {})  # only self-built cards have the flag
+
         body, _ = self.by_url(scene="oven")
-        self.assertEqual((body["source"], body["outputs_heating"]), ("self", True))
+        self.assertEqual(body["scene"], "oven")
+        hit, recipe = body["items"]
+        self.assertIs(hit["details"]["outputs_heating"], True)
+        self.assertEqual((hit["details"]["food_state"], hit["details"]["heating_group"]), ("raw", None))
+        self.assertEqual(recipe, RECIPE_CARD)
+
+        # The interface's documentation says the same
+        schemas = self.app.openapi()["components"]["schemas"]
+        self.assertEqual(
+            list(schemas["AutoSearchResponse"]["properties"]), ["ok", "trace_id", "scene", "items", "fallback", "message"]
+        )
+        self.assertEqual(list(schemas["AutoSearchHit"]["properties"]), CARD_KEYS)
+        self.assertEqual(schemas["AutoSearchHit"]["required"], ["source"])
 
     def test_nothing_from_either_goes_on_as_before(self):
         self.vectors.hits = []
         self.answer = recipe_answer([])
 
         body, _ = self.by_url()
-        self.assertEqual((body["source"], body["items"], body["fallback"]), ("empty", [], {"status": "disabled"}))
+        self.assertEqual((body["items"], body["fallback"]), ([], {"status": "disabled"}))
         self.assertEqual(body["message"], "自建库没有达到阈值的结果，菜谱识别没有识别到菜名，未开启 Global 兜底")
+        self.assertEqual(list(body), ["ok", "trace_id", "scene", "items", "fallback", "message"])
 
         body, records = self.by_url(global_fallback=True)
-        self.assertEqual((body["source"], body["fallback"]), ("global", {"status": "hit"}))
-        self.assertEqual(body["items"], [{**GLOBAL_CARD, "source": "global"}])
+        self.assertEqual(body["fallback"], {"status": "hit"})
+        self.assertEqual(body["items"], [{"source": "global", **GLOBAL_CARD}])  # the global search's card, as it is
+        self.assertEqual(list(body["items"][0]), CARD_KEYS)
         self.assertEqual(
             steps(self.timing_line(records).getMessage()),
             ["图像下载", "embedding推理", "vector搜索", "菜谱识别", "global搜索", "后处理", "总耗时"],
@@ -341,7 +371,7 @@ class BusinessSearchRecipeTests(unittest.TestCase):
         self.food.searchTool.detect.return_value = []
         self.food.searchFilter.detect.return_value = []
         body, _ = self.by_url(global_fallback=True)
-        self.assertEqual((body["source"], body["fallback"]), ("empty", {"status": "empty"}))
+        self.assertEqual((body["items"], body["fallback"]), ([], {"status": "empty"}))
         self.assertEqual(body["message"], "自建库没有达到阈值的结果，菜谱识别没有识别到菜名，Global 也没有找到结果")
 
     # -- its time and its result in the log ------------------------------------------------
@@ -370,7 +400,7 @@ class BusinessSearchRecipeTests(unittest.TestCase):
     def test_a_failed_detection_is_logged_and_does_not_fail_the_search(self):
         self.answer = recipe_answer([], status=503, success=False, message="上游识别模型不可用")
         body, records = self.by_url(trace_id="t-9")
-        self.assertEqual((body["source"], [item["source"] for item in body["items"]]), ("self", ["self"]))
+        self.assertEqual([item["source"] for item in body["items"]], ["self"])
         ((level, text),) = self.recipe_logs(records)
         self.assertEqual(level, logging.WARNING)
         self.assertRegex(
@@ -385,20 +415,20 @@ class BusinessSearchRecipeTests(unittest.TestCase):
         self.vectors.hits = []
         self.answer = httpx.ReadTimeout("no data")
         body, records = self.by_url()
-        self.assertEqual((body["source"], body["items"]), ("empty", []))
+        self.assertEqual((body["items"], body["fallback"]), ([], {"status": "disabled"}))
         self.assertEqual(body["message"], "自建库没有达到阈值的结果，菜谱识别失败，未开启 Global 兜底")
         ((level, text),) = self.recipe_logs(records)
         self.assertIn("菜谱识别失败 | UPSTREAM_TIMEOUT: 菜谱识别服务 2 秒内没有返回", text)
 
         body, _ = self.by_url(global_fallback=True)  # ... and the fallback still runs
-        self.assertEqual((body["source"], body["fallback"]), ("global", {"status": "hit"}))
+        self.assertEqual(([item["source"] for item in body["items"]], body["fallback"]), (["global"], {"status": "hit"}))
 
     def test_the_switch_turns_the_step_off(self):
         for config in ({"RECIPE_DETECT_CONFIG": {"enabled": False, "url": RECIPE_URL}}, {}):
             with self.subTest(config=config):
                 self.runtime.config = config
                 body, records = self.by_url()
-                self.assertEqual((body["source"], [item["source"] for item in body["items"]]), ("self", ["self"]))
+                self.assertEqual([item["source"] for item in body["items"]], ["self"])
                 self.assertEqual(self.received, [])
                 self.assertEqual(self.recipe_logs(records), [])
                 self.assertEqual(
@@ -421,7 +451,7 @@ class BusinessSearchRecipeTests(unittest.TestCase):
     def test_a_section_that_cannot_be_used_skips_the_step_with_a_warning(self):
         self.runtime.config = {"RECIPE_DETECT_CONFIG": {"enabled": True, "url": ""}}
         body, records = self.by_url()
-        self.assertEqual((body["source"], [item["source"] for item in body["items"]]), ("self", ["self"]))
+        self.assertEqual([item["source"] for item in body["items"]], ["self"])
         self.assertEqual(self.received, [])
         ((level, text),) = self.recipe_logs(records)
         self.assertEqual(level, logging.WARNING)

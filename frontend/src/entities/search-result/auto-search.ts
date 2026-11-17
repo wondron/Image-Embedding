@@ -1,16 +1,23 @@
 /**
  * 业务搜图 — POST /api/search/auto/file | /url (contract §6.6): the self-built library and, when the
- * server has it on, 菜谱识别 side by side; 现网 Global as an optional fallback. `{ ok, trace_id, source,
- * scene, outputs_heating, items, fallback, message? }`. Every item is the shared card with its own
- * `source`: a self-built hit (read like POST /api/search), a Global result (read like POST
- * /api/search/global/*), or 菜谱识别's one card (the dish names as its tags, nothing else).
+ * server has it on, 菜谱识别 side by side; 现网 Global as an optional fallback. `{ ok, trace_id, scene,
+ * items, fallback, message? }`. Every item is the shared card with its own `source` first: a
+ * self-built hit (read like POST /api/search; its `details.outputs_heating` says whether it carries
+ * heating information), a Global result (read like POST /api/search/global/*), or 菜谱识别's one
+ * card (the dish names as its tags, nothing else). The envelope says neither: what the UI shows
+ * for the answer as a whole is worked out from the cards.
  */
 import { asBoolean, asText, untrusted, untrustedList, type Untrusted } from '../../shared/lib/parse'
-import type { AutoSearchFallbackWire, AutoSearchHitWire, AutoSearchResponseWire } from '../../shared/api'
+import type {
+  AutoSearchFallbackWire,
+  AutoSearchHitWire,
+  AutoSearchResponseWire,
+  AutoSearchSelfDetailsWire,
+} from '../../shared/api'
 import { toApiSceneCode } from '../scene'
 import { toPredictImage } from './legacy-predict'
 import { readCardFields, toSearchImage } from './mapper'
-import type { SearchFallback, SearchFallbackStatus, SearchImage, SearchResponse } from './model'
+import type { SearchChannel, SearchFallback, SearchFallbackStatus, SearchImage, SearchResponse } from './model'
 
 const FALLBACK_STATUSES: readonly SearchFallbackStatus[] = ['not_needed', 'disabled', 'hit', 'empty', 'failed']
 
@@ -22,9 +29,18 @@ function parseCardSource(value: unknown): CardSource | undefined {
   return source === 'self' || source === 'recipe' || source === 'global' ? source : undefined
 }
 
-/** Envelope `source`: a card source, or empty; anything else is treated as not sent. */
-function parseSource(value: unknown): CardSource | 'empty' | undefined {
+/** Envelope `source` of an older server: a card source, or empty; anything else is treated as not sent. */
+function parseEnvelopeSource(value: unknown): CardSource | 'empty' | undefined {
   return asText(value)?.toLowerCase() === 'empty' ? 'empty' : parseCardSource(value)
+}
+
+/**
+ * The cards summed up, as the UI names an answer: self = self-built hits (菜谱识别's card may
+ * follow them), recipe = that card alone, global = the fallback's results, empty = nothing.
+ */
+function answerSource(items: readonly SearchImage[]): SearchChannel | undefined {
+  if (items.length === 0) return 'empty'
+  return items.some(item => item.source === 'self') ? 'self' : items[0].source
 }
 
 function parseFallback(value: unknown): SearchFallback | undefined {
@@ -78,26 +94,27 @@ export function toAutoSearchResponse(payload: unknown): SearchResponse {
   if (!body || !Array.isArray(body.items)) {
     throw new Error('搜索接口返回的数据格式不正确，请检查后端响应。')
   }
-  const source = parseSource(body.source)
-  const outputsHeating = asBoolean(body.outputs_heating)
+  // An older server said these on the envelope; now each card says them itself
+  const envelopeSource = parseEnvelopeSource(body.source)
+  const envelopeHeating = asBoolean(body.outputs_heating)
   const scene = asText(body.scene)
   const fallback = parseFallback(body.fallback)
-  const message = source === 'empty' ? emptyMessage(asText(body.message), fallback) : asText(body.message)
   const items = untrustedList<AutoSearchHitWire>(body.items).map((hit, index) => {
-    // Each card says where it came from; a server older than 菜谱识别 says it on the envelope only
-    const channel = parseCardSource(hit.source) ?? (source === 'empty' ? undefined : source)
+    const channel = parseCardSource(hit.source) ?? (envelopeSource === 'empty' ? undefined : envelopeSource)
     if (channel === 'recipe') return toRecipeImage(hit, index)
     // Global results carry no category or heating information
     if (channel === 'global') return { ...toPredictImage(hit, index), source: 'global' as const, outputsHeating: false }
+    const outputsHeating = asBoolean(untrusted<AutoSearchSelfDetailsWire>(hit.details)?.outputs_heating) ?? envelopeHeating
     return toSearchImage(hit, index, { source: channel, outputsHeating })
   })
+  const source = answerSource(items)
+  const message = source === 'empty' ? emptyMessage(asText(body.message), fallback) : asText(body.message)
   return {
     items,
     traceId: asText(body.trace_id),
     ...(message ? { message } : {}),
     ...(source ? { source } : {}),
     ...(scene ? { scene: toApiSceneCode(scene) } : {}),
-    ...(outputsHeating !== undefined ? { outputsHeating } : {}),
     ...(fallback ? { fallback } : {}),
   }
 }

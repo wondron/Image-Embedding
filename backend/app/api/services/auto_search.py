@@ -3,16 +3,18 @@ the recipe detection side by side, the global search as an optional fallback, on
 
     query image -> self-built search (scene, top_k, score_threshold)  ┐ in parallel; merged: the
                 -> recipe detection (RECIPE_DETECT_CONFIG.enabled)    ┘ hits, then the dish names
-        self-built hits                 -> source=self (a recipe card after them when dishes were recognised)
-        dish names only                 -> source=recipe
-        nothing, global_fallback=false  -> source=empty
+        self-built hits                 -> their cards (a recipe card after them when dishes were recognised)
+        dish names only                 -> the recipe card
+        nothing, global_fallback=false  -> no card (fallback.status=disabled)
         nothing, global_fallback=true   -> global search for top_k results
-            hits                        -> source=global
-            nothing, or it failed       -> source=empty (fallback.status says which)
+            hits                        -> their cards (fallback.status=hit)
+            nothing, or it failed       -> no card (fallback.status says which)
 
 Every channel answers with the same result card (app.schemas.search_hit), so items[] has one shape
-whatever the source, and each card's own source says where it came from. The recipe detection
-gives one card: the dish names as its tags, the other card fields empty.
+whatever the channel. What depends on the channel is on the card itself, not on the envelope: its
+source (self / recipe / global) comes first, and a self-built card's details say whether they
+carry the heating information (outputs_heating, from the scene). The recipe detection gives one
+card: the dish names as its tags, the other card fields empty.
 
 A failure of the self-built search (unknown scene, an image that cannot be decoded, the retrieval
 stack down) fails the request, as on POST /api/search. A failure of the recipe detection or of the
@@ -135,16 +137,26 @@ async def _abandon(detection: asyncio.Task[_Recipe] | None) -> None:
         await asyncio.gather(detection, return_exceptions=True)
 
 
+def _self_cards(local: dict[str, Any]) -> list[dict[str, Any]]:
+    """The self-built search's hits as cards of this answer: each says in its details whether
+    they carry the heating information (the scene's outputs_heating, the same for every hit)."""
+    heating = bool(local.get("outputs_heating"))
+    return [
+        {"source": "self", **hit, "details": {**hit["details"], "outputs_heating": heating}}
+        for hit in local["items"]
+    ]
+
+
 def _recipe_card(names: list[str]) -> dict[str, Any]:
     """The recipe detection's result card: the dish names as its tags. It stands for no stored
     image, so the other card fields keep their empty values."""
     return {
+        "source": "recipe",
         "tags": tags_text(names),
         "description": "",
         "original_url": None,
         "similarity": None,
         "details": {},
-        "source": "recipe",
     }
 
 
@@ -153,7 +165,7 @@ def _global_cards(result: Any, top_k: int) -> list[dict[str, Any]]:
     "found nothing" envelope (status=upstream_empty_response)."""
     if not isinstance(result, list):
         return []
-    return [{**card, "source": "global"} for card in result if isinstance(card, dict)][:top_k]
+    return [{"source": "global", **card} for card in result if isinstance(card, dict)][:top_k]
 
 
 def _empty_message(status: str, recipe: _Recipe | None) -> str:
@@ -212,22 +224,12 @@ async def run_auto_search(
         # recorded here, not when the call returned: after the self-built steps, whichever ended first
         timer.record(RECIPE_STEP, recipe.seconds, failed=recipe.error is not None)
 
-    hits = [{**hit, "source": "self"} for hit in local["items"]]
-    cards = hits + ([_recipe_card(recipe.names)] if recipe is not None and recipe.names else [])
-    body: dict[str, Any] = {
-        "ok": True,
-        "trace_id": trace_id,
-        "scene": local["scene"],
-        "outputs_heating": bool(local.get("outputs_heating")),
-    }
-    if hits:
-        body.update(source="self", items=cards, fallback={"status": "not_needed"})
-    elif cards:  # the dish names only: no card carries heating information
-        body.update(source="recipe", outputs_heating=False, items=cards, fallback={"status": "not_needed"})
+    cards = _self_cards(local) + ([_recipe_card(recipe.names)] if recipe is not None and recipe.names else [])
+    body: dict[str, Any] = {"ok": True, "trace_id": trace_id, "scene": local["scene"]}
+    if cards:  # self-built hits, the dish names, or both
+        body.update(items=cards, fallback={"status": "not_needed"})
     elif not global_fallback:
-        body.update(
-            source="empty", items=[], fallback={"status": "disabled"}, message=_empty_message("disabled", recipe)
-        )
+        body.update(items=[], fallback={"status": "disabled"}, message=_empty_message("disabled", recipe))
     else:
         try:
             answer = await run_predict(
@@ -245,16 +247,14 @@ async def run_auto_search(
             logger.warning(message)
             show_text(message, trace_id=trace_id, logger_level=logging.WARNING)
             body.update(
-                source="empty", items=[],
+                items=[],
                 fallback={"status": "failed", "error": exc.code, "detail": err.client_detail(exc)},
                 message=_empty_message("failed", recipe),
             )
         else:
             cards = _global_cards(answer.get("result"), top_k)
             if cards:
-                body.update(source="global", outputs_heating=False, items=cards, fallback={"status": "hit"})
+                body.update(items=cards, fallback={"status": "hit"})
             else:
-                body.update(
-                    source="empty", items=[], fallback={"status": "empty"}, message=_empty_message("empty", recipe)
-                )
+                body.update(items=[], fallback={"status": "empty"}, message=_empty_message("empty", recipe))
     return body

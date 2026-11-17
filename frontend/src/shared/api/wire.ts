@@ -398,32 +398,45 @@ export interface AutoSearchFallbackWire {
   detail?: string | null
 }
 
+/** `details` of a self-built card of 业务搜图: as POST /api/search answers, plus its heating flag. */
+export interface AutoSearchSelfDetailsWire extends SearchHitDetailsWire {
+  /**
+   * Whether these details carry the heating information (the scene's outputs_heating). Absent
+   * from older servers, which said it on the envelope.
+   */
+  outputs_heating?: boolean
+}
+
 /**
- * schemas/auto_search.py AutoSearchHit — the shared card plus `source`, the channel that card came
- * from: a self-built hit (as POST /api/search answers), a Global result (as POST
- * /api/search/global/*), or 菜谱识别's one card: `tags` are the recognised dish names joined with
- *「、」, `description` is "", `original_url` and `similarity` are null, `details` is {}.
+ * schemas/auto_search.py AutoSearchHit — `source`, the channel the card came from, then the shared
+ * card: a self-built hit (as POST /api/search answers, with `details.outputs_heating`), a Global
+ * result (as POST /api/search/global/*), or 菜谱识别's one card: `tags` are the recognised dish
+ * names joined with「、」, `description` is "", `original_url` and `similarity` are null, `details`
+ * is {}.
  */
-export type AutoSearchHitWire = (SearchHitWire | PredictHitWire | SearchHitBaseWire<Record<string, never>>) & {
+export type AutoSearchHitWire = (
+  SearchHitBaseWire<AutoSearchSelfDetailsWire> | PredictHitWire | SearchHitBaseWire<Record<string, never>>
+) & {
   /** Absent from servers older than 菜谱识别: every card then comes from the envelope's `source`. */
   source?: 'self' | 'recipe' | 'global' | null
 }
 
 /**
- * schemas/auto_search.py AutoSearchResponse. `source` sums the cards up: self = self-built hits
- * (with 菜谱识别's card after them when it recognised dishes), recipe = that card alone, global =
- * the fallback's results, empty = nothing.
+ * schemas/auto_search.py AutoSearchResponse. Where the results came from and whether they carry
+ * heating information is on each card (`source`, `details.outputs_heating`); `items` is [] when
+ * nothing was found, and `fallback.status` says why.
  */
 export interface AutoSearchResponseWire {
   ok: true
   trace_id: string
-  source: 'self' | 'recipe' | 'global' | 'empty'
   scene: string
-  /** false when source is recipe or global (those cards carry no heating information). */
-  outputs_heating: boolean
   items: AutoSearchHitWire[]
   fallback: AutoSearchFallbackWire
   message?: string | null
+  /** Older servers only: the cards summed up (self / recipe / global, empty = nothing). */
+  source?: 'self' | 'recipe' | 'global' | 'empty'
+  /** Older servers only: what `details.outputs_heating` of a self-built card says now. */
+  outputs_heating?: boolean
 }
 
 // -- POST /api/search/batch/* (多图搜索: 自建库; contract §6.7) -------------------------------

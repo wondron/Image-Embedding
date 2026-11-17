@@ -55,9 +55,12 @@ export interface SearchImage {
   heatingGroup: HeatingGroup | null
   width: number | null
   height: number | null
-  /** Envelope `outputs_heating`, copied onto each card (P9: never inferred). */
+  /**
+   * Whether the card carries heating information (P9: never inferred): the envelope's
+   * `outputs_heating` copied onto each card (自建), or the card's own `details.outputs_heating` (业务搜图).
+   */
   outputsHeating?: boolean
-  /** Envelope channel, copied onto each card; absent when the API did not say. */
+  /** The card's channel: the envelope's, copied onto each card (自建), or the card's own `source` (业务搜图); absent when the API did not say. */
   source?: SearchChannel
   /** FlyB only: source page / site (`details.page_url` / `details.site`); null for self-built hits. */
   pageUrl: string | null
@@ -70,13 +73,17 @@ export interface SearchResponse {
   /** Text for people, e.g. why the result is empty. */
   message?: string
   /**
-   * Envelope channel: self | empty (自建), self | recipe | global | empty (业务搜图: `self` items may
-   * end with 菜谱识别's card, `recipe` is that card alone); absent for 现网 Global.
+   * The answer's channel: self | empty (自建, its envelope `source`); self | recipe | global | empty
+   * (业务搜图, summed up from its cards: `self` items may end with 菜谱识别's card, `recipe` is that
+   * card alone, `empty` is no card); absent for 现网 Global.
    */
   source?: SearchChannel
   /** Scene actually searched (envelope `scene`). */
   scene?: string
-  /** Envelope `outputs_heating` only — never inferred from the scene seed (P9). */
+  /**
+   * Envelope `outputs_heating` only — never inferred from the scene seed (P9). Absent for 业务搜图,
+   * which says it card by card (SearchImage.outputsHeating).
+   */
   outputsHeating?: boolean
   /** 业务搜图 only: what happened to the Global fallback. */
   fallback?: SearchFallback

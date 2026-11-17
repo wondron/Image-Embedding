@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { getImageSources, getThumbnailSources, hasImage, toAutoSearchResponse } from '.'
 
-/** A self-built hit, as POST /api/search/auto/* sends it: the shared card plus its own `source`. */
+/**
+ * A self-built hit, as POST /api/search/auto/* sends it: its own `source`, then the shared card;
+ * its details end with `outputs_heating`, whether they carry the heating information.
+ */
 const selfHit = {
+  source: 'self',
   tags: '牛排、带骨',
   description: '煎牛排',
   original_url: 'https://s3.example/original/1.jpg',
@@ -17,27 +21,29 @@ const selfHit = {
     images: [{ image_url: 'https://s3.example/original/1.jpg', thumbnail_url: 'https://s3.example/thumb/1.webp', width: 800, height: 600 }],
     food_state: 'raw',
     heating_group: { id: 2, code: 'grill', name: '烤' },
+    outputs_heating: true,
   },
-  source: 'self',
 }
 /** 菜谱识别's card: the dish names as its tags, every other card field empty. */
-const recipeCard = { tags: '荷塘小炒、凉拌猪耳、清蒸鲈鱼', description: '', original_url: null, similarity: null, details: {}, source: 'recipe' }
+const recipeCard = { source: 'recipe', tags: '荷塘小炒、凉拌猪耳、清蒸鲈鱼', description: '', original_url: null, similarity: null, details: {} }
 const globalCard = {
+  source: 'global',
   tags: '清蒸鲈鱼的做法',
   description: '鲈鱼洗净',
   original_url: 'https://img.example/fish.jpg',
   similarity: null,
   details: { rank: 1, page_url: 'https://site.example/fish', site: { Hostname: '美食站' }, images: [{ image_url: 'https://img.example/fish.jpg', thumbnail_url: 'https://img.example/fish-s.jpg', width: 640, height: 480 }], document_info: null },
-  source: 'global',
 }
-const envelope = (source: string, items: unknown[], extra: Record<string, unknown> = {}) => ({
-  ok: true, trace_id: 'trace-1', source, scene: 'oven', outputs_heating: true, items, fallback: { status: 'not_needed' }, ...extra,
+/** The envelope says neither where the cards came from nor whether they carry heating information. */
+const envelope = (items: unknown[], extra: Record<string, unknown> = {}) => ({
+  ok: true, trace_id: 'trace-1', scene: 'oven', items, fallback: { status: 'not_needed' }, ...extra,
 })
 
 describe('toAutoSearchResponse (§6.6)', () => {
   it('reads each card by its own source: the self-built hits, then the recipe card', () => {
-    const response = toAutoSearchResponse(envelope('self', [selfHit, recipeCard]))
-    expect(response).toMatchObject({ source: 'self', scene: 'oven', outputsHeating: true, traceId: 'trace-1', fallback: { status: 'not_needed' } })
+    const response = toAutoSearchResponse(envelope([selfHit, recipeCard]))
+    // The answer's channel is summed up from the cards: self-built hits, whatever follows them
+    expect(response).toMatchObject({ source: 'self', scene: 'oven', traceId: 'trace-1', fallback: { status: 'not_needed' } })
     expect(response.items).toHaveLength(2)
     expect(response.items[0]).toMatchObject({
       id: '0b6f2c1e-0000-4000-8000-000000000001', source: 'self', title: '烤牛排', tags: '牛排、带骨', category: '牛排',
@@ -54,13 +60,20 @@ describe('toAutoSearchResponse (§6.6)', () => {
     })
   })
 
+  it('takes the heating flag from each self-built card, not from the envelope', () => {
+    const plainHit = { ...selfHit, details: { ...selfHit.details, outputs_heating: false } }
+    const response = toAutoSearchResponse(envelope([selfHit, plainHit, recipeCard]))
+    expect(response.items.map(item => item.outputsHeating)).toEqual([true, false, false])
+    expect(response.outputsHeating).toBeUndefined()
+  })
+
   it('reads the recipe card alone (the self-built library had nothing) and never gives it an image', () => {
-    const response = toAutoSearchResponse(envelope('recipe', [
+    const response = toAutoSearchResponse(envelope([
       { ...recipeCard, original_url: 'https://img.example/not-a-recipe-image.jpg', similarity: 0.5 },
-    ], { outputs_heating: false }))
-    expect(response).toMatchObject({ source: 'recipe', outputsHeating: false })
+    ]))
+    expect(response).toMatchObject({ source: 'recipe' })
     const [card] = response.items
-    expect(card).toMatchObject({ id: 'recipe-1', source: 'recipe', imageUrl: null, similarity: null })
+    expect(card).toMatchObject({ id: 'recipe-1', source: 'recipe', imageUrl: null, similarity: null, outputsHeating: false })
     expect(hasImage(card)).toBe(false)
     expect(getImageSources(card)).toEqual([])
     expect(getThumbnailSources(card)).toEqual([])
@@ -68,7 +81,7 @@ describe('toAutoSearchResponse (§6.6)', () => {
   })
 
   it('reads Global results by their own source and without heating information', () => {
-    const response = toAutoSearchResponse(envelope('global', [globalCard], { outputs_heating: false, fallback: { status: 'hit' } }))
+    const response = toAutoSearchResponse(envelope([globalCard], { fallback: { status: 'hit' } }))
     expect(response).toMatchObject({ source: 'global', fallback: { status: 'hit' } })
     expect(response.items[0]).toMatchObject({
       id: 'image-1', source: 'global', title: '清蒸鲈鱼的做法', imageUrl: 'https://img.example/fish.jpg',
@@ -77,28 +90,48 @@ describe('toAutoSearchResponse (§6.6)', () => {
     expect(hasImage(response.items[0])).toBe(true)
   })
 
-  it('falls back to the envelope source for cards without one (a server older than 菜谱识别)', () => {
-    const { source: _self, ...oldSelfHit } = selfHit
+  it('treats an unknown card source as not sent', () => {
+    const response = toAutoSearchResponse(envelope([{ ...selfHit, source: 'flyb' }]))
+    expect(response.items[0]).toMatchObject({ category: '牛排', outputsHeating: true })
+    expect(response.items[0].source).toBeUndefined()
+    expect(response.source).toBeUndefined()
+  })
+
+  it('still reads an older server, which said the source and the heating flag on the envelope', () => {
+    const { outputs_heating: _flag, ...oldDetails } = selfHit.details
+    const { source: _self, ...oldSelfCard } = selfHit
+    const oldSelfHit = { ...oldSelfCard, details: oldDetails }
     const { source: _global, ...oldGlobalCard } = globalCard
-    expect(toAutoSearchResponse(envelope('self', [oldSelfHit])).items[0]).toMatchObject({ source: 'self', category: '牛排' })
-    expect(toAutoSearchResponse(envelope('global', [oldGlobalCard])).items[0]).toMatchObject({ source: 'global', siteName: '美食站' })
-    // An unknown card source is treated as not sent
-    expect(toAutoSearchResponse(envelope('self', [{ ...selfHit, source: 'flyb' }])).items[0]).toMatchObject({ source: 'self' })
+    const old = (source: string, outputs_heating: boolean, items: unknown[]) => envelope(items, { source, outputs_heating })
+
+    // Cards without a source of their own (a server older than 菜谱识别) take the envelope's
+    const self = toAutoSearchResponse(old('self', true, [oldSelfHit]))
+    expect(self).toMatchObject({ source: 'self', items: [{ source: 'self', category: '牛排', outputsHeating: true }] })
+    expect(toAutoSearchResponse(old('global', false, [oldGlobalCard])).items[0]).toMatchObject({ source: 'global', siteName: '美食站' })
+    expect(toAutoSearchResponse(old('self', false, [{ ...oldSelfHit, source: 'self' }, recipeCard])).items)
+      .toMatchObject([{ source: 'self', outputsHeating: false }, { source: 'recipe' }])
+    expect(toAutoSearchResponse(old('empty', true, []))).toMatchObject({ source: 'empty', items: [] })
+    // What a card says itself comes first
+    expect(toAutoSearchResponse(old('self', false, [selfHit])).items[0]).toMatchObject({ source: 'self', outputsHeating: true })
   })
 
   it('explains an empty result, adding the reason of a failed fallback', () => {
     const said = '自建库没有达到阈值的结果，菜谱识别没有识别到菜名，Global 兜底失败'
-    const failed = toAutoSearchResponse(envelope('empty', [], {
+    const failed = toAutoSearchResponse(envelope([], {
       message: said, fallback: { status: 'failed', error: 'UPSTREAM_TIMEOUT', detail: '上游搜索服务响应超时' },
     }))
+    // No card: the answer is empty, and the fallback says why
     expect(failed).toMatchObject({ source: 'empty', items: [], fallback: { status: 'failed', error: 'UPSTREAM_TIMEOUT' } })
     expect(failed.message).toBe(`${said}：上游搜索服务响应超时（UPSTREAM_TIMEOUT）`)
-    const disabled = toAutoSearchResponse(envelope('empty', [], { message: '自建库没有达到阈值的结果，菜谱识别失败，未开启 Global 兜底', fallback: { status: 'disabled' } }))
+    const disabled = toAutoSearchResponse(envelope([], { message: '自建库没有达到阈值的结果，菜谱识别失败，未开启 Global 兜底', fallback: { status: 'disabled' } }))
+    expect(disabled).toMatchObject({ source: 'empty', fallback: { status: 'disabled' } })
     expect(disabled.message).toBe('自建库没有达到阈值的结果，菜谱识别失败，未开启 Global 兜底')
+    // Without a message of the server's, the usual one
+    expect(toAutoSearchResponse(envelope([], { fallback: { status: 'disabled' } })).message).toBe('自建库暂未找到相关图片。')
   })
 
   it('rejects a body without an items array', () => {
-    expect(() => toAutoSearchResponse({ ok: true, source: 'recipe' })).toThrow('格式')
+    expect(() => toAutoSearchResponse({ ok: true, trace_id: 'trace-1', scene: 'oven', fallback: { status: 'not_needed' } })).toThrow('格式')
     expect(() => toAutoSearchResponse(null)).toThrow('格式')
   })
 })

@@ -42,7 +42,7 @@ it('keeps per-image failures, empty successes, timing, and heating flags separat
 })
 
 it('business search uses image_url for JSON and file/form fields for uploads', async () => {
-  const fetch = vi.fn().mockImplementation(() => Promise.resolve(json({ ok: true, source: 'empty', items: [] })))
+  const fetch = vi.fn().mockImplementation(() => Promise.resolve(json({ ok: true, trace_id: 't', scene: 'general', items: [], fallback: { status: 'disabled' } })))
   vi.stubGlobal('fetch', fetch)
   await searchAutoImages({ url: 'https://example.test/a.png', scene: 'device', topK: 3, globalFallback: false, scoreThreshold: 0 })
   expect(fetch.mock.calls[0][0]).toBe('/api/search/auto/url')

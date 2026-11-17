@@ -3,8 +3,10 @@
 The self-built library and, when RECIPE_DETECT_CONFIG turns it on, the recipe detection, in
 parallel and merged; when neither has anything, the global search as an optional fallback
 (app.api.services.auto_search). items[] are the result cards every channel shares
-(app.schemas.search_hit): each card's source says which channel it came from, the envelope's
-source sums them up, fallback says what happened to the global search.
+(app.schemas.search_hit), each with its source first: the channel it came from. What depends on
+the channel is on the card, not on the envelope: a self-built card's details say whether they
+carry the heating information (outputs_heating). fallback says what happened to the global
+search, and so why items is empty when it is.
 """
 
 from typing import Any, Literal
@@ -58,24 +60,31 @@ class AutoSearchUrlRequest(BaseModel):
     machine_info: str | None = Field(default=None, max_length=MACHINE_INFO_MAX_LENGTH, description=MACHINE_INFO_DOC)
 
 
-class AutoSearchHit(SearchHitBase):
-    """One result card: the four card fields, the rest in details (as the channel gives them),
-    and the channel it came from."""
+class _CardSource(BaseModel):
+    """The channel a card came from. A base class of its own so that source is the card's first
+    field on the wire: pydantic puts the fields of the last base class first."""
+
+    source: Literal["self", "recipe", "global"] = Field(
+        ...,
+        description=(
+            "这条结果卡来自哪里：self 自建库；recipe 菜谱识别——tags 是识别出的菜名（用「、」连接），"
+            "description 为空字符串，original_url、similarity 为 null，details 为 {}；global 现网 Global（兜底）"
+        ),
+    )
+
+
+class AutoSearchHit(SearchHitBase, _CardSource):
+    """One result card: the channel it came from, the four card fields, and the rest in details
+    (as the channel gives them)."""
 
     details: dict[str, Any] = Field(
         default_factory=dict,
         description=(
             "其余字段，内容按来源。source=self：同 POST /api/search 的 details——id、category_id、category、"
-            "scenes、scene_label（场景有标签映射时）、label_status、images[]；场景 outputs_heating 时另有"
-            "六个食物字段和 heating_group。source=global：同 Global 搜图的 details——rank、page_url、site、"
-            "images[]、document_info。source=recipe：{}"
-        ),
-    )
-    source: Literal["self", "recipe", "global"] | None = Field(
-        default=None,
-        description=(
-            "这条结果卡来自哪里：self 自建库；recipe 菜谱识别——tags 是识别出的菜名（用「、」连接），"
-            "description 为空字符串，original_url、similarity 为 null，details 为 {}；global 现网 Global（兜底）"
+            "scenes、scene_label（场景有标签映射时）、label_status、images[]，另有 outputs_heating（布尔）："
+            "这条结果是否带加热信息，按场景配置；为 true 时另有六个食物字段和 heating_group。"
+            "source=global：同 Global 搜图的 details——rank、page_url、site、images[]、document_info。"
+            "source=recipe：{}"
         ),
     )
 
@@ -88,7 +97,7 @@ class AutoSearchFallback(BaseModel):
         description=(
             "not_needed：自建库或菜谱识别有结果，没有走兜底；disabled：两者都没有结果，global_fallback=false；"
             "hit：Global 有结果；empty：Global 也没有结果；failed：Global 搜图失败（原因见 error、detail），"
-            "按没有结果返回"
+            "按没有结果返回。disabled、empty、failed 时 items 为 []"
         ),
     )
     error: str | None = Field(
@@ -100,27 +109,13 @@ class AutoSearchFallback(BaseModel):
 class AutoSearchResponse(BaseModel):
     ok: bool = True
     trace_id: str
-    source: Literal["self", "recipe", "global", "empty"] = Field(
-        ...,
-        description=(
-            "items 来自哪里：self 自建库有结果（菜谱识别也识别出菜名时，items 最后还有一条 source=recipe 的结果卡）；"
-            "recipe 自建库没有结果，只有菜谱识别的那一条；global 现网 Global（兜底）；empty 没有结果。"
-            "每条结果卡自己的 source 说明它来自哪里"
-        ),
-    )
     scene: str = Field(..., description="实际使用的检测场景 code")
-    outputs_heating: bool = Field(
-        default=False,
-        description=(
-            "items 是否带加热信息（details 里的六个食物字段和 heating_group）：自建库结果和空结果按场景配置"
-            "（只有自建库的结果卡带，菜谱识别的那一条不带）；source 为 recipe、global 时总是 false"
-        ),
-    )
     items: list[AutoSearchHit] = Field(
         default_factory=list,
         description=(
-            "结果卡：自建库按相似度从高到低，菜谱识别的一条排在自建库结果之后；Global 按上游排名；"
-            "source=empty 时为 []"
+            "结果卡，每条的 source 说明它来自哪里：自建库（self）按相似度从高到低，菜谱识别（recipe）的一条"
+            "排在自建库结果之后；自建库和菜谱识别都没有结果、走了兜底时是 Global（global）的结果，按上游排名。"
+            "没有结果时为 []，原因见 fallback.status 和 message"
         ),
     )
     fallback: AutoSearchFallback

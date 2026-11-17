@@ -193,7 +193,7 @@ test('业务搜图传递兜底开关，兜底失败作为搜索提示显示', as
   const bodies: Record<string, unknown>[] = []
   await page.route('**/api/search/auto/url', route => {
     bodies.push(route.request().postDataJSON())
-    return route.fulfill({ json: { ok: true, source: 'empty', scene: 'general', items: [],
+    return route.fulfill({ json: { ok: true, trace_id: 'fallback-1', scene: 'general', items: [],
       fallback: bodies.at(-1)?.global_fallback
         ? { status: 'failed', error: 'GLOBAL_FAILED', detail: 'controlled failure' }
         : { status: 'disabled' } } })
@@ -215,13 +215,13 @@ test('业务搜图传递兜底开关，兜底失败作为搜索提示显示', as
 })
 
 test('业务搜图把菜谱识别的菜名显示成一张没有图片的结果卡，不能勾选和下载', async ({ page }) => {
-  const recipe = { tags: '荷塘小炒、凉拌猪耳、清蒸鲈鱼', description: '', original_url: null, similarity: null, details: {}, source: 'recipe' }
+  // As the server answers: each card says its source; a self-built card's details end with outputs_heating
+  const recipe = { source: 'recipe', tags: '荷塘小炒、凉拌猪耳、清蒸鲈鱼', description: '', original_url: null, similarity: null, details: {} }
+  const selfBuilt = { source: 'self', ...hit, details: { ...hit.details, outputs_heating: false } }
   let selfBuiltHits = true
   await page.route('**/api/search/auto/url', route => route.fulfill({ json: selfBuiltHits
-    ? { ok: true, trace_id: 'recipe-1', source: 'self', scene: 'general', outputs_heating: false,
-      items: [{ ...hit, source: 'self' }, recipe], fallback: { status: 'not_needed' } }
-    : { ok: true, trace_id: 'recipe-2', source: 'recipe', scene: 'general', outputs_heating: false,
-      items: [recipe], fallback: { status: 'not_needed' } } }))
+    ? { ok: true, trace_id: 'recipe-1', scene: 'general', items: [selfBuilt, recipe], fallback: { status: 'not_needed' } }
+    : { ok: true, trace_id: 'recipe-2', scene: 'general', items: [recipe], fallback: { status: 'not_needed' } } }))
   await page.goto('/')
   await page.getByRole('button', { name: '业务搜图', exact: true }).click()
   await page.getByRole('button', { name: '图片链接', exact: true }).click()

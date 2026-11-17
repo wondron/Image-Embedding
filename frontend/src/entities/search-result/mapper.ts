@@ -51,7 +51,11 @@ function parseSource(value: unknown): 'self' | 'empty' | undefined {
   return source === 'self' || source === 'empty' ? source : undefined
 }
 
-/** One self-built hit (POST /api/search, and 业务搜图 with source=self) → SearchImage. */
+/**
+ * One self-built hit (POST /api/search, and 业务搜图 with source=self) → SearchImage. `envelope`:
+ * the hit's channel and heating flag, which POST /api/search says once for all hits on its
+ * envelope and 业务搜图 on each card.
+ */
 export function toSearchImage(
   hit: Untrusted<SearchHitWire>,
   index: number,

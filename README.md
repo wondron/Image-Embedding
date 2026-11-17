@@ -19,7 +19,7 @@ npm.cmd run dev
 
 「现网 Global」的两个输入接口明确命名为 `POST /api/search/global/file`（上传图片文件）和 `POST /api/search/global/url`（图片链接），前端使用这两个地址；两者共用同一套 Global 搜图逻辑。旧 `/api/predict/searchImage_file`、`/api/predict/searchImage_url` 保留为兼容别名，不在 Swagger 中展示，参数和响应保持一致。
 
-给业务方的搜图接口是 `POST /api/search/auto/file`（上传文件）和 `POST /api/search/auto/url`（JSON 图片链接）：先查自建库；配置 `RECIPE_DETECT_CONFIG.enabled` 开启时同时并行调用菜谱识别，识别出的菜名作为一条 `source=recipe` 的结果卡（菜名在 `tags` 里）排在自建库结果之后；两者都没有结果且 `global_fallback=true` 时用现网 Global 兜底。按 `source`（`self` / `recipe` / `global` / `empty`，每条结果卡也有自己的 `source`）返回同一种结果卡。参数、响应和错误见 [数据契约 §6.6](docs/image-search-pg-v01-data-contract.md)。
+给业务方的搜图接口是 `POST /api/search/auto/file`（上传文件）和 `POST /api/search/auto/url`（JSON 图片链接）：先查自建库；配置 `RECIPE_DETECT_CONFIG.enabled` 开启时同时并行调用菜谱识别，识别出的菜名作为一条 `source=recipe` 的结果卡（菜名在 `tags` 里）排在自建库结果之后；两者都没有结果且 `global_fallback=true` 时用现网 Global 兜底。各通道返回同一种结果卡，每条结果卡的 `source`（`self` / `recipe` / `global`）说明它来自哪里，自建库结果卡的 `details.outputs_heating` 说明它是否带加热信息；没有结果时 `items` 为空，原因见 `fallback.status`。参数、响应和错误见 [数据契约 §6.6](docs/image-search-pg-v01-data-contract.md)。
 
 多图搜索接口是 `POST /api/search/batch/files`（multipart，字段名 `files` 重复 1–30 次）和 `POST /api/search/batch/urls`（JSON `image_urls`）：一次请求多张查询图，逐张查自建库，整批共用 `scene`、`top_k`、`score_threshold`；`results[]` 每张图一项，某张图读不出或无法解码只影响它自己。不调用 Global。见 [数据契约 §6.7](docs/image-search-pg-v01-data-contract.md#batch-search)。
 

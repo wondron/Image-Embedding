@@ -255,7 +255,7 @@ class TimingLineTests(unittest.TestCase):
         line, record, response = self.post(
             "/api/search/auto/file", files=self.upload(), data={"top_k": "5", "machine_info": "KQ-01"}
         )
-        self.assertEqual(response.json()["source"], "self")
+        self.assertEqual([item["source"] for item in response.json()["items"]], ["self"])
         self.assertTrue(line.startswith("业务搜图(上传文件) | "), line)
         self.assertEqual(steps(line), ["embedding推理", "vector搜索", "后处理", "总耗时"])
         # scene and score_threshold were not sent: left out. machine_info is only ever seen here
@@ -268,7 +268,7 @@ class TimingLineTests(unittest.TestCase):
         line, _, response = self.post(
             "/api/search/auto/url", json={"image_url": "https://x.example/a.png", "global_fallback": True}
         )
-        self.assertEqual(response.json()["source"], "global")
+        self.assertEqual([item["source"] for item in response.json()["items"]], ["global"])
         self.assertTrue(line.startswith("业务搜图(图片链接) | "), line)
         # 后处理: the self-built one plus the global filter, added up
         self.assertEqual(steps(line), ["图像下载", "embedding推理", "vector搜索", "global搜索", "后处理", "总耗时"])
