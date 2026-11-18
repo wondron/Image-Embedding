@@ -105,6 +105,10 @@
 .ie .ie-status-row > legend { float: none; width: auto; margin: 0 0 6px; padding: 0; }
 .ie-status-control { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; min-inline-size: 0; }
 .ie-status-control > label { min-block-size: 36px; }
+/* Another category picked: the stored category's name in the tags can follow it */
+.ie-tag-swap { display: flex; align-items: flex-start; gap: 6px; margin: 0; color: #223046; font-size: 14px; line-height: 1.6; cursor: pointer; }
+.ie-tag-swap > input { flex-shrink: 0; margin: 4px 0 0; accent-color: var(--primary); }
+.ie-tag-swap:has(input:disabled) { cursor: default; }
 /* Narrow content: labels above. Wide content: one shared 80px label rail and a
    full remaining control column, not a second independently-sized field. */
 @container ie-editor (min-width: 420px) {
@@ -114,7 +118,7 @@
   .ie .ie-line-field > label { grid-column: 1; grid-row: 1; padding-block-start: 7px; }
   .ie .ie-category-picker > .cp > :not(label),
   .ie .ie-line-field > :not(label) { grid-column: 2; min-inline-size: 0; }
-  .ie .ie-status-row { padding-inline-start: 92px; }
+  .ie .ie-status-row, .ie .ie-tag-swap { padding-inline-start: 92px; }
   .ie .ie-status-row > legend { position: absolute; inset-block-start: 0; inset-inline-start: 0; inline-size: 80px; margin: 0; padding-block-start: 7px; }
 }
 /* Preserve the existing food-field content-width guard; v0.4 replaces ONLY the

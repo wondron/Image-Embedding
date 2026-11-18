@@ -80,13 +80,20 @@ export function BatchEditDialog({ items, apiBase, categories, onClose, onFinishe
   const working = run.phase === 'running' || run.phase === 'stopping'
   const failed = run.items.filter(item => run.outcomes.get(item.id)?.status === 'failed')
   const notReached = run.items.filter(item => !run.outcomes.has(item.id))
+  const newCategoryName = edit.category.categoryId !== null ? categories.tree?.byId.get(edit.category.categoryId)?.node.name ?? null : null
+  // Tags replaced or cleared outright: no old category name is left to rename
+  const tagsOverwritten = edit.tags.mode === 'replace' || edit.tags.mode === 'clear'
+  const renameNote = tagsOverwritten
+    ? '标签选了「替换为」或「清空」时用不到这一项。'
+    : edit.renameCategoryTag ? '每张图片按它原来的类别换；标签里没有原类别名的，标签不变。' : ''
 
   function change(patch: Partial<BatchEdit>) {
     setEdit(current => ({ ...current, ...patch }))
   }
 
   async function begin(targets: readonly LibraryImageItem[]) {
-    const outcomes = await start(items, targets, (item, signal) => editOne(item, edit, apiBase, signal))
+    const tree = categories.tree
+    const outcomes = await start(items, targets, (item, signal) => editOne(item, edit, apiBase, signal, tree))
     onFinished(outcomes)
     const tally = tallyOutcomes(outcomes.values())
     const clean = outcomes.size === items.length && tally.done === items.length
@@ -134,16 +141,23 @@ export function BatchEditDialog({ items, apiBase, categories, onClose, onFinishe
             error={shown.category}
             hint={edit.category.mode === 'set' ? '改了类别而下面的标注状态「不修改」时，记为已核验。' : undefined}
           >
-            {edit.category.mode === 'set' && <CategoryPicker
-              id={`${id}-category`}
-              label="新的类别"
-              tree={categories.tree}
-              loading={categories.loading}
-              loadError={categories.error}
-              onRetry={categories.refresh}
-              value={edit.category.categoryId}
-              onChange={categoryId => change({ category: { mode: 'set', categoryId } })}
-            />}
+            {edit.category.mode === 'set' && <>
+              <CategoryPicker
+                id={`${id}-category`}
+                label="新的类别"
+                tree={categories.tree}
+                loading={categories.loading}
+                loadError={categories.error}
+                onRetry={categories.refresh}
+                value={edit.category.categoryId}
+                onChange={categoryId => change({ category: { mode: 'set', categoryId } })}
+              />
+              <label className="lb-check">
+                <input type="checkbox" checked={edit.renameCategoryTag} disabled={tagsOverwritten} onChange={event => change({ renameCategoryTag: event.target.checked })} />
+                <span>同时把标签里的原类别名换成{newCategoryName ? `「${newCategoryName}」` : '新类别名'}</span>
+              </label>
+              {renameNote && <p className="lb-hint">{renameNote}</p>}
+            </>}
           </Row>
           <Row
             label="标注状态"

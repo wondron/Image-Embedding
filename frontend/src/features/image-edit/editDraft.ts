@@ -9,13 +9,21 @@ import {
   AMOUNT_FIELDS,
   imageFieldErrors,
   parseAmount,
+  renameTag,
+  tagRename,
   type FoodFieldValues,
   type ImageDetail,
   type ImageFieldName,
   type ImagePatch,
+  type TagRename,
 } from '../../entities/image'
 
 export type EditLabelStatus = 'auto' | 'verified'
+
+/** The tag swap turned on, with the tags as they were before it. */
+export interface TagSwap extends TagRename {
+  before: readonly string[]
+}
 
 /** What the editor changes; amounts keep the typed text. */
 export interface ImageEditDraft extends FoodFieldValues {
@@ -24,6 +32,8 @@ export interface ImageEditDraft extends FoodFieldValues {
   labelStatus: EditLabelStatus
   tags: readonly string[]
   description: string
+  /** The stored category's name in the tags became the picked category's name (see withTagSwap). */
+  tagSwap: TagSwap | null
 }
 
 export type EditField = 'category' | ImageFieldName
@@ -43,16 +53,42 @@ export function draftFromImage(image: ImageDetail): ImageEditDraft {
     totalMassG: amountText(image.totalMassG),
     waterMassG: amountText(image.waterMassG),
     mainIngredientMassG: amountText(image.mainIngredientMassG),
+    tagSwap: null,
   }
 }
 
 /**
  * The draft after picking a category: one picked by hand is verified (what the server would make
- * it); going back to the stored category brings its stored label back.
+ * it); going back to the stored category brings its stored label back. A tag swap made for the
+ * previous pick is undone (it named that category).
  */
 export function withCategory(draft: ImageEditDraft, image: ImageDetail, categoryId: number | null): ImageEditDraft {
   const stored = categoryId !== null && categoryId === image.categoryId && image.labelStatus === 'auto'
-  return { ...draft, categoryId, labelStatus: stored ? 'auto' : 'verified' }
+  return { ...withTagSwap(draft, null), categoryId, labelStatus: stored ? 'auto' : 'verified' }
+}
+
+/**
+ * The tag swap offered while the category changes: the stored category's name, when the tags have
+ * it, can become the picked category's name. A swap that is on stays offered, so it can be turned
+ * off again; null when there is nothing to offer.
+ */
+export function categoryTagOffer(image: ImageDetail, draft: ImageEditDraft, tree: CategoryTree | null): TagRename | null {
+  if (draft.tagSwap) return { from: draft.tagSwap.from, to: draft.tagSwap.to }
+  if (!tree || image.categoryId === null || draft.categoryId === null || draft.categoryId === image.categoryId) return null
+  const rename = tagRename(tree.byId.get(image.categoryId)?.node.name, tree.byId.get(draft.categoryId)?.node.name)
+  return rename && draft.tags.includes(rename.from) ? rename : null
+}
+
+/**
+ * Turns the tag swap on (with the offered rename) or off (null), in the tags at once. Off puts the
+ * tags back as they were; if they were edited meanwhile, the new name goes back to the old one.
+ */
+export function withTagSwap(draft: ImageEditDraft, rename: TagRename | null): ImageEditDraft {
+  const swap = draft.tagSwap
+  if (rename) return swap ? draft : { ...draft, tags: renameTag(draft.tags, rename), tagSwap: { ...rename, before: draft.tags } }
+  if (!swap) return draft
+  const untouched = sameList(draft.tags, renameTag(swap.before, swap))
+  return { ...draft, tags: untouched ? swap.before : renameTag(draft.tags, { from: swap.to, to: swap.from }), tagSwap: null }
 }
 
 /**

@@ -29,7 +29,17 @@ import { FoodFields, TagInput } from '../annotation-fields'
 import { CategoryPicker, categoryPath, type CategoryTreeState } from '../category-picker'
 import { useSceneCatalog } from '../scene-catalog'
 import { SceneMembershipPanel } from '../scene-memberships/SceneMembershipPanel'
-import { describePatch, draftFromImage, isDirty, toImagePatch, validateDraft, withCategory, type ImageEditDraft } from './editDraft'
+import {
+  categoryTagOffer,
+  describePatch,
+  draftFromImage,
+  isDirty,
+  toImagePatch,
+  validateDraft,
+  withCategory,
+  withTagSwap,
+  type ImageEditDraft,
+} from './editDraft'
 import { VectorCard } from './VectorCard'
 import type { PayloadNames } from './vectorView'
 import './image-edit.css'
@@ -126,6 +136,8 @@ export function ImageEditPanel({
   const dirty = Boolean(image && draft && isDirty(image, draft))
   const patch = image && draft && !invalid ? toImagePatch(image, draft) : {}
   const changes = describePatch(patch)
+  /** Another category picked: the stored one's name in the tags can follow it. */
+  const tagOffer = image && draft ? categoryTagOffer(image, draft, categories.tree) : null
 
   // Size before paint for loaded values, typing and undo; width changes are observed
   // separately from height so our own sizing cannot create a resize feedback loop.
@@ -375,6 +387,10 @@ export function ImageEditPanel({
                   hint={draft.categoryId === null ? '没有类别时图片为「未标注」。' : undefined}
                 />
               </div>
+              {tagOffer && <label className="ie-tag-swap">
+                <input type="checkbox" checked={draft.tagSwap !== null} disabled={busy !== null} onChange={event => setDraft(withTagSwap(draft, event.target.checked ? tagOffer : null))} />
+                <span>同时把标签「{tagOffer.from}」换成「{tagOffer.to}」</span>
+              </label>}
               {draft.categoryId !== null && <fieldset className="ia-choice ie-status-row" disabled={busy !== null}>
                 <legend>标注状态</legend>
                 <div className="ie-status-control">

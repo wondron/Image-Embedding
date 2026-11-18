@@ -18,7 +18,7 @@ function node(id: number, name: string, isActive = true): CategoryNode {
     sortOrder: 0, isActive, imageCount: 0, sceneRuleCount: 0, createdAt: null, updatedAt: null,
   }
 }
-const tree = buildCategoryTree([node(1, '牛排'), node(2, '停用的', false)])
+const tree = buildCategoryTree([node(1, '牛排'), node(2, '停用的', false), node(3, '红烧肉'), node(4, '长'.repeat(65)), { ...node(5, ''), name: null }])
 const edit = (patch: Partial<BatchEdit>): BatchEdit => ({ ...EMPTY_BATCH_EDIT, ...patch })
 const amounts = (key: keyof BatchEdit['amounts'], mode: 'keep' | 'set' | 'clear', text = '') => ({ ...EMPTY_BATCH_EDIT.amounts, [key]: { mode, text } })
 const labelled = { categoryId: 1, tags: ['带骨', '整块'] }
@@ -49,6 +49,20 @@ describe('batch edit', () => {
     expect(validateBatchEdit(edit({ amounts: amounts('waterMassG', 'set', '0') }), tree)).toEqual({})  // water may be 0
     expect(validateBatchEdit(edit({ category: { mode: 'set', categoryId: 1 }, labelStatus: 'auto', tags: { mode: 'replace', values: ['a'] } }), tree)).toEqual({})
   })
+
+  it('names the category tag rename, reads the tags first for it, and needs a new name that can be a tag', () => {
+    const rename = edit({ category: { mode: 'set', categoryId: 3 }, renameCategoryTag: true })
+    expect(describeBatchEdit(rename)).toBe('类别及标签里的类别名')
+    expect(describeBatchEdit({ ...rename, tags: { mode: 'add', values: ['x'] } })).toBe('类别及标签里的类别名、标签')
+    expect(describeBatchEdit({ ...rename, tags: { mode: 'clear', values: [] } })).toBe('类别、标签')  // cleared: no tag left to rename
+    expect(needsCurrentTags(rename)).toBe(true)
+    expect(needsCurrentTags({ ...rename, tags: { mode: 'replace', values: ['x'] } })).toBe(false)
+    expect(needsCurrentTags({ ...rename, category: { mode: 'clear', categoryId: null } })).toBe(false)
+    expect(validateBatchEdit(rename, tree)).toEqual({})
+    expect(validateBatchEdit({ ...rename, category: { mode: 'set', categoryId: 4 } }, tree).category).toContain('64')
+    expect(validateBatchEdit({ ...rename, category: { mode: 'set', categoryId: 5 } }, tree).category).toContain('没有中文名称')
+    expect(validateBatchEdit({ ...rename, renameCategoryTag: false, category: { mode: 'set', categoryId: 4 } }, tree)).toEqual({})
+  })
 })
 
 describe('planImagePatch', () => {
@@ -76,6 +90,21 @@ describe('planImagePatch', () => {
     expect(planImagePatch(edit({ tags: { mode: 'clear', values: [] } }), unlabelled).kind).toBe('skip')
     const full = { categoryId: 1, tags: Array.from({ length: 32 }, (_, index) => `t${index}`) }
     expect(planImagePatch(edit({ tags: { mode: 'add', values: ['one-more'] } }), full)).toEqual({ kind: 'fail', reason: '加上后有 33 个标签，最多 32 个' })
+  })
+
+  it('renames the tag of each image’s old category to the new one, before tags are added or removed', () => {
+    const rename = (patch: Partial<BatchEdit> = {}) => edit({ category: { mode: 'set', categoryId: 3 }, renameCategoryTag: true, ...patch })
+    const steak = { categoryId: 1, tags: ['牛排', '带骨'] }
+    expect(planImagePatch(rename(), steak, tree)).toEqual({ kind: 'patch', patch: { category_id: 3, tags: ['红烧肉', '带骨'] } })
+    expect(planImagePatch(rename({ tags: { mode: 'add', values: ['红烧肉', '整块'] } }), steak, tree))
+      .toEqual({ kind: 'patch', patch: { category_id: 3, tags: ['红烧肉', '带骨', '整块'] } })
+    expect(planImagePatch(rename({ tags: { mode: 'remove', values: ['带骨'] } }), steak, tree)).toEqual({ kind: 'patch', patch: { category_id: 3, tags: ['红烧肉'] } })
+    // Tags given outright win; no such tag, no old category, no tree or the option off: the tags stay
+    expect(planImagePatch(rename({ tags: { mode: 'replace', values: ['a'] } }), steak, tree)).toEqual({ kind: 'patch', patch: { category_id: 3, tags: ['a'] } })
+    expect(planImagePatch(rename(), labelled, tree)).toEqual({ kind: 'patch', patch: { category_id: 3 } })
+    expect(planImagePatch(rename(), { categoryId: null, tags: ['牛排'] }, tree)).toEqual({ kind: 'patch', patch: { category_id: 3 } })
+    expect(planImagePatch(rename(), steak)).toEqual({ kind: 'patch', patch: { category_id: 3 } })
+    expect(planImagePatch(rename({ renameCategoryTag: false }), steak, tree)).toEqual({ kind: 'patch', patch: { category_id: 3 } })
   })
 
   it('sets or clears the description and the food annotation', () => {

@@ -1,3 +1,4 @@
+import type { CategoryTree } from '../../entities/category'
 import { deleteImage, getImage, updateImage, type LibraryImageItem } from '../../entities/image'
 import { ApiError } from '../../shared/api'
 import { requestSignal } from '../../shared/lib'
@@ -7,16 +8,17 @@ import type { BatchOutcome } from './runBatch'
 const REQUEST_TIMEOUT_MS = 30_000
 
 /**
- * One image of a batch edit: PATCH only what the edit sets. Adding or removing tags reads the
- * image's tags first, so tags someone added meanwhile are kept.
+ * One image of a batch edit: PATCH only what the edit sets. Adding or removing tags, or renaming
+ * the category's tag, reads the image first, so tags someone added meanwhile are kept. The tree
+ * names the old and the new category.
  */
-export async function editOne(item: LibraryImageItem, edit: BatchEdit, apiBase: string, signal: AbortSignal): Promise<BatchOutcome> {
+export async function editOne(item: LibraryImageItem, edit: BatchEdit, apiBase: string, signal: AbortSignal, tree: CategoryTree | null = null): Promise<BatchOutcome> {
   let state: ImageState = { categoryId: item.categoryId, tags: item.tags }
   if (needsCurrentTags(edit)) {
     const detail = await getImage(item.id, { baseUrl: apiBase, signal: requestSignal(signal, REQUEST_TIMEOUT_MS) })
     state = { categoryId: detail.image.categoryId, tags: detail.image.tags }
   }
-  const plan = planImagePatch(edit, state)
+  const plan = planImagePatch(edit, state, tree)
   if (plan.kind === 'skip') return { status: 'skipped', reason: plan.reason }
   if (plan.kind === 'fail') return { status: 'failed', reason: plan.reason }
   const result = await updateImage(item.id, plan.patch, { baseUrl: apiBase, signal: requestSignal(signal, REQUEST_TIMEOUT_MS) })

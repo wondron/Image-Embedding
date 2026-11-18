@@ -4,38 +4,40 @@ import { acknowledgeNotice, expectToast } from './notice'
 // Fixtures only: every API request is answered below; nothing reaches a real backend.
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
 const imageId = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
-const CATEGORIES = [{
-  id: 1, code: 'dish.steak', parent_id: null, path: '1', name: '牛排', names: [{ lang: 'zh', name: '牛排', kind: 'primary' }], cuisines: [],
+const category = (id: number, code: string, name: string) => ({
+  id, code, parent_id: null, path: String(id), name, names: [{ lang: 'zh', name, kind: 'primary' }], cuisines: [],
   heating_group: null, sort_order: 0, is_active: true, image_count: 0, scene_rule_count: 0, created_at: null, updated_at: null,
-}]
+})
+const CATEGORIES = [category(1, 'dish.steak', '牛排'), category(2, 'dish.pork', '红烧肉')]
+const categoryOf = (id: number | null) => CATEGORIES.find(entry => entry.id === id) ?? null
 const SCENES = [{ id: 1, code: 'general', name: '通用', description: null, include_all: true, outputs_heating: false, is_active: true, created_at: null, member_count: 0, labels: [], rules: [] }]
 const ENUMS = [{ name: 'food_state', label: '食物状态', editable: true, values: [{ value: 'raw', label: '生' }, { value: 'cooked', label: '熟' }] }]
 
 interface Stored { n: number; id: string; categoryId: number | null; labelStatus: string; description: string; tags: string[]; foodState: string | null; deleted: boolean }
 
-/** Image 3 has no category; odd ones are tagged 带骨. */
-function makeImages(count: number): Stored[] {
+/** Image 3 has no category; odd ones are tagged 带骨 (unless `tags` says otherwise). */
+function makeImages(count: number, tags = (n: number) => (n % 2 ? ['带骨'] : [])): Stored[] {
   return Array.from({ length: count }, (_, index) => {
     const n = index + 1
-    return { n, id: imageId(n), categoryId: n === 3 ? null : 1, labelStatus: n === 3 ? 'unlabeled' : 'auto', description: `图片${n}`, tags: n % 2 ? ['带骨'] : [], foodState: null, deleted: false }
+    return { n, id: imageId(n), categoryId: n === 3 ? null : 1, labelStatus: n === 3 ? 'unlabeled' : 'auto', description: `图片${n}`, tags: tags(n), foodState: null, deleted: false }
   })
 }
 
 const listItem = (image: Stored) => ({
   id: image.id, original_url: `https://cdn.test/o/${image.n}.png`, thumb_url: `https://cdn.test/t/${image.n}.png`,
-  category_id: image.categoryId, category: image.categoryId ? '牛排' : null, scenes: ['general'], label_status: image.labelStatus,
+  category_id: image.categoryId, category: categoryOf(image.categoryId)?.name ?? null, scenes: ['general'], label_status: image.labelStatus,
   description: image.description, tags: image.tags, width: 640, height: 480, created_at: '2026-11-10T08:00:00+00:00', updated_at: null, vector_status: 'synced',
 })
 const detail = (image: Stored) => ({
-  ...listItem(image), sha256: 'ab'.repeat(32), category_code: image.categoryId ? 'dish.steak' : null, source_type: 'user_upload', license: 'unknown',
+  ...listItem(image), sha256: 'ab'.repeat(32), category_code: categoryOf(image.categoryId)?.code ?? null, source_type: 'user_upload', license: 'unknown',
   food_state: image.foodState, food_processing: null, food_count: null, total_mass_g: null, water_mass_g: null, main_ingredient_mass_g: null,
   heating_group: null, payload_version: 2, embeddings: [],
 })
 const vector = { status: 'synced', collection: 'c_dino_v2', embedding_space_id: 'dino:v2', exists: true, payload: {}, expected_payload: {}, payload_matches: true, payload_version: 2, synced_version: 2, embedded_at: null }
 
-/** failOnce: ids whose first PATCH / DELETE answers 503; total: what the list says it has (default: what is stored). */
-async function mockApi(page: Page, { count = 30, failOnce = [] as string[], total = null as number | null } = {}) {
-  const images = makeImages(count)
+/** failOnce: ids whose first PATCH / DELETE answers 503; total: what the list says it has (default: what is stored); tags: each image's tags by its number. */
+async function mockApi(page: Page, { count = 30, failOnce = [] as string[], total = null as number | null, tags = undefined as ((n: number) => string[]) | undefined } = {}) {
+  const images = makeImages(count, tags)
   const failing = new Set(failOnce)
   const calls = { list: [] as Array<Record<string, string>>, patches: [] as Array<{ id: string; body: Record<string, unknown> }>, deletes: [] as string[], details: [] as string[] }
   await page.route(url => url.pathname.startsWith('/api/'), async route => {
@@ -106,7 +108,7 @@ async function screenshot(page: Page, info: TestInfo, name: string) {
 const pick = (page: Page, n: number) => page.getByRole('checkbox', { name: `选择 图片${n}`, exact: true })
 const bar = (page: Page) => page.getByRole('toolbar', { name: '批量操作' })
 
-test('批量修改：勾选（Shift 连选），只发改了的字段；没有类别的图片不改标注状态', async ({ page }, info) => {
+test('批量修改：勾选（Shift 连选），只发改了的字段；没有类别的图片不改标注状态；改完清空选择，取消不清空', async ({ page }, info) => {
   const { calls } = await mockApi(page)
   await openLibrary(page)
   await pick(page, 1).click()
@@ -115,8 +117,13 @@ test('批量修改：勾选（Shift 连选），只发改了的字段；没有�
   await expect(page.locator('.mg-library-card.is-selected')).toHaveCount(4)
   await screenshot(page, info, 'batch-selected')
 
-  await bar(page).getByRole('button', { name: '批量修改' }).click()
   const dialog = page.getByRole('dialog', { name: '批量修改标注（4 张）' })
+  await bar(page).getByRole('button', { name: '批量修改' }).click()
+  await dialog.getByRole('button', { name: '取消', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  await expect(bar(page)).toContainText('已选 4 张')  // nothing ran: the picks stay
+
+  await bar(page).getByRole('button', { name: '批量修改' }).click()
   await expect(dialog.getByRole('button', { name: '开始修改' })).toBeDisabled()  // nothing to change yet
   await dialog.getByLabel('标签：怎么改').selectOption('add')
   const tags = dialog.getByLabel('要添加的标签')
@@ -144,11 +151,12 @@ test('批量修改：勾选（Shift 连选），只发改了的字段；没有�
   await expect.poll(() => calls.list.length).toBeGreaterThan(listsBefore)  // the page reloads
   await dialog.getByRole('button', { name: '完成' }).click()
   await expect(dialog).toBeHidden()
-  await expect(bar(page)).toContainText('已选 4 张')  // still picked for the next change
+  await expect(bar(page)).toContainText('可勾选图片后批量操作')  // the batch ran: nothing stays picked
+  await expect(page.locator('.mg-library-card.is-selected')).toHaveCount(0)
   await expect(page.locator('.mg-library-card').first()).toContainText('#批量')
 })
 
-test('批量修改：失败的可以重试；全部成功后自动关闭并提示', async ({ page }) => {
+test('批量修改：失败的可以重试；全部成功后自动关闭并提示，清空选择', async ({ page }) => {
   const { calls } = await mockApi(page, { failOnce: [imageId(2)] })
   await openLibrary(page)
   await bar(page).getByRole('checkbox', { name: '选择本页' }).check()
@@ -165,8 +173,38 @@ test('批量修改：失败的可以重试；全部成功后自动关闭并提�
   await dialog.getByRole('button', { name: '重试失败的（1）' }).click()
   await expectToast(page, '已修改 24 张图片的描述。', 'success')
   await expect(dialog).toBeHidden()
+  await expect(bar(page)).toContainText('可勾选图片后批量操作')
   expect(calls.patches.filter(call => call.id === imageId(2))).toHaveLength(2)
   expect(new Set(calls.patches.map(call => JSON.stringify(call.body)))).toEqual(new Set([JSON.stringify({ description: '统一描述' })]))
+})
+
+test('批量修改：换类别时可以把每张图片标签里的原类别名换成新类别名', async ({ page }, info) => {
+  // 1 and 2 carry their category's name as a tag; 3 has no category; 4 has no such tag
+  const tags: Record<number, string[]> = { 1: ['牛排', '带骨'], 2: ['整块', '牛排'], 3: ['牛排'], 4: ['带骨'] }
+  const { calls } = await mockApi(page, { tags: n => tags[n] ?? [] })
+  await openLibrary(page)
+  await pick(page, 1).click()
+  await pick(page, 4).click({ modifiers: ['Shift'] })
+  await bar(page).getByRole('button', { name: '批量修改' }).click()
+  const dialog = page.getByRole('dialog', { name: '批量修改标注（4 张）' })
+  await dialog.getByLabel('类别：怎么改').selectOption('set')
+  const rename = dialog.getByRole('checkbox', { name: /^同时把标签里的原类别名换成/ })
+  await expect(rename).not.toBeChecked()  // only when asked for
+  await dialog.getByRole('combobox', { name: '新的类别' }).fill('红烧')
+  await dialog.getByRole('treeitem', { name: /^红烧肉/ }).click()
+  await expect(rename).toHaveAccessibleName('同时把标签里的原类别名换成「红烧肉」')
+  await rename.check()
+  await expect(dialog.locator('.lb-summary')).toHaveText('将修改 4 张图片的：类别及标签里的类别名')
+  await screenshot(page, info, 'batch-edit-rename-tag')
+  await dialog.getByRole('button', { name: '开始修改' }).click()
+  await expectToast(page, '已修改 4 张图片的类别及标签里的类别名。', 'success')
+  expect(calls.details.sort()).toEqual([1, 2, 3, 4].map(imageId))  // each image's tags are read as they are now
+  expect(Object.fromEntries(calls.patches.map(call => [call.id, call.body]))).toEqual({
+    [imageId(1)]: { category_id: 2, tags: ['红烧肉', '带骨'] },
+    [imageId(2)]: { category_id: 2, tags: ['整块', '红烧肉'] },
+    [imageId(3)]: { category_id: 2 },  // no category before: no old name to replace
+    [imageId(4)]: { category_id: 2 },  // no tag named after its category
+  })
 })
 
 test('批量删除：选择全部筛选结果，数量多时输入「删除」确认；删完从列表和选择里去掉', async ({ page }, info) => {
@@ -191,6 +229,22 @@ test('批量删除：选择全部筛选结果，数量多时输入「删除」�
   expect(new Set(calls.deletes).size).toBe(30)
   await expect(page.getByRole('heading', { name: '暂无已入库图片（空库）' })).toBeVisible()
   await expect(bar(page)).toHaveCount(0)
+})
+
+test('批量删除：有没删掉的，关掉弹窗后选择也清空', async ({ page }) => {
+  await mockApi(page, { failOnce: [imageId(2)] })
+  await openLibrary(page)
+  await pick(page, 1).click()
+  await pick(page, 2).click()
+  await bar(page).getByRole('button', { name: '批量删除' }).click()
+  const dialog = page.getByRole('dialog', { name: '批量删除（2 张）' })
+  await dialog.getByRole('button', { name: '删除 2 张' }).click()
+  await expect(dialog.getByRole('region', { name: '批量删除进度' })).toContainText('有 1 张没成功')
+  await dialog.getByRole('button', { name: '完成' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(pick(page, 1)).toHaveCount(0)  // deleted
+  await expect(pick(page, 2)).not.toBeChecked()  // still there, not picked either: retrying is the dialog's job
+  await expect(bar(page)).toContainText('可勾选图片后批量操作')
 })
 
 test('少量删除不用输入确认；换筛选条件会清空选择', async ({ page }) => {

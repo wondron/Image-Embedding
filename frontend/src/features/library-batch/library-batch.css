@@ -38,6 +38,10 @@ textarea.lb-input { min-height: 72px; resize: vertical; line-height: 1.6; }
 .lb-row-value .cp-selected + .cp-search .cp-combo { margin-top: 6px; }
 .lb-error { margin: 5px 0 0; color: #b42318; font-size: 12px; line-height: 1.6; }
 .lb-hint { margin: 5px 0 0; color: #7b8899; font-size: 12px; line-height: 1.6; }
+/* An option of the field, under its value */
+.lb-check { display: flex; align-items: flex-start; gap: 6px; margin-top: 8px; color: #223046; font-size: 13px; line-height: 1.6; cursor: pointer; }
+.lb-check > input { flex-shrink: 0; margin: 3px 0 0; accent-color: var(--primary); }
+.lb-check:has(input:disabled) { color: #94a3b8; cursor: default; }
 
 /* Progress and results */
 .lb-progress { display: flex; flex-direction: column; gap: 8px; }

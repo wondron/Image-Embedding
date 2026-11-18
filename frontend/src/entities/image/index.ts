@@ -43,11 +43,14 @@ export {
   type FoodFieldValues,
   type ImageFieldErrors,
   type ImageFieldName,
+  type TagRename,
   type TextFieldValues,
   charLength,
   foodFieldsFilled,
   imageFieldErrors,
   parseAmount,
+  renameTag,
+  tagRename,
 } from './fields'
 export {
   type ListImagesOptions,

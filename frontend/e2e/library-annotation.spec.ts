@@ -52,13 +52,13 @@ const listItem = (image: Image, vectorStatus: string) => ({
  * legacyWrites: answer PATCH / vector-sync like a server from before writes carried `vector`.
  * vector: the steak image's state in the vector store; reembed: how POST .../reembed answers.
  * categories: the category tree; listTotal: the total the list reports; fillPage: answer every
- * list request with a full page of plain images.
+ * list request with a full page of plain images; tags: the steak image's stored tags.
  */
 async function mockApi(page: Page, {
   legacyWrites = false, vector = 'stale' as 'stale' | 'missing', reembed = 'ok' as 'ok' | 'unreadable',
-  categories = CATEGORIES as unknown[], listTotal = null as number | null, fillPage = false,
+  categories = CATEGORIES as unknown[], listTotal = null as number | null, fillPage = false, tags = null as string[] | null,
 } = {}) {
-  const state = { image: steakImage(), vector: vector as 'stale' | 'synced' | 'missing', deleted: false }
+  const state = { image: tags ? { ...steakImage(), tags } : steakImage(), vector: vector as 'stale' | 'synced' | 'missing', deleted: false }
   const calls = { list: [] as Array<Record<string, string>>, patches: [] as unknown[], pushes: 0, reembeds: 0, deletes: [] as string[], details: 0, categoryReads: 0 }
   // The vector state as the server reports it: before a push the point still has the old scenes
   const vectorWire = () => {
@@ -256,6 +256,33 @@ test('图库：撤销修改后可以关闭，没有改动的保存按钮不可�
   await expect(save).toBeDisabled()
   await dialog.getByRole('button', { name: '关闭弹窗' }).click()
   await expect(dialog).toBeHidden()
+})
+
+test('图库：换类别时可以勾选把标签里的原类别名换成新类别名，取消勾选就换回来', async ({ page }, info) => {
+  const calls = await mockApi(page, { tags: ['牛排', '带骨'] })
+  await openLibrary(page)
+  await page.getByRole('button', { name: '标注 煎牛排' }).click()
+  const dialog = page.getByRole('dialog', { name: '图片标注' })
+  const chips = dialog.locator('.ia-tag')
+  await expect(chips).toHaveText(['牛排', '带骨'])
+  const offered = dialog.getByRole('checkbox', { name: /^同时把标签/ })
+  await expect(offered).toHaveCount(0)  // the category has not changed
+
+  await pickCategory(dialog, '红烧', '红烧肉')
+  const swap = dialog.getByRole('checkbox', { name: '同时把标签「牛排」换成「红烧肉」' })
+  await expect(swap).not.toBeChecked()  // only when asked for
+  await swap.check()
+  await expect(chips).toHaveText(['红烧肉', '带骨'])  // in its place, at once
+  await screenshot(page, info, 'library-editor-tag-swap')
+  await swap.uncheck()
+  await expect(chips).toHaveText(['牛排', '带骨'])
+  await swap.check()
+  await expect(dialog.locator('.ie-changes')).toContainText('未保存：类别、标注状态、标签')
+  await dialog.getByRole('button', { name: '保存修改' }).click()
+  await expectToast(page, '已保存，向量库已同步，检索已生效。', 'success')
+  expect(calls.patches).toEqual([{ category_id: 4, label_status: 'verified', tags: ['红烧肉', '带骨'] }])
+  await expect(chips).toHaveText(['红烧肉', '带骨'])
+  await expect(offered).toHaveCount(0)  // saved: 红烧肉 is the stored category now
 })
 
 test('图库：旧版服务端的写入不带向量状态时，再读一次详情', async ({ page }) => {

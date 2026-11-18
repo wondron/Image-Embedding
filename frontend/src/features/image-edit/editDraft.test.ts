@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildCategoryTree, type CategoryNode } from '../../entities/category'
 import type { ImageDetail } from '../../entities/image'
-import { describePatch, draftFromImage, isDirty, toImagePatch, validateDraft, withCategory } from './editDraft'
+import { categoryTagOffer, describePatch, draftFromImage, isDirty, toImagePatch, validateDraft, withCategory, withTagSwap } from './editDraft'
 
 function node(id: number, code: string, isActive = true): CategoryNode {
   return {
@@ -69,5 +69,53 @@ describe('validateDraft / isDirty', () => {
     expect(validateDraft(draft, IMAGE, tree)).toEqual({ totalMassG: '请输入正整数。' })
     expect(isDirty(IMAGE, draft)).toBe(true)
     expect(isDirty(IMAGE, { ...draftFromImage(IMAGE), description: '煎牛排  ' })).toBe(false)  // only spaces around
+  })
+})
+
+describe('categoryTagOffer / withTagSwap', () => {
+  const fish = buildCategoryTree([
+    { ...node(1, 'fish.golden'), name: '金鲳鱼' },
+    { ...node(2, 'fish.silver'), name: '银鲳鱼' },
+    { ...node(3, 'fish.unnamed'), name: null },
+    { ...node(4, 'fish.long'), name: '长'.repeat(65) },
+  ])
+  const golden: ImageDetail = { ...IMAGE, categoryId: 1, category: '金鲳鱼', tags: ['清蒸', '金鲳鱼'] }
+
+  it('offers the swap only for another category whose name can replace the stored one in the tags', () => {
+    const draft = draftFromImage(golden)
+    expect(categoryTagOffer(golden, draft, fish)).toBeNull()  // the category has not changed
+    expect(categoryTagOffer(golden, withCategory(draft, golden, 2), fish)).toEqual({ from: '金鲳鱼', to: '银鲳鱼' })
+    expect(categoryTagOffer(golden, withCategory(draft, golden, 2), null)).toBeNull()  // no tree, no names
+    expect(categoryTagOffer(golden, withCategory(draft, golden, null), fish)).toBeNull()  // cleared
+    expect(categoryTagOffer(golden, withCategory(draft, golden, 3), fish)).toBeNull()  // no name to put in
+    expect(categoryTagOffer(golden, withCategory(draft, golden, 4), fish)).toBeNull()  // too long for a tag
+    const untagged = { ...golden, tags: ['清蒸'] }
+    expect(categoryTagOffer(untagged, withCategory(draftFromImage(untagged), untagged, 2), fish)).toBeNull()  // nothing to replace
+    const unlabeled = { ...golden, categoryId: null, category: null, labelStatus: 'unlabeled' as const }
+    expect(categoryTagOffer(unlabeled, withCategory(draftFromImage(unlabeled), unlabeled, 2), fish)).toBeNull()  // no old name
+  })
+
+  it('swaps the tag in its place at once and sends it; turning it off or another pick puts it back', () => {
+    const picked = withCategory(draftFromImage(golden), golden, 2)
+    const offer = categoryTagOffer(golden, picked, fish)
+    const swapped = withTagSwap(picked, offer)
+    expect(swapped.tags).toEqual(['清蒸', '银鲳鱼'])
+    expect(categoryTagOffer(golden, swapped, fish)).toEqual(offer)  // still offered, so it can be turned off
+    expect(toImagePatch(golden, swapped)).toEqual({ category_id: 2, label_status: 'verified', tags: ['清蒸', '银鲳鱼'] })
+    expect(withTagSwap(swapped, null)).toMatchObject({ tags: ['清蒸', '金鲳鱼'], tagSwap: null })
+    // Back to the stored category: the swap is undone, nothing is left to send
+    const back = withCategory(swapped, golden, 1)
+    expect(back.tags).toEqual(['清蒸', '金鲳鱼'])
+    expect(toImagePatch(golden, back)).toEqual({})
+  })
+
+  it('keeps each tag once, and the edits made while swapped', () => {
+    const both = { ...golden, tags: ['金鲳鱼', '清蒸', '银鲳鱼'] }
+    const picked = withCategory(draftFromImage(both), both, 2)
+    const swapped = withTagSwap(picked, categoryTagOffer(both, picked, fish))
+    expect(swapped.tags).toEqual(['银鲳鱼', '清蒸'])  // the first keeps its place, like the server
+    expect(withTagSwap(swapped, null).tags).toEqual(['金鲳鱼', '清蒸', '银鲳鱼'])  // untouched: exactly as before
+    const edited = { ...swapped, tags: [...swapped.tags, '整条'] }
+    expect(withTagSwap(edited, null).tags).toEqual(['金鲳鱼', '清蒸', '整条'])  // edited: the new name goes back to the old one
   })
 })

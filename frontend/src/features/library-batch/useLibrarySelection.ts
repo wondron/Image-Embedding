@@ -4,7 +4,7 @@ import type { LibraryImageItem } from '../../entities/image'
 /**
  * The images picked for a batch action. Picks stay while paging; other filters mean another result
  * set, so the picks are dropped then (nothing hidden ever goes into a batch). The picked images'
- * data follows the reloaded list (a batch edit changes their tags or category).
+ * data follows the reloaded list (the image editor can change their tags or category).
  */
 export function useLibrarySelection(pageItems: readonly LibraryImageItem[], resetKey: string) {
   const [selected, setSelected] = useState<ReadonlyMap<string, LibraryImageItem>>(() => new Map())
@@ -70,12 +70,6 @@ export function useLibrarySelection(pageItems: readonly LibraryImageItem[], rese
     })
   }, [])
 
-  const remove = useCallback((ids: Iterable<string>) => {
-    const gone = new Set(ids)
-    if (!gone.size) return
-    setSelected(current => new Map([...current].filter(([id]) => !gone.has(id))))
-  }, [])
-
   const clear = useCallback(() => {
     anchor.current = null
     setSelected(current => (current.size ? new Map() : current))
@@ -92,7 +86,6 @@ export function useLibrarySelection(pageItems: readonly LibraryImageItem[], rese
     toggle,
     setPage,
     add,
-    remove,
     clear,
   }
 }

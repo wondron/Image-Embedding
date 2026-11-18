@@ -79,6 +79,28 @@ export function imageFieldErrors(values: TextFieldValues & FoodFieldValues): Ima
   return errors
 }
 
+/** A tag that follows a category change: the old category's name becomes the new one's. */
+export interface TagRename {
+  from: string
+  to: string
+}
+
+/**
+ * The rename for a category going from one name to another; null when there is nothing to rename:
+ * a side without a name, the same name, or a new name too long to be a tag.
+ */
+export function tagRename(from: string | null | undefined, to: string | null | undefined): TagRename | null {
+  const old = from?.trim()
+  const next = to?.trim()
+  if (!old || !next || old === next || charLength(next) > MAX_TAG_LENGTH) return null
+  return { from: old, to: next }
+}
+
+/** The tags with `from` turned into `to` in its place, each kept once (the first keeps its place, like the server). */
+export function renameTag(tags: readonly string[], rename: TagRename): string[] {
+  return [...new Set(tags.map(tag => (tag === rename.from ? rename.to : tag)))]
+}
+
 /** How many food fields are filled. */
 export function foodFieldsFilled(values: FoodFieldValues): number {
   return [values.foodState, values.foodProcessing, ...AMOUNT_FIELDS.map(field => values[field.key].trim())].filter(Boolean).length

@@ -3,7 +3,8 @@
  * what the person set is sent, image by image (PATCH /api/images/{id}), with the rules of
  * backend app/services/retrieval/image_fields.py — clearing the category makes an image unlabeled,
  * a category set without a label status is verified, an explicit label status must agree with the
- * category (so images without one are skipped for it).
+ * category (so images without one are skipped for it). With a new category, the tag naming each
+ * image's old category can become the new category's name.
  */
 import type { CategoryTree } from '../../entities/category'
 import {
@@ -13,6 +14,8 @@ import {
   MAX_TAG_LENGTH,
   charLength,
   parseAmount,
+  renameTag,
+  tagRename,
   type AmountField,
   type ImagePatch,
 } from '../../entities/image'
@@ -24,6 +27,8 @@ export type BatchLabelStatus = 'keep' | 'auto' | 'verified'
 
 export interface BatchEdit {
   category: { mode: FieldMode; categoryId: number | null }
+  /** With a new category: a tag that is an image's old category name becomes the new category's name. */
+  renameCategoryTag: boolean
   labelStatus: BatchLabelStatus
   tags: { mode: TagMode; values: readonly string[] }
   description: { mode: FieldMode; text: string }
@@ -35,6 +40,7 @@ export interface BatchEdit {
 
 export const EMPTY_BATCH_EDIT: BatchEdit = {
   category: { mode: 'keep', categoryId: null },
+  renameCategoryTag: false,
   labelStatus: 'keep',
   tags: { mode: 'keep', values: [] },
   description: { mode: 'keep', text: '' },
@@ -70,9 +76,15 @@ export function changedFields(edit: BatchEdit): BatchEditField[] {
   return fields
 }
 
+/** The old category's name in the tags follows the new category (tags replaced or cleared outright make it moot). */
+export function renamesCategoryTag(edit: BatchEdit): boolean {
+  return edit.renameCategoryTag && edit.category.mode === 'set' && edit.tags.mode !== 'replace' && edit.tags.mode !== 'clear'
+}
+
 /** 「类别、标签」 */
 export function describeBatchEdit(edit: BatchEdit): string {
-  return changedFields(edit).map(field => BATCH_FIELD_LABEL[field]).join('、')
+  const renames = renamesCategoryTag(edit)
+  return changedFields(edit).map(field => (field === 'category' && renames ? '类别及标签里的类别名' : BATCH_FIELD_LABEL[field])).join('、')
 }
 
 /** Problems with the edit; empty when it can run (an edit that changes nothing is not an error here). */
@@ -84,6 +96,8 @@ export function validateBatchEdit(edit: BatchEdit, tree: CategoryTree | null): B
     else if (!tree) errors.category = '类别目录未加载，暂时不能更换类别。'
     else if (!node) errors.category = '所选类别已不存在，请重新选择。'
     else if (!node.isActive) errors.category = '所选类别已停用，请换一个类别。'
+    else if (renamesCategoryTag(edit) && !node.name?.trim()) errors.category = '这个类别没有中文名称，不能换进标签。'
+    else if (renamesCategoryTag(edit) && charLength(node.name!.trim()) > MAX_TAG_LENGTH) errors.category = `这个类别的名称超过 ${MAX_TAG_LENGTH} 个字符，不能作为标签。`
   }
   if (edit.labelStatus !== 'keep' && edit.category.mode === 'clear') {
     errors.labelStatus = '清空类别后图片就是未标注，不能再设标注状态。'
@@ -110,9 +124,9 @@ export function validateBatchEdit(edit: BatchEdit, tree: CategoryTree | null): B
   return errors
 }
 
-/** Adding or removing tags works on each image's tags as they are now: read them first. */
+/** Adding or removing tags, or renaming the category's tag, works on each image's tags as they are now: read them first. */
 export function needsCurrentTags(edit: BatchEdit): boolean {
-  return edit.tags.mode === 'add' || edit.tags.mode === 'remove'
+  return edit.tags.mode === 'add' || edit.tags.mode === 'remove' || renamesCategoryTag(edit)
 }
 
 /** One image as the plan sees it now. */
@@ -128,8 +142,8 @@ export type ImagePlan =
 
 const NO_CATEGORY_NOTE = '没有类别，标注状态没改'
 
-/** What to send for one image (call after validateBatchEdit passed). */
-export function planImagePatch(edit: BatchEdit, image: ImageState): ImagePlan {
+/** What to send for one image (call after validateBatchEdit passed); the tree names the categories for renameCategoryTag. */
+export function planImagePatch(edit: BatchEdit, image: ImageState, tree: CategoryTree | null = null): ImagePlan {
   const patch: ImagePatch = {}
   let note: string | undefined
   let category = image.categoryId
@@ -147,9 +161,14 @@ export function planImagePatch(edit: BatchEdit, image: ImageState): ImagePlan {
   }
 
   const tags = image.tags
-  let nextTags: readonly string[] | null = null
-  if (edit.tags.mode === 'add') nextTags = [...new Set([...tags, ...edit.tags.values])]
-  else if (edit.tags.mode === 'remove') nextTags = tags.filter(tag => !edit.tags.values.includes(tag))
+  // The tag naming the image's old category takes the new name first; then tags are added or removed
+  const rename = renamesCategoryTag(edit) && image.categoryId !== null && edit.category.categoryId !== null
+    ? tagRename(tree?.byId.get(image.categoryId)?.node.name, tree?.byId.get(edit.category.categoryId)?.node.name)
+    : null
+  const base = rename ? renameTag(tags, rename) : tags
+  let nextTags: readonly string[] | null = rename ? base : null
+  if (edit.tags.mode === 'add') nextTags = [...new Set([...base, ...edit.tags.values])]
+  else if (edit.tags.mode === 'remove') nextTags = base.filter(tag => !edit.tags.values.includes(tag))
   else if (edit.tags.mode === 'replace') nextTags = [...new Set(edit.tags.values)]
   else if (edit.tags.mode === 'clear') nextTags = []
   if (nextTags) {

@@ -26,7 +26,7 @@ import {
 } from '../../features/library-filters'
 import { LIBRARY_LAYOUTS, LibraryPagination, LibraryResults, useLibraryList, type LibraryLayout } from '../../features/library-list'
 import { useSceneSelection } from '../../features/scene-catalog'
-import { BatchDeleteDialog, BatchEditDialog, MAX_BATCH_DELETE, useLibrarySelection, type BatchOutcome } from '../../features/library-batch'
+import { BatchDeleteDialog, BatchEditDialog, MAX_BATCH_DELETE, useLibrarySelection } from '../../features/library-batch'
 import './library-page.css'
 
 /** 「选择全部筛选结果」 reads them page by page; beyond this many the person narrows the filters first. */
@@ -238,11 +238,14 @@ export function LibraryPage({ apiBase, filters, setFilters, page, setPage, categ
     }
   }
 
-  /** After a batch run: the list and the category counts read again; deleted images leave the picks. */
-  function batchFinished(kind: 'edit' | 'delete', outcomes: ReadonlyMap<string, BatchOutcome>) {
+  /**
+   * After a batch run: the list and the category counts read again, and nothing stays picked (a
+   * cancelled dialog keeps the picks). Retrying in the dialog still works: it has its own copy.
+   */
+  function batchFinished() {
     setReloadKey(key => key + 1)
     categories.refresh()
-    if (kind === 'delete') selection.remove([...outcomes].filter(([, outcome]) => outcome.status === 'done').map(([id]) => id))
+    selection.clear()
   }
 
   const vectorUnreadable = items.length > 0 && items.every(item => item.vectorStatus === 'unavailable')
@@ -397,13 +400,13 @@ export function LibraryPage({ apiBase, filters, setFilters, page, setPage, categ
       apiBase={apiBase}
       categories={categories}
       onClose={() => setBatch(null)}
-      onFinished={outcomes => batchFinished('edit', outcomes)}
+      onFinished={batchFinished}
     />}
     {batch?.kind === 'delete' && <BatchDeleteDialog
       items={batch.items}
       apiBase={apiBase}
       onClose={() => setBatch(null)}
-      onFinished={outcomes => batchFinished('delete', outcomes)}
+      onFinished={batchFinished}
     />}
   </div>
 }
