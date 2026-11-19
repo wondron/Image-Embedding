@@ -16,3 +16,4 @@ backend/.env
 .playwright-cli/
 output/playwright/
 backend/output/acceptance/
+temp_image/
