@@ -13,13 +13,19 @@ of its own, merged into one list of hits.
 
 It never fails the business search: run_region_search answers what it came to (the hits, or why
 there are none), and the caller logs that and records its steps on the request's timer.
-GroundingDINO, the decoding and the cropping run in a worker thread, as every crop's search does.
-A thread cannot be interrupted: when the region search is cancelled (the whole image answered),
-the one it is in runs to its end and its result is discarded; no further crop is searched.
+
+GroundingDINO runs one image at a time, and every business search starts a region search, so the
+searches take turns (ApplicationState.detector_turn). They wait for their turn on the event loop,
+where a search dropped because its whole image answered leaves the queue without running the
+model. A worker thread cannot be interrupted, so a turn lasts until the model has run, even when
+its search is dropped meanwhile: a thread that waited for the model's own lock instead would run
+it for nobody, and every such run would delay the searches still waiting for an answer. Once a
+search is dropped no further crop of it is searched.
 """
 
 from __future__ import annotations
 
+import asyncio
 import math
 import time
 from dataclasses import dataclass, field
@@ -144,6 +150,25 @@ def _detect_and_crop(
     return regions, [crop(image, region) for region in regions]
 
 
+async def _detect_in_turn(
+    runtime: ApplicationState, detector: Any, image_bytes: bytes, settings: AutoSearchRegionSettings
+) -> tuple[list[Region], list[bytes]]:
+    """_detect_and_crop once it is this search's turn at GroundingDINO. Cancelled while waiting,
+    it never runs; cancelled while running, it returns at once and the turn ends with the run."""
+    turn = runtime.detector_turn
+    await turn.acquire()
+
+    async def run() -> tuple[list[Region], list[bytes]]:
+        try:
+            return await run_in_threadpool(_detect_and_crop, detector, image_bytes, settings)
+        finally:
+            turn.release()
+
+    # Shielded: a cancellation reaches neither the run nor the release (shield retrieves the
+    # outcome of a run nobody waits for any more)
+    return await asyncio.shield(asyncio.ensure_future(run()))
+
+
 def _reason(exc: Exception) -> str:
     return f"{exc.code}: {exc.detail}" if isinstance(exc, err.AppError) else f"{type(exc).__name__}: {exc}"
 
@@ -166,9 +191,9 @@ async def run_region_search(
     except err.NotReadyError as exc:
         return RegionOutcome(skipped=f"GroundingDINO 未就绪：{exc.detail}")
 
-    started = time.perf_counter()
+    started = time.perf_counter()  # 目标检测 includes the wait for the turn
     try:
-        regions, crops = await run_in_threadpool(_detect_and_crop, detector, image_bytes, settings)
+        regions, crops = await _detect_in_turn(runtime, detector, image_bytes, settings)
     except Exception as exc:
         return RegionOutcome(steps=((DETECT_STEP, time.perf_counter() - started, True),), error=_reason(exc))
     detected = (DETECT_STEP, time.perf_counter() - started, False)

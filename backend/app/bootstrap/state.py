@@ -43,6 +43,9 @@ class ApplicationState:
     embedder: Any = None
     detector: GdinoDetect | None = None
     detector_error: str | None = None
+    # 业务搜图的区域搜索轮流使用 GroundingDINO（app.api.services.region_search）：在事件循环上排队，
+    # 排队时被取消的请求不会再占用模型；正在推理的那次跑完才轮到下一个
+    detector_turn: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
     initialization_error: str | None = None
     warmup_error: str | None = None
     retrieval: Optional["RetrievalStack"] = None

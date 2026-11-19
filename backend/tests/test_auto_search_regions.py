@@ -11,6 +11,7 @@ size in pixels, and the vector store answers by the vector.
     业务搜图(图片链接) | 图像下载 … | embedding推理 … | vector搜索 … | 后处理 … | 目标检测 … | 区域搜索 … | 总耗时 …
 """
 
+import asyncio
 import logging
 import re
 import threading
@@ -388,6 +389,46 @@ class BusinessSearchRegionTests(unittest.TestCase):
         self.assertEqual(self.embedding.sizes, [WHOLE])  # ... without searching its boxes
         self.assertEqual(self.region_logs(logs.records), [])  # nobody reads its answer
         self.assertNotIn("目标检测", self.timing_steps(logs.records))
+
+    def test_searches_dropped_while_waiting_for_the_model_never_run_it(self):
+        """Every business search starts a region search, and GroundingDINO runs one image at a time:
+        those whose whole image answered leave the queue, so they do not delay one that needs it."""
+
+        class SlowDetector(FakeDetector):  # the real one infers under a lock, about 0.44 s an image
+            def __init__(self):
+                super().__init__()
+                self.lock = threading.Lock()
+                self.runs = 0
+
+            def detect(self, image, **kwargs):
+                with self.lock:
+                    time.sleep(0.3)
+                    self.runs += 1
+                    return super().detect(image, **kwargs)
+
+        self.runtime.detector = detector = SlowDetector()
+        self.vectors.hits[WHOLE] = [{"id": ROW_D, "score": 0.9}]  # QUERY: the whole image answers
+        miss = encoded(300, 150)  # no whole-image hit: its answer waits for its own detection
+
+        async def post(client, data):
+            started = time.perf_counter()
+            response = await client.post("/api/search/auto/file", files={"file": ("q.png", data, "image/png")})
+            self.assertEqual(response.status_code, 200, response.text)
+            return time.perf_counter() - started
+
+        async def burst():
+            transport = httpx.ASGITransport(app=self.app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                hits = [asyncio.create_task(post(client, QUERY)) for _ in range(5)]
+                await asyncio.sleep(0.05)
+                waited = await post(client, miss)
+                return await asyncio.gather(*hits), waited
+
+        with self.assertLogs(level="INFO"):
+            hit_times, waited = asyncio.run(burst())
+        self.assertLess(max(hit_times), 0.3)  # none waited for a detection
+        self.assertEqual(detector.runs, 2)  # the one under way when the hits answered, and the miss's own
+        self.assertLess(waited, 1.2)  # that run and its own; behind every hit's run it was 5 x 0.3 s more
 
     def test_a_failed_whole_image_search_fails_the_request(self):
         body, records = self.by_file(data=b"broken", status=422)
