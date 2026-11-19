@@ -16,20 +16,16 @@ if TYPE_CHECKING:
 def require_food_service(runtime: ApplicationState) -> "FoodService":
     try:
         return runtime.require_food_service()
-    except RuntimeError as exc:
-        raise errors.not_ready(f"service unavailable: {exc}") from exc
+    except errors.AppError as exc:
+        if exc.code != "NOT_READY":
+            raise
+        raise errors.not_ready(f"service unavailable: {exc.detail}") from exc
 
 
 def require_retrieval(runtime: ApplicationState) -> "RetrievalStack":
-    try:
-        return runtime.require_retrieval()
-    except RuntimeError as exc:
-        raise errors.not_ready(str(exc)) from exc
+    return runtime.require_retrieval()
 
 
 def require_catalog(runtime: ApplicationState) -> "CatalogServices":
     """The category / scene admin (PostgreSQL only)."""
-    try:
-        return runtime.require_catalog()
-    except RuntimeError as exc:
-        raise errors.not_ready(str(exc)) from exc
+    return runtime.require_catalog()

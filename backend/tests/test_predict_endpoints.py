@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.v1 import predict
+from app.core import errors as err
 from app.core.exceptions import register_exception_handlers
 
 
@@ -129,7 +130,7 @@ class PredictEndpointTests(unittest.TestCase):
                 response = self.client.post("/api/search/global/file", files={"file": ("query.png", data, "image/png")})
                 self.assertEqual(response.status_code, status)
         self.service.detect.assert_not_called()
-        self.runtime.require_food_service.side_effect = RuntimeError("not initialized")
+        self.runtime.require_food_service.side_effect = err.not_ready("not initialized")
         response = self.client.post("/api/search/global/file", files={"file": ("query.png", b"data", "image/png")})
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()["detail"], "service unavailable: not initialized")

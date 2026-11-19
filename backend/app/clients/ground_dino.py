@@ -31,6 +31,7 @@ class GdinoDetect:
         
         self.model_path = cfg["model_path"]
         self.tokenizer_path = cfg["tokenizer_path"]
+        self.use_gpu = bool(cfg.get("use_gpu", True))
         self.device_id = total_config.get("device_id", 0)
         self.threads = cfg.get("threads", 4)
         self.short_side = cfg.get("short_side", 800)
@@ -49,7 +50,7 @@ class GdinoDetect:
     def load_model(self):
         started = perf_counter()
         self.tokenizer = BertTokenizer(self.tokenizer_path)
-        self.sess = create_session(self.model_path, "cuda", self.threads, device_id=self.device_id)
+        self.sess = create_session(self.model_path, "cuda" if self.use_gpu else "cpu", self.threads, device_id=self.device_id)
         self.provider = "cuda" if self.sess.get_providers()[0] == "CUDAExecutionProvider" else "cpu"
         self.input_shapes = {item.name: item.shape for item in self.sess.get_inputs()}
         self.ini_flag = True

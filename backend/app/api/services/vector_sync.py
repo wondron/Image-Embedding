@@ -39,7 +39,9 @@ def push_image_payload(runtime: ApplicationState, image_id: UUID | str) -> dict[
     """{vector_sync, sync_required} after pushing the image's committed payload."""
     try:
         stack = runtime.require_retrieval()
-    except RuntimeError:
+    except err.AppError as exc:
+        if exc.code != "NOT_READY":
+            raise
         return {"vector_sync": "not_ready", "sync_required": True}
     # The PostgreSQL change is committed either way; the client is told to sync, the cause is logged.
     try:
@@ -75,7 +77,9 @@ def push_payloads(
         return {"pushed": 0, "pending": 0, "vector_sync": "pushed", "sync_required": False}
     try:
         stack = runtime.require_retrieval()
-    except RuntimeError:
+    except err.AppError as exc:
+        if exc.code != "NOT_READY":
+            raise
         return {"pushed": 0, "pending": len(ids), "vector_sync": "not_ready", "sync_required": True}
     pushed = 0
     status = "pushed"

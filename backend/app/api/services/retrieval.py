@@ -320,7 +320,9 @@ def _attach_vector_status(runtime: ApplicationState, items: List[Dict[str, Any]]
     statuses: Dict[str, str] = {}
     try:
         stack = runtime.require_retrieval()
-    except RuntimeError:
+    except err.AppError as exc:
+        if exc.code != "NOT_READY":
+            raise
         stack = None
     if stack is not None:
         try:

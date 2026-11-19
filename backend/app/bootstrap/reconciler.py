@@ -14,6 +14,7 @@ import threading
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from app.core import errors as err
 from app.core.config.settings import ReconcileSettings
 from app.services.retrieval.build_embeddings import BuildEmbeddingsUseCase
 from app.services.retrieval.reconcile import ReconcileLimits, ReconcileUseCase, RoundResult
@@ -79,8 +80,10 @@ class BackgroundReconciler:
             return None
         try:
             stack = self._runtime.require_retrieval()
-        except RuntimeError as exc:
-            self._record({"skipped": "not_ready", "detail": str(exc)})
+        except err.AppError as exc:
+            if exc.code != "NOT_READY":
+                raise
+            self._record({"skipped": "not_ready", "detail": exc.detail})
             return None
         followed = self._follow_current(stack)
         if followed is not None:

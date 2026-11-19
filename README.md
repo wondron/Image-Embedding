@@ -94,6 +94,8 @@ python backend/scripts/index_folder.py
 
 这些连接参数只在启动时读取，Nacos 里修改后需要重启服务（`RECIPE_DETECT_CONFIG` 除外）；predict 的模型配置仍支持热更新。
 
+GroundingDINO 在启动时按 `GROUNDINGDINO_CONFIG` 加载，`model_path` 指向 ONNX，`tokenizer_path` 指向包含 `tokenizer.json` 的目录，`use_gpu` 控制是否请求 CUDA。缺少或为空的配置段会跳过加载；已有配置段默认启用，也可设 `enabled: false` 关闭。预热使用 `Settings.warmup.enabled` 和 `groundingdino_runs`（默认 3 次）。实例保存在 `ApplicationState.detector`，业务入口可通过 `runtime.require_detector()` 获取；加载或预热失败记录在 `detector_error`，原有 embedding 服务继续运行。Nacos 更新时，检测配置及 `TOTAL_CONFIG.device_id` 未变则复用实例，变化时先加载、预热成功再替换，失败保留旧配置和旧实例。当前只接入模型生命周期，检索仍按整图提取特征。
+
 ### 换 embedding 模型
 
 模型权重随镜像发布（不挂载目录），所以换模型时镜像里要同时带新旧两个版本：

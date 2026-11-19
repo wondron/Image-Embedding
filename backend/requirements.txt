@@ -6,6 +6,7 @@
 onnxruntime-gpu==1.19.2        # GPU build must match the CUDA / cuDNN of the Dockerfile base image
 numpy==1.26.4
 onnx==1.16.2
+tokenizers==0.20.3           # local GroundingDINO BERT tokenizer
 opencv-python-headless==4.10.0.84
 
 # ==== Web / API ====

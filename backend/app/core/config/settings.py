@@ -130,6 +130,7 @@ class CorsSettings:
 class WarmupSettings:
     enabled: bool = True
     embedding_runs: int = 3
+    groundingdino_runs: int = 3
 
 
 @dataclass(frozen=True, slots=True)

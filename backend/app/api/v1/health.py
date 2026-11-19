@@ -41,8 +41,10 @@ def readyz(request: Request) -> dict[str, Any]:
         runtime = get_application_state(request)
         try:
             service = runtime.require_food_service()
-        except RuntimeError as exc:
-            raise errors.not_ready(f"not ready: {exc}") from exc
+        except AppError as exc:
+            if exc.code != "NOT_READY":
+                raise
+            raise errors.not_ready(f"not ready: {exc.detail}") from exc
         return readiness_info(runtime, service)
     except AppError:
         raise

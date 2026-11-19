@@ -50,9 +50,15 @@ def load_application_config(
 
 
 def create_embedder(config: dict):
-    """The process-wide embedding encoder; predict and retrieval share this instance."""
+    """创建进程内共享的特征编码器，供预测和检索使用。"""
     from app.clients.inference import Embedder
     return Embedder(config)
+
+
+def create_detector(config: dict):
+    """创建进程内共享的 GroundingDINO 客户端，仅在配置启用时加载。"""
+    from app.clients.ground_dino import GdinoDetect
+    return GdinoDetect(config)
 
 
 def create_food_service(config: dict, embedder):
@@ -70,10 +76,51 @@ def warmup_embedder(embedder, app_settings: Settings = settings) -> None:
     logger.info("预热配置 | warmup=%s", app_settings.warmup)
 
 
+def warmup_detector(detector, app_settings: Settings = settings) -> None:
+    if not app_settings.warmup.enabled:
+        return
+    times = app_settings.warmup.groundingdino_runs
+    detector.warmup(times)
+
+
+def _detector_config(config: dict) -> dict | None:
+    section = config.get("GROUNDINGDINO_CONFIG")
+    if not config_flag(config, "GROUNDINGDINO_CONFIG", "enabled", bool(section)):
+        return None
+    return {
+        "GROUNDINGDINO_CONFIG": dict(section),
+        "TOTAL_CONFIG": {"device_id": (config.get("TOTAL_CONFIG") or {}).get("device_id", 0)},
+    }
+
+
+def _detector_for(runtime: ApplicationState, config: dict):
+    """准备可用的检测器，保留正在处理请求的旧实例。"""
+    detector_config = _detector_config(config)
+    if detector_config is None:
+        return None
+    if runtime.detector is not None and _detector_config(runtime.config) == detector_config:
+        return runtime.detector
+    detector = create_detector(detector_config)
+    warmup_detector(detector, runtime.settings)
+    return detector
+
+
+def initialize_detector(runtime: ApplicationState):
+    """加载可选的检测器；失败时记录错误，特征提取服务继续运行。"""
+    runtime.detector = None
+    runtime.detector_error = None
+    try:
+        runtime.detector = _detector_for(runtime, runtime.config)
+    except Exception as exc:
+        runtime.detector_error = f"{type(exc).__name__}: {exc}"
+        logger.exception("GroundingDINO 初始化或预热失败：%s", exc)
+    return runtime.detector
+
+
 
 
 def initialize_embedder(runtime: ApplicationState):
-    """Load and warm the encoder once; None (with initialization_error set) on failure."""
+    """加载并预热特征编码器；加载失败时记录 initialization_error 并返回 None。"""
     try:
         embedder = create_embedder(runtime.config)
     except Exception as exc:
@@ -90,8 +137,10 @@ def initialize_embedder(runtime: ApplicationState):
 
 
 def _loaded_embedder_for(runtime: ApplicationState, config: dict):
-    """An encoder already in memory whose spec matches config and whose weight files are still
-    the ones it loaded, else None (weights replaced in place at the same path load anew)."""
+    """查找已加载、规格与配置一致且权重文件未变的编码器，否则返回 None。
+
+    即使模型路径相同，权重文件被原地替换后也需要重新加载。
+    """
     from app.clients.inference import EmbeddingSpec
 
     spec = EmbeddingSpec.try_from_config(config)
@@ -114,7 +163,7 @@ def _loaded_embedder_for(runtime: ApplicationState, config: dict):
 
 
 def apply_download_policy(config: dict) -> None:
-    """IMAGE_DOWNLOAD_CONFIG.trusted_networks for every remote image fetch; read once at startup."""
+    """启动时读取 IMAGE_DOWNLOAD_CONFIG.trusted_networks，统一应用于远程图片下载。"""
     from app.clients import public_image
 
     try:
@@ -129,25 +178,24 @@ def apply_download_policy(config: dict) -> None:
 
 
 def load_enum_file() -> None:
-    """Read config/param/enums.yaml now so a broken file shows up in the startup log.
+    """启动时读取 config/param/enums.yaml，提前记录文件中的错误。
 
-    Not fatal: predict does not use it. Until the file is fixed, index requests that pass an
-    editable enum value and /api/enums answer ENUM_FILE_INVALID; the store re-reads the file
-    as soon as it changes.
+    枚举文件错误不阻止启动，预测流程不依赖该文件。修复前，携带可编辑枚举值的入库请求
+    和 /api/enums 接口返回 ENUM_FILE_INVALID；文件变化后，枚举存储会自动重新读取。
     """
     try:
         get_enum_store().catalog()
     except errors.AppError:
-        pass  # the store already logged why
+        pass  # 枚举存储已记录具体错误
 
 
 def _retrieval_enabled(config: dict) -> bool:
-    """TOTAL_CONFIG.retrieval_enabled: false skips PG / Qdrant init (predict-only, e.g. host-side debug)."""
+    """读取检索开关；为 false 时跳过 PostgreSQL 和 Qdrant 初始化，供本机调试等仅预测场景使用。"""
     return config_flag(config, "TOTAL_CONFIG", "retrieval_enabled", True)
 
 
 def _is_infra_unreachable(exc: BaseException) -> bool:
-    """DNS / refused / timeout while reaching compose service names from the host."""
+    """判断访问 Compose 服务名时是否出现域名解析失败、连接被拒绝或超时等连接错误。"""
     text = f"{type(exc).__name__}: {exc}".lower()
     markers = (
         "getaddrinfo failed",
@@ -173,10 +221,9 @@ def _retrieval_local_debug_hint() -> str:
 
 
 def initialize_catalog(runtime: ApplicationState) -> None:
-    """Build the category / scene admin on PostgreSQL alone; on failure keep serving the rest.
+    """基于 PostgreSQL 创建类别和场景管理服务；失败时保留其他服务。
 
-    Independent of TOTAL_CONFIG.retrieval_enabled and of the encoder: configuring categories and
-    scenes needs neither.
+    类别和场景管理不依赖特征编码器，也不受 TOTAL_CONFIG.retrieval_enabled 开关影响。
     """
     runtime.catalog = None
     runtime.catalog_error = None
@@ -197,16 +244,16 @@ def initialize_catalog(runtime: ApplicationState) -> None:
 
 
 def initialize_retrieval(runtime: ApplicationState, embedder) -> None:
-    """Build the retrieval stack on the shared encoder; on failure keep serving predict.
+    """基于共享的特征编码器装配检索服务；失败时保留预测服务。
 
-    It borrows the catalog's PostgreSQL store when the catalog is up (one pool per process).
+    类别和场景管理服务可用时，复用其 PostgreSQL 存储，使每个进程共用一个连接池。
     """
     runtime.retrieval = None
     runtime.retrieval_error = None
     runtime.retrieval_error_code = None
     try:
         enabled = _retrieval_enabled(runtime.config)
-    except ValueError as exc:  # a bad switch value degrades retrieval only, like any other retrieval error
+    except ValueError as exc:  # 与其他检索错误一样，开关配置错误只影响检索服务
         runtime.retrieval_error = f"{type(exc).__name__}: {exc}"
         runtime.retrieval_error_code = "NOT_READY"
         logger.warning("Retrieval 栈已跳过 | %s", runtime.retrieval_error)
@@ -233,7 +280,7 @@ def initialize_retrieval(runtime: ApplicationState, embedder) -> None:
             metadata=catalog.store if catalog is not None else None,
         )
     except Exception as exc:
-        # retrieval_error is shown by the health endpoints: an internal code keeps its detail in this log only
+        # 健康检查接口会展示 retrieval_error；内部错误的详细信息仅记录到日志
         if isinstance(exc, errors.AppError):
             runtime.retrieval_error = f"{exc.code}: {errors.client_detail(exc)}"
             runtime.retrieval_error_code = exc.code
@@ -246,14 +293,15 @@ def initialize_retrieval(runtime: ApplicationState, embedder) -> None:
             log_startup_exception(logger, "Retrieval 栈初始化失败", exc, runtime.config)
         return
 
-    model = runtime.retrieval.model  # endpoints are logged by build_retrieval_infra
+    model = runtime.retrieval.model  # 连接地址由 build_retrieval_infra 记录到日志
     logger.info("Retrieval 栈已就绪 | collection=%s | model=%s", model.collection, model.space_id)
 
 
 def initialize_models(runtime: ApplicationState) -> None:
-    """The model versions (/api/embedding-models): built whenever retrieval is enabled, also when
-    its stack is down, since switching to the configured encoder's version is how a stack that
-    cannot pair its encoder is fixed."""
+    """检索启用时创建模型版本管理服务，供 /api/embedding-models 使用。
+
+    即使检索服务初始化失败也会创建，以便通过切换模型版本修复编码器与向量库不匹配的问题。
+    """
     if runtime.retrieval_error_code == "RETRIEVAL_DISABLED":
         return
     from app.bootstrap.model_registry import ModelRegistry
@@ -263,7 +311,7 @@ def initialize_models(runtime: ApplicationState) -> None:
 
 def initialize_food_service(runtime: ApplicationState, embedder) -> None:
     if embedder is None:
-        return  # initialization_error already says why
+        return  # initialization_error 已记录编码器不可用的原因
     try:
         runtime.food_service = create_food_service(runtime.config, embedder)
     except Exception as exc:
@@ -272,12 +320,13 @@ def initialize_food_service(runtime: ApplicationState, embedder) -> None:
 
 
 def apply_nacos_config_update(runtime: ApplicationState, provider: NacosConfigProvider, snapshot: NacosConfigSnapshot,) -> bool:
-    """Build the replacement predict service before atomically publishing it.
+    """先构建新的预测服务，再原子更新运行时配置及服务实例。
 
-    The encoder is reused when EMBEDDING_CONFIG describes an already-loaded model,
-    so ordinary config changes never reload ONNX. A different model is loaded for
-    predict only: retrieval stays on the encoder paired with its Qdrant collection, and
-    the new one can be registered and built as a new model version (/api/embedding-models).
+    EMBEDDING_CONFIG 与已加载的编码器匹配时复用实例，普通配置变化不会重新加载 ONNX。
+    更换模型时，预测服务使用新编码器，检索服务继续使用与其 Qdrant 集合配对的编码器；
+    新模型可通过 /api/embedding-models 登记版本并生成向量。
+    GroundingDINO 的配置和设备未变时复用实例；需要替换时，先加载并预热新实例，
+    全部准备成功后再发布新配置和服务实例。
     """
     if runtime.stopping:
         return False
@@ -289,6 +338,7 @@ def apply_nacos_config_update(runtime: ApplicationState, provider: NacosConfigPr
             if runtime.retrieval is not None:
                 logger.warning("EMBEDDING_CONFIG 换了模型：predict 改用 %s；检索仍用 %s（collection %s），到「模型版本」登记新版本、生成向量后再切换",
                     embedder.model_path, runtime.retrieval.model.space_id, runtime.retrieval.model.collection)
+        detector = _detector_for(runtime, snapshot.config)
         service = create_food_service(snapshot.config, embedder)
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
@@ -302,7 +352,7 @@ def apply_nacos_config_update(runtime: ApplicationState, provider: NacosConfigPr
         "loaded": True,
         **provider.source_info(snapshot),
     }
-    runtime.replace_configuration(snapshot.config, config_info, service, embedder)
+    runtime.replace_configuration(snapshot.config, config_info, service, embedder, detector=detector)
     logger.info("Nacos配置重读成功 | data_ids=%s", list(snapshot.data_ids))
     return True
 
@@ -324,6 +374,7 @@ async def lifespan(app: FastAPI):
     apply_download_policy(config)
     load_enum_file()
     embedder = initialize_embedder(runtime)
+    initialize_detector(runtime)
     initialize_food_service(runtime, embedder)
     initialize_catalog(runtime)
     initialize_retrieval(runtime, embedder)
