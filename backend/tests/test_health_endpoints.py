@@ -75,7 +75,7 @@ class HealthEndpointTests(unittest.TestCase):
 
         response = self.client.get("/api/readyz")
 
-        self.assert_not_ready(response, "not ready: controlled initialization failure")
+        self.assert_not_ready(response, "controlled initialization failure")
 
     def test_missing_model_components_are_not_ready(self):
         self.service.embeddingTool = None

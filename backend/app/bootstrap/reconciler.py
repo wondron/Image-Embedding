@@ -80,9 +80,7 @@ class BackgroundReconciler:
             return None
         try:
             stack = self._runtime.require_retrieval()
-        except err.AppError as exc:
-            if exc.code != "NOT_READY":
-                raise
+        except err.NotReadyError as exc:
             self._record({"skipped": "not_ready", "detail": exc.detail})
             return None
         followed = self._follow_current(stack)

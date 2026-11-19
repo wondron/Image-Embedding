@@ -133,7 +133,7 @@ class PredictEndpointTests(unittest.TestCase):
         self.runtime.require_food_service.side_effect = err.not_ready("not initialized")
         response = self.client.post("/api/search/global/file", files={"file": ("query.png", b"data", "image/png")})
         self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json()["detail"], "service unavailable: not initialized")
+        self.assertEqual(response.json()["detail"], "not initialized")
 
     def test_openapi_exposes_separate_request_and_response_contracts(self):
         schema = self.app.openapi()

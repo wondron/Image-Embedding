@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.bootstrap.state import ApplicationState
-from app.core import errors
 
 if TYPE_CHECKING:
     from app.bootstrap.catalog import CatalogServices
@@ -14,12 +13,7 @@ if TYPE_CHECKING:
 
 
 def require_food_service(runtime: ApplicationState) -> "FoodService":
-    try:
-        return runtime.require_food_service()
-    except errors.AppError as exc:
-        if exc.code != "NOT_READY":
-            raise
-        raise errors.not_ready(f"service unavailable: {exc.detail}") from exc
+    return runtime.require_food_service()
 
 
 def require_retrieval(runtime: ApplicationState) -> "RetrievalStack":

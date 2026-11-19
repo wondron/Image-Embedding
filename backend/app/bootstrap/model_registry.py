@@ -125,12 +125,7 @@ class ModelRegistry:
     # -- what it works with -------------------------------------------------------
 
     def _store(self) -> Any:
-        try:
-            return self._runtime.require_catalog().store
-        except err.AppError as exc:
-            if exc.code != "NOT_READY":
-                raise
-            raise err.not_ready(f"catalog (PostgreSQL) is not ready: {exc.detail}") from exc
+        return self._runtime.require_catalog().store
 
     def _configured(self) -> Any:
         return self._runtime.embedder
@@ -160,9 +155,7 @@ class ModelRegistry:
             return stack.infra.storage
         try:
             catalog = self._runtime.require_catalog()
-        except err.AppError as exc:
-            if exc.code != "NOT_READY":
-                raise
+        except err.NotReadyError as exc:
             raise err.not_ready(f"object storage is not available: {exc.detail}") from exc
         try:
             return catalog.file_storage()

@@ -130,6 +130,14 @@ class AppError(Exception):
         return f"{type(self).__name__}({self.code!r}, {self.detail!r}, http_status={self.http_status})"
 
 
+class NotReadyError(AppError):
+    """NOT_READY (503): a resource is not up yet. Callers that can do without it catch this
+    class instead of checking exc.code."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__("NOT_READY", detail)
+
+
 def is_internal(exc: AppError) -> bool:
     """True when the detail must stay in the log (registered as internal, or an unregistered 5xx)."""
     spec = ERROR_CODES.get(exc.code)
@@ -152,8 +160,8 @@ def validation_error(detail: str) -> AppError:
     return AppError("VALIDATION_ERROR", detail)
 
 
-def not_ready(detail: str) -> AppError:
-    return AppError("NOT_READY", detail)
+def not_ready(detail: str) -> NotReadyError:
+    return NotReadyError(detail)
 
 
 def internal_error(detail: str) -> AppError:

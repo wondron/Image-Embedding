@@ -43,9 +43,7 @@ logger = logging.getLogger("svc.images")
 def _vector_state(runtime: ApplicationState, image: dict[str, Any]) -> dict[str, Any]:
     try:
         stack = runtime.require_retrieval()
-    except err.AppError as exc:
-        if exc.code != "NOT_READY":
-            raise
+    except err.NotReadyError as exc:
         return {"status": "unavailable", "detail": f"retrieval stack not ready: {exc.detail}"}
     try:
         return stack.vector_status_uc.inspect(image)
@@ -138,9 +136,7 @@ def delete_image(runtime: ApplicationState, request: Request, image_id: UUID) ->
     queued = require_catalog(runtime).images_uc.delete(image_id)
     try:
         stack = runtime.require_retrieval()
-    except err.AppError as exc:
-        if exc.code != "NOT_READY":
-            raise
+    except err.NotReadyError:
         stack = None
     cleanup = "done" if stack is not None and stack.deletion_worker.clean_up(queued) else "queued"
     logger.info(
@@ -177,9 +173,8 @@ def _file_storage(runtime: ApplicationState):
     them in memory too), else the catalog's."""
     try:
         return runtime.require_retrieval().infra.storage
-    except err.AppError as exc:
-        if exc.code != "NOT_READY":
-            raise
+    except err.NotReadyError:
+        pass
     try:
         return require_catalog(runtime).file_storage()
     except (ValueError, err.AppError) as exc:  # a bad IMAGE_STORAGE_CONFIG, boto3 missing

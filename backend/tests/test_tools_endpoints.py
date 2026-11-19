@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.v1 import tools
+from app.core import errors as err
 from app.core.exceptions import register_exception_handlers
 
 
@@ -64,10 +65,10 @@ class ToolsEndpointTests(unittest.TestCase):
         self.runtime.require_food_service.assert_not_called()
 
     def test_embedding_reports_unavailable_service(self):
-        self.runtime.require_food_service.side_effect = RuntimeError("models are loading")
+        self.runtime.require_food_service.side_effect = err.not_ready("models are loading")
         response = self.upload()
         self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json()["detail"], "service unavailable: models are loading")
+        self.assertEqual(response.json()["detail"], "models are loading")
 
     def test_embedding_reports_missing_model(self):
         self.service.embeddingTool = None
