@@ -62,7 +62,7 @@ def whitespace_tokenize(text):
 
 
 # =======================
-# Tokenizer classes
+# 分词器类
 # =======================
 
 class BasicTokenizer(object):
@@ -194,7 +194,7 @@ class FullTokenizer(object):
         return [self.inv_vocab[i] for i in ids]
 
 
-# Helper functions -----------------------------
+# 辅助函数 -----------------------------
 
 def _is_whitespace(char):
     return char in " \t\n\r" or unicodedata.category(char) == "Zs"
@@ -248,7 +248,7 @@ def tokenize(texts: Union[str, List[str]], context_length: int = 52) -> List[Lis
 
         ids = [cls_id] + token_ids + [sep_id]
 
-        # padding
+        # 填充
         if len(ids) < context_length:
             ids = ids + [0] * (context_length - len(ids))
 

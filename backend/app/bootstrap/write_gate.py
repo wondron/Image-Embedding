@@ -1,11 +1,9 @@
-"""The gate in front of vector writes to the current collection, so a model version switch never
-loses an image.
+"""挡在当前 collection 向量写入前面的闸门，让切换模型版本时永远不会丢图片。
 
-Writers that put new vectors into the current collection (index, re-embed, the reconciler filling
-missing vectors) hold it shared while they take the stack and write. A switch holds it
-exclusively: new writers wait, the ones in flight finish, then the switch embeds what the target
-version still lacks and swaps the stack in, all before any writer can reach the old collection
-again. Writers only wait while a switch runs (seconds), never on each other.
+往当前 collection 写新向量的写入方（入库、重新计算 embedding、对账任务补缺失的向量）
+在获取检索服务并写入期间共享持有它。切换时独占持有：新的写入方等待，进行中的完成，
+然后切换为目标版本补算它还缺的，并换上新的检索服务，这一切都在任何写入方能再次
+碰到旧 collection 之前完成。写入方只在切换进行时等待（几秒），彼此之间从不等待。
 """
 
 from __future__ import annotations
@@ -16,7 +14,7 @@ from contextlib import contextmanager
 
 from app.core import errors as err
 
-# How long a writer waits for a switch to finish, and a switch for the writes in flight
+# 写入方等切换完成、以及切换等进行中的写入完成的最长时间
 WRITE_WAIT_SECONDS = 120.0
 
 
@@ -33,7 +31,7 @@ class VectorWriteGate:
 
     @contextmanager
     def shared(self) -> Iterator[None]:
-        """One write; waits while a switch runs (NOT_READY if it does not end in time)."""
+        """一次写入；切换进行时等待（没能按时结束时为 NOT_READY）。"""
         with self._cond:
             if not self._cond.wait_for(lambda: not self._closed, timeout=self._wait):
                 raise err.not_ready("a model version switch is in progress; try again shortly")
@@ -47,8 +45,9 @@ class VectorWriteGate:
 
     @contextmanager
     def exclusive(self) -> Iterator[None]:
-        """A switch: no writer runs inside. NOT_READY when the writes in flight do not end in time
-        (nothing was switched; try again)."""
+        """一次切换：期间没有写入方在运行。进行中的写入没能按时结束时为 NOT_READY
+        （什么都没切换；请重试）。
+        """
         with self._cond:
             if not self._cond.wait_for(lambda: not self._closed, timeout=self._wait):
                 raise err.not_ready("another model version switch is in progress")

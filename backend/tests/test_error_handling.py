@@ -1,4 +1,4 @@
-"""One error envelope and one trace id for every failure (core.exceptions + core.middleware)."""
+"""每个失败都是同一种错误结构和一个 trace id（core.exceptions + core.middleware）。"""
 
 import unittest
 
@@ -90,7 +90,7 @@ class ErrorEnvelopeTests(unittest.TestCase):
         self.assertNotIn("secret-bytes", response.text)
         log = "\n".join(logs.output)
         self.assertIn("[SQL: INSERT INTO images", log)
-        self.assertIn("KeyError: 'driver state'", log)  # the cause chain is logged too
+        self.assertIn("KeyError: 'driver state'", log)  # 异常链也写进日志
         self.assertIn(body["trace_id"], log)
 
     def test_request_validation_summarizes_fields_without_echoing_the_body(self):
@@ -136,7 +136,7 @@ class TraceIdTests(unittest.TestCase):
 
 
 class FullMiddlewareStackTests(unittest.TestCase):
-    """register_middlewares + register_exception_handlers, as create_app wires them."""
+    """register_middlewares + register_exception_handlers，和 create_app 的组装方式一样。"""
 
     def setUp(self):
         app = FastAPI()

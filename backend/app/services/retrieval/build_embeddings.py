@@ -1,21 +1,21 @@
-"""Fill one model version's collection from the stored originals (POST /api/embedding-models/{id}/build).
+"""用存下来的原图补齐一个模型版本的 collection（POST /api/embedding-models/{id}/build）。
 
-One batch (run_batch):
+一批（run_batch）：
 
-    the next images in id order with no ledger row for the version (no vector in its collection)
-    -> read each original from object storage -> the version's encoder -> upsert the point with
-    the payload PostgreSQL gives now -> one ledger row per point (record_embeddings)
+    按 id 顺序取下一批在该版本下没有台账行（在它的 collection 里没有向量）的图片
+    -> 从对象存储读取每张原图 -> 该版本的编码器 -> 用 PostgreSQL 现在给出的 payload
+    upsert 向量点 -> 每个向量点一条台账行（record_embeddings）
 
-What fails for one image (its original cannot be read or decoded, the vector is invalid) is a
-failure of that image: the batch goes on, and the caller leaves the id out of the rest of its
-run. What fails for every image (Qdrant, PostgreSQL) raises, so the caller stops. An image
-deleted while it was embedded has its point removed again, so the collection keeps no orphan.
+单张图的失败（原图读不了或解码不了、向量无效）只算这张图失败：这一批继续，调用方在
+本次运行的剩余部分跳过这个 id。所有图都会失败的问题（Qdrant、PostgreSQL）会抛出，
+调用方随之停止。计算 embedding 期间被删除的图片，它的向量点会再删掉，所以 collection
+里不会留下孤儿点。
 
-push_payloads catches the version's payloads up: images changed after their vector was written
-(edits only push to the current collection) have a ledger row behind their payload_version.
+push_payloads 让该版本的 payload 跟上：向量写入之后又修改过的图片（编辑只推送到当前
+collection）的台账行落后于它的 payload_version。
 
-The use case holds no progress: the ledger is the progress, so a stopped build picks up where it
-stopped and a second one never writes an image twice in the same pass.
+用例本身不保存进度：台账就是进度，所以停下来的构建会从停下的地方继续，同时跑的
+第二个构建在同一轮里也不会把一张图写两次。
 """
 
 from __future__ import annotations
@@ -35,14 +35,15 @@ logger = logging.getLogger("retrieval.build")
 
 BUILD_BATCH = 16
 VERIFY_BATCH = 256
-# Codes that belong to one image: the build records them and goes on
+# 属于单张图的错误码：构建记录下来并继续
 IMAGE_FAILURES = frozenset({"IMAGE_FILE_UNAVAILABLE", "INDEX_BAD_IMAGE", "INDEX_BAD_EMBEDDING"})
 
 
 @dataclass
 class LedgerCheck:
-    """checked: ledger rows looked at; forgotten: rows deleted because their point is not in the
-    collection; last_id: where the next slice starts (None: the end was reached)."""
+    """checked：查看过的台账行数；forgotten：因为向量点不在 collection 里而删除的行数；
+    last_id：下一段从哪里开始（None：已经到末尾）。
+    """
 
     checked: int = 0
     forgotten: int = 0
@@ -60,12 +61,12 @@ def verify_ledger(
     batch: int = VERIFY_BATCH,
     should_stop: Any = None,
 ) -> LedgerCheck:
-    """The ledger says which images have a vector in a version's collection; check that their
-    points really are there, and forget the rows whose point is gone (a collection lost and made
-    anew, points removed by hand), so the images count as without a vector again and a build or
-    the reconciler embeds them. limit: at most this many rows from `after` (a slice); None: all.
+    """台账记录了哪些图片在某个版本的 collection 里有向量；检查它们的向量点是不是真的在，
+    忘掉向量点已经不在的行（collection 丢了又重建、向量点被手工删除），这样这些图片
+    重新算作没有向量，由构建或对账任务重新计算 embedding。limit：从 `after` 开始最多
+    这么多行（一段）；None：全部。
 
-    Points are written before their ledger row, so a row is never checked ahead of its point.
+    向量点先于它的台账行写入，所以不会出现台账行比向量点先被检查的情况。
     """
     result = LedgerCheck(last_id=after)
     while not (should_stop and should_stop()):
@@ -88,9 +89,10 @@ def verify_ledger(
 
 @dataclass
 class BuildBatch:
-    """embedded: ids now in the collection; failures: [{image_id, code, detail}]; gone: deleted
-    meanwhile; last_id: where the next batch starts (None: nothing was left); done: no image
-    after last_id lacks a vector."""
+    """embedded：现在已经在 collection 里的 id；failures：[{image_id, code, detail}]；gone：
+    这期间被删除的；last_id：下一批从哪里开始（None：已经没有剩下的）；done：last_id 之后
+    没有缺向量的图片了。
+    """
 
     embedded: list[str] = field(default_factory=list)
     failures: list[dict[str, Any]] = field(default_factory=list)
@@ -140,7 +142,7 @@ class BuildEmbeddingsUseCase:
         for row in rows:
             image_id = str(row["id"])
             current = payload_rows.get(image_id)
-            if current is None:  # deleted since the backlog was read
+            if current is None:  # 读取待处理列表之后被删除了
                 result.gone.append(image_id)
                 continue
             try:
@@ -157,18 +159,18 @@ class BuildEmbeddingsUseCase:
                 food_state=current.get("food_state"),
                 label_status=current.get("label_status"),
             )
-            self._vectors.upsert(image_id, vector, payload)  # INDEX_QDRANT_FAILED stops the build
+            self._vectors.upsert(image_id, vector, payload)  # INDEX_QDRANT_FAILED 会让构建停止
             versions[image_id] = int(current["payload_version"])
         recorded = set(self._models.record_embeddings(model_id=self.model.id, versions=versions))
         orphans = sorted(set(versions) - recorded)
-        for image_id in orphans:  # deleted after its point was written: take the point out again
+        for image_id in orphans:  # 向量点写入之后被删除了：把向量点再删掉
             self._vectors.delete(image_id)
         result.gone.extend(orphans)
         result.embedded = sorted(recorded)
         return result
 
     def push_payloads(self, *, limit: int = 200, should_stop: Any = None) -> int:
-        """Push the payloads that changed after their vector was written; returns how many."""
+        """推送向量写入之后变化过的 payload；返回推送了多少。"""
         sync = SyncSceneMembershipsUseCase(self._metadata, self._vectors, model=self.model)
         pushed, after = 0, None
         while not (should_stop and should_stop()):

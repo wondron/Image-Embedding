@@ -1,15 +1,14 @@
-"""images.tags: free-text tag array, '{}' while untagged; GIN index for exact-tag filters.
+"""images.tags：自由文本标签数组，没有标签时为 '{}'；GIN 索引用于精确标签过滤。
 
 Revision ID: 20261109_0007
 Revises: 20261109_0006
 Create Date: 2026-11-09
 
-ADD COLUMN with a constant default is metadata-only on PostgreSQL >= 11
-(no table rewrite, no long lock). Existing rows read as '{}'. The GIN index is built
-over those empty arrays, so it is quick, but plain CREATE INDEX still blocks writes to
-images while it runs.
+在 PostgreSQL >= 11 上，带常量默认值的 ADD COLUMN 只改元数据
+（不重写表，不长时间持锁）。已有的行读出来为 '{}'。GIN 索引建在这些空数组上，
+所以很快，但普通的 CREATE INDEX 在运行期间仍然会阻塞对 images 的写入。
 
-Downgrade drops the column: stored tags are lost.
+降级会删除这一列：已存的标签会丢失。
 """
 from __future__ import annotations
 

@@ -1,22 +1,19 @@
-"""Task center: the index records and the deletion queue (GET/DELETE /api/index-tasks,
-GET /api/image-deletions).
+"""任务中心：入库记录和删除队列（GET/DELETE /api/index-tasks、GET /api/image-deletions）。
 
-PostgreSQL only (built by app.bootstrap.catalog, like the gallery admin), so the history stays
-readable while the encoder or Qdrant are down. Draining the deletion queue needs the vector store
-and the object storage: the HTTP layer runs the retrieval stack's DeletionWorker for that
-(POST /api/image-deletions/process).
+只用 PostgreSQL（和图库管理一样由 app.bootstrap.catalog 构建），所以编码器或 Qdrant
+挂了时历史记录也能读。处理删除队列需要向量库和对象存储：为此 HTTP 层运行检索服务的
+DeletionWorker（POST /api/image-deletions/process）。
 
-Records are written by the index use case (services.retrieval.index_image), one per file.
+记录由入库用例写入（services.retrieval.index_image），每个文件一条。
 
-Deleting an image keeps its records (they tell what was indexed when): such a succeeded record
-reads image_state=deleted, can be listed on its own (image_state filter) and cleared on its own
-(DELETE ?image_state=deleted), or one by one (DELETE /api/index-tasks/{id}). Clearing only ever
-removes records, never images.
+删除图片会保留它的记录（它们说明什么时候入库了什么）：这样的成功记录显示
+image_state=deleted，可以单独列出（image_state 过滤）和单独清空
+（DELETE ?image_state=deleted），也可以逐条删除（DELETE /api/index-tasks/{id}）。
+清空只删除记录，从不删除图片。
 
-A record is one upload, not one image: uploading the same bytes again succeeds again without
-storing anything (new_image false). counts.repeated says how many such records there are for
-images still stored, and the new_image filter lists them apart from the uploads that stored a
-new image, so the number of new images can be read off the records.
+一条记录对应一次上传，不是一张图片：再次上传同样的字节会再次成功，但不存任何东西
+（new_image 为 false）。counts.repeated 说明仍存在的图片有多少这样的记录，new_image
+过滤把它们和存了新图片的上传分开列出，这样能从记录里读出新图片的数量。
 """
 
 from __future__ import annotations
@@ -31,10 +28,10 @@ from app.core.rules.enum_fields import coerce_optional_enum
 
 MAX_PAGE_SIZE = 100
 MAX_DELETIONS = 200
-MAX_TASK_ID = 2**63 - 1  # index_tasks.id is a bigint
+MAX_TASK_ID = 2**63 - 1  # index_tasks.id 是 bigint
 
-# Whether a succeeded record's image is still stored: derived when reading (no column, no CHECK),
-# hence not one of the system enums of app.core.enums
+# 成功记录的图片是否仍然存在：读取时推导（没有列，也没有 CHECK），
+# 所以不是 app.core.enums 里的系统枚举
 IndexTaskImageState = Literal["present", "deleted"]
 IMAGE_STATES: tuple[str, ...] = ("present", "deleted")
 
@@ -54,8 +51,9 @@ def _new_image(value: Any) -> bool | None:
 
 
 def index_task_item(row: Mapping[str, Any]) -> dict[str, Any]:
-    """The wire record. `image` is the image as it is now: null when the file failed, or when its
-    image was deleted since (a succeeded record keeps its image_id; image_state says which)."""
+    """wire 记录。`image` 是图片现在的样子：文件失败时为 null，或者图片之后被删除了时也为 null
+    （成功记录保留它的 image_id；image_state 说明是哪种）。
+    """
     image = None
     image_state = None
     if row.get("status") == IndexTaskStatus.SUCCEEDED.value:
@@ -106,9 +104,10 @@ class TaskCenterUseCase:
     def list_index_tasks(
         self, *, status: Any = None, image_state: Any = None, new_image: Any = None, page: Any = 1, page_size: Any = 50
     ) -> dict[str, Any]:
-        """Newest first; `status` filters (succeeded / failed), `image_state` the succeeded records
-        (present / deleted), `new_image` the succeeded records too (True: stored a new image /
-        False: a repeat of one already stored). counts are over all records."""
+        """最新的在前；`status` 过滤（succeeded / failed），`image_state` 过滤成功的记录
+        （present / deleted），`new_image` 也过滤成功的记录（True：存了一张新图片 /
+        False：重复上传已存的图片）。counts 按全部记录统计。
+        """
         wanted = coerce_optional_enum(IndexTaskStatus, status, field="status")
         state = _image_state(image_state)
         fresh = _new_image(new_image)
@@ -134,8 +133,9 @@ class TaskCenterUseCase:
         }
 
     def clear_index_tasks(self, *, status: Any = None, image_state: Any = None) -> dict[str, Any]:
-        """Delete the records of a filter: a status and / or an image state, at least one (never
-        everything by accident). Only records go; images are not touched."""
+        """删除一个过滤条件下的记录：状态和 / 或图片状态，至少一个（永远不会意外删光）。
+        只删记录；不碰图片。
+        """
         wanted = coerce_optional_enum(IndexTaskStatus, status, field="status")
         state = _image_state(image_state)
         if wanted is None and state is None:
@@ -144,12 +144,12 @@ class TaskCenterUseCase:
         return {"status": wanted.value if wanted else None, "image_state": state, "deleted": deleted}
 
     def delete_index_task(self, task_id: Any) -> dict[str, Any]:
-        """Delete one record (its image is not touched): deleted 1, or 0 when it was not there."""
+        """删除一条记录（不碰它的图片）：deleted 为 1，不存在时为 0。"""
         task_id = _bounded(task_id, field="task_id", low=1, high=MAX_TASK_ID)
         return {"id": task_id, "deleted": self._catalog.delete_index_task(task_id)}
 
     def list_deletions(self, *, limit: Any = 50) -> dict[str, Any]:
-        """Queued cleanups, oldest first, with how many there are in all."""
+        """排队的清理，最早的在前，以及总数。"""
         limit = _bounded(limit, field="limit", low=1, high=MAX_DELETIONS)
         rows = self._catalog.list_pending_deletions(limit=limit)
         return {"total": self._catalog.count_pending_deletions(), "items": [deletion_item(row) for row in rows]}

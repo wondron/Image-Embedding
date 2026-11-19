@@ -1,15 +1,14 @@
-"""Image deletion pipeline (contract §2.5).
+"""图片删除流程（契约 §2.5）。
 
-1. delete_image: TX delete images (+ CASCADE deps) → insert image_deletions
-2. process_deletion_queue: drain image_deletions → Qdrant delete + S3 delete → remove row
-   (DELETE /api/images/{image_id} runs this for its own row right away, DeletionWorker.clean_up;
-   what fails there stays queued for `python -m app.workers.process_deletions` or
-   POST /api/image-deletions/process, the task center's 「立即清理」)
+1. delete_image：事务里删除 images（+ CASCADE 的依赖）→ 插入 image_deletions
+2. process_deletion_queue：清理 image_deletions → 删除 Qdrant 向量点 + 删除 S3 文件 → 删除这一行
+   （DELETE /api/images/{image_id} 会立刻为它自己的那一行执行这一步，即 DeletionWorker.clean_up；
+   那里失败的继续排队，由 `python -m app.workers.process_deletions` 或
+   POST /api/image-deletions/process（任务中心的「立即清理」）处理）
 
-Qdrant: the point goes from the current collection and from the collection of every other
-version still in use (building / ready: a new model being filled, the previous one kept for a
-roll back), so a switch or a roll back never brings a deleted image back into the results.
-Retired versions have no collection any more.
+Qdrant：从当前 collection 以及其他仍在使用的版本（building / ready：正在补齐的新模型，
+为回滚保留的上一个模型）的 collection 里删除向量点，所以切换或回滚永远不会让已删除的
+图片重新出现在结果里。已下线的版本没有 collection 了。
 """
 
 from __future__ import annotations
@@ -27,7 +26,7 @@ logger = logging.getLogger("retrieval.delete")
 
 
 class DeleteImageUseCase:
-    """Enqueue hard-delete into image_deletions (metadata TX)."""
+    """把硬删除加入 image_deletions 队列（元数据事务）。"""
 
     def __init__(self, metadata: MetadataStorePort) -> None:
         self._metadata = metadata
@@ -56,13 +55,12 @@ def _clean_up(
     row: dict[str, Any],
     others: Callable[[], list[VectorStorePort]] = _no_other_collections,
 ) -> None:
-    """Delete one queued image's point (current collection and the other versions' in use) and
-    its two files, then its queue row.
+    """删除一张排队图片的向量点（当前 collection，以及其他在用版本的）和它的两个文件，
+    然后删除它的队列行。
 
-    Raises on failure, leaving the row for a retry. An image stored again since it was deleted
-    (same bytes: same id and point) keeps its point and the files its new row names. A queued
-    file under another key than the new row's (stored before the shard directory or a
-    key_prefix change) is no file of the new row, and is still deleted.
+    失败时抛出，保留这一行以便重试。删除之后又被重新存入的图片（同样的字节：同样的 id
+    和向量点）保留它的向量点，以及新行所指的文件。排队的文件如果在新行以外的 key 下
+    （在分片目录或 key_prefix 变更之前存的），就不是新行的文件，仍然会被删除。
     """
     image_id = row.get("image_id")
     stored_again = metadata.get_by_id(image_id)
@@ -80,8 +78,9 @@ def _clean_up(
 
 
 def _failure(image_id: Any, exc: Exception) -> dict[str, Any]:
-    """One item that stays queued. `error` is the raw cause, for the operator's CLI output only;
-    `code` / `detail` are what an HTTP client may see (POST /api/image-deletions/process)."""
+    """继续排队的一项。`error` 是原始原因，只用于运维的命令行输出；
+    `code` / `detail` 是 HTTP 客户端可以看到的（POST /api/image-deletions/process）。
+    """
     if isinstance(exc, err.AppError):
         code, detail = exc.code, err.client_detail(exc)
     else:
@@ -97,10 +96,10 @@ def process_deletion_queue(
     limit: int = 50,
     others: Callable[[], list[VectorStorePort]] = _no_other_collections,
 ) -> dict[str, Any]:
-    """Drain up to `limit` image_deletions rows.
+    """清理最多 `limit` 行 image_deletions。
 
-    On full success (Qdrant + both S3 objects): remove image_deletions row.
-    On any failure: leave row for retry; continue with next.
+    全部成功（Qdrant + 两个 S3 对象）：删除 image_deletions 行。
+    任何一步失败：保留这一行以便重试；继续处理下一行。
     """
     if limit <= 0:
         raise err.validation_error("limit must be positive")
@@ -125,7 +124,7 @@ def process_deletion_queue(
 
 
 class DeletionWorker:
-    """Bootstrap-friendly wrapper around process_deletion_queue."""
+    """给 bootstrap 用的 process_deletion_queue 包装。"""
 
     def __init__(
         self,
@@ -135,8 +134,9 @@ class DeletionWorker:
         *,
         others: Callable[[], list[VectorStorePort]] = _no_other_collections,
     ) -> None:
-        """others: the collections of the other versions in use, read when a deletion is cleaned
-        (bootstrap.retrieval_stack.RetrievalInfra.other_vectors)."""
+        """others：其他在用版本的 collection，在清理删除时读取
+        （bootstrap.retrieval_stack.RetrievalInfra.other_vectors）。
+        """
         self._metadata = metadata
         self._vectors = vectors
         self._storage = storage
@@ -152,8 +152,9 @@ class DeletionWorker:
         )
 
     def clean_up(self, row: dict[str, Any]) -> bool:
-        """Clean one just-queued deletion now (DELETE /api/images/{image_id}). False leaves the
-        row queued for run_once (the cause is logged)."""
+        """立刻清理一条刚加入队列的删除（DELETE /api/images/{image_id}）。返回 False 时
+        这一行继续排队，留给 run_once（原因写日志）。
+        """
         try:
             _clean_up(self._metadata, self._vectors, self._storage, row, self._others)
         except Exception:

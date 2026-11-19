@@ -1,23 +1,22 @@
-"""Write rules for one stored image as the gallery edits it (PATCH /api/images/{image_id}).
+"""图库编辑一张已存图片时的写入规则（PATCH /api/images/{image_id}）。
 
-Everything here needs no database: which fields a patch may carry, what null means for each,
-and how label_status follows the category (images invariant: unlabeled <=> no category). The
-checks that need the stored row - the new category exists and is active - run in the write
-transaction (app.repositories.images.patch_image), which settles the label with
-resolve_label_status against the row it locked.
+这里的检查都不需要数据库：修改请求可以带哪些字段、每个字段的 null 是什么意思，
+以及 label_status 怎样跟随类别（images 的不变式：unlabeled <=> 没有类别）。
+需要已存行的检查（新类别存在且启用）在写入事务里进行
+（app.repositories.images.patch_image），它对锁住的那一行用 resolve_label_status
+确定标注状态。
 
-    field                         null means                        vector payload
-    category_id                   clear it: the image is unlabeled  yes (scenes follow it)
-    label_status                  refused: leave it out to follow   yes
-                                  the category
-    description                   ""                                no
-    tags                          []                                no
-    food_state                    clear it                          yes
-    food_processing, food_count,  clear it                          no
+    字段                          null 的含义                       向量 payload
+    category_id                   清空：图片变为未标注              是（场景随之变化）
+    label_status                  拒绝：不传就跟随类别              是
+    description                   ""                                否
+    tags                          []                                否
+    food_state                    清空                              是
+    food_processing, food_count,  清空                              否
     total / water / main mass
 
-A field left out stays as it is. A patch that changes a payload field bumps
-images.payload_version (the HTTP layer then pushes the payload).
+没传的字段保持不变。修改了 payload 字段的请求会递增
+images.payload_version（随后 HTTP 层推送 payload）。
 """
 
 from __future__ import annotations
@@ -32,12 +31,12 @@ from app.core.rules.enum_fields import coerce_enum
 from app.core.rules.food_fields import FOOD_FIELDS, coerce_food_field
 from app.core.rules.text_fields import normalize_description, normalize_tags
 
-# The fields a patch may carry, in the order they are checked
+# 修改请求可以带的字段，按检查顺序排列
 IMAGE_PATCH_FIELDS = ("category_id", "label_status", "description", "tags", *FOOD_FIELDS)
 
 
 def normalize_image_patch(fields: Any) -> dict[str, Any]:
-    """The given fields, each normalized (see the module docstring); at least one, no others."""
+    """传来的字段，每个都已规范化（见模块文档字符串）；至少一个，不能有其他字段。"""
     if not isinstance(fields, Mapping):
         raise err.validation_error("image fields must be an object")
     unknown = sorted(str(key) for key in set(fields) - set(IMAGE_PATCH_FIELDS))
@@ -75,12 +74,11 @@ def resolve_label_status(
     new_category_id: int | None,
     requested: LabelStatus | str | None,
 ) -> LabelStatus:
-    """label_status of an image the patch leaves with new_category_id.
+    """修改后类别为 new_category_id 的图片的 label_status。
 
-    A label sent (requested) is kept when it fits the category. Left out, the label follows the
-    category: none -> unlabeled; set or changed by this patch -> verified (a person picked it in
-    the gallery); unchanged -> the current label. VALIDATION_ERROR when the label sent
-    contradicts the category.
+    请求里传了标注状态（requested）且和类别相符时保留。没传时标注状态跟随类别：
+    没有类别 -> unlabeled；本次修改设置或改变了类别 -> verified（有人在图库里选的）；
+    类别没变 -> 保持当前的标注状态。传来的标注状态和类别矛盾时 VALIDATION_ERROR。
     """
     if requested is not None:
         label = LabelStatus(requested)

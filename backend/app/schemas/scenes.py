@@ -1,23 +1,23 @@
-"""Scenes wire: the scene configuration and the membership sync.
+"""场景的 wire：场景配置和归属同步。
 
-    GET    /api/scenes                                  every scene with its labels and rules
-    POST   /api/scenes                                  create a scene (201)
-    PATCH  /api/scenes/{scene_id}                       change name / description / flags
-    DELETE /api/scenes/{scene_id}                       delete a scene (not the default one)
-    POST   /api/scenes/{scene_id}/labels                add a label (201)
-    PATCH  /api/scenes/{scene_id}/labels/{label_id}     change a label
-    DELETE /api/scenes/{scene_id}/labels/{label_id}     delete a label no rule uses
-    POST   /api/scenes/{scene_id}/rules                 add a rule (201)
-    PATCH  /api/scenes/{scene_id}/rules/{rule_id}       change a rule's target and / or label
-    DELETE /api/scenes/{scene_id}/rules/{rule_id}       delete a rule
-    POST   /api/scenes/sync                             recompute one batch of stored images
+    GET    /api/scenes                                  所有场景及其标签和规则
+    POST   /api/scenes                                  创建场景（201）
+    PATCH  /api/scenes/{scene_id}                       修改名称 / 描述 / 开关
+    DELETE /api/scenes/{scene_id}                       删除场景（默认场景除外）
+    POST   /api/scenes/{scene_id}/labels                添加标签（201）
+    PATCH  /api/scenes/{scene_id}/labels/{label_id}     修改标签
+    DELETE /api/scenes/{scene_id}/labels/{label_id}     删除没有规则使用的标签
+    POST   /api/scenes/{scene_id}/rules                 添加规则（201）
+    PATCH  /api/scenes/{scene_id}/rules/{rule_id}       修改规则的对象和 / 或标签
+    DELETE /api/scenes/{scene_id}/rules/{rule_id}       删除规则
+    POST   /api/scenes/sync                             重算一批已存图片
 
-Writes to a scene, its labels or its rules answer with the whole scene and sync_required: true
-when the change reaches stored images only through POST /api/scenes/sync (rules, a scene's
-is_active / include_all), false when it already shows (labels, names, descriptions,
-outputs_heating). Success bodies carry no trace_id (it is in the X-Trace-Id header, as for
-/api/enums and /api/categories). Request limits are app.core.scene_rules;
-app.core.rules.scene_fields checks them again together with the rules a schema cannot say.
+对场景、它的标签或规则的写入返回整个场景和 sync_required：修改只有通过
+POST /api/scenes/sync 才能作用到已存图片时为 true（规则、场景的 is_active / include_all），
+已经生效时为 false（标签、名称、描述、outputs_heating）。成功的响应体不带 trace_id
+（它在 X-Trace-Id 响应头里，和 /api/enums、/api/categories 一样）。请求的限制来自
+app.core.scene_rules；app.core.rules.scene_fields 会再检查一次，同时检查 schema 表达不了的
+规则。
 """
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -40,7 +40,7 @@ from app.core.scene_rules import (
     SCENE_SYNC_BATCH_MAX,
 )
 
-# -- responses --------------------------------------------------------------------------
+# -- 响应 ---------------------------------------------------------------------------------
 
 
 class SceneLabelItem(BaseModel):
@@ -124,7 +124,7 @@ class SceneSyncResponse(BaseModel):
     done: bool
 
 
-# -- requests ---------------------------------------------------------------------------
+# -- 请求 ---------------------------------------------------------------------------------
 
 _SORT_ORDER = dict(ge=CATEGORY_SORT_ORDER_MIN, le=CATEGORY_SORT_ORDER_MAX, strict=True)
 
@@ -148,7 +148,7 @@ class SceneCreateRequest(BaseModel):
 
 
 class SceneUpdateRequest(BaseModel):
-    """Only the fields sent change; code cannot change."""
+    """只修改传来的字段；code 不能修改。"""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -182,7 +182,7 @@ class SceneLabelUpdateRequest(BaseModel):
 
 
 class SceneRuleCreateRequest(BaseModel):
-    """Exactly one of category_id and cuisine; label_id only with category_id."""
+    """category_id 和 cuisine 恰好一个；label_id 只能和 category_id 一起出现。"""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -199,8 +199,9 @@ class SceneRuleCreateRequest(BaseModel):
 
 
 class SceneRuleUpdateRequest(BaseModel):
-    """Only the fields sent change. A new target is category_id or cuisine (exactly one non-null;
-    the other one is cleared); label_id null clears the label."""
+    """只修改传来的字段。新的对象是 category_id 或 cuisine（恰好一个非 null；另一个被清空）；
+    label_id 为 null 时清空标签。
+    """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 

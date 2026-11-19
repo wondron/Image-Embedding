@@ -1,4 +1,4 @@
-"""Configuration-import routes and planners: dry runs, portable references and partial writes."""
+"""配置导入的路由和规划：dry run、可移植的引用和部分写入。"""
 
 import copy
 import unittest

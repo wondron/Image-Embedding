@@ -1,16 +1,16 @@
-"""Small-gallery correctness smoke for the embedding model + Qdrant (算法逻辑).
+"""针对 embedding 模型 + Qdrant 的小图库正确性冒烟测试（算法逻辑）。
 
-Indexes N gallery images into a scratch collection, then checks:
-  - same image          -> top-1 is itself
-  - resized + JPEG q85  -> top-1 is the original
-  - random noise        -> no hit at or above --score-threshold
+把 N 张图库图片写进一个临时 collection，然后检查：
+  - 同一张图                -> top-1 是它自己
+  - 缩放 + JPEG 质量 85     -> top-1 是原图
+  - 随机噪声                -> 没有达到 --score-threshold 的结果
 
-Uses the service's own Embedder (app.clients.inference) and QdrantStore
-(app.clients.qdrant). Does NOT touch PostgreSQL / HTTP; point ids are uuid5(path).
+使用服务自己的 Embedder（app.clients.inference）和 QdrantStore（app.clients.qdrant）。
+**不**访问 PostgreSQL / HTTP；向量点 id 是 uuid5(path)。
 
-Usage (from backend/):
+用法（在 backend/ 下）：
   python scripts/smoke_gallery_correctness.py --root "E:\\dataset\\红薯叶" --limit 30
-  python scripts/smoke_gallery_correctness.py --root <dir> --qdrant-url :memory:   # no server
+  python scripts/smoke_gallery_correctness.py --root <dir> --qdrant-url :memory:   # 不需要服务器
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 
 def imread_unicode(path: Path):
-    """OpenCV imread fails on non-ASCII Windows paths; use fromfile+imdecode."""
+    """OpenCV 的 imread 在包含非 ASCII 字符的 Windows 路径上会失败；改用 fromfile+imdecode。"""
     data = np.fromfile(str(path), dtype=np.uint8)
     if data.size == 0:
         return None

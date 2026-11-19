@@ -1,8 +1,8 @@
-"""Live PostgreSQL checks for migrations + repositories.
+"""迁移 + 仓储的真实 PostgreSQL 检查。
 
-Skipped unless TEST_DATABASE_URL points at an EMPTY throwaway database
-(e.g. postgresql+psycopg://user:pw@localhost:5432/image_embedding_test).
-Every test drops and recreates the schema through Alembic.
+除非 TEST_DATABASE_URL 指向一个**空的**、可以随便丢弃的数据库
+（例如 postgresql+psycopg://user:pw@localhost:5432/image_embedding_test），否则跳过。
+每个测试都通过 Alembic 删除并重建表结构。
 """
 
 import hashlib
@@ -21,12 +21,12 @@ def _alembic(cmd: str, rev: str) -> None:
 
     cfg = Config(str(BACKEND / "alembic.ini"))
     cfg.set_main_option("script_location", str(BACKEND / "alembic"))
-    cfg.attributes["database_url"] = TEST_URL  # alembic/env.py uses it instead of POSTGRES_CONFIG
+    cfg.attributes["database_url"] = TEST_URL  # alembic/env.py 用它代替 POSTGRES_CONFIG
     getattr(command, cmd)(cfg, rev)
 
 
-# Test fixture: the six scenes these tests were written against (migration 0001 used to insert
-# them; base data now comes from scripts/seed_data.py, which only has the first three).
+# 测试数据：编写这些测试时依据的六个场景（迁移 0001 以前会插入它们；基础数据现在来自
+# scripts/seed_data.py，那里只有前三个）。
 FIXTURE_SCENES_SQL = """
 INSERT INTO scenes (code, name, description, include_all, outputs_heating, is_active)
 VALUES
@@ -71,7 +71,7 @@ class PgLiveTests(unittest.TestCase):
 
         return PgMetadataStore(url=TEST_URL)
 
-    # ---- schema ---------------------------------------------------------
+    # ---- 表结构 ---------------------------------------------------------
 
     def test_migrated_schema_matches_the_orm_models(self):
         from alembic.autogenerate import compare_metadata
@@ -135,7 +135,7 @@ class PgLiveTests(unittest.TestCase):
                 {"s": oven, "c": cat, "l": label},
             )
 
-    # ---- repositories ---------------------------------------------------
+    # ---- 仓储 -----------------------------------------------------------
 
     def seed_catalog(self):
         hg = self.sql(
@@ -190,7 +190,7 @@ class PgLiveTests(unittest.TestCase):
         steak_img = self.insert(store, 1, category_id=cat["steak"], label_status="auto", food_state="cooked")
         plain_img = self.insert(store, 2)
 
-        # general holds every image without image_scenes rows; steak matches the oven rule
+        # general 不需要 image_scenes 行就包含所有图片；steak 匹配 oven 的规则
         rows = self.sql("SELECT scene_id FROM image_scenes WHERE image_id = :i", {"i": steak_img}).fetchall()
         self.assertEqual(len(rows), 1)
         self.assertEqual(store.get_effective_scene_codes(steak_img), ["general", "oven"])
@@ -250,12 +250,12 @@ class PgLiveTests(unittest.TestCase):
                 store.patch_image(iid, fields)
             self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
         self.assertEqual(store.get_by_id(iid)["payload_version"], 1)
-        # The single update entry applies the same category/label rule as gallery edits.
+        # 唯一的更新入口使用和图库编辑相同的类别 / 标注规则。
         store.patch_image(iid, {"category_id": cat["steak"]})
         row = store.get_by_id(iid)
         self.assertEqual((row["label_status"], row["payload_version"]), ("verified", 2))
         self.assertEqual(row["scenes"], ["general", "oven"])
-        # Sending the stored payload values again is a no-op for synchronization.
+        # 再次发送已存的 payload 值，对同步来说什么都不做。
         out = store.patch_image(iid, {"category_id": cat["steak"], "label_status": "verified"})
         self.assertEqual(out["payload_version"], 2)
 
@@ -280,8 +280,9 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual(status, "building")
 
     def test_a_point_written_again_holds_the_image_until_its_ledger_row_is_in(self):
-        """lock_image_for_vector (reembed): a deletion waits for the write, so its cleanup comes
-        after the point; one that came first leaves nothing to write."""
+        """lock_image_for_vector（reembed）：删除会等待写入，所以它的清理在向量点之后进行；
+        先到的删除会让这里没东西可写。
+        """
         import threading
 
         store = self.store()
@@ -291,7 +292,7 @@ class PgLiveTests(unittest.TestCase):
 
         with self.assertRaises(RuntimeError), store.lock_image_for_vector(iid, model_id=model_id):
             raise RuntimeError("the upsert failed")
-        self.assertEqual(ledger(), [])  # rolled back
+        self.assertEqual(ledger(), [])  # 已回滚
         with store.lock_image_for_vector(iid, model_id=model_id) as current:
             self.assertEqual((current["payload_version"], current["scenes"]), (1, ["general"]))
         self.assertEqual(ledger(), [(str(iid), 1)])
@@ -301,7 +302,7 @@ class PgLiveTests(unittest.TestCase):
         def delete():
             try:
                 store.enqueue_image_deletion(iid)
-            except Exception as exc:  # surfaced below
+            except Exception as exc:  # 在下面暴露出来
                 failure.append(exc)
             done.set()
 
@@ -314,15 +315,15 @@ class PgLiveTests(unittest.TestCase):
         worker.join(10)
         self.assertEqual(failure, [])
         self.assertIsNone(store.get_image_by_uuid(iid))
-        # Queued after the write: its cleanup removes the point just written
+        # 在写入之后排队：它的清理会删除刚写入的向量点
         self.assertEqual([str(r["image_id"]) for r in store.list_pending_deletions()], [str(iid)])
-        self.assertEqual(ledger(), [])  # gone with the image
+        self.assertEqual(ledger(), [])  # 随图片一起删除了
 
         with store.lock_image_for_vector(iid, model_id=model_id) as current:
-            self.assertIsNone(current)  # deleted: no point may be written
+            self.assertIsNone(current)  # 已删除：不能写入向量点
         self.assertEqual(ledger(), [])
 
-    # ---- one image as the gallery admin reads and edits it (patch_image / get_image_detail) ----
+    # ---- 图库管理读取和编辑的单张图片（patch_image / get_image_detail）----
 
     def current_model(self, collection):
         return self.sql(
@@ -344,7 +345,7 @@ class PgLiveTests(unittest.TestCase):
         )
         self.assertEqual((detail["food_state"], detail["tags"], detail["embeddings"], detail["heating_group"]),
                          ("raw", ["带骨"], [], None))
-        self.assertEqual(len(detail["sha256"]), 64)  # hex
+        self.assertEqual(len(detail["sha256"]), 64)  # 十六进制
         self.assertIsNone(store.get_image_detail(uuid.uuid4()))
         model_id = self.current_model("c_detail")
         store.upsert_image_embedding(model_id=model_id, image_id=iid, synced_version=1)
@@ -354,20 +355,20 @@ class PgLiveTests(unittest.TestCase):
             [(model_id, "c_detail", "current", 1)],
         )
 
-        # A category picked by hand: verified, the rule memberships follow, one bump
+        # 手工选的类别：verified，规则归属跟着变，递增一次
         out = store.patch_image(iid, {"category_id": cat["steak"]})
         self.assertEqual(
             (out["label_status"], out["category_name"], out["category_code"], out["scenes"], out["payload_version"]),
             ("verified", "牛排", "dish.steak", ["general", "oven"], 2),
         )
-        self.assertEqual(out["heating_group"]["code"], "grill")  # the nearest ancestor's
-        # Fields outside the payload, and a food_state equal to the stored one: no bump
+        self.assertEqual(out["heating_group"]["code"], "grill")  # 最近祖先的
+        # payload 以外的字段，以及和已存值相同的 food_state：不递增
         out = store.patch_image(iid, {"tags": ["去骨"], "description": "煎", "total_mass_g": 300, "food_state": "raw"})
         self.assertEqual((out["tags"], out["description"], out["total_mass_g"], out["payload_version"]),
                          (["去骨"], "煎", 300, 2))
         out = store.patch_image(iid, {"food_state": "cooked", "label_status": "auto"})
         self.assertEqual((out["food_state"], out["label_status"], out["payload_version"]), ("cooked", "auto", 3))
-        # Category cleared: unlabeled and out of the rule scene
+        # 类别被清空：未标注，并退出规则场景
         out = store.patch_image(iid, {"category_id": None})
         self.assertEqual((out["category_id"], out["label_status"], out["scenes"], out["payload_version"]),
                          (None, "unlabeled", ["general"], 4))
@@ -380,12 +381,12 @@ class PgLiveTests(unittest.TestCase):
                 store.patch_image(image, fields)
             self.assertEqual(ctx.exception.code, code)
 
-        refused({"label_status": "auto"})  # no category to go with it
+        refused({"label_status": "auto"})  # 没有类别能和它对应
         self.sql("UPDATE categories SET is_active = false WHERE id = :c", {"c": cat["dish"]})
-        refused({"category_id": cat["dish"]})  # disabled: no longer used for labelling
+        refused({"category_id": cat["dish"]})  # 已停用：不再用于标注
         refused({"category_id": 999999})
         refused({"description": "x"}, "IMAGE_NOT_FOUND", image=str(uuid.uuid4()))
-        self.assertEqual(store.get_image_detail(iid)["payload_version"], 4)  # nothing half-written
+        self.assertEqual(store.get_image_detail(iid)["payload_version"], 4)  # 没有写了一半的东西
 
     def test_list_filters_on_a_category_subtree_and_the_label_status(self):
         cat = self.seed_catalog()  # dish > dish.steak
@@ -397,12 +398,12 @@ class PgLiveTests(unittest.TestCase):
         def ids(**kw):
             return sorted(item["id"] for item in store.list_images(scene="general", **kw)[0])
 
-        self.assertEqual(ids(category_id=cat["dish"]), sorted([dish, steak]))  # the category and its subtree
+        self.assertEqual(ids(category_id=cat["dish"]), sorted([dish, steak]))  # 这个类别及其子树
         self.assertEqual(ids(category_id=cat["steak"]), [steak])
         self.assertEqual(ids(category_id=999999), [])
         self.assertEqual(ids(label_status="unlabeled"), [plain])
         self.assertEqual(ids(category_id=cat["dish"], label_status="verified"), [steak])
-        self.assertEqual(store.list_images(scene="general", category_id=cat["dish"])[1], 2)  # the total honours it
+        self.assertEqual(store.list_images(scene="general", category_id=cat["dish"])[1], 2)  # 总数也遵循它
 
     def test_list_out_of_sync_follows_the_current_model_s_ledger(self):
         store = self.store()
@@ -418,16 +419,16 @@ class PgLiveTests(unittest.TestCase):
                 {"v": version, "c": f"c_{version}", "s": status},
             ).scalar_one()
 
-        self.assertEqual(ids(out_of_sync=True), sorted([synced, behind, never]))  # no current model: all of them
+        self.assertEqual(ids(out_of_sync=True), sorted([synced, behind, never]))  # 没有当前模型：全部
         old, current = model("v1", "retired"), model("v2", "current")
         for image, mid, version in ((synced, current, 1), (behind, current, 1), (never, old, 5)):
             self.sql("INSERT INTO image_embeddings (model_id, image_id, synced_version) VALUES (:m, :i, :v)",
                      {"m": mid, "i": uuid.UUID(image), "v": version})
         self.sql("UPDATE images SET payload_version = 2 WHERE id = :i", {"i": uuid.UUID(behind)})
-        # behind: ledger v1 < payload v2; never: only an older model wrote it
+        # behind：台账 v1 < payload v2；never：只有旧模型写过它
         self.assertEqual(ids(out_of_sync=True), sorted([behind, never]))
-        self.assertEqual(store.list_images(scene="general", out_of_sync=True)[1], 2)  # the total honours it
-        self.assertEqual(ids(), sorted([synced, behind, never]))  # off by default
+        self.assertEqual(store.list_images(scene="general", out_of_sync=True)[1], 2)  # 总数也遵循它
+        self.assertEqual(ids(), sorted([synced, behind, never]))  # 默认关闭
 
     def test_unsynced_payload_ids_are_ledger_rows_behind_in_id_order(self):
         store = self.store()
@@ -436,7 +437,7 @@ class PgLiveTests(unittest.TestCase):
             "INSERT INTO embedding_models (name, version, dim, distance, input_size, weights_uri, collection, status) "
             "VALUES ('dino', 'v2', 4, 'cosine', 224, 'w', 'c_v2', 'current') RETURNING id"
         ).scalar_one()
-        for image in images[:4]:  # images[4] was never embedded into the current model: left out
+        for image in images[:4]:  # images[4] 从来没有写进当前模型：不返回
             self.sql("INSERT INTO image_embeddings (model_id, image_id, synced_version) VALUES (:m, :i, 1)",
                      {"m": current, "i": uuid.UUID(image)})
         self.assertEqual(store.list_unsynced_payload_ids(), [])
@@ -446,7 +447,7 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual(store.list_unsynced_payload_ids(), behind)
         self.assertEqual(store.list_unsynced_payload_ids(limit=2), behind[:2])
         self.assertEqual(store.list_unsynced_payload_ids(after=images[0]), behind[1:])
-        self.assertEqual(store.list_unsynced_payload_ids(until=images[2]), behind[:2])  # inclusive
+        self.assertEqual(store.list_unsynced_payload_ids(until=images[2]), behind[:2])  # 含边界
         self.assertEqual(store.list_unsynced_payload_ids(after=images[0], until=images[2]), [images[2]])
         store.mark_payloads_pushed(model_id=current, versions={images[2]: 2})
         self.assertEqual(store.list_unsynced_payload_ids(), [images[0], images[3]])
@@ -457,10 +458,10 @@ class PgLiveTests(unittest.TestCase):
         store = self.store()
         images = sorted(self.insert(store, n) for n in range(1, 5))
         old_fp = {"spec": {"model_path": "old.onnx"}, "probe": [1.0, 0.0, 0.0, 0.0]}
-        current = self.current_model("c_old")  # registered by hand, before fingerprints (0009)
+        current = self.current_model("c_old")  # 手工登记的，在有指纹之前（0009）
         self.assertIsNone(store.get_current_embedding_model()["fingerprint"])
         self.assertTrue(store.record_model_fingerprint(current, old_fp))
-        self.assertFalse(store.record_model_fingerprint(current, {"spec": {}, "probe": [0.5]}))  # never overwritten
+        self.assertFalse(store.record_model_fingerprint(current, {"spec": {}, "probe": [0.5]}))  # 从不覆盖
         self.assertEqual(store.get_current_embedding_model()["fingerprint"], old_fp)
         self.assertEqual(store.record_embeddings(model_id=current, versions={i: 1 for i in images}), images)
 
@@ -470,7 +471,7 @@ class PgLiveTests(unittest.TestCase):
         new = store.register_embedding_model(fields)
         self.assertEqual((new["status"], new["collection"], new["preprocess"]), ("building", "c_new", {"scale": [224, 224]}))
         self.assertEqual(new["fingerprint"], fields["fingerprint"])
-        for clash in ({"collection": "c_other"}, {"version": "v3"}):  # name + version taken, collection taken
+        for clash in ({"collection": "c_other"}, {"version": "v3"}):  # 名称 + 版本被占用，collection 被占用
             with self.subTest(clash=clash), self.assertRaises(AppError) as ctx:
                 store.register_embedding_model({**fields, **clash})
             self.assertEqual(ctx.exception.code, "EMBEDDING_MODEL_EXISTS")
@@ -482,48 +483,48 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual([r["id"] for r in store.list_embedding_model_rows(statuses=("building", "ready"))], [new["id"]])
         self.assertEqual(len(store.list_embedding_model_rows()), 2)
 
-        # The backlog: images without a vector in the version, in id order, after a cursor, minus the tried ones
+        # 待处理列表：该版本下没有向量的图片，按 id 顺序，在游标之后，去掉已经试过的
         self.assertEqual(store.count_embedding_backlog(new["id"]), 4)
         self.assertEqual([r["id"] for r in store.list_embedding_backlog(new["id"], limit=2)], images[:2])
         self.assertEqual([r["id"] for r in store.list_embedding_backlog(new["id"], after=images[1])], images[2:])
         self.assertEqual([r["id"] for r in store.list_embedding_backlog(new["id"], exclude=[images[0], images[2]])],
                          [images[1], images[3]])
         self.assertTrue(store.list_embedding_backlog(new["id"])[0]["original_url"].startswith("https://cdn/o/"))
-        # Recording leaves out an image deleted meanwhile (its ledger rows go with it)
+        # 记录时跳过这期间被删除的图片（它的台账行随之删除）
         store.enqueue_image_deletion(images[3])
         self.assertEqual(store.record_embeddings(model_id=new["id"], versions={images[0]: 1, images[1]: 1, images[3]: 1}),
                          images[:2])
         self.assertEqual(store.count_embedding_backlog(new["id"]), 1)
         self.assertEqual([s["id"] for s in store.sample_embedded_images(new["id"], limit=5)], images[:2])
-        # A payload that moved on after its vector was written: behind in that version's ledger
+        # 向量写入之后 payload 又变了：在那个版本的台账里落后
         self.sql("UPDATE images SET payload_version = 3 WHERE id = :i", {"i": uuid.UUID(images[1])})
         self.assertEqual(store.list_unsynced_payload_ids(model_id=new["id"]), [images[1]])
         self.assertEqual({m["id"]: m["behind"] for m in store.list_embedding_models()["models"]}, {current: 1, new["id"]: 1})
-        store.record_embeddings(model_id=new["id"], versions={images[1]: 3})  # embedded again: up to date
+        store.record_embeddings(model_id=new["id"], versions={images[1]: 3})  # 重新计算了 embedding：已是最新
         self.assertEqual(store.list_unsynced_payload_ids(model_id=new["id"]), [])
 
-        # Switch: one current at a time, the previous one ready for a roll back
+        # 切换：同一时间只有一个当前版本，之前的保持 ready 以便回滚
         result = store.activate_embedding_model(new["id"])
         self.assertEqual((result["previous_id"], result["model"]["status"]), (current, "current"))
         self.assertIsNotNone(result["model"]["activated_at"])
         self.assertEqual(store.get_embedding_model(current)["status"], "ready")
         self.assertEqual(store.get_current_embedding_model()["id"], new["id"])
-        self.assertIsNone(store.activate_embedding_model(new["id"])["previous_id"])  # already current
-        self.assertEqual(store.activate_embedding_model(current)["previous_id"], new["id"])  # roll back
+        self.assertIsNone(store.activate_embedding_model(new["id"])["previous_id"])  # 已经是当前版本
+        self.assertEqual(store.activate_embedding_model(current)["previous_id"], new["id"])  # 回滚
         store.activate_embedding_model(new["id"])
 
-        # building -> ready only from the expected status
+        # building -> ready 只能从预期的状态切换
         third = store.register_embedding_model({**fields, "version": "v3", "collection": "c3"})
         self.assertFalse(store.set_embedding_model_status(third["id"], "ready", expected=("ready",)))
         self.assertTrue(store.set_embedding_model_status(third["id"], "ready", expected=("building",)))
         self.assertEqual(store.get_embedding_model(third["id"])["status"], "ready")
 
-        # Retire: never the current one; its ledger rows go, the row stays as retired
+        # 下线：永远不能是当前版本；它的台账行删除，这一行保留为 retired
         with self.assertRaises(AppError) as ctx:
             store.retire_embedding_model(new["id"])
         self.assertEqual(ctx.exception.code, "EMBEDDING_MODEL_STATE")
         out = store.retire_embedding_model(current)
-        self.assertEqual((out["model"]["status"], out["ledger_rows"]), ("retired", 3))  # images[3] is deleted
+        self.assertEqual((out["model"]["status"], out["ledger_rows"]), ("retired", 3))  # images[3] 已删除
         self.assertEqual(self.sql("SELECT count(*) FROM image_embeddings WHERE model_id = :m", {"m": current}).scalar_one(), 0)
         for call, code in ((lambda: store.activate_embedding_model(current), "EMBEDDING_MODEL_STATE"),
                            (lambda: store.activate_embedding_model(9999), "EMBEDDING_MODEL_NOT_FOUND"),
@@ -549,9 +550,9 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual(store.forget_embeddings(current, [images[1], images[3], "00000000-0000-4000-8000-000000000999"]), 2)
         self.assertEqual(store.forget_embeddings(current, []), 0)
         self.assertEqual(store.list_embedded_ids(current), [images[0], images[2], images[4]])
-        self.assertEqual(store.count_embedding_backlog(current), 2)  # forgotten rows: without a vector again
+        self.assertEqual(store.count_embedding_backlog(current), 2)  # 被忘掉的行：重新算作没有向量
         self.assertEqual(store.clear_embeddings(current), 3)
-        self.assertEqual(store.list_embedded_ids(other), [images[0]])  # another version's ledger untouched
+        self.assertEqual(store.list_embedded_ids(other), [images[0]])  # 另一个版本的台账不受影响
         moved = {"spec": {"model_path": "config/model/embedding/embeddingcls-abc/model.onnx"}, "probe": [1.0, 0, 0, 0],
                  "files": [{"name": "model.onnx", "size": 3, "sha256": "ab" * 32}], "artifact": "ab" * 32}
         self.assertTrue(store.refresh_model_fingerprint(current, moved))
@@ -564,13 +565,13 @@ class PgLiveTests(unittest.TestCase):
         image = self.insert(store, 1)
         urls = {"original_url": "https://cdn/o/1.jpg", "thumb_url": "https://cdn/t/1.webp"}
         self.assertEqual(store.get_image_file_urls(image), {**urls, "deleted": False})
-        store.enqueue_image_deletion(image)  # gone from images, files waiting for the cleanup
+        store.enqueue_image_deletion(image)  # 已从 images 删除，文件在等待清理
         self.assertEqual(store.get_image_file_urls(image), {**urls, "deleted": True})
         store.complete_deletion(image)
         self.assertIsNone(store.get_image_file_urls(image))
 
     def test_a_maintenance_lock_lets_one_process_in_at_a_time(self):
-        first, second = self.store(), self.store()  # two pools: two sessions, like two processes
+        first, second = self.store(), self.store()  # 两个连接池：两个会话，相当于两个进程
         with first.try_maintenance_lock(42) as held:
             self.assertTrue(held)
             with second.try_maintenance_lock(42) as other:
@@ -579,7 +580,7 @@ class PgLiveTests(unittest.TestCase):
                 self.assertTrue(unrelated)
         with second.try_maintenance_lock(42) as after_release:
             self.assertTrue(after_release)
-        # No transaction stays open while a lock is held
+        # 持有锁期间没有事务一直开着
         with first.try_maintenance_lock(42):
             open_tx = self.sql(
                 "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
@@ -596,13 +597,13 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "IMAGE_NOT_FOUND")
         iid = self.insert(store, 1)
         first = store.enqueue_image_deletion(iid)
-        self.assertEqual(store.enqueue_image_deletion(iid), first)  # still queued: the same row
-        self.assertEqual(self.insert(store, 1), iid)  # the same bytes indexed again before the cleanup ran
+        self.assertEqual(store.enqueue_image_deletion(iid), first)  # 仍在排队：同一行
+        self.assertEqual(self.insert(store, 1), iid)  # 在清理运行之前，同样的字节又入库了一次
         store.enqueue_image_deletion(iid)
         self.assertIsNone(store.get_image_by_uuid(iid))
         self.assertEqual([r["image_id"] for r in store.list_pending_deletions()], [iid])
 
-    # ---- task center: index_tasks and the deletion queue count ----------
+    # ---- 任务中心：index_tasks 和删除队列计数 ----------
 
     def test_index_records_list_with_the_image_as_it_is_now_and_clear_by_status(self):
         from app.core.errors import AppError
@@ -611,24 +612,24 @@ class PgLiveTests(unittest.TestCase):
         store = self.store()
         kept = self.insert(store, 1, category_id=cat["steak"], label_status="verified")
         gone = self.insert(store, 2)
-        store.record_index_tasks([  # one transaction: the same created_at, id breaks the tie
+        store.record_index_tasks([  # 一个事务：created_at 相同，用 id 区分先后
             {"filename": "gone.jpg", "status": "succeeded", "image_id": gone, "new_image": True,
              "duration_ms": 640, "trace_id": "t-1"},
             {"filename": "junk.png", "status": "failed", "error_code": "INDEX_BAD_IMAGE",
              "error_detail": "cannot decode image", "duration_ms": 4, "trace_id": "t-2",
-             "image_id": kept},  # a failed record never keeps an image id
+             "image_id": kept},  # 失败的记录从不保留图片 id
         ])
         store.record_index_tasks([{"filename": "x" * 300, "status": "succeeded", "image_id": kept, "new_image": False}])
         store.enqueue_image_deletion(gone)
 
         result = store.list_index_tasks()
-        # x…: the kept image indexed again (new_image false): a repeat, its image still stored
+        # x…：保留的图片又入库了一次（new_image 为 false）：一次重复，它的图片仍然存在
         self.assertEqual(
             (result["total"], result["counts"]),
             (3, {"succeeded": 2, "failed": 1, "image_deleted": 1, "repeated": 1}),
         )
         newest, failed, deleted = result["items"]
-        self.assertEqual((len(newest["filename"]), newest["filename"][-1]), (255, "…"))  # clipped
+        self.assertEqual((len(newest["filename"]), newest["filename"][-1]), (255, "…"))  # 截断了
         self.assertEqual(
             (newest["image_exists"], newest["category_name"], newest["image_label_status"], newest["new_image"]),
             (True, "牛排", "verified", False),
@@ -641,27 +642,27 @@ class PgLiveTests(unittest.TestCase):
         page = store.list_index_tasks(status="succeeded", page=2, page_size=1)
         self.assertEqual((page["total"], [r["filename"] for r in page["items"]]), (2, ["gone.jpg"]))
         self.assertEqual(page["counts"], {"succeeded": 2, "failed": 1, "image_deleted": 1, "repeated": 1})
-        # the image state splits the succeeded records: still stored / deleted since
+        # 图片状态把成功的记录分开：仍然存在 / 之后被删除了
         for state, ids in (("present", [newest["id"]]), ("deleted", [deleted["id"]])):
             listed = store.list_index_tasks(image_state=state)
             self.assertEqual((listed["total"], [r["id"] for r in listed["items"]]), (1, ids))
         listed = store.list_index_tasks(status="failed", image_state="deleted")
         self.assertEqual((listed["total"], listed["items"]), (0, []))
-        # new_image splits them too: the uploads that stored an image / the repeats of a stored one
+        # new_image 也把它们分开：存了图片的上传 / 重复上传已存的图片
         for new_image, ids in ((False, [newest["id"]]), (True, [deleted["id"]])):
             listed = store.list_index_tasks(new_image=new_image)
             self.assertEqual((listed["total"], [r["id"] for r in listed["items"]]), (1, ids))
         listed = store.list_index_tasks(status="succeeded", image_state="present", new_image=True)
-        self.assertEqual((listed["total"], listed["items"]), (0, []))  # the only stored image's record is a repeat
+        self.assertEqual((listed["total"], listed["items"]), (0, []))  # 唯一一张仍存的图片的记录是一次重复
         listed = store.list_index_tasks(status="failed", new_image=True)
         self.assertEqual((listed["total"], listed["items"]), (0, []))
 
-        with self.assertRaises(AppError) as ctx:  # a succeeded record names its image
+        with self.assertRaises(AppError) as ctx:  # 成功的记录指明它的图片
             store.record_index_tasks([{"filename": "a.png", "status": "succeeded"}])
         self.assertEqual(ctx.exception.code, "INDEX_POSTGRES_FAILED")
         self.assertEqual(store.list_index_tasks()["total"], 3)
 
-        # clearing takes exactly what the same filter lists, and only records
+        # 清空删除的正好是同一个过滤条件列出的内容，并且只删记录
         self.assertEqual(store.clear_index_tasks(image_state="deleted"), 1)
         self.assertEqual(store.list_index_tasks()["counts"], {"succeeded": 1, "failed": 1, "image_deleted": 0, "repeated": 1})
         self.assertEqual(store.clear_index_tasks(status="failed"), 1)
@@ -698,11 +699,11 @@ class PgLiveTests(unittest.TestCase):
         store = self.store()
         model_id = self.current_model("c_images")
         iid = self.insert(store, 1)
-        orphan = self.insert(store, 2)  # in PG, never embedded into this collection
+        orphan = self.insert(store, 2)  # 在 PG 里，从来没有写进这个 collection
         vectors = QdrantVectorStore(QdrantStore(QdrantConnection(url=":memory:"), collection="c_images", vector_dim=4))
         vectors.ensure_collection()
         self.addCleanup(vectors.close)
-        # A point whose payload is behind PostgreSQL (label_status)
+        # payload 落后于 PostgreSQL 的向量点（label_status）
         vectors.upsert(iid, [1, 0, 0, 0], {"scenes": ["general"], "category_id": None, "food_state": None, "label_status": "auto"})
         model = ActiveModel(id=model_id, name="m", version="1", collection="c_images", dim=4, distance="cosine")
         storage = Mock()
@@ -735,7 +736,7 @@ class PgLiveTests(unittest.TestCase):
             state = vector(iid)
             self.assertEqual((state["status"], state["synced_version"], state["payload_version"]), ("synced", 1, 1))
 
-            # A category edited in the gallery reaches the search filter in the same request
+            # 在图库里编辑的类别在同一个请求里就作用到搜索过滤
             body = client.patch(f"/api/images/{iid}", json={"category_id": cat["steak"]}).json()
             self.assertEqual((body["vector_sync"], body["image"]["scenes"], body["image"]["label_status"]),
                              ("pushed", ["general", "oven"], "verified"))
@@ -744,7 +745,7 @@ class PgLiveTests(unittest.TestCase):
             body = client.patch(f"/api/images/{orphan}", json={"tags": ["x"]}).json()
             self.assertEqual((body["vector_sync"], body["sync_required"], body["image"]["tags"]), ("missing", True, ["x"]))
 
-            # Deleted: gone from PostgreSQL, the point and both files removed in the same request
+            # 已删除：从 PostgreSQL 消失，向量点和两个文件在同一个请求里删除
             body = client.delete(f"/api/images/{iid}").json()
             self.assertEqual((body["image_id"], body["cleanup"]), (iid, "done"))
             self.assertEqual(vectors.get_payloads([iid]), {})
@@ -780,11 +781,11 @@ class PgLiveTests(unittest.TestCase):
         row = store.get_image_by_uuid(iid)
         self.assertEqual((row["food_state"], row["source_type"]), ("thawed", "partner_api"))
 
-        # 0004's downgrade restores the old CHECK lists, so it refuses while such rows exist
+        # 0004 的降级会恢复旧的 CHECK 列表，所以存在这样的行时它会拒绝
         with self.assertRaisesRegex(IntegrityError, "ck_images_(source_type|food_state)"):
             _alembic("downgrade", "20261106_0003")
         self.sql("UPDATE images SET source_type = 'user_upload'")
-        self.sql("UPDATE image_foods SET food_state = 'frozen'")  # 0006's downgrade copies it back to images
+        self.sql("UPDATE image_foods SET food_state = 'frozen'")  # 0006 的降级会把它复制回 images
         _alembic("downgrade", "20261106_0003")
         _alembic("upgrade", "head")
 
@@ -806,27 +807,27 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual({k: row[k] for k in FOOD_FIELDS}, food)
         before = row["payload_version"]
 
-        # a patch changes only the given columns; these are not in the Qdrant payload: no bump
+        # 修改只改变传来的列；这些不在 Qdrant payload 里：不递增
         store.patch_image(iid, {"total_mass_g": "1200", "food_count": None})
         row = store.get_image_by_uuid(iid)
         self.assertEqual((row["total_mass_g"], row["food_count"], row["water_mass_g"], row["payload_version"]),
                          (1200, None, 0, before))
-        store.patch_image(iid, {"food_state": "cooked"})  # food_state is in the payload
+        store.patch_image(iid, {"food_state": "cooked"})  # food_state 在 payload 里
         self.assertEqual(store.get_image_by_uuid(iid)["payload_version"], before + 1)
-        store.patch_image(bare, {"water_mass_g": 80})  # first annotation of an image creates its row
+        store.patch_image(bare, {"water_mass_g": 80})  # 图片的第一次标注会创建它的行
         self.assertEqual(store.get_image_by_uuid(bare)["water_mass_g"], 80)
 
-        items, _ = store.list_images(scene="general")  # list / search hydrate through the same join
+        items, _ = store.list_images(scene="general")  # 列表 / 搜索通过同一个 join 补全信息
         self.assertEqual({i["id"]: i["total_mass_g"] for i in items}, {bare: None, iid: 1200})
         self.assertEqual(store.get_active_by_ids([iid])[iid]["main_ingredient_mass_g"], 300)
 
         with self.assertRaises(AppError) as ctx:
             store.patch_image(iid, {"main_ingredient_mass_g": 0})
         self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
-        # the database holds the same rule for writers that skip the repository
+        # 对绕过仓储的写入方，数据库也保持同样的规则
         with self.assertRaisesRegex(IntegrityError, "ck_image_foods_total_mass_positive"):
             self.sql("UPDATE image_foods SET total_mass_g = 0")
-        store.enqueue_image_deletion(iid)  # deleting the image deletes its annotation
+        store.enqueue_image_deletion(iid)  # 删除图片会删除它的标注
         self.assertEqual(self.sql("SELECT count(*) FROM image_foods").scalar_one(), 1)
 
     def test_0006_moves_the_food_columns_into_image_foods_and_back(self):
@@ -845,7 +846,7 @@ class PgLiveTests(unittest.TestCase):
         rows = self.sql(
             "SELECT image_id, food_state, food_processing, food_count, total_mass_g, water_mass_g FROM image_foods"
         ).fetchall()
-        self.assertEqual([tuple(r) for r in rows], [(ids[0], "raw", "sliced", 4, 350, None)])  # weight -> total mass
+        self.assertEqual([tuple(r) for r in rows], [(ids[0], "raw", "sliced", 4, 350, None)])  # 重量 -> 总质量
 
         _alembic("downgrade", "20261109_0005")
         self.assertEqual(dict(self.sql("SELECT id, food_weight_g FROM images").fetchall()), {ids[0]: 350, ids[1]: None})
@@ -875,21 +876,21 @@ class PgLiveTests(unittest.TestCase):
             return sorted(i["id"] for i in store.list_images(scene="general", **kw)[0])
 
         self.assertEqual(ids(tag="红薯叶"), [iid])
-        self.assertEqual(ids(tag="红薯"), [])  # tag is an exact match
-        self.assertEqual(ids(q="薯"), [iid])  # q matches any tag as a substring
-        self.assertEqual(store.list_images(scene="general", tag="带皮")[1], 1)  # total honours the filter
+        self.assertEqual(ids(tag="红薯"), [])  # tag 是精确匹配
+        self.assertEqual(ids(q="薯"), [iid])  # q 以子串方式匹配任一标签
+        self.assertEqual(store.list_images(scene="general", tag="带皮")[1], 1)  # 总数遵循过滤条件
 
         before = store.get_image_by_uuid(iid)["payload_version"]
         store.patch_image(iid, {"tags": ["清蒸", " "]})
         row = store.get_image_by_uuid(iid)
         self.assertEqual((row["tags"], row["payload_version"]), (["清蒸"], before))
         self.assertEqual((ids(tag="红薯叶"), ids(tag="清蒸")), ([], [iid]))
-        self.assertEqual(store.get_active_by_ids([iid], scene="general")[iid]["tags"], ["清蒸"])  # search hydrate
+        self.assertEqual(store.get_active_by_ids([iid], scene="general")[iid]["tags"], ["清蒸"])  # 搜索补全信息
 
         store.patch_image(iid, {"tags": []})
         self.assertEqual(store.get_image_by_uuid(iid)["tags"], [])
 
-    # ---- category tree admin (app.repositories.categories) ---------------
+    # ---- 类别树管理（app.repositories.categories）---------------
 
     @staticmethod
     def zh(name):
@@ -904,7 +905,7 @@ class PgLiveTests(unittest.TestCase):
         return ctx.exception.detail
 
     def seed_tree(self, store):
-        """ingredient (sorted first), dish > dish.pizza > dish.pizza.slice"""
+        """ingredient（排在最前），dish > dish.pizza > dish.pizza.slice"""
         dish = store.create_category({"code": "dish", "names": [self.zh("菜品")]})
         ingredient = store.create_category({"code": "ingredient", "names": [self.zh("食材")], "sort_order": -1})
         pizza = store.create_category({
@@ -930,7 +931,7 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual((dish["parent_id"], dish["path"], dish["name"]), (None, str(dish["id"]), "菜品"))
         self.assertEqual((pizza["parent_id"], pizza["path"]), (dish["id"], f"{dish['id']}.{pizza['id']}"))
         self.assertEqual(piece["path"], f"{dish['id']}.{pizza['id']}.{piece['id']}")
-        # names: the display language first, in a language the primary first
+        # names：先是显示语言的，同一种语言里主名称在前
         self.assertEqual(pizza["names"], [
             self.zh("披萨"),
             {"lang": "zh", "name": "比萨", "kind": "alias"},
@@ -943,13 +944,13 @@ class PgLiveTests(unittest.TestCase):
         )
         from datetime import datetime
 
-        self.assertIsNotNone(datetime.fromisoformat(pizza["created_at"]).tzinfo)  # ISO 8601 with an offset
+        self.assertIsNotNone(datetime.fromisoformat(pizza["created_at"]).tzinfo)  # 带偏移量的 ISO 8601
 
-        # parents before children; siblings by sort_order, then id
+        # 父节点在子节点之前；同级按 sort_order，然后按 id
         listed = store.list_categories()
         self.assertEqual([n["code"] for n in listed], ["ingredient", "dish", "dish.pizza", "dish.pizza.slice"])
-        self.assertEqual(listed[2], pizza)  # a write answers with the same node the list shows
-        self.assertEqual(store.get_category_id_by_code("dish.pizza"), pizza["id"])  # indexing resolves it
+        self.assertEqual(listed[2], pizza)  # 写入返回的节点和列表显示的相同
+        self.assertEqual(store.get_category_id_by_code("dish.pizza"), pizza["id"])  # 入库时解析它
 
     def test_category_patch_renames_relabels_and_replaces_names(self):
         store = self.store()
@@ -971,16 +972,16 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual((patched["sort_order"], patched["is_active"], patched["path"]), (7, False, pizza["path"]))
         by_id = {node["id"]: node for node in store.list_categories()}
         self.assertEqual(by_id[piece["id"]]["code"], "dish.pizza_pie.slice")
-        self.assertGreater(patched["updated_at"], stale)  # raw SQL has to set it itself
+        self.assertGreater(patched["updated_at"], stale)  # 原生 SQL 要自己设置它
         self.assertEqual(
             self.sql("SELECT count(*) FROM category_names WHERE category_id = :c", {"c": pizza["id"]}).scalar_one(), 1
         )
 
-        # only the given fields change; null clears the heating group
+        # 只修改传来的字段；null 清空加热组
         cleared = store.update_category(pizza["id"], {"heating_group_id": None})["category"]
         self.assertIsNone(cleared["heating_group"])
         self.assertEqual((cleared["code"], cleared["sort_order"], cleared["names"]), ("dish.pizza_pie", 7, [self.zh("意式披萨")]))
-        # a names-only patch still touches updated_at
+        # 只修改名称的请求也会更新 updated_at
         self.sql("UPDATE categories SET updated_at = now() - interval '1 day' WHERE id = :id", {"id": dish["id"]})
         before = store.list_categories()[1]["updated_at"]
         self.assertGreater(store.update_category(dish["id"], {"names": [self.zh("菜肴")]})["category"]["updated_at"], before)
@@ -1000,15 +1001,15 @@ class PgLiveTests(unittest.TestCase):
         self.assertIn("descendants", self.assert_category_error("VALIDATION_ERROR", update, pizza["id"], {"parent_id": piece["id"]}))
         self.assertIn("descendants", self.assert_category_error("VALIDATION_ERROR", update, pizza["id"], {"parent_id": pizza["id"]}))
         self.assertIn("does not exist", self.assert_category_error("VALIDATION_ERROR", update, pizza["id"], {"parent_id": 987654}))
-        # only a domain may be a root: by creating, by moving up, by renaming a root
+        # 只有领域可以是根节点：无论是创建、向上移动，还是重命名根节点
         create = store.create_category
         self.assertIn("needs a parent", self.assert_category_error("VALIDATION_ERROR", create, {"code": "snack", "names": [self.zh("零食")]}))
         self.assertIn("needs a parent", self.assert_category_error("VALIDATION_ERROR", update, pizza["id"], {"parent_id": None}))
         self.assert_category_error("VALIDATION_ERROR", update, dish["id"], {"code": "dishes"})
-        # ... and a domain under another node can go back up
+        # ……而且在另一个节点下的领域可以移回去
         dessert = create({"code": "dessert", "parent_id": dish["id"], "names": [self.zh("甜点烘焙")]})
         self.assertEqual(update(dessert["id"], {"parent_id": None})["category"]["path"], str(dessert["id"]))
-        # nothing above was half-applied
+        # 上面没有任何东西只应用了一半
         self.assertEqual(
             {n["code"]: n["parent_id"] for n in store.list_categories()},
             {"ingredient": None, "dish": None, "dessert": None, "ingredient.pizza": ingredient["id"], "ingredient.pizza.slice": pizza["id"]},
@@ -1027,7 +1028,7 @@ class PgLiveTests(unittest.TestCase):
     def test_category_subtree_recode_can_reuse_a_descendants_previous_code(self):
         store = self.store()
         _, _, pizza, piece = self.seed_tree(store)
-        # A single UPDATE order would hit the immediate unique index on the old child code.
+        # 单条 UPDATE 的顺序会撞上旧子节点 code 上的即时唯一索引。
         store.update_category(pizza["id"], {"code": "dish.pizza.slice"})
         nodes = {node["id"]: node for node in store.list_categories()}
         self.assertEqual(nodes[pizza["id"]]["code"], "dish.pizza.slice")
@@ -1041,7 +1042,7 @@ class PgLiveTests(unittest.TestCase):
         duplicate = {"code": "dish.pizza", "parent_id": dish["id"], "names": [self.zh("重复")]}
         self.assertIn("'dish.pizza'", self.assert_category_error("CATEGORY_CODE_EXISTS", store.create_category, duplicate))
         self.assert_category_error("CATEGORY_CODE_EXISTS", store.update_category, pizza["id"], {"code": "dish"})
-        self.assertEqual(store.update_category(pizza["id"], {"code": "dish.pizza"})["category"]["code"], "dish.pizza")  # its own code is fine
+        self.assertEqual(store.update_category(pizza["id"], {"code": "dish.pizza"})["category"]["code"], "dish.pizza")  # 它自己的 code 没问题
 
         self.assert_category_error("VALIDATION_ERROR", store.create_category, dict(duplicate, code="dish.x", parent_id=987654))
         self.assert_category_error("VALIDATION_ERROR", store.create_category, dict(duplicate, code="dish.x", heating_group_id=987654))
@@ -1066,7 +1067,7 @@ class PgLiveTests(unittest.TestCase):
         self.assert_category_error("CATEGORY_CODE_EXISTS", store.update_category, other["id"], {"code": "Ingredient.hONGsU"})
         renamed = store.update_category(sweet["id"], {"code": "Ingredient.hONGsU"})["category"]
         self.assertEqual((renamed["code"], renamed["id"]), ("Ingredient.hONGsU", sweet["id"]))
-        # Writers outside the repository still hit the lower(code) unique index.
+        # 仓储之外的写入方仍然会撞上 lower(code) 唯一索引。
         with self.assertRaises(IntegrityError):
             self.sql("INSERT INTO categories (code) VALUES ('INGREDIENT.HONGSU')")
         with self.assertRaises(IntegrityError):
@@ -1105,11 +1106,11 @@ class PgLiveTests(unittest.TestCase):
             for code in ("ingredient", "dish", "dessert", "beverage", "mixed")
         }
         self.assertEqual(self.sql("SELECT count(*) FROM categories WHERE parent_id IS NULL").scalar_one(), 6)
-        # A legacy code consumes a slot even though it is outside the six allowed codes.
+        # 旧的 code 即使不在允许的六个 code 之内也占一个名额。
         other_fields = {"code": "other", "names": [self.zh("其他")]}
         self.assertIn("at most 6", self.assert_category_error("VALIDATION_ERROR", store.create_category, other_fields))
         store.update_category(roots["mixed"]["id"], {"is_active": False})
-        # Deactivation does not free a root slot; duplicate codes keep their conflict error.
+        # 停用不会释放根节点名额；重复的 code 保持冲突错误。
         self.assertIn("at most 6", self.assert_category_error("VALIDATION_ERROR", store.create_category, other_fields))
         self.assert_category_error(
             "CATEGORY_CODE_EXISTS", store.create_category, {"code": "mixed", "names": [self.zh("重复")]}
@@ -1122,7 +1123,7 @@ class PgLiveTests(unittest.TestCase):
             next(n for n in store.list_categories() if n["id"] == other["id"])["parent_id"],
             roots["ingredient"]["id"],
         )
-        # Moving an existing root beneath another category frees exactly one slot.
+        # 把已有的根节点移到另一个类别下面，正好释放一个名额。
         store.update_category(roots["mixed"]["id"], {"parent_id": roots["ingredient"]["id"]})
         promoted = store.update_category(other["id"], {"parent_id": None})["category"]
         self.assertEqual((promoted["parent_id"], promoted["path"]), (None, str(other["id"])))
@@ -1142,7 +1143,7 @@ class PgLiveTests(unittest.TestCase):
         detail = self.assert_category_error("CATEGORY_IN_USE", delete, piece["id"])
         self.assertIn("images: 1", detail)
         self.assertIn("scene rules: 1", detail)
-        self.assertEqual(self.sql("SELECT count(*) FROM scene_rules").scalar_one(), 1)  # the rule did not cascade away
+        self.assertEqual(self.sql("SELECT count(*) FROM scene_rules").scalar_one(), 1)  # 规则没有被级联删除
 
         self.sql("DELETE FROM scene_rules")
         self.sql("DELETE FROM images WHERE id = :id", {"id": image})
@@ -1150,10 +1151,10 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual(
             self.sql("SELECT count(*) FROM category_names WHERE category_id = :c", {"c": piece["id"]}).scalar_one(), 0
         )
-        self.assertEqual(delete(pizza["id"])["code"], "dish.pizza")  # no children left
+        self.assertEqual(delete(pizza["id"])["code"], "dish.pizza")  # 没有子节点了
         self.assertEqual([n["code"] for n in store.list_categories()], ["ingredient", "dish"])
 
-    # ---- scene configuration (app.repositories.scene_config / scenes) -----
+    # ---- 场景配置（app.repositories.scene_config / scenes）-----
 
     def assert_app_error(self, code, fn, *args, **kwargs):
         from app.core.errors import AppError
@@ -1171,12 +1172,12 @@ class PgLiveTests(unittest.TestCase):
         store = self.store()
         image = self.insert(store, 1)
         list_uc = ListImagesUseCase(store)
-        self.assertEqual(list_uc.execute()["scene"], "general")  # the default
-        self.assertEqual(list_uc.execute(scene="normal")["scene"], "general")  # MVP code still maps
+        self.assertEqual(list_uc.execute()["scene"], "general")  # 默认场景
+        self.assertEqual(list_uc.execute(scene="normal")["scene"], "general")  # MVP 的 code 仍然会映射
         detail = self.assert_app_error("LIST_UNKNOWN_SCENE", list_uc.execute, scene="steam_oven")
-        self.assertIn("general, oven, range_hood, us_diet, cn_diet, jp_diet", detail)  # tells the client what exists
+        self.assertIn("general, oven, range_hood, us_diet, cn_diet, jp_diet", detail)  # 告诉客户端有哪些
 
-        # A scene created through the configuration is usable at once, everywhere
+        # 通过配置创建的场景立刻在所有地方可用
         store.create_scene({"code": "steam_oven", "name": "蒸烤箱", "include_all": True})
         self.assertEqual((list_uc.execute(scene="steam_oven")["total"]), 1)
         self.assertEqual(resolve_index_scenes(store, scenes=["steam_oven", "general"]), ["steam_oven", "general"])
@@ -1185,7 +1186,7 @@ class PgLiveTests(unittest.TestCase):
                          failed=err.search_postgres_failed)["code"],
             "steam_oven",
         )
-        # ... and refused once disabled
+        # ……停用后就被拒绝
         steam = store.get_scene_by_code("steam_oven")["id"]
         store.update_scene(steam, {"is_active": False})
         self.assertIn("is inactive", self.assert_app_error("LIST_UNKNOWN_SCENE", list_uc.execute, scene="steam_oven"))
@@ -1203,11 +1204,11 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual(store.get_effective_scene_codes(steak), ["general"])
         self.assertEqual(store.list_images(scene="oven"), ([], 0))
         self.assertEqual(store.get_active_by_ids([steak], scene="oven"), {})
-        self.assertEqual(store.get_payload_rows([steak])[0]["scenes"], ["general"])  # what sync would push
+        self.assertEqual(store.get_payload_rows([steak])[0]["scenes"], ["general"])  # 同步会推送的内容
         oven_row = next(s for s in store.list_scene_configs() if s["code"] == "oven")
         self.assertEqual(oven_row["member_count"], 0)
 
-        store.update_scene(oven, {"is_active": True})  # rows were kept: members are back at once
+        store.update_scene(oven, {"is_active": True})  # 行保留着：成员立刻回来
         self.assertEqual(store.get_effective_scene_codes(steak), ["general", "oven"])
 
     def test_scene_configuration_crud_and_its_guards(self):
@@ -1230,7 +1231,7 @@ class PgLiveTests(unittest.TestCase):
         self.assert_app_error("VALIDATION_ERROR", store.create_scene, {"code": "device", "name": "旧编码"})
         self.assert_app_error("VALIDATION_ERROR", store.update_scene, sid, {"code": "steam"})
 
-        # labels: unique per scene, deletable only when no rule uses them
+        # 标签：每个场景内唯一，只有没有规则使用时才能删除
         scene = store.create_scene_label(sid, {"code": "steak", "name": "牛排", "sort_order": 2})
         scene = store.create_scene_label(sid, {"code": "meat", "name": "肉类", "sort_order": 1})
         self.assertEqual([l["code"] for l in scene["labels"]], ["meat", "steak"])  # sort_order
@@ -1241,7 +1242,7 @@ class PgLiveTests(unittest.TestCase):
         oven_label = self.sql("SELECT id FROM scene_labels WHERE code = 'steak' AND scene_id <> :s", {"s": sid}).scalar_one()
         self.assert_app_error("SCENE_NOT_FOUND", store.update_scene_label, sid, oven_label, {"name": "别的场景的"})
 
-        # rules: one per category / cuisine; labels only of this scene, only on category rules
+        # 规则：每个类别 / 菜系一条；标签只能是本场景的，并且只能用在类别规则上
         scene = store.create_scene_rule(sid, {"category_id": cat["steak"], "label_id": steak_label})
         scene = store.create_scene_rule(sid, {"cuisine": "american"})
         self.assertEqual(
@@ -1268,17 +1269,17 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual(len(scene["rules"]), 1)
         self.assert_app_error("SCENE_NOT_FOUND", store.delete_scene_rule, sid, cuisine_rule)
 
-        # the category admin sees the rule as a use
+        # 类别管理把规则视为一种使用
         self.assertEqual(next(n for n in store.list_categories() if n["code"] == "dish.steak")["scene_rule_count"], 1)
 
-        # deleting a scene takes its labels, rules and memberships; its code is still in the
-        # members' payloads, so the delete asks for a sync
+        # 删除场景会带走它的标签、规则和归属；它的 code 还在成员的 payload 里，
+        # 所以删除会要求同步
         image = self.insert(store, 1, category_id=cat["steak"], label_status="auto")
         store.recompute_scene_memberships(limit=10)
         self.assertEqual(store.get_effective_scene_codes(image), ["general", "oven", "steam_oven"])
         self.assertEqual(store.delete_scene(sid), {"id": sid, "code": "steam_oven", "sync_required": True})
         empty = store.create_scene({"code": "air_fryer", "name": "空气炸锅"})
-        self.assertEqual(store.delete_scene(empty["id"])["sync_required"], False)  # never had members
+        self.assertEqual(store.delete_scene(empty["id"])["sync_required"], False)  # 从来没有成员
         for table in ("scene_labels", "scene_rules", "image_scenes"):
             self.assertEqual(self.sql(f"SELECT count(*) FROM {table} WHERE scene_id = :s", {"s": sid}).scalar_one(), 0, table)
         self.assertEqual(store.get_effective_scene_codes(image), ["general", "oven"])
@@ -1291,40 +1292,40 @@ class PgLiveTests(unittest.TestCase):
         def flag(result):
             return result["sync_required"]
 
-        # A new rule-based scene has no members yet; a new active include_all one has every image
+        # 新的按规则的场景还没有成员；新的启用的 include_all 场景包含所有图片
         rule_based = store.create_scene({"code": "steam_oven", "name": "蒸烤箱"})
         sid = rule_based["id"]
         self.assertFalse(flag(rule_based))
         self.assertTrue(flag(store.create_scene({"code": "air_fryer", "name": "空气炸锅", "include_all": True})))
         self.assertFalse(flag(store.create_scene({"code": "grill", "name": "烤架", "include_all": True, "is_active": False})))
 
-        # Read per request: names, descriptions, outputs_heating, labels
+        # 每次请求时读取：名称、描述、outputs_heating、标签
         self.assertFalse(flag(store.update_scene(sid, {"name": "蒸烤箱 2", "description": "x", "outputs_heating": True})))
-        self.assertFalse(flag(store.update_scene(sid, {"is_active": True, "include_all": False})))  # unchanged values
+        self.assertFalse(flag(store.update_scene(sid, {"is_active": True, "include_all": False})))  # 值没有变
         scene = store.create_scene_label(sid, {"code": "steak", "name": "牛排"})
         self.assertFalse(flag(scene))
         label = scene["labels"][0]["id"]
         self.assertFalse(flag(store.update_scene_label(sid, label, {"name": "牛排 2", "is_active": False})))
 
-        # Rules of an active rule-based scene change membership; a label mapping does not
+        # 启用的按规则场景的规则会改变归属；标签映射不会
         scene = store.create_scene_rule(sid, {"category_id": cat["dish"]})
         self.assertTrue(flag(scene))
         rule = scene["rules"][0]["id"]
         self.assertFalse(flag(store.update_scene_rule(sid, rule, {"label_id": label})))
-        self.assertFalse(flag(store.update_scene_rule(sid, rule, {"category_id": cat["dish"], "cuisine": None})))  # same target
+        self.assertFalse(flag(store.update_scene_rule(sid, rule, {"category_id": cat["dish"], "cuisine": None})))  # 同一个对象
         self.assertTrue(flag(store.update_scene_rule(sid, rule, {"category_id": cat["steak"]})))
         self.assertFalse(flag(store.delete_scene_label(sid, store.create_scene_label(sid, {"code": "x", "name": "x"})["labels"][-1]["id"])))
 
-        # Turning the scene off or into include_all changes membership; while it is off, nothing does
+        # 关闭场景或改成 include_all 会改变归属；关闭期间什么都不会改变
         self.assertTrue(flag(store.update_scene(sid, {"is_active": False})))
         self.assertFalse(flag(store.create_scene_rule(sid, {"cuisine": "american"})))
-        self.assertFalse(flag(store.update_scene(sid, {"include_all": True})))  # still off
-        self.assertTrue(flag(store.update_scene(sid, {"is_active": True})))  # on, with every image
-        self.assertFalse(flag(store.delete_scene_rule(sid, rule)))  # an include_all scene ignores its rules
+        self.assertFalse(flag(store.update_scene(sid, {"include_all": True})))  # 仍然关闭
+        self.assertTrue(flag(store.update_scene(sid, {"is_active": True})))  # 开启，包含所有图片
+        self.assertFalse(flag(store.delete_scene_rule(sid, rule)))  # include_all 场景忽略它的规则
         self.assertTrue(flag(store.update_scene(sid, {"include_all": False})))
 
     def test_a_rule_target_changes_in_place(self):
-        cat = self.seed_catalog()  # oven: rule on dish with label steak
+        cat = self.seed_catalog()  # oven：针对 dish 的规则，标签为 steak
         store = self.store()
         oven = store.get_scene_by_code("oven")["id"]
         label = cat["label"]
@@ -1334,11 +1335,11 @@ class PgLiveTests(unittest.TestCase):
             return [(r["id"], r["category"]["code"] if r["category"] else None, r["cuisine"], r["label"]["code"] if r["label"] else None)
                     for r in next(s for s in store.list_scene_configs() if s["id"] == oven)["rules"]]
 
-        # Another category: same rule id, label kept
+        # 另一个类别：规则 id 相同，标签保留
         store.update_scene_rule(oven, rule, {"category_id": cat["steak"]})
         self.assertEqual(rules(), [(rule, "dish.steak", None, "steak")])
 
-        # A cuisine rule cannot keep a label: refused (nothing changes) until the label is cleared too
+        # 菜系规则不能保留标签：被拒绝（什么都不变），直到标签也被清空
         detail = self.assert_app_error("VALIDATION_ERROR", store.update_scene_rule, oven, rule, {"cuisine": "american"})
         self.assertIn("label_id: null", detail)
         self.assertEqual(rules(), [(rule, "dish.steak", None, "steak")])
@@ -1346,11 +1347,11 @@ class PgLiveTests(unittest.TestCase):
         self.assertTrue(result["sync_required"])
         self.assertEqual(rules(), [(rule, None, "american", None)])
 
-        # Back to a category, with a label, in one request
+        # 在一个请求里改回类别，并带上标签
         store.update_scene_rule(oven, rule, {"category_id": cat["dish"], "label_id": label})
         self.assertEqual(rules(), [(rule, "dish", None, "steak")])
 
-        # The target must be free in this scene, the category must exist, exactly one target
+        # 对象在这个场景里必须没有被占用，类别必须存在，恰好一个对象
         other = store.create_scene_rule(oven, {"cuisine": "american"})["rules"][-1]["id"]
         self.assert_app_error("SCENE_RULE_EXISTS", store.update_scene_rule, oven, other, {"category_id": cat["dish"]})
         self.assert_app_error("SCENE_RULE_EXISTS", store.update_scene_rule, oven, rule, {"cuisine": "american", "label_id": None})
@@ -1360,7 +1361,7 @@ class PgLiveTests(unittest.TestCase):
         self.assert_app_error("VALIDATION_ERROR", store.update_scene_rule, oven, rule, {})
         self.assertEqual(rules(), [(rule, "dish", None, "steak"), (other, None, "american", None)])
 
-        # Stored images follow the new target at the next recompute
+        # 已存图片在下一次重算时跟随新的对象
         steak = self.insert(store, 1, category_id=cat["steak"], label_status="auto")
         self.assertEqual(store.get_effective_scene_codes(steak), ["general", "oven"])
         store.delete_scene_rule(oven, other)
@@ -1376,17 +1377,17 @@ class PgLiveTests(unittest.TestCase):
         ).scalar_one()
         a, b = self.insert(store, 1), self.insert(store, 2)
         self.sql("UPDATE images SET payload_version = 3 WHERE id = :i", {"i": uuid.UUID(b)})
-        gone = str(uuid.uuid4())  # deleted meanwhile: no row, no FK failure
+        gone = str(uuid.uuid4())  # 这期间被删除了：没有行，也不会外键失败
 
         recorded = store.mark_payloads_pushed(model_id=model_id, versions={a: 1, b: 2, gone: 1})
-        self.assertEqual(recorded, [a])  # b moved on to 3 after its payload was read
+        self.assertEqual(recorded, [a])  # b 的 payload 被读取之后它变成了 3
         self.assertEqual(store.mark_payloads_pushed(model_id=model_id, versions={b: 3}), [b])
         self.assertEqual(store.mark_payloads_pushed(model_id=model_id, versions={}), [])
         ledger = dict(self.sql("SELECT image_id::text, synced_version FROM image_embeddings").fetchall())
         self.assertEqual(ledger, {a: 1, b: 3})
 
     def test_batch_recompute_follows_the_rules_and_bumps_only_what_changed(self):
-        cat = self.seed_catalog()  # oven: rule on dish (cuisines {american}) with label steak
+        cat = self.seed_catalog()  # oven：针对 dish（菜系 {american}）的规则，标签为 steak
         store = self.store()
         steak = self.insert(store, 1, category_id=cat["steak"], label_status="auto")
         plain = self.insert(store, 2)
@@ -1396,11 +1397,11 @@ class PgLiveTests(unittest.TestCase):
         def versions():
             return dict(self.sql("SELECT id::text, payload_version FROM images").fetchall())
 
-        # A new rule does nothing to stored images until they are recomputed
+        # 新规则在已存图片被重算之前对它们没有影响
         store.create_scene_rule(us_diet, {"cuisine": "american"})
         self.assertEqual(store.get_effective_scene_codes(steak), ["general", "oven"])
 
-        # Paging in id order; the cursor ends with None
+        # 按 id 顺序分页；游标以 None 结束
         ordered = sorted([steak, plain])
         first = store.recompute_scene_memberships(limit=1)
         self.assertEqual((first["image_ids"], first["last_id"]), ([ordered[0]], ordered[0]))
@@ -1409,14 +1410,14 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual(store.recompute_scene_memberships(after=second["last_id"], limit=1),
                          {"image_ids": [], "changed_ids": [], "last_id": None})
         self.assertEqual(sorted(first["changed_ids"] + second["changed_ids"]), [steak])
-        self.assertEqual(store.get_effective_scene_codes(steak), ["general", "oven", "us_diet"])  # cuisine inherited from dish
+        self.assertEqual(store.get_effective_scene_codes(steak), ["general", "oven", "us_diet"])  # 菜系继承自 dish
         self.assertEqual(versions(), {steak: 2, plain: 1})
 
-        # Nothing changed: a second pass bumps nobody
+        # 什么都没变：第二遍不递增任何图片
         self.assertEqual(store.recompute_scene_memberships(limit=10)["changed_ids"], [])
         self.assertEqual(versions(), {steak: 2, plain: 1})
 
-        # Removing a rule removes its members; a manual override survives recomputes
+        # 删除规则会删除它的成员；手工覆盖在重算后保留
         store.set_manual_scene_membership(plain, "oven", is_member=True)
         oven_rule = self.sql("SELECT id FROM scene_rules WHERE scene_id = :s", {"s": oven}).scalar_one()
         store.delete_scene_rule(oven, oven_rule)
@@ -1426,15 +1427,15 @@ class PgLiveTests(unittest.TestCase):
         rows = self.sql("SELECT origin, count(*) FROM image_scenes GROUP BY origin ORDER BY origin").fetchall()
         self.assertEqual([tuple(r) for r in rows], [("manual", 1), ("rule", 1)])
 
-        # Moving a category changes its subtree's memberships the same way
+        # 移动类别会以同样的方式改变它子树的归属
         store.create_scene_rule(oven, {"category_id": cat["dish"]})
         ingredient = store.create_category({"code": "ingredient", "names": [self.zh("食材")]})
-        store.update_category(cat["steak"], {"parent_id": ingredient["id"]})  # no longer under dish
+        store.update_category(cat["steak"], {"parent_id": ingredient["id"]})  # 不再在 dish 下面
         store.recompute_scene_memberships(limit=10)
-        self.assertEqual(store.get_effective_scene_codes(steak), ["general"])  # nor american any more
+        self.assertEqual(store.get_effective_scene_codes(steak), ["general"])  # 也不再是 american
 
     def test_a_category_move_or_cuisines_change_recomputes_the_images_below_it(self):
-        cat = self.seed_catalog()  # oven: rule on dish; dish has cuisines {american}; steak under dish
+        cat = self.seed_catalog()  # oven：针对 dish 的规则；dish 的菜系为 {american}；steak 在 dish 下面
         store = self.store()
         store.create_scene_rule(store.get_scene_by_code("us_diet")["id"], {"cuisine": "american"})
         steak = self.insert(store, 1, category_id=cat["steak"], label_status="auto")
@@ -1449,19 +1450,19 @@ class PgLiveTests(unittest.TestCase):
             return store.update_category(category_id, fields)["scene_membership"]
 
         start = versions()
-        # Names, order and an unchanged set of cuisines decide no scene: nothing is recomputed
+        # 名称、顺序和没变的菜系集合不决定任何场景：不重算任何东西
         self.assertIsNone(update(cat["steak"], {"names": [self.zh("西冷牛排")], "sort_order": 3}))
         self.assertIsNone(update(cat["dish"], {"cuisines": ["american", "american"]}))
         self.assertEqual(versions(), start)
 
-        # Cuisines reach every image of the subtree that inherits them; ids in id order
+        # 菜系会作用到子树里所有继承它的图片；id 按 id 顺序
         both = sorted([steak, dish_img])
         self.assertEqual(update(cat["dish"], {"cuisines": []}), {"images": 2, "changed_ids": both})
         self.assertEqual(store.get_effective_scene_codes(steak), ["general", "oven"])
         self.assertEqual(update(cat["dish"], {"cuisines": ["american"]}), {"images": 2, "changed_ids": both})
         self.assertEqual(store.get_effective_scene_codes(dish_img), ["general", "oven", "us_diet"])
 
-        # Moving steak out of dish leaves the dish rule and the cuisine it inherited from dish
+        # 把 steak 移出 dish 就离开了 dish 的规则，以及它从 dish 继承的菜系
         ingredient = store.create_category({"code": "ingredient", "names": [self.zh("食材")]})
         result = store.update_category(cat["steak"], {"parent_id": ingredient["id"]})
         self.assertEqual(result["category"]["parent_id"], ingredient["id"])
@@ -1470,16 +1471,16 @@ class PgLiveTests(unittest.TestCase):
         self.assertEqual(update(ingredient["id"], {"cuisines": ["american"]}), {"images": 1, "changed_ids": [steak]})
         self.assertEqual(store.get_effective_scene_codes(steak), ["general", "us_diet"])
 
-        # A manual override survives: back under dish, steak follows the oven rule but stays out of us_diet
+        # 手工覆盖保留：回到 dish 下面后，steak 跟随 oven 的规则，但仍然不在 us_diet 里
         store.set_manual_scene_membership(steak, "us_diet", is_member=False)
         self.assertEqual(update(cat["steak"], {"parent_id": cat["dish"]}), {"images": 1, "changed_ids": [steak]})
         self.assertEqual(store.get_effective_scene_codes(steak), ["general", "oven"])
 
-        # Every change bumped the image once; images outside the subtrees were left alone
+        # 每次修改都让图片递增了一次；子树之外的图片不受影响
         self.assertEqual(versions(), {steak: start[steak] + 6, dish_img: start[dish_img] + 2, plain: start[plain]})
 
     def test_scene_labels_come_from_the_deepest_rule_with_an_active_label(self):
-        cat = self.seed_catalog()  # oven: dish -> label steak
+        cat = self.seed_catalog()  # oven：dish -> 标签 steak
         store = self.store()
         oven = store.get_scene_by_code("oven")["id"]
         scene = store.create_scene_label(oven, {"code": "beef", "name": "牛肉"})
@@ -1490,7 +1491,7 @@ class PgLiveTests(unittest.TestCase):
             return {cid: label["code"] for cid, label in store.map_categories_to_scene_labels(oven, list(ids)).items()}
 
         self.assertEqual(mapped(cat["steak"], cat["dish"]), {cat["steak"]: "beef", cat["dish"]: "steak"})
-        store.update_scene_label(oven, beef, {"is_active": False})  # falls back to the broader rule
+        store.update_scene_label(oven, beef, {"is_active": False})  # 退回到更宽泛的规则
         self.assertEqual(mapped(cat["steak"]), {cat["steak"]: "steak"})
         steak_label = self.sql("SELECT id FROM scene_labels WHERE code = 'steak'").scalar_one()
         store.update_scene_label(oven, steak_label, {"is_active": False})
@@ -1513,14 +1514,14 @@ class PgLiveTests(unittest.TestCase):
         ).scalar_one()
         steak = self.insert(store, 1, category_id=cat["steak"], label_status="auto", food_state="cooked")
         plain = self.insert(store, 2)
-        orphan = self.insert(store, 3)  # in PG, never embedded into this collection
+        orphan = self.insert(store, 3)  # 在 PG 里，从来没有写进这个 collection
 
         vectors = QdrantVectorStore(QdrantStore(QdrantConnection(url=":memory:"), collection="c_sync", vector_dim=4))
         vectors.ensure_collection()
         self.addCleanup(vectors.close)
         for image, unit in ((steak, [1, 0, 0, 0]), (plain, [0, 1, 0, 0])):
             vectors.upsert(image, unit, {"scenes": ["general"], "category_id": None, "food_state": None, "label_status": "x"})
-        store.upsert_image_embedding(model_id=model_id, image_id=steak, synced_version=1)  # plain: ledger write "failed"
+        store.upsert_image_embedding(model_id=model_id, image_id=steak, synced_version=1)  # plain：台账写入"失败"了
         self.sql("UPDATE image_embeddings SET embedded_at = now() - interval '1 day'")
 
         model = ActiveModel(id=model_id, name="m", version="1", collection="c_sync", dim=4, distance="cosine")
@@ -1533,13 +1534,13 @@ class PgLiveTests(unittest.TestCase):
         points = {p["id"]: p["payload"] for p in vectors.search([1, 0, 0, 0], top_k=10)}
         self.assertEqual(points[steak], {"category_id": cat["steak"], "scenes": ["general", "oven"], "food_state": "cooked", "label_status": "auto"})
         self.assertEqual(points[plain]["scenes"], ["general"])
-        self.assertEqual(len(vectors.search([1, 0, 0, 0], top_k=10, scene="oven")), 1)  # the filter sees the new payload
+        self.assertEqual(len(vectors.search([1, 0, 0, 0], top_k=10, scene="oven")), 1)  # 过滤看到了新的 payload
         ledger = {r[0]: (r[1], r[2]) for r in self.sql(
             "SELECT image_id::text, synced_version, embedded_at < now() - interval '1 hour' FROM image_embeddings"
         ).fetchall()}
-        self.assertEqual(ledger, {steak: (1, True), plain: (1, False)})  # plain's row is new; steak's embedded_at kept
+        self.assertEqual(ledger, {steak: (1, True), plain: (1, False)})  # plain 的行是新的；steak 的 embedded_at 保留
 
-        # A rule change reaches the vector filter through the next sync
+        # 规则修改通过下一次同步作用到向量过滤
         oven = store.get_scene_by_code("oven")["id"]
         rule = self.sql("SELECT id FROM scene_rules WHERE scene_id = :s", {"s": oven}).scalar_one()
         store.delete_scene_rule(oven, rule)
@@ -1571,7 +1572,7 @@ class PgLiveTests(unittest.TestCase):
             "VALUES ('m', '1', 4, 'cosine', 336, 's3://w', 'c_manual', 'current') RETURNING id"
         ).scalar_one()
         plain = self.insert(store, 1)
-        orphan = self.insert(store, 2)  # in PG, never embedded into this collection
+        orphan = self.insert(store, 2)  # 在 PG 里，从来没有写进这个 collection
         vectors = QdrantVectorStore(QdrantStore(QdrantConnection(url=":memory:"), collection="c_manual", vector_dim=4))
         vectors.ensure_collection()
         self.addCleanup(vectors.close)
@@ -1602,7 +1603,7 @@ class PgLiveTests(unittest.TestCase):
                     "JOIN image_embeddings e ON e.image_id = i.id WHERE i.id = :i", {"i": uuid.UUID(image)}
                 ).scalar_one()
 
-            # Included by hand: the vector filter sees it in the same request, the ledger agrees
+            # 手工包含：向量过滤在同一个请求里就能看到，台账也一致
             response = client.put(path, json={"is_member": True})
             self.assertEqual(response.status_code, 200, response.text)
             body = response.json()
@@ -1610,24 +1611,24 @@ class PgLiveTests(unittest.TestCase):
             self.assertEqual(oven_hits(), [plain])
             self.assertTrue(synced(plain))
 
-            # Back to the rules (none match): out of the filter again
+            # 回到按规则（没有匹配的）：又从过滤里出去了
             body = client.delete(path).json()
             self.assertEqual((body["vector_sync"], body["sync_required"], body["scenes"]), ("pushed", False, ["general"]))
             self.assertEqual(oven_hits(), [])
 
-            # No vector in the current collection: saved in PG, search cannot see it
+            # 当前 collection 里没有向量：存在 PG 里，搜索看不到
             body = client.put(f"/api/images/{orphan}/scene-memberships/{oven}", json={"is_member": True}).json()
             self.assertEqual((body["vector_sync"], body["sync_required"]), ("missing", True))
             self.assertEqual(store.get_effective_scene_codes(orphan), ["general", "oven"])
 
-            # Qdrant fails: still saved, the client is told to sync
+            # Qdrant 失败：仍然保存，告诉客户端需要同步
             with patch.object(vectors, "set_payloads", side_effect=RuntimeError("qdrant down")):
                 body = client.put(path, json={"is_member": True}).json()
             self.assertEqual((body["vector_sync"], body["sync_required"], body["scenes"]), ("failed", True, ["general", "oven"]))
             self.assertEqual(oven_hits(), [])
-            self.assertFalse(synced(plain))  # the ledger tells the truth: the payload is behind
+            self.assertFalse(synced(plain))  # 台账如实记录：payload 落后了
 
-            # Retrieval stack not built: PostgreSQL alone still takes the change
+            # 检索服务没有构建：只靠 PostgreSQL 也能接受修改
             runtime.retrieval, runtime.retrieval_error = None, "embedding model unavailable"
             body = client.put(path, json={"is_member": False}).json()
             self.assertEqual((body["vector_sync"], body["sync_required"], body["scenes"]), ("not_ready", True, ["general"]))
@@ -1654,8 +1655,8 @@ class PgLiveTests(unittest.TestCase):
         uc = SyncSceneMembershipsUseCase(store, vectors, model=model)
         oven = store.get_scene_by_code("oven")["id"]
 
-        # Another writer includes the image in oven (and pushes it) between our read and our write:
-        # our payload is the older one, so it must not stay in the collection
+        # 另一个写入方在我们读和写之间把图片加入了 oven（并推送了）：
+        # 我们的 payload 是较旧的那个，所以不能留在 collection 里
         real_set = vectors.set_payloads
         calls = []
 
@@ -1663,18 +1664,18 @@ class PgLiveTests(unittest.TestCase):
             calls.append({k: v["scenes"] for k, v in payloads.items()})
             if len(calls) == 1:
                 store.put_manual_scene_membership(image, oven, is_member=True)
-                uc.push_images([image])  # the other writer's own push lands first
+                uc.push_images([image])  # 另一个写入方自己的推送先到
             return real_set(payloads)
 
         with patch.object(vectors, "set_payloads", side_effect=racing_set):
             result = uc.push_images([image])
-        self.assertEqual(calls[0], {image: ["general"]})  # the stale write ...
-        self.assertEqual(calls[-1], {image: ["general", "oven"]})  # ... is followed by the current one
+        self.assertEqual(calls[0], {image: ["general"]})  # 过时的写入……
+        self.assertEqual(calls[-1], {image: ["general", "oven"]})  # ……之后跟着当前的写入
         self.assertEqual((list(result.pushed), result.missing, result.unconfirmed), ([image], [], []))
         self.assertEqual([hit["id"] for hit in vectors.search([1, 0, 0, 0], top_k=5, scene="oven")], [image])
 
     def run_while_locked(self, action, *, shared):
-        """Start action in a thread while this test holds the catalog lock; True if it waited."""
+        """在这个测试持有目录锁期间，在一个线程里启动 action；它等待了就返回 True。"""
         import threading
 
         from sqlalchemy import text
@@ -1687,7 +1688,7 @@ class PgLiveTests(unittest.TestCase):
         def run():
             try:
                 action()
-            except Exception as exc:  # surfaced by the assertion below
+            except Exception as exc:  # 由下面的断言暴露出来
                 failure.append(exc)
             done.set()
 
@@ -1716,9 +1717,9 @@ class PgLiveTests(unittest.TestCase):
         for name, action in writes.items():
             with self.subTest(name):
                 self.assertTrue(self.run_while_locked(action, shared=False), f"{name} did not wait for an admin write")
-        # Recomputes only read the catalog: they share the lock with other readers
+        # 重算只读取目录：它们和其他读取方共享锁
         self.assertFalse(self.run_while_locked(lambda: store.recompute_image_scenes(image, bump_version=False), shared=True))
-        # ... while an admin write waits for them
+        # ……而管理写入要等它们
         self.assertTrue(self.run_while_locked(lambda: store.create_scene({"code": "air_fryer", "name": "空气炸锅"}), shared=True))
         self.assertEqual([n["code"] for n in store.list_categories()], ["dish"])
 

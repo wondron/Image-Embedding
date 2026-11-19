@@ -1,1 +1,1 @@
-"""HTTP glue services (thin adapters over app.services)."""
+"""HTTP 胶水服务（app.services 之上的薄适配层）。"""

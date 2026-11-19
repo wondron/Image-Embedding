@@ -1,17 +1,17 @@
-"""Reconcile the vector store with PostgreSQL from the command line (cron, or a separate service).
+"""在命令行里让向量库与 PostgreSQL 对账（cron，或单独的服务）。
 
-One round pushes the payloads whose ledger row is behind and drains the deletion queue
-(app.services.retrieval.reconcile). The API already runs rounds in the background while
-RECONCILE_CONFIG.enabled is true; use this where it is off, or to catch up right away. A round
-that finds another process mid-round skips (advisory lock).
+一轮会补推台账落后的 payload，并清理删除队列
+（app.services.retrieval.reconcile）。RECONCILE_CONFIG.enabled 为 true 时 API 已经在后台
+定期对账；关掉时用这个，或者需要立刻补齐时用。发现另一个进程正在对账的一轮
+会跳过（advisory lock）。
 
-Needs PG + Qdrant + object storage config, like the other workers; no ONNX model is loaded.
+和其他后台任务一样，需要 PG、Qdrant 和对象存储的配置；不加载 ONNX 模型。
 
-Invoke from backend/:
+在 backend/ 下执行：
 
-  python -m app.workers.reconcile                # rounds while they get something done (at most --rounds)
-  python -m app.workers.reconcile --rounds 1     # exactly one round
-  python -m app.workers.reconcile --loop         # every RECONCILE_CONFIG.interval_seconds until Ctrl+C
+  python -m app.workers.reconcile                # 每轮有进展就继续（最多 --rounds 轮）
+  python -m app.workers.reconcile --rounds 1     # 只跑一轮
+  python -m app.workers.reconcile --loop         # 每隔 RECONCILE_CONFIG.interval_seconds 跑一轮，直到 Ctrl+C
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
                 max_payloads=settings.max_payloads, max_deletions=settings.max_deletions,
                 max_verifications=settings.max_verifications,
             ),
-            # no encoder in this worker: the ledger is checked, missing vectors wait for the API
+            # 这个后台任务里没有编码器：只检查台账，缺失的向量等 API 来补
             ledger=(infra.model.id, infra.vectors, infra.metadata),
         )
         cursor = None
@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
             result = use_case.run_once(cursor=cursor, should_stop=stop.is_set)
             cursor = result.cursor
             rounds.append(result.as_dict())
-            # Another round only helps while one gets something done (failures would just repeat)
+            # 只有一轮有进展时再跑一轮才有用（失败的只会重复失败）
             progressed = result.payloads.pushed > 0 or result.deletions.processed > 0
             if args.loop:
                 if stop.wait(settings.interval_seconds):

@@ -1,14 +1,13 @@
-"""Probe whether the effective IMAGE_STORAGE_CONFIG can actually reach object storage.
+"""探测生效的 IMAGE_STORAGE_CONFIG 是否真的能连上对象存储。
 
-Loads the same effective config as workers and the API: local YAML as the base,
-with Nacos overlaid key-by-key when reachable (app.core.config.nacos.load_config_once /
-NacosConfigProvider.load). Does not invent a second credential entry, does not
-print secrets, and reuses the production S3ImageStorage client (including its OSS-compatible checksum Config).
+加载和后台任务、API 相同的生效配置：本地 YAML 为底，Nacos 能连上时按键覆盖
+（app.core.config.nacos.load_config_once / NacosConfigProvider.load）。不另造第二套凭证入口，
+不打印密钥，复用生产环境的 S3ImageStorage 客户端（包括它兼容 OSS 的校验和 Config）。
 
-The probe object uses a clearly identifiable key under _oss_connectivity_probe/.
-By default it is deleted afterwards; cleanup is also attempted on failure.
+探测对象使用 _oss_connectivity_probe/ 下一个一眼就能认出的 key。
+默认事后删除；失败时也会尝试清理。
 
-Usage (from backend/, same interpreter as the API process):
+用法（在 backend/ 下，用和 API 进程相同的解释器）：
   python scripts/check_oss_connectivity.py
   python scripts/check_oss_connectivity.py --offline
   python scripts/check_oss_connectivity.py --keep
@@ -34,14 +33,14 @@ EXIT_CONFIG = 2
 EXIT_BUCKET = 3
 EXIT_TRANSFER = 4
 
-# Official references used only for failure hints (not as a second client config):
-# - PublicEndpointForbidden (data APIs on default public endpoints, Chinese mainland,
-#   accounts that activated OSS on/after 2025-03-20):
+# 只用于失败提示的官方参考资料（不作为第二套客户端配置）：
+# - PublicEndpointForbidden（在默认公网 endpoint 上调用数据接口、中国内地、
+#   2025-03-20 及之后开通 OSS 的账号）：
 #   https://www.alibabacloud.com/help/en/oss/user-guide/0048-00000401
 #   https://help.aliyun.com/en/oss/publicendpointforbidden-error-when-upload-object
-# - boto3 + OSS signature / endpoint / addressing:
+# - boto3 + OSS 的签名 / endpoint / 寻址方式：
 #   https://www.alibabacloud.com/help/en/oss/developer-reference/use-aws-sdks-to-access-oss
-# - OSS S3 compatibility: virtual-hosted style only:
+# - OSS 的 S3 兼容性：只支持虚拟主机寻址：
 #   https://www.alibabacloud.com/help/en/oss/developer-reference/compatibility-with-amazon-s3
 
 _SECRET_ASSIGN = re.compile(r"(?i)\b(aws_access_key_id|aws_secret_access_key|secret_access_key|access_key_id|secret_access_key_id|secret)\s*[:=]\s*([^\s,;&]+)")
@@ -67,7 +66,7 @@ def _empty_display(value: str | None) -> str:
     return value if value else '""'
 
 def public_url(public_base_url: str, key: str) -> str:
-    """Same join as app.utils.storage_keys.public_url."""
+    """和 app.utils.storage_keys.public_url 的拼接方式相同。"""
     base = (public_base_url or "").rstrip("/")
     k = (key or "").lstrip("/")
     if not base:
@@ -92,12 +91,11 @@ def credentials_status(access_key_id: str, secret_access_key: str) -> str:
 
 
 def inspect_key_prefix(section: Any, settings_obj: Any) -> dict[str, Any]:
-    """Detect key_prefix without requiring the in-progress settings field.
+    """检测 key_prefix，不依赖还在开发中的设置字段。
 
-    If the field has not landed in ImageStorageSettings and is absent from the
-    effective IMAGE_STORAGE_CONFIG mapping, report that it is not present.
-    Do not invent contract normalization; use the settings value when the
-    field already exists on the settings object, otherwise the raw section value.
+    如果这个字段还没有加进 ImageStorageSettings，并且生效的 IMAGE_STORAGE_CONFIG 映射里
+    也没有，就报告它不存在。不自己发明契约的规范化规则：设置对象上已经有这个字段时用设置
+    的值，否则用配置段里的原始值。
     """
     mapping = section if isinstance(section, Mapping) else {}
     fields = getattr(type(settings_obj), "__dataclass_fields__", {})
@@ -138,7 +136,7 @@ def build_probe_key(prefix_info: Mapping[str, Any], unique: str) -> str:
 
 
 def prefix_report(key: str, prefix_info: Mapping[str, Any]) -> tuple[bool, str]:
-    """Whether the probe key landed under the expected prefix, plus an explanation."""
+    """探测 key 是否落在预期的前缀下，并附上说明。"""
     if prefix_info.get("landed") and (prefix_info.get("value") or "").strip().strip("/"):
         prefix = (prefix_info.get("value") or "").strip().strip("/")
         ok = key == prefix or key.startswith(prefix + "/")
@@ -224,7 +222,7 @@ def extract_error_code(exc: BaseException) -> str:
 
 
 def classify_oss_error(exc: BaseException) -> str | None:
-    """Brief, sourced hints for common Aliyun OSS failures. Never claims 'config looks fine'."""
+    """针对常见阿里云 OSS 失败的简短提示，并注明出处。从不声称"配置看起来没问题"。"""
     code = extract_error_code(exc)
     text = sanitize_error_text(f"{type(exc).__name__}: {exc}")
     blob = f"{code} {text}".lower()
@@ -314,7 +312,7 @@ def load_effective_storage_config() -> tuple[dict[str, Any], dict[str, Any], Any
 
 
 def build_s3_client(settings_obj: Any) -> Any:
-    """Use the production S3ImageStorage constructor so the probe matches the app."""
+    """使用生产环境的 S3ImageStorage 构造函数，让探测和应用保持一致。"""
     from app.clients.image_storage import S3ImageStorage
 
     storage = S3ImageStorage(settings_obj)
@@ -440,13 +438,13 @@ def main(argv: list[str] | None = None) -> int:
         elif uploaded and args.keep:
             print(f"KEEP 按 --keep 保留探测对象 key={key}")
         elif not uploaded:
-            # Best-effort cleanup if put failed after a partial write (unusual).
+            # put 在部分写入后失败时尽力清理（不常见）。
             try:
                 client.delete_object(Bucket=bucket, Key=key)
             except Exception:
                 pass
         if uploaded and not read_ok and args.keep is False:
-            # already attempted delete above when uploaded
+            # 上传成功时上面已经尝试过删除
             pass
 
 

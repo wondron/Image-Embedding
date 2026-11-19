@@ -1,1 +1,1 @@
-"""API v1 resource routers."""
+"""API v1 的资源路由。"""

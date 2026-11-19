@@ -77,7 +77,7 @@ class GdinoDetect:
         return " . ".join(t.strip().rstrip(".").strip() for t in text_range) + " ."
 
     def preprocess(self, image, caption):
-        """Build graph feeds from a BGR array, RGB PIL image or image path."""
+        """从 BGR 数组、RGB PIL 图像或图片路径构建计算图的输入。"""
         return prepare_inputs(
             image, caption, self.tokenizer, self.input_shapes,
             short_side=self.short_side, max_size=self.max_size, max_text_len=self.max_text_len,
@@ -103,13 +103,13 @@ class GdinoDetect:
         return boxes, logits, phrases
 
     def predict(self, image_path, caption, box_threshold, text_threshold):
-        """HTTP entry point (keeps the original non-validating threshold policy, no NMS)."""
+        """HTTP 入口（保留原来不校验阈值的策略，不做 NMS）。"""
         result, _ = self.predict_with_metadata(image_path, caption, box_threshold, text_threshold, validate_thresholds=False)
         return result
 
     def predict_with_metadata(self, image, caption, box_threshold, text_threshold,
                               *, validate_thresholds=True):
-        """Return (detections, preprocessing metadata) for HTTP/CLI callers (no NMS)."""
+        """为 HTTP / 命令行调用方返回（检测结果, 预处理元数据）（不做 NMS）。"""
         t0 = perf_counter()
         with self.lock:
             t1 = perf_counter()

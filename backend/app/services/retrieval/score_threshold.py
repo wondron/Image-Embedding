@@ -1,7 +1,7 @@
-"""score_threshold resolve + hard validate (SSOT section 3.2.1).
+"""score_threshold 的解析和严格校验（SSOT 3.2.1 节）。
 
-Omitted / null -> 0.55 (rejection ON). Explicit 0 -> OFF.
-Legal set: {0} union [0.30, 1]. Out of range -> SEARCH_BAD_SCORE_THRESHOLD.
+没传 / null -> 0.55（开启拒绝）。显式 0 -> 关闭。
+合法取值：{0} ∪ [0.30, 1]。超出范围 -> SEARCH_BAD_SCORE_THRESHOLD。
 """
 
 from __future__ import annotations
@@ -17,11 +17,11 @@ MAX_SCORE_THRESHOLD = 1.0
 
 
 def resolve_score_threshold(value: Optional[Union[float, int]] = None) -> float:
-    """Normalize request score_threshold to effective T.
+    """把请求的 score_threshold 规范化成生效的阈值 T。
 
-    - None (omit / JSON null) -> DEFAULT_SCORE_THRESHOLD (0.55)
-    - 0 -> 0.0 (disable rejection; no score filter)
-    - otherwise must be finite and in [0.30, 1]
+    - None（没传 / JSON null）-> DEFAULT_SCORE_THRESHOLD（0.55）
+    - 0 -> 0.0（关闭拒绝；不按分数过滤）
+    - 其他值必须是有限数，且在 [0.30, 1] 内
     """
     if value is None:
         return float(DEFAULT_SCORE_THRESHOLD)
@@ -38,7 +38,7 @@ def resolve_score_threshold(value: Optional[Union[float, int]] = None) -> float:
             f"score_threshold must be finite; got {t!r}"
         )
 
-    # Sentinel: explicit 0 disables rejection
+    # 哨兵值：显式 0 关闭拒绝
     if t == 0.0:
         return 0.0
 
@@ -52,7 +52,7 @@ def resolve_score_threshold(value: Optional[Union[float, int]] = None) -> float:
 
 
 def qdrant_score_threshold(effective_t: float) -> Optional[float]:
-    """Native Qdrant threshold: None when rejection disabled (T==0)."""
+    """Qdrant 原生阈值：关闭拒绝时（T==0）为 None。"""
     if effective_t > 0.0:
         return float(effective_t)
     return None

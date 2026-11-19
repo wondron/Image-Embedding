@@ -1,6 +1,6 @@
-"""Batch search routes: several query images against the self-built library in one request
-(app.api.services.batch_search). One route per input, like the other search routes: uploaded
-files (multipart) or image URLs (JSON)."""
+"""多图搜索的路由：一次请求用多张查询图搜自建库（app.api.services.batch_search）。
+和其他搜索路由一样，每种输入一个路由：上传文件（multipart）或图片 URL（JSON）。
+"""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ _DESCRIPTION = (
 @router.post(
     "/files",
     response_model=BatchSearchResponse,
-    response_model_exclude_unset=True,  # per image: only the fields of its case; hits as on /api/search
+    response_model_exclude_unset=True,  # 每张图：只有它那种情况的字段；结果和 /api/search 的一样
     summary="多图搜索（上传文件）：自建库",
     description=_DESCRIPTION,
 )
@@ -61,7 +61,7 @@ async def batch_search_by_files(
     """multipart/form-data：files（可重复）加上其余表单字段。"""
     runtime = get_application_state(request)
     trace_id = bind_trace_id(request, trace_id)
-    require_retrieval(runtime)  # NOT_READY before reading any upload
+    require_retrieval(runtime)  # 在读取任何上传文件之前先确定 NOT_READY
     max_bytes = runtime.max_image_bytes
     images = [
         QueryImage(label=upload.filename or f"file-{index + 1}", read=partial(read_upload, upload, max_bytes))
@@ -89,7 +89,7 @@ async def batch_search_by_urls(request: Request, body: BatchSearchUrlsRequest) -
     """application/json：{image_urls, scene, top_k, score_threshold, trace_id}。"""
     runtime = get_application_state(request)
     trace_id = bind_trace_id(request, body.trace_id)
-    require_retrieval(runtime)  # NOT_READY before downloading anything
+    require_retrieval(runtime)  # 在下载任何东西之前先确定 NOT_READY
     images = [
         QueryImage(
             label=url,

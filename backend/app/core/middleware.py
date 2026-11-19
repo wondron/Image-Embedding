@@ -11,7 +11,7 @@ from app.core.config.settings import settings
 
 TRACE_HEADER = "X-Trace-Id"
 _TRACE_HEADER_KEY = TRACE_HEADER.lower().encode("latin-1")
-# Client-supplied ids end up in headers and logs: keep them short and inert.
+# 客户端传来的 id 会进入响应头和日志：保持简短且无害。
 _TRACE_ID_RE = re.compile(r"[A-Za-z0-9._:-]{1,64}")
 
 
@@ -21,11 +21,11 @@ def _clean_trace_id(value: Any) -> str | None:
 
 
 def _new_trace_id() -> str:
-    return str(uuid.uuid4())  # same format as show_text / historical trace ids
+    return str(uuid.uuid4())  # 和 show_text / 历史 trace id 的格式相同
 
 
 def get_trace_id(request: Request) -> str:
-    """The request's trace id (set by TraceIdMiddleware, else created on first use)."""
+    """这个请求的 trace id（由 TraceIdMiddleware 设置，否则第一次使用时生成）。"""
     trace_id = getattr(request.state, "trace_id", None)
     if not trace_id:
         trace_id = _new_trace_id()
@@ -34,7 +34,7 @@ def get_trace_id(request: Request) -> str:
 
 
 def bind_trace_id(request: Request, explicit: Any = None) -> str:
-    """Adopt an id passed in the request body/query (if valid) for this request."""
+    """采用请求体 / 查询参数里传来的 id（合规时）作为这个请求的 trace id。"""
     trace_id = _clean_trace_id(explicit)
     if trace_id:
         request.state.trace_id = trace_id
@@ -43,10 +43,10 @@ def bind_trace_id(request: Request, explicit: Any = None) -> str:
 
 
 class TraceIdMiddleware:
-    """One trace id per request: from the X-Trace-Id header if valid, else generated.
+    """每个请求一个 trace id：X-Trace-Id 请求头合规时用它，否则生成一个。
 
-    Stored in request.state.trace_id (error envelopes, logs) and echoed in the
-    X-Trace-Id response header (the final value, if an endpoint re-bound it).
+    存在 request.state.trace_id 里（错误结构、日志用），并回写到 X-Trace-Id 响应头
+    （如果接口重新绑定过，用最终的值）。
     """
 
     def __init__(self, app: Any) -> None:
@@ -72,9 +72,9 @@ class TraceIdMiddleware:
 
 
 def register_middlewares(app: FastAPI) -> None:
-    """Innermost first: each add_middleware wraps the ones added before it."""
-    # Inside CORS, so 500s from unexpected exceptions still carry the CORS headers.
-    # Imported here: app.core.exceptions imports this module.
+    """先加最里层的：每次 add_middleware 都包住之前加的中间件。"""
+    # 放在 CORS 里面，这样意外异常产生的 500 也带 CORS 响应头。
+    # 在这里导入：app.core.exceptions 导入了本模块。
     from app.core.exceptions import UnhandledErrorMiddleware
 
     app.add_middleware(UnhandledErrorMiddleware)

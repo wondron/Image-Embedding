@@ -203,7 +203,7 @@ def check_connection(settings: Any, profile: Mapping[str, Any]) -> int:
                 document = parse_config_text(text, "Nacos configuration")
             except Exception as exc:
                 invalid_documents += 1
-                # YAML exceptions include source lines; report only type and location.
+                # YAML 异常里包含源文件的行；只报告类型和位置。
                 mark = getattr(exc, "problem_mark", None)
                 location = f" line={mark.line + 1} column={mark.column + 1}" if mark is not None else ""
                 print(f"FAIL 配置须为有效 YAML mapping | {label} | {type(exc).__name__}{location}")

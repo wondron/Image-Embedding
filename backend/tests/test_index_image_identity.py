@@ -1,4 +1,4 @@
-"""IndexImageUseCase vs the images identity rule: same bytes -> same row, first upload wins."""
+"""IndexImageUseCase 与图片身份规则：相同字节 -> 同一行，第一次上传胜出。"""
 
 import hashlib
 import io
@@ -55,7 +55,7 @@ class FakeVectors:
 
 
 class FakeMetadata:
-    """Just enough of PgMetadataStore: insert keeps the first row per id."""
+    """刚好够用的 PgMetadataStore：插入时每个 id 保留第一行。"""
 
     def __init__(self, categories=None):
         self.rows = {}
@@ -63,7 +63,7 @@ class FakeMetadata:
         self.ledger = {}
         self.ledger_fails = False
         self.categories = categories or {}
-        self.tasks = []  # index_tasks rows, in write order
+        self.tasks = []  # index_tasks 行，按写入顺序
         self.tasks_fail = False
         self._write_lock = threading.RLock()
 
@@ -114,7 +114,7 @@ class FakeMetadata:
                 "width": row["width"],
                 "height": row["height"],
                 "category_id": row["category_id"],
-                **{key: row.get(key) for key in FOOD_FIELDS},  # image_foods, LEFT JOINed on read
+                **{key: row.get(key) for key in FOOD_FIELDS},  # image_foods，读取时 LEFT JOIN
                 "label_status": str(row["label_status"]),
                 "source_type": str(row["source_type"]),
                 "license": str(row["license"]),
@@ -161,10 +161,10 @@ class IndexImageIdentityTests(unittest.TestCase):
 
     def test_reupload_pushes_the_stored_row_not_the_request(self):
         data = _png()
-        first = self.use_case().execute_one(image_bytes=data)  # first: unlabeled
+        first = self.use_case().execute_one(image_bytes=data)  # 第一次：未标注
         self.assertTrue(first["created"])
         out = self.use_case().execute_one(image_bytes=data, category="dish.steak", food_state="raw")
-        self.assertFalse(out["created"])  # the client is told its labels were not written
+        self.assertFalse(out["created"])  # 告诉客户端它的标注没有写入
         _, payload = self.vectors.upserts[-1]
         self.assertIsNone(payload["category_id"])
         self.assertEqual(payload["label_status"], "unlabeled")
@@ -218,7 +218,7 @@ class IndexImageIdentityTests(unittest.TestCase):
             uc.execute_one(image_bytes=_png())
         self.assertEqual(ctx.exception.code, "INDEX_BAD_EMBEDDING")
         self.assertEqual(self.vectors.upserts, [])
-        self.assertEqual(self.meta.rows, {})  # embedding runs before any write
+        self.assertEqual(self.meta.rows, {})  # embedding 在任何写入之前计算
 
     def test_description_defaults_to_empty_and_is_stored_stripped(self):
         self.assertEqual(self.use_case().execute_one(image_bytes=_png((9, 9, 9)))["description"], "")
@@ -243,9 +243,9 @@ class IndexImageIdentityTests(unittest.TestCase):
         out = self.use_case().execute_one(
             image_bytes=_png((4, 4, 4)), tags=[" 红薯叶 ", "带皮", "", "红薯叶", "  "]
         )
-        self.assertEqual(out["tags"], ["红薯叶", "带皮"])  # stripped, blanks dropped, first duplicate kept
+        self.assertEqual(out["tags"], ["红薯叶", "带皮"])  # 去掉首尾空白、丢掉空的、重复的保留第一个
         self.assertEqual(self.meta.rows[uuid.UUID(out["id"])]["tags"], ["红薯叶", "带皮"])
-        _, payload = self.vectors.upserts[-1]  # tags stay in PG, like description
+        _, payload = self.vectors.upserts[-1]  # 标签留在 PG 里，和 description 一样
         self.assertNotIn("tags", payload)
 
     def test_reupload_keeps_the_first_tags(self):
@@ -274,7 +274,7 @@ class IndexImageIdentityTests(unittest.TestCase):
         self.assertEqual({key: out[key] for key in FOOD_FIELDS}, expected)
         stored = self.meta.rows[uuid.UUID(out["id"])]
         self.assertEqual({key: stored[key] for key in FOOD_FIELDS}, expected)
-        _, payload = self.vectors.upserts[-1]  # only food_state goes to Qdrant
+        _, payload = self.vectors.upserts[-1]  # 只有 food_state 进入 Qdrant
         self.assertEqual(set(payload), {"category_id", "scenes", "food_state", "label_status"})
 
     def test_no_food_annotation_is_fine(self):
@@ -303,7 +303,7 @@ class IndexImageIdentityTests(unittest.TestCase):
 
 
 class IndexTaskRecordTests(unittest.TestCase):
-    """Each file of a batch / single upload leaves one index_tasks record (task center)."""
+    """批量 / 单个上传的每个文件都留下一条 index_tasks 记录（任务中心）。"""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -350,7 +350,7 @@ class IndexTaskRecordTests(unittest.TestCase):
             )
         (row,) = self.meta.tasks
         self.assertEqual((row["error_code"], row["error_detail"]), ("INDEX_QDRANT_FAILED", "vector store write failed"))
-        self.assertEqual(out["failed"][0]["detail"], "vector store write failed")  # same text as the response
+        self.assertEqual(out["failed"][0]["detail"], "vector store write failed")  # 和响应里的文本相同
         self.assertNotIn("qdrant down", repr(self.meta.tasks))
 
     def test_execute_file_records_and_still_raises_its_failure(self):
@@ -372,7 +372,7 @@ class IndexTaskRecordTests(unittest.TestCase):
             single = self.use_case().execute_file({"image_bytes": _png((6, 6, 6)), "filename": "kept2.png"})
         self.assertEqual(len(out["indexed"]), 1)
         self.assertTrue(single["id"])
-        self.assertEqual(len(self.meta.rows), 2)  # both images stored
+        self.assertEqual(len(self.meta.rows), 2)  # 两张图片都存了
         self.assertTrue(any("index task record not written" in line for line in logs.output))
 
     def test_execute_one_records_nothing(self):
@@ -381,8 +381,9 @@ class IndexTaskRecordTests(unittest.TestCase):
 
 
 class ShardedStorageTests(unittest.TestCase):
-    """With object storage: an image's files go to the directory of its SHA-256's first two hex
-    characters, and a re-upload that kept a row stored under other keys leaves no copies behind."""
+    """有对象存储时：图片的文件放进它 SHA-256 前两个十六进制字符命名的目录，保留了存在
+    其他 key 下的行的重复上传不会留下副本。
+    """
 
     BASE = "https://cdn.test/image-embedding"
 
@@ -398,7 +399,7 @@ class ShardedStorageTests(unittest.TestCase):
         )
 
     def stored_before_the_shard_directory(self, data):
-        """A row and its files as an upload before the shard directory left them."""
+        """分片目录之前的上传留下的一行及其文件。"""
         image_id = str(uuid.UUID(bytes=hashlib.sha256(data).digest()[:16]))
         urls = {"original_url": f"{self.BASE}/original/{image_id}.png", "thumb_url": f"{self.BASE}/thumb/{image_id}.webp"}
         self.meta.insert_image({
@@ -431,7 +432,7 @@ class ShardedStorageTests(unittest.TestCase):
         image_id, urls = self.stored_before_the_shard_directory(data)
         out = self.use_case().execute_one(image_bytes=data)
         self.assertFalse(out["created"])
-        self.assertEqual({key: out[key] for key in urls}, urls)  # the stored row wins
+        self.assertEqual({key: out[key] for key in urls}, urls)  # 已存的行胜出
         shard = image_id[:2]
         self.assertEqual(sorted(self.storage._deleted), [f"original/{shard}/{image_id}.png", f"thumb/{shard}/{image_id}.webp"])
         self.assertEqual(set(self.storage._objects), {f"original/{image_id}.png", f"thumb/{image_id}.webp"})

@@ -1,4 +1,4 @@
-"""Qdrant probe checks with fake clients and a local read-only HTTP server."""
+"""用假客户端和本地只读 HTTP 服务器检查 Qdrant 探测。"""
 
 from __future__ import annotations
 

@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-if str(BACKEND_ROOT) not in sys.path:  # also works as `python scripts/seed_data.py`
+if str(BACKEND_ROOT) not in sys.path:  # 也可以用 `python scripts/seed_data.py` 运行
     sys.path.insert(0, str(BACKEND_ROOT))
 
 
@@ -323,7 +323,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         with engine.connect() as conn:
             check_schema(conn)
-            conn.rollback()  # end the check's implicit transaction before the write transaction
+            conn.rollback()  # 在写事务之前结束检查用的隐式事务
             with conn.begin() as tx:
                 report = seed_base_data(conn)
                 if args.dry_run:

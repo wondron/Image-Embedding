@@ -1,9 +1,9 @@
-"""The embedding model retrieval runs against (embedding_models row, status='current').
+"""检索所用的 embedding 模型（embedding_models 表里 status='current' 的那一行）。
 
-One model version = one Qdrant collection. The query/index encoder and the
-collection must switch together (app.models.embedding.EmbeddingModel): the stack
-pairs them by the row's fingerprint (services.retrieval.model_versions.same_encoder),
-and refuses to start when the loaded encoder's output dim differs from the row.
+一个模型版本对应一个 Qdrant collection。查询 / 入库用的编码器和 collection 必须一起切换
+（app.models.embedding.EmbeddingModel）：检索服务按这一行的指纹把它们配对
+（services.retrieval.model_versions.same_encoder），加载的编码器输出维度和这一行不同时
+拒绝启动。
 """
 
 from __future__ import annotations
@@ -26,13 +26,13 @@ class ActiveModel:
     input_size: int | None = None
     weights_uri: str | None = None
     preprocess: Mapping[str, Any] = field(default_factory=dict)
-    # {spec, probe} of the encoder that writes this collection (clients.inference.Embedder
-    # .fingerprint); None for a version registered before fingerprints were recorded
+    # 写入这个 collection 的编码器的 {spec, probe}（clients.inference.Embedder
+    # .fingerprint）；记录指纹之前登记的版本为 None
     fingerprint: Mapping[str, Any] | None = field(default=None, compare=False, repr=False)
 
     @property
     def space_id(self) -> str:
-        """Human-readable embedding space id (name:version)."""
+        """便于阅读的 embedding 空间 id（name:version）。"""
         return f"{self.name}:{self.version}"
 
     @classmethod
@@ -55,7 +55,7 @@ class ActiveModel:
             raise err.not_ready(f"invalid embedding_models current row: {exc}") from exc
 
     def check_encoder_dim(self, encoder_dim: int) -> None:
-        """VECTOR_DIM_MISMATCH unless the encoder produces vectors for this collection."""
+        """编码器产生的向量不适用于这个 collection 时抛出 VECTOR_DIM_MISMATCH。"""
         if int(encoder_dim) != self.dim:
             raise err.vector_dim_mismatch(
                 f"encoder output dim={encoder_dim} but embedding_models "

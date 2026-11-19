@@ -1,7 +1,7 @@
-"""Compatibility config cache for standalone scripts.
+"""给独立脚本用的兼容配置缓存。
 
-The FastAPI application owns its config snapshot through ``app.state.runtime``;
-this module remains available to command-line utilities and model demos.
+FastAPI 应用通过 ``app.state.runtime`` 持有自己的配置快照；
+这个模块留给命令行工具和模型演示使用。
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ def set_cfg(cfg: dict, yaml_path: Optional[str] = None):
 
 
 def load_cfg(yaml_path: Optional[str] = None) -> dict:
-    """Load config once for scripts or application startup."""
+    """为脚本或应用启动加载一次配置。"""
     global _cfg, _yaml_path
     yaml_path = yaml_path or settings.config.yaml_path
     _cfg = load_config(yaml_path)
@@ -32,7 +32,7 @@ def load_cfg(yaml_path: Optional[str] = None) -> dict:
 
 
 def get_cfg() -> dict:
-    """Lazy load config on first use and reuse it afterwards."""
+    """第一次使用时延迟加载配置，之后复用。"""
     global _cfg
     if _cfg is None:
         load_cfg()
@@ -40,7 +40,7 @@ def get_cfg() -> dict:
 
 
 def info() -> dict:
-    """Return current config source for diagnostics."""
+    """返回当前配置的来源，用于诊断。"""
     return {
         "app_env": settings.application.env,
         "yaml_path": _yaml_path or settings.config.yaml_path,

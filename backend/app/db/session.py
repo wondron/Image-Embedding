@@ -1,6 +1,6 @@
-"""PostgreSQL connection for the metadata store: engine, ping, schema check.
+"""元数据库的 PostgreSQL 连接：engine、ping、表结构检查。
 
-Depends only on app.core and app.db / app.models, never on app.services.
+只依赖 app.core 和 app.db / app.models，不依赖 app.services。
 """
 
 from __future__ import annotations
@@ -20,13 +20,13 @@ from app.core.config.constant import PG_CONNECT_TIMEOUT_SECONDS
 from app.db.base import Base
 from app.db.common import logger
 
-# Migrations shipped with this code: backend/alembic (/app/alembic in the image)
+# 随代码发布的迁移脚本：backend/alembic（镜像里是 /app/alembic）
 ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 
 
 @lru_cache(maxsize=1)
 def expected_revision() -> str:
-    """Head of the Alembic scripts next to this code; the database must be at exactly this revision."""
+    """与本代码放在一起的 Alembic 脚本的 head；数据库必须正好在这个版本。"""
     head = ScriptDirectory(str(ALEMBIC_DIR)).get_current_head()
     if head is None:
         raise errors.not_ready(f"no Alembic revisions under {ALEMBIC_DIR}")
@@ -34,11 +34,11 @@ def expected_revision() -> str:
 
 
 class PgConnectionMixin:
-    """Connection, ping, and Alembic schema verification.
+    """连接、ping，以及 Alembic 表结构校验。
 
-    url: normally PostgresSettings.url() (POSTGRES_CONFIG in Nacos / local YAML).
-    host / database reported by ping() are read from that URL, so they always
-    describe the database this store actually connects to.
+    url：通常是 PostgresSettings.url()（Nacos / 本地 YAML 里的 POSTGRES_CONFIG）。
+    ping() 报告的 host / database 从这个 URL 读取，所以总是
+    对应本存储实际连接的数据库。
     """
 
     def __init__(self, *, url: URL | str, connect_timeout: float = PG_CONNECT_TIMEOUT_SECONDS) -> None:
@@ -64,7 +64,7 @@ class PgConnectionMixin:
             raise errors.index_postgres_failed(f"create_engine: {type(exc).__name__}: {exc}") from exc
 
     def close(self) -> None:
-        """Dispose the connection pool (idempotent); next call reconnects lazily."""
+        """释放连接池（可重复调用）；下次使用时再按需重新连接。"""
         engine, self._engine = self._engine, None
         self._schema_ready = False
         if engine is not None:
@@ -91,12 +91,12 @@ class PgConnectionMixin:
             }
 
     def ensure_schema(self) -> None:
-        """Check the database is at this code's Alembic head and has ltree plus every
-        table in app.models. Does NOT auto-migrate.
+        """检查数据库处于本代码的 Alembic head，并且有 ltree 扩展和 app.models 里的每一张表。
+        **不会**自动迁移。
 
-        A database that is reachable but not migrated is NOT_READY (the message says what to
-        run); a failure to reach or query it is INDEX_POSTGRES_FAILED.
-        Run: `cd backend && alembic upgrade head` (same POSTGRES_CONFIG as the app).
+        数据库能连上但没有迁移时为 NOT_READY（信息里会写要执行的命令）；
+        连不上或查询失败为 INDEX_POSTGRES_FAILED。
+        执行：`cd backend && alembic upgrade head`（使用和应用相同的 POSTGRES_CONFIG）。
         """
         if self._schema_ready:
             return

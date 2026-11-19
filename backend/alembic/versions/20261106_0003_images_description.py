@@ -1,11 +1,11 @@
-"""images.description: free-text description, default empty string.
+"""images.description：自由文本描述，默认为空字符串。
 
 Revision ID: 20261106_0003
 Revises: 20261105_0002
 Create Date: 2026-11-06
 
-ADD COLUMN with a constant default is metadata-only on PostgreSQL >= 11
-(no table rewrite, no long lock). Existing rows read as ''.
+在 PostgreSQL >= 11 上，带常量默认值的 ADD COLUMN 只改元数据
+（不重写表，不长时间持锁）。已有的行读出来为 ''。
 """
 from __future__ import annotations
 

@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-if str(BACKEND_ROOT) not in sys.path:  # also works as `python scripts/reset_data.py`
+if str(BACKEND_ROOT) not in sys.path:  # 也可以用 `python scripts/reset_data.py` 运行
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from scripts.seed_data import (  # noqa: E402

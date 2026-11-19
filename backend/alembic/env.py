@@ -1,14 +1,13 @@
-"""Alembic env — the database comes from the same config as the application.
+"""Alembic 环境——数据库取自和应用相同的配置。
 
-Connection: POSTGRES_CONFIG in the effective config (Nacos layered over the local
-YAML, app.core.config.nacos), rendered by PostgresSettings.url(). Programmatic
-callers (tests/test_pg_live.py) can target another database through
-Config.attributes["database_url"].
+连接：生效配置里的 POSTGRES_CONFIG（Nacos 叠加在本地 YAML 上，app.core.config.nacos），
+由 PostgresSettings.url() 生成。以代码方式调用的一方（tests/test_pg_live.py）可以通过
+Config.attributes["database_url"] 指向另一个数据库。
 
-Schema SSOT is app.models (ORM). Revisions stay hand-reviewed SQL; use
-`alembic check` to confirm the migrated DB matches the models, or
-`alembic revision --autogenerate` to draft the next revision.
-The categories.path trigger lives only in migrations (not visible to autogenerate).
+表结构的唯一权威来源是 app.models（ORM）。迁移版本仍然是人工审阅的 SQL；用
+`alembic check` 确认迁移后的数据库和模型一致，或者用 `alembic revision --autogenerate`
+起草下一个版本。
+categories.path 触发器只存在于迁移里（autogenerate 看不到）。
 """
 from __future__ import annotations
 
@@ -39,7 +38,7 @@ def _database_url() -> URL:
 
     app_config = load_config_once(settings.nacos, settings.config.yaml_path)
     url = PostgresSettings.from_config(app_config).url()
-    # say which database is about to be migrated (password masked) and where its settings came from
+    # 说明即将迁移的是哪个数据库（密码已遮盖），以及它的配置来自哪里
     nacos = settings.nacos
     logging.getLogger("alembic.env").info(
         "target database %s | NACOS_ENV=%s, %s",

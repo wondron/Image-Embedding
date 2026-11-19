@@ -56,7 +56,7 @@ class ImageResolutionTests(unittest.TestCase):
         self.assertEqual(list(image_utils.iter_image_urls(item)), [self.original, self.large, self.medium, self.small])
 
     def test_flyb_size_names_are_matched_case_insensitively(self):
-        # what FlyB actually sends (logged 2026-11-12): capitalized sizes, Tiny first
+        # FlyB 实际发送的内容（2026-11-12 的日志）：尺寸首字母大写，Tiny 在最前
         tiny = 'https://images.invalid/tiny.png'
         item = {'original_url': self.original, 'details': {'images': [{'thumbnail_url': {
             'Tiny': tiny, 'Small': self.small, 'Medium': self.medium, 'Large': self.large,
@@ -70,7 +70,7 @@ class ImageResolutionTests(unittest.TestCase):
         self.assertEqual(item, before)
 
     def test_invalid_thumbnail_fields_and_empty_urls_are_ignored(self):
-        # the pre-card keys image_url / top-level thumbnail_url are no longer read either
+        # 结果卡之前的键 image_url / 顶层的 thumbnail_url 也都不再读取
         for item in ({}, {'original_url': None, 'details': None}, {'original_url': 123, 'details': 'invalid'}, {'details': {'images': 'invalid'}}, {'details': {'images': [None, 42, {}, {'thumbnail_url': {'large': None, 'medium': '', 'small': '  ', 'bad': []}}]}}, {'image_url': 'https://images.invalid/a.png', 'thumbnail_url': 'https://images.invalid/b.png'}):
             with self.subTest(item=item):
                 self.assertEqual(list(image_utils.iter_image_urls(item)), [])

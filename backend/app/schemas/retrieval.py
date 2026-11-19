@@ -1,8 +1,8 @@
-"""Retrieval wire: index / search / list (search and list follow contract §6.1).
+"""检索的 wire：入库 / 搜索 / 列表（搜索和列表遵循契约 §6.1）。
 
-Routes declare these as response_model; search/list use exclude_unset so the
-fields §6.1 makes conditional (scene_label, food_state, heating_group; in a search
-hit they sit in details) appear only when the use case set them.
+路由把它们声明为 response_model；搜索 / 列表使用 exclude_unset，这样 §6.1 规定的
+条件字段（scene_label、food_state、heating_group；在搜索结果里它们在 details 中）
+只在用例设置了时才出现。
 """
 
 from typing import Any, Literal
@@ -12,10 +12,10 @@ from pydantic import BaseModel, Field
 from app.schemas.search_hit import SearchHitBase
 
 
-# -- requests ---------------------------------------------------------------------------
+# -- 请求 ---------------------------------------------------------------------------------
 
 class IndexJsonRequest(BaseModel):
-    """JSON body when the file is already on a path the API process can read (§3.1)."""
+    """文件已经在 API 进程能读取的路径上时用的 JSON 请求体（§3.1）。"""
 
     path: str = Field(..., description="Local path reachable by the API process")
     description: str = Field(default="", description="图片描述，默认空字符串")
@@ -31,8 +31,8 @@ class IndexJsonRequest(BaseModel):
     )
     source_type: str | None = Field(default=None, description="来源，取值见 GET /api/enums/source_type；默认 user_upload")
     license: str | None = Field(default=None, description="许可，取值见 GET /api/enums/license；默认 unknown")
-    # optional food annotation (stored in image_foods); the use case checks it
-    # (app.core.rules.food_fields). Strict ints: JSON true must not count as 1
+    # 可选的食物标注（存在 image_foods 里）；由用例检查
+    # （app.core.rules.food_fields）。严格的整数：JSON 的 true 不能当成 1
     food_state: str | None = Field(default=None, description="食物状态，取值见 GET /api/enums/food_state")
     food_processing: str | None = Field(
         default=None, description="加工状态，取值见 GET /api/enums/food_processing"
@@ -44,7 +44,7 @@ class IndexJsonRequest(BaseModel):
 
 
 class SearchJsonRequest(BaseModel):
-    """JSON search body (§3.2 B)."""
+    """JSON 搜索请求体（§3.2 B）。"""
 
     img_url: str = Field(..., description="Remote query image URL")
     scene: str | None = None
@@ -56,7 +56,7 @@ class SearchJsonRequest(BaseModel):
     trace_id: str | None = None
 
 
-# -- shared parts -----------------------------------------------------------------------
+# -- 共用部分 -----------------------------------------------------------------------------
 
 class HeatingGroup(BaseModel):
     id: int
@@ -108,10 +108,10 @@ class IndexResponse(BaseModel):
     failed: list[IndexFailure] = Field(default_factory=list)
 
 
-# -- POST /api/search (§6.1.1) ------------------------------------------------------------
+# -- POST /api/search（§6.1.1）------------------------------------------------------------
 
 class SearchHitImage(BaseModel):
-    """The hit's image (details.images[0]): same keys as a FlyB result's details.images[]."""
+    """结果的图片（details.images[0]）：和 FlyB 结果 details.images[] 的键相同。"""
 
     image_url: str | None = Field(default=None, description="原图，同卡片的 original_url")
     thumbnail_url: str | None = Field(default=None, description="缩略图（512px WebP）")
@@ -120,7 +120,7 @@ class SearchHitImage(BaseModel):
 
 
 class SearchHitDetails(BaseModel):
-    """Everything of a self-built hit besides the card fields."""
+    """自建库结果中除卡片字段之外的全部内容。"""
 
     id: str = Field(..., description="images.id，也是 Qdrant point id")
     category_id: int | None = None
@@ -129,7 +129,7 @@ class SearchHitDetails(BaseModel):
     scene_label: str | None = Field(default=None, description="检索场景下的场景类别名；场景没有标签映射时不出现")
     label_status: str | None = None
     images: list[SearchHitImage] = Field(default_factory=list)
-    # food annotation: only when the scene outputs_heating (§6.1 P9), like heating_group
+    # 食物标注：只在场景开启 outputs_heating 时出现（§6.1 P9），和 heating_group 一样
     food_state: str | None = None
     food_processing: str | None = None
     food_count: int | None = None
@@ -153,7 +153,7 @@ class SearchResponse(BaseModel):
     message: str | None = None
 
 
-# -- GET /api/images (§6.1.2) -------------------------------------------------------------
+# -- GET /api/images（§6.1.2）-------------------------------------------------------------
 
 class ListImageItem(BaseModel):
     id: str
@@ -167,7 +167,7 @@ class ListImageItem(BaseModel):
     tags: list[str] = Field(default_factory=list)
     width: int | None = None
     height: int | None = None
-    # food annotation: only when the scene outputs_heating (§6.1 P9), like heating_group
+    # 食物标注：只在场景开启 outputs_heating 时出现（§6.1 P9），和 heating_group 一样
     food_state: str | None = None
     food_processing: str | None = None
     food_count: int | None = None

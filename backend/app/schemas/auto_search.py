@@ -1,13 +1,12 @@
-"""Business search wire (POST /api/search/auto/file, POST /api/search/auto/url).
+"""业务搜图的 wire（POST /api/search/auto/file、POST /api/search/auto/url）。
 
-The whole image in the self-built library; when it finds nothing, the regions GroundingDINO found
-in it (AUTO_SEARCH_REGION_CONFIG) and the recipe detection (RECIPE_DETECT_CONFIG), started beside
-it and merged; when none has anything, the global search as an optional fallback
-(app.api.services.auto_search). items[] are the result cards every channel shares
-(app.schemas.search_hit), each with its source first: the channel it came from. What depends on
-the channel is on the card, not on the envelope: a self-built card's details say whether they
-carry the heating information (outputs_heating). fallback says what happened to the global
-search, and so why items is empty when it is.
+用整图查自建库；整图没有结果时，用 GroundingDINO 在图里找到的区域
+（AUTO_SEARCH_REGION_CONFIG）和菜谱识别（RECIPE_DETECT_CONFIG），它们和整图搜索同时
+启动，最后合并；都没有结果时，用 Global 搜图作为可选兜底（app.api.services.auto_search）。
+items[] 是各通道共用的结果卡（app.schemas.search_hit），每张卡的第一个字段是 source：
+它来自哪个通道。和通道有关的信息在结果卡上，不在外层：自建库结果卡的 details 说明是否
+带加热信息（outputs_heating）。fallback 说明 Global 搜图的情况，也就说明了 items 为空时
+的原因。
 """
 
 from typing import Any, Literal
@@ -17,10 +16,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.schemas.search_hit import SearchHitBase
 
 TOP_K_DEFAULT = 10
-TOP_K_MAX = 20  # what the global search returns at most (FLAB_CONFIG.DOC_COUNT is 1–20)
+TOP_K_MAX = 20  # Global 搜图最多返回的条数（FLAB_CONFIG.DOC_COUNT 为 1–20）
 MACHINE_INFO_MAX_LENGTH = 128
 
-# Parameter descriptions shared by the file and the URL route
+# 文件路由和 URL 路由共用的参数说明
 SCENE_DOC = (
     "检测场景 code，如 general、oven（一体机）、range_hood（抽油烟机），见 GET /api/scenes；不传为 general。"
     "只作用于自建库：按场景过滤、场景类别名和加热信息都按它；Global 不分场景"
@@ -46,8 +45,9 @@ MACHINE_INFO_DOC = f"调用方设备信息（如设备型号），只用于日�
 
 
 class AutoSearchUrlRequest(BaseModel):
-    """JSON body of POST /api/search/auto/url. Unknown fields are refused (422), so a misspelt
-    or outdated parameter name (img_url, search_num, global_switch) does not pass unnoticed."""
+    """POST /api/search/auto/url 的 JSON 请求体。未知字段会被拒绝（422），这样拼错的或过时的
+    参数名（img_url、search_num、global_switch）不会被悄悄忽略。
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -63,8 +63,9 @@ class AutoSearchUrlRequest(BaseModel):
 
 
 class _CardSource(BaseModel):
-    """The channel a card came from. A base class of its own so that source is the card's first
-    field on the wire: pydantic puts the fields of the last base class first."""
+    """结果卡来自哪个通道。单独作为一个基类，这样 source 是结果卡在 wire 上的第一个字段：
+    pydantic 把最后一个基类的字段放在最前面。
+    """
 
     source: Literal["self", "recipe", "global"] = Field(
         ...,
@@ -76,8 +77,7 @@ class _CardSource(BaseModel):
 
 
 class AutoSearchHit(SearchHitBase, _CardSource):
-    """One result card: the channel it came from, the four card fields, and the rest in details
-    (as the channel gives them)."""
+    """一张结果卡：来源通道、四个卡片字段，其余放在 details 里（按通道给出的原样）。"""
 
     details: dict[str, Any] = Field(
         default_factory=dict,
@@ -94,7 +94,7 @@ class AutoSearchHit(SearchHitBase, _CardSource):
 
 
 class AutoSearchFallback(BaseModel):
-    """What happened to the global fallback; always present."""
+    """Global 兜底的情况；总是出现。"""
 
     status: Literal["not_needed", "disabled", "hit", "empty", "failed"] = Field(
         ...,

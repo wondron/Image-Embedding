@@ -1,4 +1,4 @@
-"""Task center routes: index records and the image deletion queue."""
+"""任务中心的路由：入库记录和图片删除队列。"""
 
 from __future__ import annotations
 

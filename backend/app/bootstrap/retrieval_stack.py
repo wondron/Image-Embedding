@@ -1,31 +1,26 @@
-"""Composition root for retrieval (图搜图): builds and wires objects, nothing else.
+"""检索（图搜图）的组合根：只负责构建和组装对象，别的什么都不做。
 
-    build_retrieval_infra   PG -> active embedding model -> Qdrant collection -> S3
-                            (no ONNX; enough for workers)
-    build_retrieval_stack   infra + the encoder paired with the model + use cases
-                            (API process; the configured encoder is the process-wide
-                            Embedder passed in by bootstrap.lifespan, shared with predict)
+    build_retrieval_infra   PG -> 当前 embedding 模型 -> Qdrant collection -> S3
+                            （不加载 ONNX；对后台任务来说足够了）
+    build_retrieval_stack   infra + 与模型配对的编码器 + 各个用例
+                            （API 进程；配置的编码器是 bootstrap.lifespan 传进来的
+                            进程内共用 Embedder，和预测共用）
 
-Pairing (pair_encoder): the stack uses the configured encoder (EMBEDDING_CONFIG) only when its
-fingerprint is the model version's (services.retrieval.model_versions.same_encoder). When
-EMBEDDING_CONFIG names another model, the version's own encoder is loaded from the spec its
-fingerprint recorded, so search keeps querying the collection with the encoder that wrote it
-while the new model is registered and built (/api/embedding-models). When that cannot be
-loaded the stack does not start (EMBEDDING_MODEL_MISMATCH): a wrong pair would answer every
-search with neighbours from another embedding space. A version registered before fingerprints
-existed is checked against a few of its stored images first, then gets the configured
-encoder's fingerprint.
+配对（pair_encoder）：只有配置的编码器（EMBEDDING_CONFIG）的指纹就是该模型版本的指纹时
+（services.retrieval.model_versions.same_encoder），检索服务才使用它。EMBEDDING_CONFIG 指向
+另一个模型时，按版本指纹记录的 spec 加载该版本自己的编码器，这样在新模型登记和构建期间
+（/api/embedding-models），搜索仍然用写入 collection 的那个编码器去查询。加载不了时检索服务
+不启动（EMBEDDING_MODEL_MISMATCH）：错误的配对会让每次搜索都返回另一个 embedding 空间里
+的近邻。在有指纹之前登记的版本，先用它的几张已存图片核对，然后记下配置的编码器的指纹。
 
-The API process passes the catalog's PostgreSQL store (metadata=...; app.bootstrap.catalog)
-so there is one pool; the infra then borrows it and does not close it. Workers let the infra
-open and own its store.
+API 进程传入目录的 PostgreSQL 存储（metadata=...；app.bootstrap.catalog），这样只有一个
+连接池；infra 借用它，不负责关闭。后台任务让 infra 自己打开并持有存储。
 
-Business rules live in app.services.retrieval; adapters in app.repositories /
-app.clients. Both builders release what they opened if a later step fails.
+业务规则在 app.services.retrieval 里；适配器在 app.repositories / app.clients 里。
+后面的步骤失败时，两个构建函数都会释放已经打开的东西。
 
-Every connection parameter comes from the effective config (Nacos layered over the
-local YAML): POSTGRES_CONFIG, QDRANT_CONFIG, IMAGE_STORAGE_CONFIG. They are read
-once here, so changing them in Nacos takes effect after a restart.
+所有连接参数都来自生效配置（Nacos 叠加在本地 YAML 上）：POSTGRES_CONFIG、QDRANT_CONFIG、
+IMAGE_STORAGE_CONFIG。它们只在这里读取一次，所以在 Nacos 里修改后要重启才生效。
 """
 
 from __future__ import annotations
@@ -60,7 +55,7 @@ logger = logging.getLogger("retrieval")
 
 @dataclass
 class RetrievalInfra:
-    """Connections + the active model. Owns their lifecycle, except a borrowed metadata store."""
+    """各个连接 + 当前模型。负责它们的生命周期，借来的元数据存储除外。"""
 
     metadata: PgMetadataStore
     vectors: QdrantVectorStore
@@ -70,9 +65,9 @@ class RetrievalInfra:
     _siblings: dict[str, QdrantVectorStore] = field(default_factory=dict, repr=False)
 
     def other_vectors(self) -> list[QdrantVectorStore]:
-        """The collections of the other versions still in use (building / ready), over the same
-        client; one whose collection is gone from Qdrant is left out. Read per call: a version
-        registered or retired since is seen at once."""
+        """同一个客户端上其他仍在使用的版本（building / ready）的 collection；collection 已经从
+        Qdrant 消失的版本不包括在内。每次调用时读取：之后登记或下线的版本立刻就能看到。
+        """
         out: list[QdrantVectorStore] = []
         rows = self.metadata.list_embedding_model_rows(statuses=(ModelStatus.BUILDING.value, ModelStatus.READY.value))
         for row in rows:
@@ -89,7 +84,7 @@ class RetrievalInfra:
         return out
 
     def ping(self) -> dict[str, dict[str, Any]]:
-        """Dependency status; never raises."""
+        """依赖状态；从不抛出。"""
         return {
             "postgres": self.metadata.ping(),
             "qdrant": self.vectors.ping(),
@@ -109,7 +104,7 @@ class RetrievalInfra:
 
 @dataclass
 class RetrievalStack:
-    """Everything the retrieval HTTP layer calls."""
+    """检索 HTTP 层调用的全部内容。"""
 
     infra: RetrievalInfra
     embedding: Embedder
@@ -131,7 +126,7 @@ class RetrievalStack:
 
 
 def _qdrant_connection(config: Mapping[str, Any]) -> QdrantConnection:
-    """QDRANT_CONFIG as-is (url, api_key, timeout, prefer_grpc); the endpoint must be explicit."""
+    """原样使用 QDRANT_CONFIG（url、api_key、timeout、prefer_grpc）；endpoint 必须显式给出。"""
     section = dict(config.get("QDRANT_CONFIG") or {})
     if not section.get("url") and not (section.get("host") and section.get("port")):
         raise ValueError("QDRANT_CONFIG.url (or host + port) missing from the configuration (Nacos / local YAML)")
@@ -144,13 +139,13 @@ def build_retrieval_infra(
     metadata: PgMetadataStore | None = None,
     model: ActiveModel | None = None,
 ) -> RetrievalInfra:
-    """PG schema check -> current embedding model -> its Qdrant collection -> object storage.
+    """PG 表结构检查 -> 当前 embedding 模型 -> 它的 Qdrant collection -> 对象存储。
 
-    metadata: a store to borrow (the catalog's); None opens one from POSTGRES_CONFIG.
-    model: the version to build on instead of the current one (a switch builds the stack of the
-    version it is about to make current, before PostgreSQL says so).
+    metadata：要借用的存储（目录的）；None 时用 POSTGRES_CONFIG 打开一个。
+    model：用来代替当前版本构建的版本（切换时，在 PostgreSQL 把它设为当前版本之前，
+    先构建它的检索服务）。
     """
-    # Parse every section before opening anything: a config error fails fast with nothing to release.
+    # 在打开任何东西之前解析所有配置段：配置错误尽早失败，不需要释放任何东西。
     with dependency_initialization(logger, config, "POSTGRES_CONFIG", stage="配置解析"):
         pg = PostgresSettings.from_config(config) if metadata is None else None
     with dependency_initialization(logger, config, "QDRANT_CONFIG", stage="配置解析"):
@@ -182,7 +177,7 @@ def build_retrieval_infra(
             existed = vectors.collection_exists()
             vectors.ensure_collection(recreate=False)
         if not existed:
-            # A collection made anew holds no point: whatever the ledger says, nothing is in it
+            # 重新建的 collection 里没有向量点：不管台账怎么说，里面都是空的
             forgotten = metadata.clear_embeddings(model.id)
             if forgotten:
                 logger.warning(
@@ -214,7 +209,7 @@ def build_retrieval_infra(
 
 
 def load_encoder_from_spec(config: Mapping[str, Any]) -> Callable[[Mapping[str, Any]], Embedder]:
-    """Loads the encoder a fingerprint's spec describes, with this process's runtime flags."""
+    """用本进程的运行时开关加载指纹 spec 所描述的编码器。"""
 
     def load(spec: Mapping[str, Any]) -> Embedder:
         return Embedder(config_for_fingerprint(spec, config))
@@ -223,12 +218,11 @@ def load_encoder_from_spec(config: Mapping[str, Any]) -> Callable[[Mapping[str, 
 
 
 def _adopt_configured_encoder(infra: RetrievalInfra, configured: Embedder) -> None:
-    """The current version has no fingerprint yet (registered before they existed): check a few
-    of its stored images against the configured encoder, then record its fingerprint.
+    """当前版本还没有指纹（在有指纹之前登记的）：用配置的编码器核对它的几张已存图片，
+    然后记录它的指纹。
 
-    EMBEDDING_MODEL_MISMATCH when the collection was written by another encoder. When the check
-    cannot run (originals or vectors unreadable) the encoder is used as before but nothing is
-    recorded, so the next start checks again.
+    collection 是另一个编码器写的时为 EMBEDDING_MODEL_MISMATCH。核对无法进行时（原图或
+    向量读不了），编码器照旧使用，但什么都不记录，下次启动时再核对。
     """
     model = infra.model
     model.check_encoder_dim(configured.probe_dim())
@@ -258,8 +252,9 @@ def _adopt_configured_encoder(infra: RetrievalInfra, configured: Embedder) -> No
 
 
 def _follow_moved_weights(infra: RetrievalInfra, encoder: Any) -> None:
-    """The version's encoder found at another path (or now with file hashes): record where, so
-    a later load (a roll back, a restart under another EMBEDDING_CONFIG) finds the weights."""
+    """在另一个路径下（或者现在带着文件哈希）找到了这个版本的编码器：记下位置，这样以后
+    加载（回滚、换了 EMBEDDING_CONFIG 后重启）能找到权重。
+    """
     model = infra.model
     current = encoder.fingerprint()
     if not moved(model.fingerprint, current):
@@ -280,10 +275,10 @@ def pair_encoder(
     candidates: Sequence[Any] = (),
     load: Callable[[Mapping[str, Any]], Embedder] | None = None,
 ) -> Embedder:
-    """The encoder that wrote infra.model's collection: the configured one, one of candidates
-    (encoders already in memory), or the version's own loaded from its fingerprint.
+    """写入 infra.model 的 collection 的编码器：配置的那个、candidates 中的一个（已经在内存里的
+    编码器），或者根据指纹加载的该版本自己的编码器。
 
-    VECTOR_DIM_MISMATCH / EMBEDDING_MODEL_MISMATCH when there is none.
+    都没有时为 VECTOR_DIM_MISMATCH / EMBEDDING_MODEL_MISMATCH。
     """
     model = infra.model
     if model.fingerprint is None:
@@ -340,18 +335,18 @@ def build_retrieval_stack(
     candidates: Sequence[Any] = (),
     load: Callable[[Mapping[str, Any]], Embedder] | None = None,
 ) -> RetrievalStack:
-    """Infra + encoder + use cases.
+    """infra + 编码器 + 各个用例。
 
-    embedder: the process-wide configured encoder (shared with predict). Only standalone
-    callers omit it, in which case one is built from config.
-    metadata: the catalog's store to borrow (see build_retrieval_infra).
-    model / candidates / load: see build_retrieval_infra and pair_encoder (load defaults to
-    loading from the fingerprint's spec with this config's runtime flags).
+    embedder：进程内共用的配置编码器（和预测共用）。只有独立调用方才不传，这时用配置
+    构建一个。
+    metadata：要借用的目录存储（见 build_retrieval_infra）。
+    model / candidates / load：见 build_retrieval_infra 和 pair_encoder（load 默认用本配置的
+    运行时开关按指纹的 spec 加载）。
     """
     infra = build_retrieval_infra(config, metadata=metadata, model=model)
     try:
         configured = embedder if embedder is not None else Embedder(config)
-        # Encoder and collection must belong to the same model version.
+        # 编码器和 collection 必须属于同一个模型版本。
         embedding = pair_encoder(
             infra, configured, candidates=candidates, load=load if load is not None else load_encoder_from_spec(config)
         )

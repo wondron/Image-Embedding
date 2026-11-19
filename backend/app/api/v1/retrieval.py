@@ -1,8 +1,7 @@
-"""Image index / search / list / health routes (SSOT §3, §6.1 wire).
+"""图片入库 / 搜索 / 列表 / 健康检查的路由（SSOT §3，§6.1 wire）。
 
-Routes only declare the HTTP surface; parsing, use-case calls and error mapping
-live in app.api.services.retrieval. Multipart vs JSON is resolved there by
-Content-Type (avoids FastAPI File+Body conflicts).
+路由只声明 HTTP 接口；解析、调用用例和错误映射都在 app.api.services.retrieval 里。
+multipart 还是 JSON 在那里按 Content-Type 判断（避免 FastAPI 的 File+Body 冲突）。
 """
 
 from __future__ import annotations
@@ -51,7 +50,7 @@ async def index_image_file(
 @router.post(
     "/search",
     response_model=SearchResponse,
-    response_model_exclude_unset=True,  # §6.1: conditional fields stay absent
+    response_model_exclude_unset=True,  # §6.1：条件字段不出现
     summary="Search by image",
     description=(
         "通过 multipart/form-data 上传 file，或使用 JSON 提交 {img_url,scene}。"

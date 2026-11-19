@@ -1,14 +1,14 @@
-"""PG v0.1 initial: 12 tables + ltree + path trigger.
+"""PG v0.1 初始版本：12 张表 + ltree + 路径触发器。
 
 Revision ID: 20261104_0001
 Revises:
 Create Date: 2026-11-04
 
-Contract: docs/image-search-pg-v01-data-contract.md §2
+契约：docs/image-search-pg-v01-data-contract.md §2
 
-Structure only. This revision used to insert six scenes; base data (default scenes, category
-roots) now lives in scripts/seed_data.py: run `python -m scripts.seed_data` after
-`alembic upgrade head`. Databases migrated earlier keep the scenes they already have.
+只有表结构。这个版本以前会插入六个场景；基础数据（默认场景、类别根节点）现在放在
+scripts/seed_data.py 里：在 `alembic upgrade head` 之后执行 `python -m scripts.seed_data`。
+之前已经迁移过的数据库保留它们已有的场景。
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from typing import Sequence, Union
 
 from alembic import op
 
-# revision identifiers, used by Alembic.
+# 版本标识，供 Alembic 使用。
 revision: str = "20261104_0001"
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None

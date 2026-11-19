@@ -1,8 +1,8 @@
-"""Task center wire: index records (GET / DELETE /api/index-tasks, DELETE /api/index-tasks/{id})
-and the deletion queue (GET /api/image-deletions, POST /api/image-deletions/process).
+"""任务中心的 wire：入库记录（GET / DELETE /api/index-tasks、DELETE /api/index-tasks/{id}）
+和删除队列（GET /api/image-deletions、POST /api/image-deletions/process）。
 
-Success bodies carry no trace_id (it is in the X-Trace-Id header), as for the gallery admin.
-Use case: app.services.retrieval.task_center.
+成功的响应体不带 trace_id（它在 X-Trace-Id 响应头里），和图库管理一样。
+用例：app.services.retrieval.task_center。
 """
 
 from typing import Literal
@@ -13,10 +13,10 @@ from app.core.enums import IndexTaskStatus, LabelStatus
 from app.services.retrieval.task_center import MAX_DELETIONS, IndexTaskImageState
 
 
-# -- index records ------------------------------------------------------------------------
+# -- 入库记录 -----------------------------------------------------------------------------
 
 class IndexTaskImage(BaseModel):
-    """The record's image as it is now."""
+    """记录对应的图片现在的样子。"""
 
     id: str
     thumb_url: str | None = None
@@ -86,7 +86,7 @@ class IndexTaskDeleteResponse(BaseModel):
     deleted: int = Field(..., description="1：删掉了这条记录；0：本来就没有这条记录")
 
 
-# -- deletion queue -----------------------------------------------------------------------
+# -- 删除队列 -----------------------------------------------------------------------------
 
 class ImageDeletionItem(BaseModel):
     image_id: str

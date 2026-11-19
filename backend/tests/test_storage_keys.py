@@ -1,5 +1,6 @@
-"""Unit checks for object keys: the SHA-256 shard directory and IMAGE_STORAGE_CONFIG.key_prefix
-(implementation only, not acceptance)."""
+"""对象 key 的单元检查：SHA-256 分片目录和 IMAGE_STORAGE_CONFIG.key_prefix
+（只针对实现，不是验收）。
+"""
 
 from __future__ import annotations
 
@@ -148,8 +149,8 @@ class StorageKeyCompositionTests(unittest.TestCase):
             public_url(BASE, original_key(IMAGE, "jpg")),
             f"{BASE}/original/{SHARD}/{IMAGE}.jpg",
         )
-        # public_base_url already ending in the same path + key_prefix would double;
-        # the implementation must not itself also fold key_prefix into the base.
+        # 如果 public_base_url 已经以相同的路径 + key_prefix 结尾，会重复两次；
+        # 实现本身不能再把 key_prefix 也拼进基础 URL。
         doubled = public_url(f"{BASE}/ImageEmbedding", key)
         self.assertEqual(doubled, f"{BASE}/ImageEmbedding/ImageEmbedding/original/{SHARD}/{IMAGE}.jpg")
 
@@ -164,11 +165,11 @@ class RelativeKeyTests(unittest.TestCase):
             f"{BASE}/ImageEmbedding/foo/{sharded}",
             f"{BASE}/{sharded}?versionId=3#x",
             f"{BASE}/original/{SHARD}/{IMAGE}%2Ejpg",
-            f"https://cdn.example/thumb/{sharded}",  # a URL root naming a layout directory
+            f"https://cdn.example/thumb/{sharded}",  # 包含布局目录名的 URL 根
         ):
             with self.subTest(stored=stored):
                 self.assertEqual(relative_key(stored), sharded)
-        self.assertEqual(relative_key(f"{BASE}/thumb/{IMAGE}.webp"), f"thumb/{IMAGE}.webp")  # flat, before the shard
+        self.assertEqual(relative_key(f"{BASE}/thumb/{IMAGE}.webp"), f"thumb/{IMAGE}.webp")  # 扁平，在分片之前
         for unknown in (None, "", "   ", f"{BASE}/o/{IMAGE}.jpg", f"{BASE}/original/", "original", "https://cdn/Original/a.jpg"):
             with self.subTest(unknown=unknown):
                 self.assertIsNone(relative_key(unknown))
@@ -178,7 +179,7 @@ class RelativeKeyTests(unittest.TestCase):
         self.assertTrue(different_objects(sharded, f"{BASE}/original/{IMAGE}.jpg"))
         self.assertTrue(different_objects(f"{BASE}/thumb/{SHARD}/{IMAGE}.webp", f"{BASE}/thumb/{IMAGE}.webp"))
         self.assertTrue(different_objects(sharded, f"{BASE}/thumb/{SHARD}/{IMAGE}.webp"))
-        # The same key under another URL root, or a URL form without a layout directory: maybe the same
+        # 另一个 URL 根下的同一个 key，或者没有布局目录的 URL 形式：可能是同一个
         self.assertFalse(different_objects(sharded, f"https://old-cdn.example/bucket/original/{SHARD}/{IMAGE}.jpg"))
         self.assertFalse(different_objects(sharded, f"{BASE}/ImageEmbedding/original/{SHARD}/{IMAGE}.jpg"))
         self.assertFalse(different_objects(sharded, sharded))
@@ -251,7 +252,7 @@ class StoragePutAndLegacyUrlTests(unittest.TestCase):
     def test_read_and_delete_use_the_stored_url_not_the_current_prefix(self):
         settings = ImageStorageSettings(public_base_url=BASE, key_prefix="ImageEmbedding")
         storage = MockImageStorage(settings)
-        old_key = f"original/{IMAGE}.jpg"  # stored before key_prefix and the shard directory
+        old_key = f"original/{IMAGE}.jpg"  # 在 key_prefix 和分片目录之前存的
         old_url = f"{BASE}/{old_key}"
         storage._objects[old_key] = b"legacy-bytes"
         self.assertEqual(storage.read_by_url_or_key(old_url), b"legacy-bytes")
@@ -262,7 +263,7 @@ class StoragePutAndLegacyUrlTests(unittest.TestCase):
         self.assertEqual(new_url, f"{BASE}/ImageEmbedding/original/{SHARD}/{IMAGE}.jpg")
         self.assertEqual(_key_from_url_or_key(new_url, BASE), f"ImageEmbedding/original/{SHARD}/{IMAGE}.jpg")
         self.assertEqual(storage.read_by_url_or_key(new_url), b"new-bytes")
-        # Re-reading the legacy URL must not be rewritten onto the current prefix or shard.
+        # 重新读取旧的 URL 时，不能把它改写到当前的前缀或分片上。
         self.assertEqual(_key_from_url_or_key(old_url, BASE), old_key)
 
     def test_a_url_of_another_root_keeps_its_shard_directory(self):

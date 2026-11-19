@@ -1,9 +1,9 @@
-"""Configuration import wire: POST /api/categories/import, POST /api/scenes/import.
+"""配置导入的 wire：POST /api/categories/import、POST /api/scenes/import。
 
-The request body is the file itself (a JSON object): what the admin pages download, or the body of
-GET /api/categories / GET /api/scenes, possibly edited (app.services.retrieval.import_categories,
-import_scenes). Both answer with the same report: counts, and one row per item that was (dry_run:
-would be) created, updated or deleted, or that could not be imported.
+请求体就是文件本身（一个 JSON 对象）：管理页下载的内容，或者 GET /api/categories /
+GET /api/scenes 的响应体，可以编辑过（app.services.retrieval.import_categories、
+import_scenes）。两者返回同样的报告：计数，以及每个被（dry_run 时：将被）创建、更新或删除、
+或者无法导入的项各一行。
 """
 
 from typing import Literal

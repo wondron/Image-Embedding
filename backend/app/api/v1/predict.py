@@ -1,4 +1,4 @@
-"""Global image search routes for uploaded files and image URLs."""
+"""上传文件和图片 URL 的 Global 搜图路由。"""
 
 from __future__ import annotations
 

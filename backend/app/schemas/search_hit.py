@@ -1,9 +1,8 @@
-"""Search result card shared by both search channels (contract §6.1.1).
+"""两个搜索通道共用的搜索结果卡（契约 §6.1.1）。
 
-Self-built search (POST /api/search → SearchHit) and FlyB global search
-(POST /api/search/global/* → PredictHit) answer with the same card: the four
-fields below at the top level, every other field in ``details`` (its content depends on
-the channel, see the two subclasses).
+自建库搜索（POST /api/search → SearchHit）和 FlyB Global 搜图
+（POST /api/search/global/* → PredictHit）返回同一种卡：下面四个字段在顶层，
+其他字段都在 ``details`` 里（内容按通道而定，见两个子类）。
 """
 
 from pydantic import BaseModel, Field

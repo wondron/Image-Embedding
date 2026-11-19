@@ -1,4 +1,4 @@
-"""app.core.errors is the one registry of error codes, and it decides what a client may see."""
+"""app.core.errors 是错误码唯一的登记表，并决定客户端能看到什么。"""
 
 import inspect
 import re
@@ -9,7 +9,7 @@ from app.core import errors
 from app.core.errors import ERROR_CODES, AppError, client_detail, code_for_status, is_internal
 
 APP = Path(__file__).resolve().parents[1] / "app"
-# Where a code appears as a literal: AppError("X", ...), error_response(request, "X", ...), {"error": "X"}
+# 错误码以字面量出现的地方：AppError("X", ...)、error_response(request, "X", ...)、{"error": "X"}
 INLINE_CODE = re.compile(
     r"""\bAppError\(\s*["']([A-Z][A-Z0-9_]+)["']"""
     r"""|error_response\(\s*\w+,\s*["']([A-Z][A-Z0-9_]+)["']"""

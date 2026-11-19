@@ -1,4 +1,4 @@
-"""Free-text image fields (images.description, images.tags)."""
+"""图片的自由文本字段（images.description、images.tags）。"""
 
 from __future__ import annotations
 
@@ -6,24 +6,25 @@ from typing import Any
 
 from app.core import errors as err
 
-# API-side bounds; the columns themselves are unbounded text / text[].
+# API 一侧的长度上限；这两列本身是不限长的 text / text[]。
 MAX_DESCRIPTION_LENGTH = 1000
 MAX_TAGS = 32
 MAX_TAG_LENGTH = 64
-# A search result card carries the tags as one text (contract §6.1.1, shared with FlyB's title).
+# 搜索结果卡把标签作为一段文本（契约 §6.1.1，和 FlyB 的标题共用这个字段）。
 TAG_SEPARATOR = "、"
 
 
 def tags_text(value: Any) -> str:
-    """images.tags as the card's tags text: joined with TAG_SEPARATOR; "" when there are none.
-    For display only: a tag may itself contain the separator."""
+    """images.tags 作为结果卡的 tags 文本：用 TAG_SEPARATOR 连接；没有标签时为 ""。
+    只用于显示：标签本身可能包含分隔符。
+    """
     if isinstance(value, (list, tuple)):
         return TAG_SEPARATOR.join(str(tag) for tag in value if tag)
     return str(value or "")
 
 
 def normalize_description(value: Any) -> str:
-    """None / blank -> "" (the column default); otherwise stripped text within the bound."""
+    """None / 空白 -> ""（列的默认值）；否则为去掉首尾空白、不超过上限的文本。"""
     if value is None:
         return ""
     if not isinstance(value, str):
@@ -37,8 +38,9 @@ def normalize_description(value: Any) -> str:
 
 
 def normalize_tags(value: Any) -> list[str]:
-    """None -> [] (the column default); otherwise each tag stripped, blanks dropped and
-    duplicates removed (the first one keeps its place), within the bounds."""
+    """None -> []（列的默认值）；否则每个标签去掉首尾空白、丢掉空的、去掉重复项
+    （重复的保留第一次出现的位置），并且不超过上限。
+    """
     if value is None:
         return []
     if not isinstance(value, (list, tuple)):

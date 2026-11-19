@@ -1,6 +1,6 @@
-"""Predict orchestration via FoodService (legacy inference island).
+"""通过 FoodService 编排预测（旧的推理模块）。
 
-DDD D6: must not import application.retrieval or pg_metadata.
+DDD D6：不能导入 application.retrieval 或 pg_metadata。
 """
 
 from __future__ import annotations
@@ -35,10 +35,10 @@ async def run_predict(
     search_num: int | None = None,
     timer: timer_tool | None = None,
 ) -> dict[str, Any]:
-    """Call FoodService.detect with shared logging and upstream error handling.
+    """调用 FoodService.detect，统一处理日志和上游错误。
 
-    timer: the calling interface's timer; FoodService records global搜索 / 后处理 on it and the
-    interface writes the timing line (run_file_predict / run_url_predict, or the business search).
+    timer：调用接口的计时器；FoodService 在上面记录 global搜索 / 后处理，由接口写出耗时行
+    （run_file_predict / run_url_predict，或者业务搜图）。
     """
     svc = require_food_service(runtime)
     if not img_bytes:
@@ -96,7 +96,7 @@ async def run_file_predict(
     save_res: bool,
     search_num: int | None = None,
 ) -> dict[str, Any]:
-    """Run the search for an uploaded input and write the request's timing line."""
+    """对上传的输入执行搜索，并写出请求的耗时行。"""
     timer = timer_tool()
     completed = False
     try:
@@ -125,7 +125,7 @@ async def run_url_predict(
     save_res: bool,
     search_num: int | None = None,
 ) -> dict[str, Any]:
-    """Download a search input and run the same operation as a file upload."""
+    """下载搜索输入，然后执行和上传文件相同的操作。"""
     trace_id = trace_id or str(uuid4())
     timer = timer_tool()
     source = f"use url |{img_url}"

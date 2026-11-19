@@ -1,4 +1,4 @@
-"""Local BERT tokenizer adapter for GroundingDINO."""
+"""GroundingDINO 用的本地 BERT 分词器适配层。"""
 
 from pathlib import Path
 
@@ -6,7 +6,7 @@ import numpy as np
 
 
 class BertTokenizer:
-    """Minimal local tokenizer interface used by GroundingDINO inference."""
+    """GroundingDINO 推理使用的最小本地分词器接口。"""
 
     def __init__(self, tokenizer_path):
         from tokenizers import Tokenizer
@@ -15,7 +15,7 @@ class BertTokenizer:
         if not tokenizer_file.is_file():
             raise FileNotFoundError(f"Tokenizer file not found: {tokenizer_file}")
         self._tokenizer = Tokenizer.from_file(str(tokenizer_file))
-        # GroundingDINO constructs its sentence masks before truncating text.
+        # GroundingDINO 在截断文本之前构建句子掩码。
         self._tokenizer.no_truncation()
         self._tokenizer.no_padding()
         self.pad_token_id = self._tokenizer.token_to_id("[PAD]")

@@ -1,10 +1,9 @@
-"""Model versions end to end without a database: the real routes, adapter and registry (with its
-build thread) over an in-memory store that keeps the SQL's rules (test_pg_live runs the SQL).
+"""不用数据库的端到端模型版本测试：真实的路由、适配层和版本登记（包括它的构建线程），
+存储放在内存里，保持 SQL 的规则（SQL 由 test_pg_live 运行）。
 
-The sequence a model update goes through: the configured encoder is another model -> register
-it (own empty collection) -> build (every stored image embedded into it, failures listed, the
-version becomes ready) -> switch (a new stack swapped in, the previous version kept ready) ->
-roll back the same way -> retire the old version (collection and ledger gone).
+一次模型更新经历的流程：配置的编码器是另一个模型 -> 登记它（自己的空 collection）->
+构建（所有已存图片都写入其中，列出失败的，版本变为 ready）-> 切换（换上新的检索服务，
+上一个版本保持 ready）-> 用同样的方式回滚 -> 下线旧版本（collection 和台账都删除）。
 """
 
 import contextlib
@@ -59,7 +58,7 @@ class FakeEncoder:
 
 
 class FakeVectors:
-    """One collection in a shared fake Qdrant."""
+    """共用的假 Qdrant 里的一个 collection。"""
 
     def __init__(self, qdrant, row):
         self.qdrant, self.collection, self.dim = qdrant, str(row["collection"]), int(row["dim"])
@@ -98,12 +97,12 @@ class FakeVectors:
 
 
 class FakeModelStore:
-    """embedding_models + image_embeddings + images, with the repository's rules."""
+    """embedding_models + image_embeddings + images，带着仓储的规则。"""
 
     def __init__(self):
         self.images = {i: {"payload_version": 1, "original_url": f"https://cdn/o/{i}.jpg"} for i in IMAGES}
         self.models = {}
-        self.ledger = {}  # (model_id, image_id) -> synced_version
+        self.ledger = {}  # （model_id, image_id）-> synced_version
         self.locked = set()
 
     def add_model(self, **row):
@@ -216,7 +215,7 @@ class FakeModelStore:
             if held:
                 self.locked.discard(key)
 
-    # -- what the build and payload push read
+    # -- 构建和 payload 推送读取的内容
     def get_payload_rows(self, ids):
         return [{"id": i, "payload_version": self.images[i]["payload_version"], "category_id": None,
                  "label_status": "unlabeled", "food_state": None, "scenes": ["general"]} for i in ids if i in self.images]
@@ -266,11 +265,11 @@ class ModelVersionsTests(unittest.TestCase):
         self.runtime = ApplicationState(
             config={"QDRANT_CONFIG": {"url": "http://q:6333"}}, config_info={}, http_client=Mock(), settings=SimpleNamespace(),
             catalog=SimpleNamespace(store=self.store, file_storage=lambda: self.storage),
-            embedder=self.new_encoder,  # EMBEDDING_CONFIG now names the new model
-            retrieval=stack_for(current, self.old_encoder, self.storage),  # search kept the old pair
+            embedder=self.new_encoder,  # EMBEDDING_CONFIG 现在指向新模型
+            retrieval=stack_for(current, self.old_encoder, self.storage),  # 搜索保留旧的配对
             reconciler=Mock(),
         )
-        # weights still on disk, as pair_encoder would load them from a fingerprint's spec
+        # 权重还在磁盘上，pair_encoder 会按指纹的 spec 加载它们
         self.loadable = {"config/model/dino/old.onnx": self.old_encoder}
         self.registry = ModelRegistry(self.runtime)
         self.runtime.models = self.registry
@@ -296,7 +295,7 @@ class ModelVersionsTests(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
 
-        def load_from_spec(config):  # weights still in the image, as model_registry loads them
+        def load_from_spec(config):  # 权重还在镜像里，model_registry 会这样加载它们
             def load(spec):
                 encoder = self.loadable.get(spec["model_path"])
                 if encoder is None:
@@ -319,7 +318,7 @@ class ModelVersionsTests(unittest.TestCase):
         self.addCleanup(p.stop)
         self.addCleanup(self.registry.close)
 
-    # -- helpers
+    # -- 辅助函数
     def ok(self, response, status=200):
         self.assertEqual(response.status_code, status, response.text)
         self.assertNotIn("trace_id", response.json())
@@ -340,35 +339,35 @@ class ModelVersionsTests(unittest.TestCase):
     def model(self, body, model_id):
         return next(m for m in body["models"] if m["id"] == model_id)
 
-    # -- the sequence
+    # -- 流程
     def test_the_overview_says_the_configured_encoder_is_a_new_unregistered_model(self):
         body = self.ok(self.client.get("/api/embedding-models"))
         self.assertEqual(body["images"], 5)
         self.assertEqual(body["configured"], {"loaded": True, "model_path": "config/model/dino/new.onnx", "dim": 4,
                                               "artifact": None, "model_id": None, "detail": None})
         self.assertEqual(body["retrieval"]["model_id"], 1)
-        self.assertEqual(body["retrieval"]["encoder"], "own")  # search keeps the encoder that wrote dino_v1
+        self.assertEqual(body["retrieval"]["encoder"], "own")  # 搜索保留写入 dino_v1 的那个编码器
         current = self.model(body, 1)
         self.assertEqual((current["status"], current["embedded"], current["missing"], current["points"]), ("current", 5, 0, 5))
-        self.assertEqual((current["weights"], current["artifact"]), (None, None))  # this fake records no weight files
+        self.assertEqual((current["weights"], current["artifact"]), (None, None))  # 这个假对象不记录权重文件
         self.assertEqual((current["serving"], current["configured"], current["encoder"]), (True, False, "serving"))
         self.assertIsNone(body["build"])
-        self.assertNotIn("probe", str(body))  # the fingerprint itself stays on the server
+        self.assertNotIn("probe", str(body))  # 指纹本身留在服务端
 
     def test_a_model_update_from_register_to_retire(self):
-        # register: its own empty collection, search untouched
+        # 登记：有自己的空 collection，搜索不受影响
         registered = self.ok(self.client.post("/api/embedding-models", json={"version": "v2"}), 201)["model"]
         self.assertEqual((registered["name"], registered["status"], registered["collection"]), ("new", "building", "new_v2"))
         self.assertEqual((registered["embedded"], registered["missing"], registered["configured"]), (0, 5, True))
         self.assertEqual(self.qdrant["new_v2"], {})
-        self.error(self.client.post("/api/embedding-models", json={}), 409, "EMBEDDING_MODEL_EXISTS")  # same encoder twice
+        self.error(self.client.post("/api/embedding-models", json={}), 409, "EMBEDDING_MODEL_EXISTS")  # 同一个编码器登记两次
         new_id = registered["id"]
-        # switching to it now would hide more images than a switch tops up itself
+        # 现在就切换过去，隐藏的图片会超过切换自己能补上的数量
         with patch.object(registry_module, "FINAL_CATCHUP_MAX", 2):
             body = self.error(self.client.post(f"/api/embedding-models/{new_id}/activate", json={}), 409, "EMBEDDING_MODEL_INCOMPLETE")
         self.assertIn("5 stored images", body["detail"])
 
-        # build: every image embedded with the new encoder, the version becomes ready
+        # 构建：所有图片都用新编码器计算 embedding，版本变为 ready
         build = self.ok(self.client.post(f"/api/embedding-models/{new_id}/build"))["build"]
         self.assertEqual((build["model_id"], build["state"]), (new_id, "running"))
         body = self.wait_build()
@@ -379,9 +378,9 @@ class ModelVersionsTests(unittest.TestCase):
         self.assertEqual(sorted(self.qdrant["new_v2"]), IMAGES)
         self.assertEqual(self.qdrant["new_v2"][IMAGES[0]]["vector"], PROBE_NEW)
         self.assertEqual(len(self.new_encoder.seen), 5)
-        self.assertEqual(self.old_encoder.seen, [])  # the old pair never wrote the new collection
+        self.assertEqual(self.old_encoder.seen, [])  # 旧的配对从来没有写入新的 collection
 
-        # switch: a stack on (new version, new encoder) replaces the old one; the old stays ready
+        # 切换：基于（新版本, 新编码器）的检索服务替换旧的；旧版本保持 ready
         old_stack = self.runtime.retrieval
         switched = self.ok(self.client.post(f"/api/embedding-models/{new_id}/activate", json={}))
         self.assertEqual((switched["switched"], switched["previous_id"]), (True, 1))
@@ -391,11 +390,11 @@ class ModelVersionsTests(unittest.TestCase):
         self.assertEqual(self.runtime.retrieval.model.collection, "new_v2")
         self.assertEqual(self.store.models[1]["status"], "ready")
         threading.Event().wait(0.1)
-        old_stack.close.assert_called_once()  # after the grace period
+        old_stack.close.assert_called_once()  # 过了宽限期之后
         again = self.ok(self.client.post(f"/api/embedding-models/{new_id}/activate", json={}))
         self.assertFalse(again["switched"])
 
-        # roll back: the same call on the previous version; its encoder is loaded again from its fingerprint
+        # 回滚：对上一个版本做同样的调用；它的编码器按指纹重新加载
         back = self.ok(self.client.post("/api/embedding-models/1/activate", json={}))
         self.assertEqual((back["previous_id"], self.runtime.retrieval.model.id), (new_id, 1))
         self.assertIs(self.runtime.retrieval.embedding, self.old_encoder)
@@ -403,15 +402,15 @@ class ModelVersionsTests(unittest.TestCase):
         self.ok(self.client.post(f"/api/embedding-models/{new_id}/activate", json={}))
         self.assertIs(self.runtime.retrieval.embedding, self.new_encoder)
 
-        # retire the old version: its collection and ledger go, it cannot come back
-        self.error(self.client.post(f"/api/embedding-models/{new_id}/retire"), 409, "EMBEDDING_MODEL_STATE")  # current
+        # 下线旧版本：它的 collection 和台账都删除，不能再回来
+        self.error(self.client.post(f"/api/embedding-models/{new_id}/retire"), 409, "EMBEDDING_MODEL_STATE")  # 当前版本
         retired = self.ok(self.client.post("/api/embedding-models/1/retire"))
         self.assertEqual((retired["dropped"], retired["ledger_rows"], retired["model"]["status"]), (True, 5, "retired"))
         self.assertNotIn("dino_v1", self.qdrant)
         self.assertEqual(retired["model"]["missing"], 0)
         self.error(self.client.post("/api/embedding-models/1/activate", json={}), 409, "EMBEDDING_MODEL_STATE")
         self.error(self.client.post("/api/embedding-models/1/build"), 409, "EMBEDDING_MODEL_STATE")
-        self.ok(self.client.post("/api/embedding-models/1/retire"))  # already retired: as it is
+        self.ok(self.client.post("/api/embedding-models/1/retire"))  # 已经下线：保持原样
 
     def test_images_that_cannot_be_embedded_are_listed_and_need_an_explicit_switch(self):
         self.storage.unreadable = {IMAGES[1]}
@@ -423,12 +422,12 @@ class ModelVersionsTests(unittest.TestCase):
         self.assertEqual(build["failures"][0]["image_id"], IMAGES[1])
         self.assertEqual(build["failures"][0]["code"], "IMAGE_FILE_UNAVAILABLE")
         self.assertNotIn("NoSuchKey", build["failures"][0]["detail"])
-        self.assertEqual(self.model(body, new_id)["status"], "building")  # not complete: not ready
+        self.assertEqual(self.model(body, new_id)["status"], "building")  # 不完整：不是 ready
         self.error(self.client.post(f"/api/embedding-models/{new_id}/activate", json={}), 409, "EMBEDDING_MODEL_INCOMPLETE")
         switched = self.ok(self.client.post(f"/api/embedding-models/{new_id}/activate", json={"allow_missing": True}))
         self.assertTrue(switched["switched"])
         self.assertEqual(switched["model"]["missing"], 1)
-        # the image readable again: a build of the current version fills the gap with the new encoder
+        # 图片又能读了：对当前版本做一次构建，用新编码器补上缺口
         self.storage.unreadable = set()
         self.ok(self.client.post(f"/api/embedding-models/{new_id}/build"))
         body = self.wait_build()
@@ -443,7 +442,7 @@ class ModelVersionsTests(unittest.TestCase):
         build = self.wait_build()["build"]
         self.assertEqual(build["state"], "failed")
         self.assertIn("IMAGE_FILE_UNAVAILABLE", build["error"])
-        self.assertEqual(build["failed"], registry_module.FAILURE_STREAK_LIMIT + 7)  # stopped after the batch that crossed it
+        self.assertEqual(build["failed"], registry_module.FAILURE_STREAK_LIMIT + 7)  # 在越过上限的那一批之后停止
         self.assertLessEqual(len(build["failures"]), registry_module.MAX_FAILURES_SHOWN)
 
     def test_a_vector_store_failure_fails_the_build_with_a_reason(self):
@@ -476,9 +475,9 @@ class ModelVersionsTests(unittest.TestCase):
         gate.set()
         body = self.wait_build()
         self.assertEqual(body["build"]["state"], "stopped")
-        self.assertEqual(body["build"]["embedded"], 2)  # ended after the batch in flight
+        self.assertEqual(body["build"]["embedded"], 2)  # 在进行中的那一批之后结束
         self.assertEqual(self.model(body, new_id)["missing"], 3)
-        # starting again goes on where it stopped
+        # 再次启动从停下的地方继续
         self.store.list_embedding_backlog = original
         self.ok(self.client.post(f"/api/embedding-models/{new_id}/build"))
         body = self.wait_build()
@@ -502,9 +501,9 @@ class ModelVersionsTests(unittest.TestCase):
         self.store.ledger.update({(7, i): 1 for i in IMAGES})
         body = self.error(self.client.post("/api/embedding-models/7/activate", json={}), 409, "EMBEDDING_ENCODER_UNAVAILABLE")
         self.assertIn("could not be loaded", body["detail"])
-        self.assertEqual(self.store.models[1]["status"], "current")  # nothing switched
+        self.assertEqual(self.store.models[1]["status"], "current")  # 什么都没切换
 
-    # -- the switch window, the collection's real points, the old version's own weights --------------
+    # -- 切换窗口、collection 里真实的向量点、旧版本自己的权重 --------------------------------
 
     def built_new_version(self):
         new_id = self.ok(self.client.post("/api/embedding-models", json={"version": "v2"}), 201)["model"]["id"]
@@ -513,7 +512,7 @@ class ModelVersionsTests(unittest.TestCase):
         return new_id
 
     def index_one_more(self, image_id, model_id):
-        """An image indexed through the stack in place: in PostgreSQL, the point and ledger row of model_id only."""
+        """通过就位的检索服务入库的一张图片：在 PostgreSQL 里，只有 model_id 的向量点和台账行。"""
         self.store.images[image_id] = {"payload_version": 1, "original_url": f"https://cdn/o/{image_id}.jpg"}
         collection = self.store.models[model_id]["collection"]
         self.qdrant[collection][image_id] = {"vector": [1.0, 0, 0, 0], "payload": {}}
@@ -522,17 +521,17 @@ class ModelVersionsTests(unittest.TestCase):
     def test_a_switch_tops_up_what_was_indexed_after_the_build(self):
         new_id = self.built_new_version()
         late = "00000009-0000-4000-8000-000000000000"
-        self.index_one_more(late, 1)  # went into the old collection after the build ended
+        self.index_one_more(late, 1)  # 在构建结束后进入了旧的 collection
         self.assertEqual(self.model(self.ok(self.client.get("/api/embedding-models")), new_id)["missing"], 1)
         switched = self.ok(self.client.post(f"/api/embedding-models/{new_id}/activate", json={}))
         self.assertEqual((switched["switched"], switched["caught_up"], switched["remaining"]), (True, 1, 0))
         self.assertEqual(switched["model"]["missing"], 0)
-        self.assertEqual(self.qdrant["new_v2"][late]["vector"], PROBE_NEW)  # embedded with the new encoder
+        self.assertEqual(self.qdrant["new_v2"][late]["vector"], PROBE_NEW)  # 用新编码器计算了 embedding
 
     def test_a_switch_holds_index_writes_back_until_the_new_stack_is_in(self):
         new_id = self.built_new_version()
         in_flight = self.runtime.vector_writes.shared()
-        in_flight.__enter__()  # an index request writing into the old collection right now
+        in_flight.__enter__()  # 一个正在往旧 collection 写入的入库请求
         done = threading.Event()
         outcome = {}
 
@@ -541,14 +540,14 @@ class ModelVersionsTests(unittest.TestCase):
             done.set()
 
         threading.Thread(target=switch, daemon=True).start()
-        self.assertFalse(done.wait(0.3))  # waits for the write in flight
-        self.assertTrue(self.runtime.vector_writes.closed)  # and new writes wait for the switch
+        self.assertFalse(done.wait(0.3))  # 等待进行中的写入
+        self.assertTrue(self.runtime.vector_writes.closed)  # 新的写入等待切换
         late = "00000009-0000-4000-8000-000000000000"
-        self.index_one_more(late, 1)  # what the write in flight stored
+        self.index_one_more(late, 1)  # 进行中的写入存下的内容
         in_flight.__exit__(None, None, None)
         self.assertTrue(done.wait(5))
         switched = self.ok(outcome["response"])
-        self.assertEqual((switched["caught_up"], switched["remaining"]), (1, 0))  # not left behind
+        self.assertEqual((switched["caught_up"], switched["remaining"]), (1, 0))  # 没有被落下
         self.assertFalse(self.runtime.vector_writes.closed)
         self.assertEqual(self.runtime.retrieval.model.id, new_id)
 
@@ -558,18 +557,18 @@ class ModelVersionsTests(unittest.TestCase):
             body = self.error(self.client.post(f"/api/embedding-models/{new_id}/activate", json={}), 409, "EMBEDDING_MODEL_INCOMPLETE")
             self.assertIn("5 stored images", body["detail"])
             switched = self.ok(self.client.post(f"/api/embedding-models/{new_id}/activate", json={"allow_missing": True}))
-        self.assertEqual((switched["caught_up"], switched["remaining"]), (0, 5))  # left to builds and the reconciler
+        self.assertEqual((switched["caught_up"], switched["remaining"]), (0, 5))  # 留给构建和对账任务
         self.assertFalse(self.runtime.vector_writes.closed)
 
     def test_points_lost_from_the_collection_are_noticed_and_embedded_again(self):
         new_id = self.built_new_version()
-        self.qdrant["new_v2"].clear()  # Qdrant lost the points; the ledger still lists 5
+        self.qdrant["new_v2"].clear()  # Qdrant 丢了向量点；台账里仍然列着 5 个
         body = self.ok(self.client.get("/api/embedding-models"))
         self.assertEqual((self.model(body, new_id)["embedded"], self.model(body, new_id)["points"]), (5, 0))
-        with patch.object(registry_module, "FINAL_CATCHUP_MAX", 2):  # the ledger is not trusted for a switch
+        with patch.object(registry_module, "FINAL_CATCHUP_MAX", 2):  # 切换时不信任台账
             self.error(self.client.post(f"/api/embedding-models/{new_id}/activate", json={}), 409, "EMBEDDING_MODEL_INCOMPLETE")
         self.qdrant["new_v2"].clear()
-        self.store.ledger.update({(new_id, i): 1 for i in IMAGES})  # the ledger claims them again
+        self.store.ledger.update({(new_id, i): 1 for i in IMAGES})  # 台账又声称它们在了
         self.ok(self.client.post(f"/api/embedding-models/{new_id}/build"))
         build = self.wait_build()["build"]
         self.assertEqual((build["verified"], build["repaired"], build["embedded"], build["remaining"]), (5, 5, 5, 0))
@@ -582,17 +581,17 @@ class ModelVersionsTests(unittest.TestCase):
         self.assertIsNone(self.model(body, new_id)["points"])
         self.ok(self.client.post(f"/api/embedding-models/{new_id}/build"))
         build = self.wait_build()["build"]
-        self.assertEqual((build["verified"], build["embedded"], build["remaining"]), (0, 5, 0))  # ledger void: all again
+        self.assertEqual((build["verified"], build["embedded"], build["remaining"]), (0, 5, 0))  # 台账作废：全部重来
         self.assertEqual(sorted(self.qdrant["new_v2"]), IMAGES)
 
     def test_the_old_version_is_topped_up_from_its_own_weights_before_a_roll_back(self):
         new_id = self.built_new_version()
         self.ok(self.client.post(f"/api/embedding-models/{new_id}/activate", json={}))
-        for n in range(6, 9):  # indexed after the switch: only the new collection has them
+        for n in range(6, 9):  # 切换之后入库的：只有新的 collection 里有
             self.index_one_more(f"0000000{n}-0000-4000-8000-000000000000", new_id)
         body = self.ok(self.client.get("/api/embedding-models"))
         self.assertEqual((self.model(body, 1)["missing"], self.model(body, 1)["encoder"]), (3, "recorded"))
-        self.ok(self.client.post("/api/embedding-models/1/build"))  # loads the old weights from the image
+        self.ok(self.client.post("/api/embedding-models/1/build"))  # 从镜像里加载旧的权重
         body = self.wait_build()
         self.assertEqual((body["build"]["embedded"], self.model(body, 1)["missing"]), (3, 0))
         self.assertEqual(self.qdrant["dino_v1"]["00000006-0000-4000-8000-000000000000"]["vector"], PROBE_OLD)
@@ -609,7 +608,7 @@ class ModelVersionsTests(unittest.TestCase):
         self.assertIn("are not in this image", body["detail"])
 
     def test_a_retrieval_stack_that_could_not_pair_is_fixed_by_switching(self):
-        self.runtime.retrieval = None  # EMBEDDING_CONFIG changed and the old weights are gone
+        self.runtime.retrieval = None  # EMBEDDING_CONFIG 改了，而且旧的权重已经不在了
         self.runtime.retrieval_error_code = "EMBEDDING_MODEL_MISMATCH"
         self.runtime.retrieval_error = "EMBEDDING_MODEL_MISMATCH: the weights are gone"
         self.runtime.reconciler = None
@@ -629,7 +628,7 @@ class ModelVersionsTests(unittest.TestCase):
     def test_register_validation_and_collection_names(self):
         self.error(self.client.post("/api/embedding-models", json={"version": "a b"}), 422, "VALIDATION_ERROR")
         self.error(self.client.post("/api/embedding-models", json={"nope": 1}), 422, "VALIDATION_ERROR")
-        self.qdrant["new_v2"] = {"left": {}}  # someone else's collection: never reused
+        self.qdrant["new_v2"] = {"left": {}}  # 别人的 collection：从不复用
         model = self.ok(self.client.post("/api/embedding-models", json={"version": "v2"}), 201)["model"]
         self.assertEqual(model["collection"], "new_v2_2")
         self.assertEqual(self.qdrant["new_v2"], {"left": {}})
@@ -644,7 +643,7 @@ class ModelVersionsTests(unittest.TestCase):
         self.error(self.client.post("/api/embedding-models/99/activate", json={}), 404, "EMBEDDING_MODEL_NOT_FOUND")
         self.error(self.client.post("/api/embedding-models/99/retire"), 404, "EMBEDDING_MODEL_NOT_FOUND")
         self.error(self.client.post("/api/embedding-models/0/retire"), 422, "VALIDATION_ERROR")
-        self.ok(self.client.post("/api/embedding-models/99/build/stop"))  # nothing to stop: as it is
+        self.ok(self.client.post("/api/embedding-models/99/build/stop"))  # 没什么可停止的：保持原样
         self.runtime.models = None
         self.runtime.retrieval_error = "TOTAL_CONFIG.retrieval_enabled is false"
         self.error(self.client.get("/api/embedding-models"), 503, "NOT_READY")

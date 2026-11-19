@@ -1,5 +1,6 @@
-"""embedding_models (the model versions, one Qdrant collection each) and the image_embeddings
-ledger (which images have a vector in which version's collection)."""
+"""embedding_models（模型版本，每个对应一个 Qdrant collection）和 image_embeddings 台账
+（哪些图片在哪个版本的 collection 里有向量）。
+"""
 
 from __future__ import annotations
 
@@ -43,7 +44,7 @@ def _upsert_image_embedding(
     image_id: UUID | str,
     synced_version: int | None = None,
 ) -> None:
-    """Record one embedding on the caller's connection and transaction."""
+    """在调用方的连接和事务上记录一条 embedding。"""
     from sqlalchemy import text
 
     uid = _as_uuid(image_id)
@@ -70,17 +71,17 @@ def _upsert_image_embedding(
 
 
 class PgEmbeddingsMixin:
-    """embedding_models current row + image_embeddings ledger."""
+    """embedding_models 的当前行 + image_embeddings 台账。"""
 
     def get_current_embedding_model(self) -> dict[str, Any]:
-        """Return the single status='current' embedding_models row.
+        """返回唯一一行 status='current' 的 embedding_models。
 
-        Raises clearly if none — seed expectation (M2 empty rebuild):
+        没有时明确报错——数据初始化的预期（M2 空库重建）：
           INSERT INTO embedding_models
             (name, version, dim, distance, input_size, preprocess, weights_uri,
              collection, status, activated_at)
           VALUES (..., 'cosine', ..., '{}', '...', '<collection>', 'current', now());
-        Partial unique index enforces at most one current.
+        部分唯一索引保证最多一个 current。
         """
         self.ensure_schema()
         from sqlalchemy import text
@@ -103,8 +104,8 @@ class PgEmbeddingsMixin:
             )
         out = _row_to_dict(row)
         out["vector_dim"] = int(out["dim"])
-        # Plain str for QdrantStore (cosine/dot/euclid); ck_embedding_models_distance
-        # guarantees a valid value
+        # 给 QdrantStore 的普通 str（cosine/dot/euclid）；ck_embedding_models_distance
+        # 保证取值合法
         out["distance"] = Distance(str(out.get("distance") or Distance.COSINE).lower()).value
         return out
 
@@ -115,9 +116,9 @@ class PgEmbeddingsMixin:
         image_id: UUID | str,
         synced_version: int | None = None,
     ) -> None:
-        """After successful Qdrant upsert: sync image_embeddings ledger.
+        """Qdrant upsert 成功之后：同步 image_embeddings 台账。
 
-        If synced_version is None, read images.payload_version for image_id.
+        synced_version 为 None 时，读取 image_id 的 images.payload_version。
         """
         self.ensure_schema()
         engine = self._get_engine()
@@ -134,8 +135,9 @@ class PgEmbeddingsMixin:
             ) from exc
 
     def get_payload_rows(self, image_ids: list[str]) -> list[dict[str, Any]]:
-        """What the Qdrant payload of these images is built from (contract §4.2), in id order:
-        {id, payload_version, category_id, label_status, food_state, scenes}. Missing ids are left out."""
+        """这些图片的 Qdrant payload 的来源字段（契约 §4.2），按 id 顺序：
+        {id, payload_version, category_id, label_status, food_state, scenes}。不存在的 id 不返回。
+        """
         self.ensure_schema()
         from sqlalchemy import text
 
@@ -163,16 +165,15 @@ class PgEmbeddingsMixin:
             raise err.index_postgres_failed(f"get_payload_rows: {type(exc).__name__}: {exc}") from exc
 
     def mark_payloads_pushed(self, *, model_id: int, versions: dict[str, int]) -> list[str]:
-        """Ledger: these payload versions are now in model_id's collection. Returns the image ids
-        recorded, in id order.
+        """台账：这些 payload 版本现在已经在 model_id 的 collection 里了。按 id 顺序返回记录了的
+        图片 id。
 
-        A version is recorded only while it is still the image's payload_version: when the image
-        changed (or was deleted) after its payload was read, the payload just written may be
-        older than what another writer pushed, so the caller reads and pushes it again
-        (services.retrieval.sync_scenes) instead of the ledger claiming it is current.
+        只有版本仍是图片的 payload_version 时才记录：图片在读取 payload 之后又变了（或被删了）时，
+        刚写入的 payload 可能比另一个写入方推送的更旧，所以调用方重新读取并再推送一次
+        （services.retrieval.sync_scenes），而不是让台账声称它是最新的。
 
-        embedded_at stays as it was for images already in the ledger (only the payload moved);
-        an image missing from it (its ledger write failed at index time) gets a row now.
+        已经在台账里的图片保留原来的 embedded_at（只是 payload 变了）；台账里缺失的图片
+        （入库时台账写入失败）现在补上一行。
         """
         if not versions:
             return []
@@ -210,12 +211,11 @@ class PgEmbeddingsMixin:
         limit: int = 200,
         model_id: int | None = None,
     ) -> list[str]:
-        """Images whose current-model ledger row (model_id's when given) is behind their
-        payload_version, in id order: after `after` (exclusive) and up to `until` (inclusive)
-        when given.
+        """当前模型（给了 model_id 时为它）的台账行落后于 payload_version 的图片，按 id 顺序：
+        在 `after` 之后（不含），给了 `until` 时到它为止（含）。
 
-        Only images with a ledger row: one without needs a vector, which a payload push cannot
-        give (list_images(out_of_sync=True) shows both kinds).
+        只包含有台账行的图片：没有台账行的需要的是向量，推送 payload 给不了
+        （list_images(out_of_sync=True) 两种都显示）。
         """
         self.ensure_schema()
         from sqlalchemy import text
@@ -249,12 +249,13 @@ class PgEmbeddingsMixin:
         except Exception as exc:
             raise err.index_postgres_failed(f"list_unsynced_payload_ids: {type(exc).__name__}: {exc}") from exc
 
-    # -- model versions (/api/embedding-models) -------------------------------------
+    # -- 模型版本（/api/embedding-models）---------------------------------------------
 
     def list_embedding_models(self) -> dict[str, Any]:
-        """{images, models}: how many images are stored, and every model version (oldest first)
-        with embedded (ledger rows: images with a vector in its collection) and behind (ledger
-        rows older than the image's payload_version). One snapshot, so embedded <= images."""
+        """{images, models}：存了多少张图片，以及每个模型版本（最早的在前）及其 embedded
+        （台账行数：在它的 collection 里有向量的图片）和 behind（比图片 payload_version 旧的
+        台账行数）。同一个快照，所以 embedded <= images。
+        """
         self.ensure_schema()
         from sqlalchemy import text
 
@@ -279,7 +280,7 @@ class PgEmbeddingsMixin:
             raise err.index_postgres_failed(f"list_embedding_models: {type(exc).__name__}: {exc}") from exc
 
     def list_embedding_model_rows(self, *, statuses: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
-        """The version rows (without counts), oldest first; only these statuses when given."""
+        """各版本的行（不带计数），最早的在前；给了 statuses 时只返回这些状态。"""
         self.ensure_schema()
         from sqlalchemy import text
 
@@ -311,9 +312,10 @@ class PgEmbeddingsMixin:
             raise err.index_postgres_failed(f"get_embedding_model: {type(exc).__name__}: {exc}") from exc
 
     def register_embedding_model(self, fields: dict[str, Any]) -> dict[str, Any]:
-        """A new model version, status building: {name, version, dim, distance, input_size,
-        preprocess, weights_uri, collection, fingerprint}. EMBEDDING_MODEL_EXISTS when the name +
-        version or the collection is taken."""
+        """新的模型版本，状态为 building：{name, version, dim, distance, input_size,
+        preprocess, weights_uri, collection, fingerprint}。名称 + 版本或 collection 已被占用时
+        为 EMBEDDING_MODEL_EXISTS。
+        """
         self.ensure_schema()
         from sqlalchemy import text
 
@@ -346,8 +348,9 @@ class PgEmbeddingsMixin:
             raise err.index_postgres_failed(f"register_embedding_model: {type(exc).__name__}: {exc}") from exc
 
     def record_model_fingerprint(self, model_id: int, fingerprint: dict[str, Any]) -> bool:
-        """Record the fingerprint of a version registered before fingerprints existed; never
-        overwrites one. False when the row already had one (or is gone)."""
+        """为有指纹之前登记的版本记录指纹；从不覆盖已有的指纹。这一行已经有指纹（或已经不在）
+        时返回 False。
+        """
         self.ensure_schema()
         from sqlalchemy import text
 
@@ -365,7 +368,7 @@ class PgEmbeddingsMixin:
             raise err.index_postgres_failed(f"record_model_fingerprint: {type(exc).__name__}: {exc}") from exc
 
     def set_embedding_model_status(self, model_id: int, status: str, *, expected: tuple[str, ...]) -> bool:
-        """Move a version to status while it is in one of expected; False when it was not."""
+        """版本处于 expected 之一时把它改成 status；不是时返回 False。"""
         self.ensure_schema()
         from sqlalchemy import text
 
@@ -389,11 +392,11 @@ class PgEmbeddingsMixin:
             raise err.index_postgres_failed(f"set_embedding_model_status: {type(exc).__name__}: {exc}") from exc
 
     def activate_embedding_model(self, model_id: int) -> dict[str, Any]:
-        """Make a building / ready version the current one, in one transaction: the previous
-        current one goes back to ready (kept for a roll back). Returns {model, previous_id}
-        (previous_id None when the version already was current, or there was none).
+        """在一个事务里让一个 building / ready 版本成为当前版本：之前的当前版本回到 ready
+        （为回滚保留）。返回 {model, previous_id}（这个版本本来就是当前版本，或者之前没有
+        当前版本时，previous_id 为 None）。
 
-        EMBEDDING_MODEL_NOT_FOUND, EMBEDDING_MODEL_STATE (retired).
+        EMBEDDING_MODEL_NOT_FOUND、EMBEDDING_MODEL_STATE（已下线）。
         """
         self.ensure_schema()
         from sqlalchemy import text
@@ -432,10 +435,10 @@ class PgEmbeddingsMixin:
             raise err.index_postgres_failed(f"activate_embedding_model: {type(exc).__name__}: {exc}") from exc
 
     def retire_embedding_model(self, model_id: int) -> dict[str, Any]:
-        """Take a version that is not current out of use: its ledger rows go (the caller drops
-        its collection) and its status becomes retired. Returns {model, ledger_rows}.
+        """停用一个非当前版本：删除它的台账行（collection 由调用方删除），状态变为 retired。
+        返回 {model, ledger_rows}。
 
-        EMBEDDING_MODEL_NOT_FOUND, EMBEDDING_MODEL_STATE (the current version).
+        EMBEDDING_MODEL_NOT_FOUND、EMBEDDING_MODEL_STATE（当前版本）。
         """
         self.ensure_schema()
         from sqlalchemy import text
@@ -466,7 +469,7 @@ class PgEmbeddingsMixin:
             raise err.index_postgres_failed(f"retire_embedding_model: {type(exc).__name__}: {exc}") from exc
 
     def count_embedding_backlog(self, model_id: int) -> int:
-        """How many stored images have no vector in model_id's collection (no ledger row)."""
+        """有多少已存图片在 model_id 的 collection 里没有向量（没有台账行）。"""
         self.ensure_schema()
         from sqlalchemy import text
 
@@ -490,8 +493,9 @@ class PgEmbeddingsMixin:
         limit: int = 16,
         exclude: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """Images with no ledger row for model_id, in id order after `after`, leaving out the
-        ids in exclude (already tried by this run): [{id, original_url}]."""
+        """在 model_id 下没有台账行的图片，按 id 顺序在 `after` 之后，跳过 exclude 里的 id
+        （本次运行已经试过的）：[{id, original_url}]。
+        """
         self.ensure_schema()
         from sqlalchemy import text
 
@@ -517,12 +521,13 @@ class PgEmbeddingsMixin:
             raise err.index_postgres_failed(f"list_embedding_backlog: {type(exc).__name__}: {exc}") from exc
 
     def record_embeddings(self, *, model_id: int, versions: dict[str, int]) -> list[str]:
-        """Ledger: these images now have a vector in model_id's collection, written with the
-        payload of the given version (embedded_at = now). Returns the ids recorded, in id order;
-        an image deleted meanwhile is left out (the caller removes its point).
+        """台账：这些图片现在在 model_id 的 collection 里有向量了，写入时用的是给定版本的
+        payload（embedded_at = now）。按 id 顺序返回记录了的 id；这期间被删除的图片不记录
+        （由调用方删除它的向量点）。
 
-        Unlike mark_payloads_pushed the version is recorded even when the image moved on since:
-        the vector is there, and a payload push catches the payload up."""
+        和 mark_payloads_pushed 不同，即使图片之后又变了也会记录这个版本：向量已经在了，
+        payload 由一次推送补上。
+        """
         if not versions:
             return []
         self.ensure_schema()
@@ -551,7 +556,7 @@ class PgEmbeddingsMixin:
             try:
                 return sorted(run(items))
             except IntegrityError:
-                # an image went away between the join and the insert: record the others one by one
+                # 在 join 和插入之间有图片没了：逐个记录其他图片
                 recorded: list[str] = []
                 for item in items:
                     try:
@@ -563,8 +568,9 @@ class PgEmbeddingsMixin:
             raise err.index_postgres_failed(f"record_embeddings: {type(exc).__name__}: {exc}") from exc
 
     def list_embedded_ids(self, model_id: int, *, after: UUID | str | None = None, limit: int = 256) -> list[str]:
-        """Image ids with a ledger row for model_id, in id order after `after` (to check that their
-        points really are in the collection)."""
+        """在 model_id 下有台账行的图片 id，按 id 顺序在 `after` 之后（用来检查它们的向量点
+        是不是真的在 collection 里）。
+        """
         self.ensure_schema()
         from sqlalchemy import text
 
@@ -584,8 +590,9 @@ class PgEmbeddingsMixin:
             raise err.index_postgres_failed(f"list_embedded_ids: {type(exc).__name__}: {exc}") from exc
 
     def forget_embeddings(self, model_id: int, image_ids: list[str]) -> int:
-        """Delete these ledger rows of model_id (their points are not in the collection): the images
-        are listed as without a vector again. Returns how many rows went."""
+        """删除 model_id 的这些台账行（它们的向量点不在 collection 里）：这些图片重新被列为
+        没有向量。返回删除了多少行。
+        """
         if not image_ids:
             return 0
         self.ensure_schema()
@@ -601,7 +608,7 @@ class PgEmbeddingsMixin:
             raise err.index_postgres_failed(f"forget_embeddings: {type(exc).__name__}: {exc}") from exc
 
     def clear_embeddings(self, model_id: int) -> int:
-        """Delete every ledger row of model_id (its collection was found missing and made anew)."""
+        """删除 model_id 的所有台账行（发现它的 collection 不见了，重新建了一个）。"""
         self.ensure_schema()
         from sqlalchemy import text
 
@@ -614,8 +621,9 @@ class PgEmbeddingsMixin:
             raise err.index_postgres_failed(f"clear_embeddings: {type(exc).__name__}: {exc}") from exc
 
     def refresh_model_fingerprint(self, model_id: int, fingerprint: dict[str, Any]) -> bool:
-        """The version's encoder found again at another path (or now with file hashes): record
-        the new fingerprint and its weights_uri. The caller has checked it is the same encoder."""
+        """在另一个路径下（或者现在带着文件哈希）重新找到了这个版本的编码器：记录新的指纹和
+        它的 weights_uri。调用方已经确认是同一个编码器。
+        """
         self.ensure_schema()
         from sqlalchemy import text
 
@@ -634,8 +642,9 @@ class PgEmbeddingsMixin:
             raise err.index_postgres_failed(f"refresh_model_fingerprint: {type(exc).__name__}: {exc}") from exc
 
     def sample_embedded_images(self, model_id: int, *, limit: int = 3) -> list[dict[str, Any]]:
-        """The images last recorded in model_id's collection: [{id, original_url}] (to check that
-        the collection's vectors come from a given encoder)."""
+        """最近记录在 model_id 的 collection 里的图片：[{id, original_url}]（用来检查 collection
+        里的向量是否来自某个编码器）。
+        """
         self.ensure_schema()
         from sqlalchemy import text
 

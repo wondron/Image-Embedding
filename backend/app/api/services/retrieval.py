@@ -1,11 +1,11 @@
-"""HTTP adapter for retrieval: parse the wire request and call a use case.
+"""检索的 HTTP 适配层：解析请求，调用用例。
 
-Business flow lives in app.services.retrieval (reached through RetrievalStack).
-Functions return the response body as a dict ({ok, trace_id, ...result}); the
-routes' response_model (app.schemas.retrieval) validates and serializes it.
-Failures are raised as AppError (codes registered in app.core.errors) and rendered by
-app.core.exceptions. Use cases block (ONNX / PG / Qdrant / S3), so async
-handlers run them in the threadpool instead of on the event loop.
+业务流程在 app.services.retrieval 里（通过 RetrievalStack 访问）。
+函数以 dict 返回响应体（{ok, trace_id, ...result}）；路由的 response_model
+（app.schemas.retrieval）负责校验和序列化。
+失败以 AppError 抛出（错误码登记在 app.core.errors），由 app.core.exceptions 渲染。
+用例会阻塞（ONNX / PG / Qdrant / S3），所以异步处理函数在线程池里执行它们，
+而不是放在事件循环上。
 """
 
 from __future__ import annotations
@@ -34,18 +34,18 @@ from app.utils.timer import timer_tool
 
 logger = logging.getLogger("svc.retrieval")
 
-# Files one POST /api/index request may carry. All of them are read into memory before indexing
-# starts (up to MAX_INDEX_FILES x max_image_bytes) and indexed one after another in the request.
+# 一次 POST /api/index 请求可以带的文件数。入库开始之前所有文件都读进内存
+# （最多 MAX_INDEX_FILES x max_image_bytes），然后在请求里一个接一个地入库。
 MAX_INDEX_FILES = 500
-# Optional food annotation an index request may carry; the use case validates it.
+# 入库请求可以带的可选食物标注；由用例校验。
 FOOD_KEYS = FOOD_FIELDS
-# Labelling an index request may set; omitted: label_status follows the category, source_type
-# user_upload, license unknown (app.services.retrieval.index_image)
+# 入库请求可以设置的标注信息；不传时：label_status 跟随类别，source_type 为
+# user_upload，license 为 unknown（app.services.retrieval.index_image）
 LABEL_KEYS = ("label_status", "source_type", "license")
 M = TypeVar("M", bound=BaseModel)
 
 
-# -- wire parsing -------------------------------------------------------------------
+# -- 请求解析 ------------------------------------------------------------------------
 
 def _is_json(request: Request) -> bool:
     return "application/json" in (request.headers.get("content-type") or "").lower()
@@ -54,12 +54,12 @@ def _is_json(request: Request) -> bool:
 async def _json_body(request: Request, model: Type[M]) -> M:
     try:
         return model(**(await request.json()))
-    except (ValueError, TypeError) as exc:  # bad JSON or schema (pydantic errors are ValueErrors)
+    except (ValueError, TypeError) as exc:  # JSON 或结构不合法（pydantic 的错误是 ValueError）
         raise err.validation_error(str(exc)) from exc
 
 
 def _form_text(raw: Any) -> Optional[str]:
-    """A multipart text field; None when omitted or blank."""
+    """multipart 的文本字段；没传或为空时为 None。"""
     if raw is None:
         return None
     text = str(raw).strip()
@@ -67,7 +67,7 @@ def _form_text(raw: Any) -> Optional[str]:
 
 
 def _json_array(raw: Any, field: str) -> Optional[List[Any]]:
-    """Multipart field holding a JSON array; None when omitted."""
+    """存放 JSON 数组的 multipart 字段；没传时为 None。"""
     if raw is None or raw == "":
         return None
     try:
@@ -87,7 +87,7 @@ def _int_param(raw: Any, field: str) -> int:
 
 
 def parse_score_threshold(raw: Any) -> Optional[float]:
-    """Wire score_threshold -> float | None (range rules live in the use case)."""
+    """请求里的 score_threshold -> float | None（范围规则在用例里）。"""
     if raw is None:
         return None
     if isinstance(raw, (int, float)):
@@ -101,11 +101,12 @@ def parse_score_threshold(raw: Any) -> Optional[float]:
         raise err.search_bad_score_threshold(f"score_threshold must be a finite float; got {raw!r}") from exc
 
 
-# -- POST /api/index ------------------------------------------------------------------
+# -- POST /api/index -----------------------------------------------------------------
 
 def _write_vectors(runtime: ApplicationState, write: Any) -> Any:
-    """Run write(stack) in this worker thread behind the vector write gate: during a model
-    version switch it waits, then writes with the stack the switch put in place."""
+    """在这个工作线程里、在向量写入闸门之后执行 write(stack)：正在切换模型版本时等待，
+    然后用切换后的检索服务写入。
+    """
     with runtime.vector_writes.shared():
         return write(require_retrieval(runtime))
 
@@ -113,10 +114,10 @@ def _write_vectors(runtime: ApplicationState, write: Any) -> Any:
 async def index_from_upload(
     runtime: ApplicationState, request: Request, file: UploadFile
 ) -> Dict[str, Any]:
-    """Read one uploaded image and index it (recorded in index_tasks; its failure is raised)."""
+    """读取一张上传的图片并入库（记录在 index_tasks 里；失败会抛出）。"""
     trace_id = bind_trace_id(request)
     data = await read_upload(file, runtime.max_image_bytes)
-    require_retrieval(runtime)  # NOT_READY before waiting for anything
+    require_retrieval(runtime)  # 在等待任何东西之前先确定 NOT_READY
     item = {"image_bytes": data, "filename": file.filename or "upload.bin"}
     indexed = await run_in_threadpool(
         _write_vectors, runtime, lambda stack: stack.index_uc.execute_file(item, trace_id=trace_id)
@@ -125,8 +126,9 @@ async def index_from_upload(
 
 
 async def index_from_request(runtime: ApplicationState, request: Request) -> Dict[str, Any]:
-    """multipart file/files (<= MAX_INDEX_FILES) or JSON {path, description, category, tags, scene, scenes,
-    label_status, source_type, license, and the optional food fields FOOD_KEYS}."""
+    """multipart 的 file/files（<= MAX_INDEX_FILES），或 JSON {path, description, category, tags, scene,
+    scenes, label_status, source_type, license，以及可选的食物字段 FOOD_KEYS}。
+    """
     trace_id = bind_trace_id(request)
     if _is_json(request):
         raw = await _json_body(request, IndexJsonRequest)
@@ -161,9 +163,9 @@ async def _index_items_from_form(request: Request, max_bytes: int) -> List[Dict[
         "tags": _json_array(form.get("tags"), "tags"),
         "scene": str(scene).strip() if scene not in (None, "") else None,
         "scenes": _json_array(form.get("scenes"), "scenes"),
-        "description": form.get("description"),  # normalized (and validated) by the use case
-        **{key: _form_text(form.get(key)) for key in LABEL_KEYS},  # enum values; checked by the use case
-        **{key: form.get(key) for key in FOOD_KEYS},  # strings; validated by the use case
+        "description": form.get("description"),  # 由用例规范化（并校验）
+        **{key: _form_text(form.get(key)) for key in LABEL_KEYS},  # 枚举值；由用例检查
+        **{key: form.get(key) for key in FOOD_KEYS},  # 字符串；由用例校验
     }
     uploads = []
     for value in [form.get("file"), *form.getlist("files"), *form.getlist("file")]:
@@ -183,7 +185,7 @@ async def _index_items_from_form(request: Request, max_bytes: int) -> List[Dict[
 
 
 def _raise_if_batch_failed_uniformly(outcome: Dict[str, Any]) -> None:
-    """Nothing indexed and every item failed the same way -> report that error."""
+    """什么都没入库，而且每一项都以同样的方式失败 -> 报告这个错误。"""
     if outcome["indexed"]:
         return
     failed = outcome["failed"]
@@ -197,7 +199,7 @@ def _raise_if_batch_failed_uniformly(outcome: Dict[str, Any]) -> None:
         raise err.index_empty_request("no decodable image in request")
 
 
-# -- POST /api/search -------------------------------------------------------------------
+# -- POST /api/search ------------------------------------------------------------------
 
 @dataclass
 class _SearchParams:
@@ -210,7 +212,7 @@ class _SearchParams:
 
 
 async def search_from_request(runtime: ApplicationState, request: Request) -> Dict[str, Any]:
-    """multipart file / img_url or JSON {img_url}; query params override body fields."""
+    """multipart 的 file / img_url，或 JSON {img_url}；查询参数覆盖请求体里的字段。"""
     params = await _search_params(request, runtime.max_image_bytes)
     trace_id = bind_trace_id(request, params.trace_id)
     if params.image_bytes is None and not params.image_url:
@@ -283,7 +285,7 @@ async def _search_params(request: Request, max_bytes: int) -> _SearchParams:
     return params
 
 
-# -- GET /api/images ---------------------------------------------------------------------
+# -- GET /api/images -------------------------------------------------------------------
 
 def run_list_images(
     runtime: ApplicationState,
@@ -300,8 +302,9 @@ def run_list_images(
     out_of_sync: Optional[bool] = None,
     trace_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """PostgreSQL only (the catalog), so the gallery lists while the encoder or Qdrant are down;
-    each item gets vector_status when the vector store can be read (one read for the page)."""
+    """只用 PostgreSQL（catalog），所以编码器或 Qdrant 挂了时图库也能列出；
+    向量库能读时，每一项带上 vector_status（整页只读一次）。
+    """
     trace_id = bind_trace_id(request, trace_id)
     result = require_catalog(runtime).list_uc.execute(
         scene=scene, page=page, page_size=page_size, q=q, category=category, tag=tag,
@@ -313,8 +316,9 @@ def run_list_images(
 
 
 def _attach_vector_status(runtime: ApplicationState, items: List[Dict[str, Any]], expected: Dict[str, Any]) -> None:
-    """vector_status on every item: synced / stale / missing, or unavailable when the retrieval
-    stack is not built or the read fails. Never fails the list: it is PostgreSQL's answer."""
+    """给每一项加上 vector_status：synced / stale / missing；检索服务没构建或读取失败时为
+    unavailable。从不让列表失败：列表是 PostgreSQL 给出的。
+    """
     if not items:
         return
     statuses: Dict[str, str] = {}
@@ -331,16 +335,16 @@ def _attach_vector_status(runtime: ApplicationState, items: List[Dict[str, Any]]
         item["vector_status"] = statuses.get(item["id"], "unavailable")
 
 
-# -- GET /api/health ---------------------------------------------------------------------
+# -- GET /api/health -------------------------------------------------------------------
 
 _FLYB_DISABLED = {"ok": False, "optional": True, "disabled": True, "detail": "out of scope"}
 
 
 def mvp_health(runtime: ApplicationState) -> JSONResponse:
-    """GET /api/health: embedding / qdrant / metadata status of the retrieval stack.
+    """GET /api/health：检索服务的 embedding / qdrant / metadata 状态。
 
-    "postgres" is the metadata database; "flyb" is always disabled.
-    Does not replace /api/healthz or /api/readyz.
+    "postgres" 是元数据库；"flyb" 总是 disabled。
+    不代替 /api/healthz 或 /api/readyz。
     """
     ts = datetime.now().astimezone().isoformat(timespec="seconds")
     stack = runtime.retrieval
@@ -352,7 +356,7 @@ def mvp_health(runtime: ApplicationState) -> JSONResponse:
             "qdrant": {
                 "ok": False,
                 "detail": detail,
-                "collection": None,  # the real one comes from the current embedding model
+                "collection": None,  # 真实的值来自当前的 embedding 模型
                 "embedding_space_id": None,
             },
             "postgres": {"ok": False, "detail": detail},

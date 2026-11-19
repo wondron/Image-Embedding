@@ -1,4 +1,4 @@
-"""Case-insensitive category-code checks through the repository, without PostgreSQL."""
+"""通过仓储做的类别 code 不区分大小写的检查，不需要 PostgreSQL。"""
 
 from types import SimpleNamespace
 import unittest

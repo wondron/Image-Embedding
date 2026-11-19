@@ -1,1 +1,1 @@
-"""Logging and observability infrastructure."""
+"""日志和可观测性基础设施。"""

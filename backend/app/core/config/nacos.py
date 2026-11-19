@@ -1,22 +1,21 @@
-"""Application config: local YAML as the base layer, Nacos dataIds layered on top.
+"""应用配置：本地 YAML 作为底层，Nacos 的各个 dataId 叠加在上面。
 
-Where to read is NacosSettings (app.core.config.settings): the NACOS_* environment
-variables, and the dataIds in constant.NACOS_DATA_ID_LIST.
+从哪里读由 NacosSettings（app.core.config.settings）决定：NACOS_* 环境变量，
+以及 constant.NACOS_DATA_ID_LIST 里的 dataId。
 
-Startup (NacosConfigProvider.load):
-  - the local YAML is read first and used as the base;
-  - with NACOS_ENABLED, the dataIds are fetched from the configured namespace / group
-    and deep-merged over it in order: Nacos wins key by key, keys Nacos does not
-    define keep their YAML value;
-  - Nacos disabled / unreachable / invalid -> the YAML alone is used; neither
-    source usable -> the YAML error is raised.
+启动时（NacosConfigProvider.load）：
+  - 先读本地 YAML，作为底层；
+  - 开启 NACOS_ENABLED 时，从配置的 namespace / group 拉取各个 dataId，
+    按顺序深度合并到上面：按键以 Nacos 为准，Nacos 没有定义的键保留
+    YAML 里的值；
+  - Nacos 关闭 / 连不上 / 内容无效 -> 只用 YAML；两个来源都用不了 ->
+    抛出 YAML 的错误。
 
-Polling (start_polling): periodic GET of the dataIds (no long-poll listener).
-A complete fetch whose fingerprint differs from the active one is offered to
-``on_update``. Failures keep the current config and retry after
-``retry_interval_seconds``. Polling also runs after a YAML fallback, so the
-service switches to Nacos once it becomes reachable. A config ``on_update``
-rejected is not offered again until it changes.
+轮询（start_polling）：定期 GET 各个 dataId（不用长轮询监听）。
+一次完整拉取的指纹和当前生效的不同时，交给 ``on_update``。
+失败时保留当前配置，过 ``retry_interval_seconds`` 后重试。退回 YAML 之后
+也会轮询，所以 Nacos 一能连上服务就会切换过去。被 ``on_update`` 拒绝的配置
+在它变化之前不会再提交。
 """
 from __future__ import annotations
 
@@ -40,17 +39,17 @@ _MARKDOWN_URL = re.compile(r"\[(https?://[^\]]+)\]\([^)]+\)")
 
 
 def _log(level: int, message: str, **fields: Any) -> None:
-    """Same message to the application log and the platform log."""
+    """同一条信息写到应用日志和平台日志。"""
     logger.log(level, message)
     show_text(message, logger_level=level, **fields)
 
 
 class NacosConfigError(RuntimeError):
-    """Raised when a Nacos operation cannot produce a usable configuration."""
+    """Nacos 操作无法得到可用配置时抛出。"""
 
 
 def _server_address(value: str) -> str:
-    """Return the first address and tolerate an accidentally pasted Markdown URL."""
+    """返回第一个地址，并容忍误粘贴进来的 Markdown 链接。"""
     value = value.strip()
     match = _MARKDOWN_URL.fullmatch(value)
     if match:
@@ -64,7 +63,7 @@ def _server_address(value: str) -> str:
 
 
 def _deep_merge(target: dict, incoming: dict) -> dict:
-    """Merge incoming into target in place: nested dicts merge, anything else is replaced."""
+    """把 incoming 原地合并进 target：嵌套的 dict 递归合并，其他值直接替换。"""
     for key, value in incoming.items():
         if isinstance(value, dict) and isinstance(target.get(key), dict):
             _deep_merge(target[key], value)
@@ -75,13 +74,13 @@ def _deep_merge(target: dict, incoming: dict) -> dict:
 
 @dataclass(frozen=True, slots=True)
 class NacosConfigSnapshot:
-    config: dict  # effective config: local YAML base + Nacos documents
-    data_ids: tuple[str, ...]  # merge order
+    config: dict  # 生效配置：本地 YAML 为底，叠加 Nacos 文档
+    data_ids: tuple[str, ...]  # 合并顺序
     raw_configs: dict[str, str]
 
     @property
     def fingerprint(self) -> str:
-        """Stable fingerprint over every dataId payload, in merge order."""
+        """按合并顺序对每个 dataId 内容计算的稳定指纹。"""
         digest = hashlib.sha256()
         for data_id in self.data_ids:
             digest.update(b"\0")
@@ -92,7 +91,7 @@ class NacosConfigSnapshot:
 
 
 class NacosConfigClient:
-    """Small client using only the Nacos authentication and config GET APIs."""
+    """只用 Nacos 鉴权接口和配置 GET 接口的简易客户端。"""
 
     def __init__(self, settings: NacosSettings, session: requests.Session | None = None) -> None:
         self.settings = settings
@@ -144,7 +143,7 @@ class NacosConfigClient:
         return {"accessToken": self._access_token or ""}
 
     def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
-        """Send an authenticated request and re-authenticate once on 401/403."""
+        """发送带鉴权的请求，遇到 401/403 时重新鉴权一次。"""
         base_params = dict(kwargs.pop("params", {}))
         response: requests.Response | None = None
         for attempt in range(2):
@@ -163,7 +162,7 @@ class NacosConfigClient:
         return response  # type: ignore[return-value]
 
     def get_config(self, data_id: str) -> str | None:
-        """Fetch one dataId; None when it is missing or blank."""
+        """拉取一个 dataId；不存在或为空时返回 None。"""
         response = self._request(
             "GET",
             self._url("cs/configs"),
@@ -188,7 +187,7 @@ class NacosConfigClient:
         return text if text.strip() else None
 
     def fetch_documents(self) -> dict[str, str]:
-        """Raw text of every configured dataId (all of them, or NacosConfigError)."""
+        """所有已配置 dataId 的原始文本（要么全部拿到，要么抛 NacosConfigError）。"""
         documents: dict[str, str] = {}
         for data_id in self.settings.data_ids:
             text = self.get_config(data_id)
@@ -206,20 +205,20 @@ UpdateCallback = Callable[[NacosConfigSnapshot], bool]
 
 
 class NacosConfigProvider:
-    """Layer Nacos over the local YAML at startup; poll Nacos for changes afterwards."""
+    """启动时把 Nacos 叠加到本地 YAML 上；之后轮询 Nacos 的变化。"""
 
     def __init__(self, settings: NacosSettings, client_factory: ClientFactory = NacosConfigClient) -> None:
         self.settings = settings
         self._client_factory = client_factory
         self._nacos_client: NacosConfigClient | None = None
-        self._base: dict | None = None  # raw local YAML (before prepare_config)
+        self._base: dict | None = None  # 原始的本地 YAML（prepare_config 之前）
         self._active: NacosConfigSnapshot | None = None
         self._rejected_fingerprint: str | None = None
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.RLock()
 
-    # -- settings ------------------------------------------------------------------
+    # -- 设置 ----------------------------------------------------------------------
 
     @property
     def poll_enabled(self) -> bool:
@@ -236,7 +235,7 @@ class NacosConfigProvider:
     def _polling_possible(self) -> bool:
         return bool(self.settings.enabled and self.poll_enabled)
 
-    # -- fetching ------------------------------------------------------------------
+    # -- 拉取 ----------------------------------------------------------------------
 
     def _client(self) -> NacosConfigClient:
         with self._lock:
@@ -245,7 +244,7 @@ class NacosConfigProvider:
             return self._nacos_client
 
     def _fetch(self) -> NacosConfigSnapshot:
-        """Fetch every dataId and layer them over the local YAML base (raises on failure)."""
+        """拉取每个 dataId 并叠加到本地 YAML 底层上（失败时抛出）。"""
         data_ids = self.settings.data_ids
         documents = self._client().fetch_documents()
         merged = deepcopy(self._base) if self._base is not None else {}
@@ -253,7 +252,7 @@ class NacosConfigProvider:
             _deep_merge(merged, parse_config_text(documents[data_id], f"Nacos dataId {data_id!r}"))
         return NacosConfigSnapshot(config=prepare_config(merged), data_ids=data_ids, raw_configs=documents)
 
-    # -- startup -------------------------------------------------------------------
+    # -- 启动 ----------------------------------------------------------------------
 
     def source_info(self, snapshot: NacosConfigSnapshot) -> dict:
         return {
@@ -310,10 +309,10 @@ class NacosConfigProvider:
             "nacos_status": status,
         }
 
-    # -- polling -------------------------------------------------------------------
+    # -- 轮询 ----------------------------------------------------------------------
 
     def start_polling(self, on_update: UpdateCallback) -> None:
-        """Start periodic GET polling (also after a YAML fallback, to pick Nacos up later)."""
+        """开始定期 GET 轮询（退回 YAML 之后也轮询，以便之后切换到 Nacos）。"""
         if not self._polling_possible():
             _log(logging.INFO, f"Nacos 配置轮询未启动  配置开关={self.settings.enabled}  轮询开关={self.poll_enabled}")
             return
@@ -348,7 +347,7 @@ class NacosConfigProvider:
             logger.debug("Nacos 配置未变更 | %s", where)
             return
         if fingerprint == rejected:
-            return  # same config on_update already refused; wait for a new one
+            return  # on_update 已经拒绝过同样的配置；等新的配置
         _log(logging.INFO, f"Nacos 已可用，切换到远端配置 | {where}" if active is None
              else f"Nacos 配置变更被检测到 | {where}")
         if on_update(candidate):
@@ -360,7 +359,7 @@ class NacosConfigProvider:
                 self._rejected_fingerprint = fingerprint
             _log(logging.WARNING, f"Nacos 配置更新被拒绝，保留当前配置 | {where}")
 
-    # -- lifecycle -----------------------------------------------------------------
+    # -- 生命周期 ------------------------------------------------------------------
 
     def _close_client(self) -> None:
         with self._lock:
@@ -387,9 +386,9 @@ class NacosConfigProvider:
 
 
 def load_config_once(settings: NacosSettings, yaml_path: str) -> dict:
-    """One-shot processes (workers, Alembic): local YAML base + Nacos, loaded once, no polling.
+    """一次性进程（后台任务、Alembic）：本地 YAML 为底叠加 Nacos，只加载一次，不轮询。
 
-    Same rules as application startup; raises when neither source is usable.
+    规则和应用启动时相同；两个来源都用不了时抛出。
     """
     provider = NacosConfigProvider(settings)
     try:

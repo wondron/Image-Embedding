@@ -1,23 +1,23 @@
-"""Put an exported embedding model into its own content-named folder for the image.
+"""把导出的 embedding 模型放进它自己的、以内容命名的文件夹，供镜像使用。
 
-    config/model/embedding/embeddingcls-<12 hex>/<the .onnx>  +  <the external data it names>
+    config/model/embedding/embeddingcls-<12 位十六进制>/<.onnx 文件>  +  <它引用的外部数据>
 
-The 12 hex characters start the SHA-256 the API records for these weights (app.clients.inference
-.artifact_hash: one file's hash, or the hash over the sorted file hashes), so a folder name
-always says which weights it holds, and two versions never share a path. The files keep their
-names: the .onnx names its external data file, renaming that would change the .onnx itself.
+这 12 个十六进制字符是 API 为这份权重记录的 SHA-256 的开头（app.clients.inference
+.artifact_hash：单个文件的哈希，或者排序后各文件哈希的总哈希），所以文件夹名总能说明
+里面是哪份权重，两个版本也永远不会共用一个路径。文件保留原名：.onnx 里写着它的外部数据
+文件名，重命名那个文件就会改变 .onnx 本身。
 
-Changing the model with no volume mounted (both versions travel in the image):
-  1. package the new export here, build the image with the old folder still in it;
-  2. point EMBEDDING_CONFIG.model_path at the printed path, deploy;
-  3. 「模型版本」: register it, build its vectors, switch; switch back if needed;
-  4. after retiring the old version, the next image may leave its folder out.
-Search keeps using the old version's weights from its own folder until the switch.
+在不挂载数据卷的情况下更换模型（两个版本都打进镜像）：
+  1. 在这里打包新的导出，构建镜像时旧的文件夹仍然保留在里面；
+  2. 把 EMBEDDING_CONFIG.model_path 指向打印出的路径，部署；
+  3. 「模型版本」：登记、生成向量、切换；需要时切回；
+  4. 旧版本下线之后，下一个镜像就可以不带它的文件夹了。
+切换之前，搜索一直使用旧版本自己文件夹里的权重。
 
---move moves the files instead of copying them (one copy of the weights, e.g. to put the model
-already in use into this layout); the hashes are checked again at the new place.
+--move 移动文件而不是复制（权重只保留一份，例如把正在使用的模型整理成这种布局）；
+在新位置会重新校验哈希。
 
-Usage (from backend/):
+用法（在 backend/ 下）：
   python scripts/package_embedding_model.py /path/to/export/multitask_cls.onnx
   python scripts/package_embedding_model.py config/model/dino/multitask_cls.onnx --move
   python scripts/package_embedding_model.py model.onnx --dest config/model/embedding --dry-run
@@ -41,9 +41,10 @@ HASH_CHARS = 12
 
 
 def package(source: Path, dest_root: Path, *, dry_run: bool = False, move: bool = False) -> Path:
-    """Copy (or move) the model's files into dest_root/embeddingcls-<hash>/; returns the .onnx
-    there. An existing folder of that name must hold the same files (then nothing is copied;
-    with move, the source files are removed so one copy is left)."""
+    """把模型的文件复制（或移动）到 dest_root/embeddingcls-<hash>/；返回那里的 .onnx。
+    同名文件夹已经存在时，里面必须是同样的文件（这时不复制；如果是移动，会删除源文件，
+    只留下一份）。
+    """
     files = model_files(str(source))
     want = {f["name"]: f["sha256"] for f in files}
     artifact = artifact_hash(files)
@@ -81,7 +82,7 @@ def package(source: Path, dest_root: Path, *, dry_run: bool = False, move: bool 
         if placed != want:
             raise SystemExit(f"the {'moved' if move else 'copied'} files do not match the source; nothing was packaged")
     except BaseException:
-        for name in moved:  # put moved files back where they were
+        for name in moved:  # 把移动过的文件放回原处
             os.replace(tmp / name, source.parent / name)
         shutil.rmtree(tmp, ignore_errors=True)
         raise

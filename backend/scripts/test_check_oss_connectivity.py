@@ -1,4 +1,4 @@
-"""Offline parameter checks for check_oss_connectivity.py. No real OSS calls."""
+"""check_oss_connectivity.py 的离线参数检查。不真正调用 OSS。"""
 
 from __future__ import annotations
 

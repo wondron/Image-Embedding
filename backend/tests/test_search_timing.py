@@ -1,5 +1,5 @@
-"""Search timing: every layer records its steps on the interface's timer_tool, and each search
-interface writes one line for the request, through its logger and through show_text.
+"""搜索耗时：每一层都把自己的步骤记在接口的 timer_tool 上，每个搜索接口为请求写一行，
+通过它的 logger 和 show_text 输出。
 
     自建库搜图(图片链接) | 图像下载 0.120s | embedding推理 0.045s | vector搜索 0.012s | 后处理 0.003s | 总耗时 0.185s
 """
@@ -77,7 +77,7 @@ def search_use_case(vectors=None):
 
 
 def food_service():
-    """FoodService with both stages faked: the upstream search and the similarity filter."""
+    """两个阶段都是假的 FoodService：上游搜索和相似度过滤。"""
     service = FoodService(FOOD_CONFIG, Mock())
     service.searchTool = Mock()
     service.searchTool.detect.return_value = [dict(GLOBAL_CARD)]
@@ -88,7 +88,7 @@ def food_service():
 
 class TimerToolTests(unittest.TestCase):
     def clock(self, *ticks):
-        """timer_tool reads these perf_counter values, in order."""
+        """timer_tool 按顺序读取这些 perf_counter 值。"""
         clock = patch.object(timer_module, "time")
         clock.start().perf_counter.side_effect = ticks
         self.addCleanup(clock.stop)
@@ -100,7 +100,7 @@ class TimerToolTests(unittest.TestCase):
             pass
         with timer.step("embedding推理"):
             pass
-        # the time between and around the steps is in the total only
+        # 步骤之间和前后的时间只算进总耗时
         self.assertEqual(timer.summary(), "图像下载 0.500s | embedding推理 0.250s | 总耗时 4.000s")
 
     def test_a_repeated_step_adds_up_and_moves_to_its_latest_place(self):
@@ -124,7 +124,7 @@ class TimerToolTests(unittest.TestCase):
         timer = timer_tool()
         with timer.step("图像下载"):
             pass
-        timer.mark("后处理")  # since the step ended
+        timer.mark("后处理")  # 从这一步结束算起
         self.assertEqual(timer.summary(), "图像下载 0.500s | 后处理 1.000s | 总耗时 3.000s")
 
     def test_a_duration_measured_elsewhere_is_recorded_like_a_step(self):
@@ -132,18 +132,17 @@ class TimerToolTests(unittest.TestCase):
         timer = timer_tool()
         with timer.step("后处理"):
             pass
-        # A step that ran beside the others times itself: the clock is not read, and the steps
-        # may add up to more than the total
+        # 和其他步骤同时运行的步骤自己计时：不读取时钟，各步骤相加可能超过总耗时
         timer.record("菜谱识别", 1.75)
         timer.record("global搜索", 0.25, failed=True)
         self.assertEqual(timer.summary(), "后处理 0.500s | 菜谱识别 1.750s | global搜索失败 0.250s | 总耗时 2.000s")
 
     def test_merged_timers_add_their_steps_in_the_order_merged_not_the_order_they_ran(self):
-        # the request's timer and two of its images' (batch search); their steps; the summary
+        # 请求的计时器和它两张图片的计时器（多图搜索）；它们的步骤；摘要
         self.clock(0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.75, 0.75, 1.0, 1.5)
         request, first, second = timer_tool(), timer_tool(), timer_tool()
         with self.assertRaises(ValueError):
-            with second.step("embedding推理"):  # ran first, merged last
+            with second.step("embedding推理"):  # 最先运行，最后合并
                 raise ValueError("cannot decode")
         with first.step("embedding推理"):
             pass
@@ -151,18 +150,18 @@ class TimerToolTests(unittest.TestCase):
             pass
         request.merge(first)
         request.merge(second)
-        # the total is the request's own: the images ran side by side
+        # 总耗时是请求自己的：各张图片同时运行
         self.assertEqual(
             request.summary(), "embedding推理 0.250s | vector搜索 0.250s | embedding推理失败 0.500s | 总耗时 1.500s"
         )
 
 
 class RecordedStepsTests(unittest.TestCase):
-    """What each layer records on the timer it is given; none of them writes a timing line."""
+    """每一层在传给它的计时器上记录什么；它们都不写耗时行。"""
 
     def test_self_built_search_records_embedding_vector_search_and_post_processing(self):
         timer = timer_tool()
-        with self.assertNoLogs(level="INFO"):  # the platform log (show_text) would show up here too
+        with self.assertNoLogs(level="INFO"):  # 平台日志（show_text）也会出现在这里
             found = search_use_case().execute(image_bytes=b"query", timer=timer)
         self.assertEqual(found["source"], "self")
         self.assertEqual(steps(timer.summary()), ["embedding推理", "vector搜索", "后处理", "总耗时"])
@@ -199,7 +198,7 @@ class RecordedStepsTests(unittest.TestCase):
 
 
 class TimingLineTests(unittest.TestCase):
-    """One timing line per request, the same text through the route's logger and show_text."""
+    """每个请求一行耗时，同样的文本通过路由的 logger 和 show_text 输出。"""
 
     def setUp(self):
         self.vectors = FakeVectors()
@@ -225,14 +224,14 @@ class TimingLineTests(unittest.TestCase):
         self.addCleanup(fetch.stop)
 
     def post(self, path, *, status=200, **request):
-        """POST; returns (the request's one timing line, its log record, the response)."""
+        """发送 POST；返回（这次请求的那一行耗时, 它的日志记录, 响应）。"""
         with patch.object(log_helper, "show_text") as platform, self.assertLogs(level="INFO") as logs:
             response = self.client.post(path, **request)
         self.assertEqual(response.status_code, status, response.text)
         records = [record for record in logs.records if "总耗时" in record.getMessage()]
         self.assertEqual(len(records), 1, [record.getMessage() for record in logs.records])
         record = records[0]
-        # The logger's line ends with the trace id; show_text gets the same text and the id as a field
+        # logger 的那一行以 trace id 结尾；show_text 拿到同样的文本，id 作为一个字段
         line, _, trace_id = record.getMessage().rpartition(" | trace_id=")
         self.assertEqual(trace_id, response.headers["X-Trace-Id"])
         platform.assert_called_once_with(line, trace_id=trace_id, logger_level=record.levelno)
@@ -263,7 +262,7 @@ class TimingLineTests(unittest.TestCase):
         self.assertEqual(steps(line), ["图像下载失败", "总耗时"])
         self.assertEqual(record.levelno, logging.WARNING)
 
-        # Refused before any step (unknown scene): still one line, with the total only
+        # 在任何步骤之前就被拒绝（场景不存在）：仍然有一行，只有总耗时
         line, record, _ = self.post("/api/search", status=422, files=self.upload(), data={"scene": "missing"})
         self.assertTrue(line.startswith("自建库搜图(上传文件)失败 | "), line)
         self.assertEqual(steps(line), ["总耗时"])
@@ -276,7 +275,7 @@ class TimingLineTests(unittest.TestCase):
         self.assertEqual([item["source"] for item in response.json()["items"]], ["self"])
         self.assertTrue(line.startswith("业务搜图(上传文件) | "), line)
         self.assertEqual(steps(line), ["embedding推理", "vector搜索", "后处理", "总耗时"])
-        # scene and score_threshold were not sent: left out. machine_info is only ever seen here
+        # 没有传 scene 和 score_threshold：不输出。machine_info 只会在这里看到
         self.assertTrue(line.endswith(" | 参数=top_k=5, global_fallback=False, machine_info=KQ-01"), line)
         self.assertEqual((record.name, record.levelno), ("autosearch", logging.INFO))
         self.food.searchTool.detect.assert_not_called()
@@ -318,7 +317,7 @@ class TimingLineTests(unittest.TestCase):
             ("files", ("a.png", b"query", "image/png")), ("files", ("b.png", b"broken", "image/png")),
         ])
         self.assertEqual((response.json()["succeeded"], response.json()["failed"]), (1, 1))
-        self.assertTrue(line.startswith("批量搜图(上传文件) | "), line)  # the request did not fail
+        self.assertTrue(line.startswith("批量搜图(上传文件) | "), line)  # 请求没有失败
         self.assertEqual(steps(line), ["embedding推理", "vector搜索", "后处理", "embedding推理失败", "总耗时"])
         self.assertEqual(record.levelno, logging.WARNING)
 

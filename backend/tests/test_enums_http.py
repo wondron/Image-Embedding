@@ -1,4 +1,4 @@
-"""GET /api/enums, GET /api/enums/{name}, POST /api/enums/{name}/values."""
+"""GET /api/enums、GET /api/enums/{name}、POST /api/enums/{name}/values。"""
 
 import os
 import tempfile

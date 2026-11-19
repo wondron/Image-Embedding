@@ -1,36 +1,35 @@
-"""Align PG v0.1 schema with app.models (ORM is now the schema SSOT).
+"""让 PG v0.1 的表结构和 app.models 对齐（ORM 现在是表结构的唯一权威来源）。
 
 Revision ID: 20261105_0002
 Revises: 20261104_0001
 Create Date: 2026-11-05
 
-What changes (0001 -> app.models):
-- Constraint / index names follow app.db.base.NAMING_CONVENTION (pk_/fk_/uq_/ck_/ix_).
-- Enum columns text -> varchar(32); CHECK lists unchanged.
-- New invariants:
-    images:              width/height NOT NULL and > 0; sha256 is 32 bytes;
+改动内容（0001 -> app.models）：
+- 约束 / 索引名遵循 app.db.base.NAMING_CONVENTION（pk_/fk_/uq_/ck_/ix_）。
+- 枚举列 text -> varchar(32)；CHECK 的取值列表不变。
+- 新的不变式：
+    images:              width/height NOT NULL 且 > 0；sha256 为 32 字节；
                          (label_status = 'unlabeled') = (category_id IS NULL)
-    categories:          not own parent
-    scene_rules:         one rule per (scene, category) and (scene, cuisine);
-                         label_id needs category_id; label must belong to the same scene
-                         (composite FK -> scene_labels(scene_id, id))
-    image_scenes:        only manual rows may exclude (is_member = false)
-    embedding_models:    dim > 0, input_size > 0
-    external_candidates: reviewed_at set iff not pending; image_id only when accepted
-- ON DELETE: scene children CASCADE; categories.heating_group_id and
-  external_candidates.image_id SET NULL; images/categories -> categories RESTRICT;
-  image_embeddings.model_id CASCADE.
-- Defaults: images.label_status 'unlabeled', image_scenes.is_member true,
-  embedding_models.status 'building', external_candidates.id gen_random_uuid().
-- Indexes: drop ones covered by a PK/unique prefix; add cuisines GIN, license,
-  image_embeddings.image_id, pending-candidates partial, scene-member partial.
-- Data: include_all scenes (general) hold every image implicitly, so their
-  image_scenes rows are removed. Images that had a manual exclusion from such a
-  scene get payload_version + 1 (their Qdrant payload must now list the scene).
-- Table/column comments from the ORM.
+    categories:          不能是自己的父节点
+    scene_rules:         每个 (scene, category) 和 (scene, cuisine) 只有一条规则；
+                         label_id 需要 category_id；标签必须属于同一个场景
+                         （复合外键 -> scene_labels(scene_id, id)）
+    image_scenes:        只有手工行可以排除（is_member = false）
+    embedding_models:    dim > 0，input_size > 0
+    external_candidates: 当且仅当不是 pending 时设置 reviewed_at；只有 accepted 时才有 image_id
+- ON DELETE：场景的子表 CASCADE；categories.heating_group_id 和
+  external_candidates.image_id SET NULL；images/categories -> categories RESTRICT；
+  image_embeddings.model_id CASCADE。
+- 默认值：images.label_status 'unlabeled'、image_scenes.is_member true、
+  embedding_models.status 'building'、external_candidates.id gen_random_uuid()。
+- 索引：删除被主键 / 唯一约束前缀覆盖的索引；新增 cuisines GIN、license、
+  image_embeddings.image_id、待审候选的部分索引、场景成员的部分索引。
+- 数据：include_all 场景（general）隐式包含所有图片，所以删除它们的 image_scenes 行。
+  曾经被手工从这类场景排除的图片 payload_version + 1（它们的 Qdrant payload 现在必须
+  列出这个场景）。
+- 表 / 列注释来自 ORM。
 
-Existing rows that violate a new constraint make the upgrade fail with that
-constraint's name; the whole revision runs in one transaction.
+违反新约束的已有行会让升级失败，并给出那个约束的名称；整个版本在一个事务里执行。
 """
 from __future__ import annotations
 
@@ -309,7 +308,7 @@ COMMENT ON COLUMN external_candidates.created_at IS '创建时间';
 
 _COMMENT_RE = re.compile(r"^COMMENT ON (TABLE|COLUMN) (\S+) IS ", re.MULTILINE)
 
-# 10. Comments: 0001 had none -> clear exactly what the upgrade set
+# 10. 注释：0001 没有注释 -> 正好清除升级时设置的那些
 CLEAR_COMMENTS_SQL = "\n".join(
     f"COMMENT ON {kind} {target} IS NULL;" for kind, target in _COMMENT_RE.findall(UPGRADE_SQL)
 )

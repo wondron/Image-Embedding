@@ -1,12 +1,12 @@
-"""Download public raster images without exposing a general-purpose URL proxy.
+"""下载公网栅格图片，但不暴露通用的 URL 代理。
 
-The one fetcher for remote image URLs: the browser download proxy (/api/images/download)
-and model-input URLs (predict, retrieval search, via app.clients.image_fetch).
+远程图片 URL 唯一的下载器：浏览器下载代理（/api/images/download）以及模型输入 URL
+（预测、检索搜索，经由 app.clients.image_fetch）。
 
-SSRF-safe: only public addresses (checked after DNS, pinned for the connection),
-ports 80/443, bounded size/time/redirects, content verified as an image.
-Failures raise AppError: INVALID_URL / FORBIDDEN_HOST / FILE_TOO_LARGE /
-UNSUPPORTED_MEDIA_TYPE / DOWNLOAD_TIMEOUT / DOWNLOAD_FAILED.
+防 SSRF：只允许公网地址（DNS 解析后检查，并为这次连接固定地址）、端口 80/443、
+限制大小 / 时间 / 重定向次数，内容校验为图片。
+失败时抛出 AppError：INVALID_URL / FORBIDDEN_HOST / FILE_TOO_LARGE /
+UNSUPPORTED_MEDIA_TYPE / DOWNLOAD_TIMEOUT / DOWNLOAD_FAILED。
 """
 
 from __future__ import annotations
@@ -45,10 +45,9 @@ class _Target:
     addresses: tuple[str, ...]
 
 
-# Networks treated as public besides the global internet, set once at startup from
-# IMAGE_DOWNLOAD_CONFIG.trusted_networks (bootstrap.lifespan). Empty in production; a
-# developer machine behind a fake-IP proxy (every name resolves into 198.18.0.0/15 and
-# 2001:2::/48) lists those ranges. Ports, redirects and limits are checked as usual.
+# 除了公共互联网之外也按公网处理的网段，启动时从 IMAGE_DOWNLOAD_CONFIG.trusted_networks
+# 设置一次（bootstrap.lifespan）。生产环境为空；在 fake-IP 代理后面的开发机（所有域名都
+# 解析到 198.18.0.0/15 和 2001:2::/48）列出这两个网段。端口、重定向和各项限制照常检查。
 _trusted_networks: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = ()
 
 
@@ -63,7 +62,7 @@ def _is_public(address: str) -> bool:
         return True
     if not ip.is_global or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
         return False
-    # Embedded IPv4 addresses must not provide a route to private networks either.
+    # 内嵌的 IPv4 地址也不能提供通往私有网络的路由。
     if isinstance(ip, ipaddress.IPv6Address):
         embedded = [ip.ipv4_mapped, ip.sixtofour]
         if ip in NAT64_NETWORK:
@@ -118,8 +117,8 @@ def _connection(target: _Target, timeout: float) -> http.client.HTTPConnection:
     connection = connection_type(target.host, target.port, timeout=timeout)
 
     def connect_public_ip(_address, socket_timeout=timeout, source_address=None):
-        # HTTP Host and HTTPS certificate verification/SNI still use target.host.
-        # Only the TCP destination changes, so a second hostname lookup cannot rebind it.
+        # HTTP Host 以及 HTTPS 证书校验 / SNI 仍然使用 target.host。
+        # 只改变 TCP 连接的目标，这样第二次域名解析无法重新绑定它。
         failure = None
         deadline = time.monotonic() + socket_timeout
         for address in target.addresses:
@@ -162,10 +161,10 @@ def _size_label(limit: int) -> str:
 
 
 def fetch_image(url: str, *, max_bytes: int | None = None, total_timeout: float | None = None) -> tuple[bytes, str]:
-    """(content, verified media type) of a public image URL.
+    """公网图片 URL 的（内容, 校验过的媒体类型）。
 
-    max_bytes / total_timeout default to MAX_IMAGE_BYTES / TOTAL_TIMEOUT (read at call time).
-    Every failure is an AppError; an upstream HTTP error is DOWNLOAD_FAILED (502), never its status.
+    max_bytes / total_timeout 默认取 MAX_IMAGE_BYTES / TOTAL_TIMEOUT（调用时读取）。
+    所有失败都是 AppError；上游的 HTTP 错误为 DOWNLOAD_FAILED（502），从不使用它的状态码。
     """
     limit = MAX_IMAGE_BYTES if max_bytes is None else int(max_bytes)
     too_large = f"Image exceeds the {_size_label(limit)} download limit."
@@ -178,8 +177,8 @@ def fetch_image(url: str, *, max_bytes: int | None = None, total_timeout: float 
             expired = threading.Event()
             try:
                 connection.request("GET", target.path, headers={"Accept": "image/*", "Accept-Encoding": "identity", "User-Agent": "ImageEmbedding/1.0"})
-                # Socket timeouts alone allow an endless slow trickle of headers/body.
-                # Capture the socket now: HTTPResponse may detach it from connection.
+                # 只靠 socket 超时，挡不住无休止的缓慢逐字节发送的响应头 / 响应体。
+                # 现在就记下 socket：HTTPResponse 可能会把它从连接上摘下来。
                 transport = connection.sock
 
                 def expire_response(transport=transport, expired=expired):

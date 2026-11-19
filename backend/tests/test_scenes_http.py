@@ -1,10 +1,10 @@
-"""Scene configuration and manual membership: the real routes, adapters, use cases and field rules
-over in-memory stores (what needs SQL or Qdrant is in test_pg_live).
+"""场景配置和手工归属：真实的路由、适配层、用例和字段规则，存储放在内存里
+（需要 SQL 或 Qdrant 的在 test_pg_live 里）。
 
-- which writes say sync_required (scene_fields.scene_flags_need_sync / rule_write_needs_sync);
-- a rule patch may replace its target (scene_fields.normalize_rule_fields);
-- a manual membership write pushes the image's payload when retrieval is up (vector_sync);
-- the payload push records only current versions and pushes superseded ones again.
+- 哪些写入返回 sync_required（scene_fields.scene_flags_need_sync / rule_write_needs_sync）；
+- 规则的修改可以替换它的对象（scene_fields.normalize_rule_fields）；
+- 检索服务就绪时，手工归属的写入会推送图片的 payload（vector_sync）；
+- payload 推送只记录当前版本，被取代的会重新推送。
 """
 
 import unittest
@@ -52,20 +52,20 @@ def flags(active, include_all):
 
 class SyncRuleTests(unittest.TestCase):
     def test_scene_flags(self):
-        self.assertTrue(scene_flags_need_sync(None, flags(True, True)))  # every image at once
-        self.assertFalse(scene_flags_need_sync(None, flags(True, False)))  # no rules yet
+        self.assertTrue(scene_flags_need_sync(None, flags(True, True)))  # 立刻包含所有图片
+        self.assertFalse(scene_flags_need_sync(None, flags(True, False)))  # 还没有规则
         self.assertFalse(scene_flags_need_sync(None, flags(False, True)))
         self.assertFalse(scene_flags_need_sync(flags(True, False), flags(True, False)))
         self.assertTrue(scene_flags_need_sync(flags(True, False), flags(False, False)))
         self.assertTrue(scene_flags_need_sync(flags(False, False), flags(True, False)))
         self.assertTrue(scene_flags_need_sync(flags(True, False), flags(True, True)))
-        self.assertFalse(scene_flags_need_sync(flags(False, False), flags(False, True)))  # still off
+        self.assertFalse(scene_flags_need_sync(flags(False, False), flags(False, True)))  # 仍然关闭
 
     def test_rule_writes(self):
         self.assertTrue(rule_write_needs_sync(flags(True, False)))
-        self.assertFalse(rule_write_needs_sync(flags(True, False), target_changed=False))  # a label only
-        self.assertFalse(rule_write_needs_sync(flags(False, False)))  # no members while off
-        self.assertFalse(rule_write_needs_sync(flags(True, True)))  # rules ignored
+        self.assertFalse(rule_write_needs_sync(flags(True, False), target_changed=False))  # 只有标签
+        self.assertFalse(rule_write_needs_sync(flags(False, False)))  # 关闭期间没有成员
+        self.assertFalse(rule_write_needs_sync(flags(True, True)))  # 规则被忽略
 
     def test_a_rule_patch_may_replace_the_target(self):
         self.assertEqual(normalize_rule_fields({"label_id": None}, partial=True), {"label_id": None})
@@ -85,7 +85,7 @@ class SyncRuleTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(err.AppError) as ctx:
                 normalize_rule_fields(bad, partial=True)
             self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
-        # a create still checks the label against its own target
+        # 创建时仍然对照它自己的对象检查标签
         with self.assertRaises(err.AppError):
             normalize_rule_fields({"cuisine": "chinese", "label_id": 3}, partial=False)
 
@@ -98,12 +98,12 @@ class SyncRuleTests(unittest.TestCase):
 
 
 class FakeMetadata:
-    """payload rows from a dict; the ledger takes a version only while it is the current one."""
+    """payload 行来自一个 dict；台账只在版本仍是当前版本时才记录它。"""
 
     def __init__(self, versions):
         self.versions = dict(versions)
         self.ledger = {}
-        self.on_read = None  # called after each read (to change an image in between)
+        self.on_read = None  # 每次读取之后调用（用来在中间修改一张图片）
 
     def get_payload_rows(self, image_ids):
         rows = [
@@ -149,7 +149,7 @@ class PayloadPushTests(unittest.TestCase):
 
         def bump_once():
             metadata.on_read = None
-            metadata.versions["a"] = 2  # another writer, after our read
+            metadata.versions["a"] = 2  # 另一个写入方，在我们读取之后
 
         metadata.on_read = bump_once
         result = SyncSceneMembershipsUseCase(metadata, vectors, model=MODEL).push_images(["a"])
@@ -167,7 +167,7 @@ class PayloadPushTests(unittest.TestCase):
 
 
 class FakeCatalog:
-    """Scene writes answer like the real store: the scene plus its sync_required."""
+    """场景写入的回答方式和真实的存储一样：场景加上它的 sync_required。"""
 
     def __init__(self):
         self.calls = []
@@ -224,12 +224,12 @@ class EndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
 
-    # ---- configuration writes --------------------------------------------------------
+    # ---- 配置写入 --------------------------------------------------------------------
 
     def test_configuration_writes_say_whether_a_sync_is_needed(self):
         body = self.ok(self.client.patch("/api/scenes/7", json={"is_active": False}))
         self.assertEqual((body["sync_required"], body["scene"]["code"]), (True, "steam_oven"))
-        self.assertNotIn("sync_required", body["scene"])  # top level only
+        self.assertNotIn("sync_required", body["scene"])  # 只看顶层
         body = self.ok(self.client.patch("/api/scenes/7/labels/3", json={"name": "牛排"}))
         self.assertFalse(body["sync_required"])
         body = self.ok(self.client.delete("/api/scenes/7"))
@@ -244,9 +244,9 @@ class EndpointTests(unittest.TestCase):
             [{"label_id": None}, {"cuisine": "chinese", "label_id": None}],
         )
         response = self.client.patch("/api/scenes/7/rules/4", json={"category_id": "5"})
-        self.assertEqual(response.status_code, 422)  # strict int, as for a create
+        self.assertEqual(response.status_code, 422)  # 严格的整数，和创建时一样
 
-    # ---- manual membership -----------------------------------------------------------
+    # ---- 手工归属 --------------------------------------------------------------------
 
     def test_a_manual_write_is_pushed_when_retrieval_is_up(self):
         body = self.ok(self.client.put(f"/api/images/{IMAGE}/scene-memberships/7", json={"is_member": True}))

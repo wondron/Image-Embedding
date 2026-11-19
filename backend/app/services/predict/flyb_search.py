@@ -103,11 +103,11 @@ class FlyBSearch:
 
 
     def parse_results(self, data: dict) -> list[dict] | dict:
-        """FlyB documents → result cards, the same card as a self-built hit (app.schemas.search_hit):
-        tags / description / original_url / similarity, everything else in details.
+        """FlyB 文档 → 结果卡，和自建库结果是同一种卡（app.schemas.search_hit）：
+        tags / description / original_url / similarity，其余都放在 details 里。
 
-        similarity stays None here; GlobalFilter fills it in when the similarity filter is on.
-        An upstream "empty response" gives a status envelope instead of the list.
+        similarity 在这里保持 None；开启相似度过滤时由 GlobalFilter 填上。
+        上游返回"空响应"时，给出一个状态结构而不是列表。
         """
         metadata = data.get("ResponseMetadata") or {}
         result = data.get("Result") or {}
@@ -157,7 +157,7 @@ class FlyBSearch:
             document = {
                 "tags": title if isinstance(title, str) else "",
                 "description": " ".join(text_snippets),
-                # The first image's original; set below
+                # 第一张图片的原图；在下面设置
                 "original_url": next((image["image_url"] for image in images if image["image_url"]), None),
                 "similarity": None,
                 "details": {
@@ -168,8 +168,8 @@ class FlyBSearch:
                     "document_info": doc.get("DocumentInfo"),
                 },
             }
-            # Always a URL string: without an original, the largest thumbnail (ThumbnailUrl may
-            # be a {large, medium, small} map, which must not end up in original_url).
+            # 总是 URL 字符串：没有原图时取最大的缩略图（ThumbnailUrl 可能是
+            # {large, medium, small} 映射，不能放进 original_url）。
             document["original_url"] = next(iter_image_urls(document), None)
             documents.append(document)
         return documents

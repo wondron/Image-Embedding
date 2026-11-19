@@ -1,4 +1,4 @@
-"""Reading uploaded files (the one bounded reader every endpoint uses)."""
+"""读取上传的文件（所有接口共用的这个限长读取函数）。"""
 
 from __future__ import annotations
 
@@ -19,10 +19,10 @@ async def read_upload(
     empty_detail: str = "Uploaded file is empty.",
     too_large_detail: str | None = None,
 ) -> bytes:
-    """Read at most max_bytes + 1 bytes; optionally check the declared MIME type.
+    """最多读取 max_bytes + 1 个字节；可选地检查声明的 MIME 类型。
 
-    EMPTY_FILE (400) / FILE_TOO_LARGE (413) / UNSUPPORTED_MEDIA_TYPE (415).
-    The caller owns and closes the UploadFile.
+    EMPTY_FILE (400) / FILE_TOO_LARGE (413) / UNSUPPORTED_MEDIA_TYPE (415)。
+    UploadFile 由调用方持有并关闭。
     """
     if allowed_content_types is not None and file.content_type and file.content_type not in allowed_content_types:
         raise errors.unsupported_media_type(f"unsupported image content type: {file.content_type}")
@@ -35,5 +35,5 @@ async def read_upload(
 
 
 def form_upload(value: Any) -> UploadFile | None:
-    """A form field value if it is an uploaded file, else None."""
+    """表单字段的值是上传文件时返回它，否则为 None。"""
     return value if isinstance(value, (UploadFile, StarletteUploadFile)) else None

@@ -1,4 +1,4 @@
-"""Tools wire: low-level model diagnostics."""
+"""工具的 wire：底层模型诊断。"""
 
 from pydantic import BaseModel
 

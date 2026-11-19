@@ -1,4 +1,4 @@
-"""QdrantStore (mechanism) and QdrantVectorStore (retrieval rules) on in-process Qdrant."""
+"""在进程内 Qdrant 上测试 QdrantStore（机制）和 QdrantVectorStore（检索规则）。"""
 
 import unittest
 import uuid
@@ -46,13 +46,13 @@ class QdrantStoreTests(unittest.TestCase):
         self.addCleanup(self.store.close)
 
     def test_upsert_search_count_delete(self):
-        a, b = str(uuid.uuid4()), 7  # uuid and unsigned-int ids are both valid Qdrant ids
+        a, b = str(uuid.uuid4()), 7  # uuid 和无符号整数都是合法的 Qdrant id
         self.store.upsert(a, unit(1, 0, 0, 0), {"scenes": ["general", "oven"], "label_status": "auto"})
         self.store.upsert(b, unit(0, 1, 0, 0), {"scenes": ["general"], "label_status": "unlabeled"})
         self.assertEqual(self.store.count(), 2)
 
         hits = self.store.search(unit(1, 0.1, 0, 0), top_k=5)
-        self.assertEqual([h["id"] for h in hits], [a, "7"])  # None threshold: low scores kept
+        self.assertEqual([h["id"] for h in hits], [a, "7"])  # 阈值为 None：低分也保留
         self.assertEqual(hits[0]["payload"]["label_status"], "auto")
 
         self.assertEqual([h["id"] for h in self.store.search(unit(1, 0.1, 0, 0), score_threshold=0.5)], [a])
@@ -75,12 +75,12 @@ class QdrantStoreTests(unittest.TestCase):
             self.store.upsert("not-a-uuid", unit(1, 0, 0, 0), {})
 
     def test_existing_collection_must_match_the_model(self):
-        client = self.store.client  # same in-process instance
+        client = self.store.client  # 同一个进程内实例
         with self.assertRaises(VectorDimMismatchError):
             QdrantStore(MEMORY, collection="c", vector_dim=8, client=client).ensure_collection()
         with self.assertRaises(CollectionMismatchError):
             QdrantStore(MEMORY, collection="c", vector_dim=DIM, distance="dot", client=client).ensure_collection()
-        # recreate is the explicit way to change shape
+        # 要改变结构，显式的方式是 recreate
         other = QdrantStore(MEMORY, collection="c", vector_dim=8, client=client)
         other.ensure_collection(recreate=True)
         self.assertEqual(other.count(), 0)
@@ -132,14 +132,14 @@ class QdrantVectorStoreTests(unittest.TestCase):
         self.assertFalse(other.collection_exists())
         other.ensure_collection()
         other.upsert(b, unit(0, 1, 0, 0), {"scenes": ["general"]})
-        self.assertIs(other._store.client, self.store.client)  # one connection for every version
-        self.assertEqual(self.vectors.get_payloads([b]), {})  # each version has its own points
+        self.assertIs(other._store.client, self.store.client)  # 所有版本共用一个连接
+        self.assertEqual(self.vectors.get_payloads([b]), {})  # 每个版本有自己的向量点
         np.testing.assert_allclose(other.get_vectors([a, b])[str(b)], unit(0, 1, 0, 0), rtol=1e-6)
         self.assertEqual(list(other.get_vectors([a, b])), [str(b)])
         self.assertTrue(other.drop_collection())
         self.assertFalse(other.collection_exists())
-        self.assertFalse(other.drop_collection())  # gone already
-        self.assertEqual(self.store.count(), 1)  # the current collection is untouched
+        self.assertFalse(other.drop_collection())  # 已经没了
+        self.assertEqual(self.store.count(), 1)  # 当前 collection 不受影响
 
     def test_shape_mismatch_is_vector_dim_mismatch(self):
         wrong = QdrantVectorStore(QdrantStore(MEMORY, collection="c", vector_dim=8, client=self.store.client))
@@ -166,7 +166,7 @@ class FakeMetadata:
 
 
 class ScoreThresholdEndToEndTests(unittest.TestCase):
-    """score_threshold policy lives in services only; 0 must disable rejection."""
+    """score_threshold 的策略只在 services 里；0 必须关闭拒绝。"""
 
     def setUp(self):
         self.store = QdrantStore(MEMORY, collection="c", vector_dim=DIM)
@@ -175,7 +175,7 @@ class ScoreThresholdEndToEndTests(unittest.TestCase):
         self.addCleanup(vectors.close)
         self.near, self.far = uuid.uuid4(), uuid.uuid4()
         vectors.upsert(self.near, unit(1, 0, 0, 0), {"scenes": ["general"]})
-        vectors.upsert(self.far, unit(0.2, 1, 0, 0), {"scenes": ["general"]})  # cos ~0.2 to the query
+        vectors.upsert(self.far, unit(0.2, 1, 0, 0), {"scenes": ["general"]})  # 和查询的余弦约 0.2
         embedding = type("E", (), {"embed_bytes": lambda self, b: unit(1, 0, 0, 0)})()
         model = ActiveModel(id=1, name="m", version="v", collection="c", dim=DIM, distance="cosine")
         self.uc = SearchImageUseCase(embedding, vectors, FakeMetadata([self.near, self.far]), model=model)

@@ -1,34 +1,33 @@
-"""Reconciliation: bring the vector store back in line with PostgreSQL, one bounded round at a time.
+"""对账：每次一轮、每轮有上限，让向量库重新和 PostgreSQL 保持一致。
 
-PostgreSQL is the source of truth. Every write that changes what a vector payload is built from
-bumps images.payload_version, and the ledger (image_embeddings.synced_version) records the version
-the current collection has. Writers push right after their commit, best effort; whatever did not
-make it stays behind in the ledger: Qdrant was down, the process stopped in between, a category
-move had more images than one request pushes. Deleted images wait in image_deletions the same way.
+PostgreSQL 是数据的权威来源。每次改变向量 payload 来源字段的写入都会递增
+images.payload_version，台账（image_embeddings.synced_version）记录当前 collection 里
+是哪个版本。写入方在提交后立刻推送，尽力而为；没推上去的就在台账里落后：Qdrant 挂了、
+进程在中间停了、一次类别移动涉及的图片超过一个请求推送的数量。已删除的图片同样在
+image_deletions 里等待。
 
-One round:
+一轮：
 
-1. push the payloads of the images whose ledger row is behind (SyncSceneMembershipsUseCase
-   .push_images), in id order starting after the cursor the previous round returned and wrapping
-   around once, at most max_payloads images. Images that keep failing (no point in the collection:
-   they need a new vector) are therefore visited once per lap and never starve the others;
-2. check a slice of the current model's ledger against the collection's real points
-   (verify_ledger, at most max_verifications rows from where the last round stopped): a row whose
-   point is gone is forgotten, so the image counts as without a vector again;
-3. embed images the current model has no vector for (BuildEmbeddingsUseCase.run_batch with the
-   current encoder, at most max_embeddings images, in id order from where the last round
-   stopped), each batch behind the vector write gate: images written to the old collection while
-   a switch was about to happen, by a process that had not followed it yet, or whose point was
-   lost. Images whose original cannot be read are tried again on the next lap;
-4. drain the deletion queue (DeletionWorker.run_once), oldest first, at most max_deletions rows;
-   it stops at a batch that cleaned nothing (the oldest rows keep failing).
+1. 推送台账行落后的图片的 payload（SyncSceneMembershipsUseCase.push_images），
+   按 id 顺序从上一轮返回的游标之后开始，最多绕回一圈，最多 max_payloads 张图。
+   一直失败的图片（collection 里没有向量点：需要重新计算向量）因此每圈只访问一次，
+   不会饿死其他图片；
+2. 用 collection 里真实的向量点核对当前模型的一段台账（verify_ledger，从上一轮停下的
+   地方开始，最多 max_verifications 行）：向量点已经不在的行被忘掉，图片重新算作
+   没有向量；
+3. 为当前模型没有向量的图片计算 embedding（用当前编码器的 BuildEmbeddingsUseCase
+   .run_batch，最多 max_embeddings 张图，按 id 顺序从上一轮停下的地方开始），每一批都在
+   向量写入闸门之后：即将切换时写进旧 collection 的图片、由还没跟上切换的进程写入的图片，
+   或者向量点丢失的图片。原图读不了的图片在下一圈再试；
+4. 清理删除队列（DeletionWorker.run_once），从最早的开始，最多 max_deletions 行；
+   遇到什么都没清理掉的一批就停（最早的那些行一直失败）。
 
-Steps 2 and 3 need the current model's stack (step 3 its encoder): the CLI worker, which has no
-encoder, checks the ledger but embeds nothing.
+第 2、3 步需要当前模型的检索服务（第 3 步需要它的编码器）：命令行后台任务没有编码器，
+只检查台账，不计算 embedding。
 
-Rounds run in the API process (app.bootstrap.reconciler, RECONCILE_CONFIG) or from cron
-(`python -m app.workers.reconcile`). A PostgreSQL advisory lock keeps two processes from running
-a round at once: the second one skips its round.
+每一轮在 API 进程里运行（app.bootstrap.reconciler，RECONCILE_CONFIG），或者由 cron 调用
+（`python -m app.workers.reconcile`）。PostgreSQL advisory lock 防止两个进程同时跑一轮：
+后来的那个跳过这一轮。
 """
 
 from __future__ import annotations
@@ -47,7 +46,7 @@ from app.services.retrieval.sync_scenes import SyncSceneMembershipsUseCase
 
 logger = logging.getLogger("retrieval.reconcile")
 
-# pg_try_advisory_lock key of a round ("RECS")
+# 一轮的 pg_try_advisory_lock 键（"RECS"）
 RECONCILE_LOCK_KEY = 0x52454353
 
 
@@ -57,8 +56,8 @@ class ReconcileLimits:
     max_payloads: int = 2000
     deletion_batch: int = 50
     max_deletions: int = 200
-    max_verifications: int = 2000  # ledger rows checked against the collection per round (0: off)
-    max_embeddings: int = 100  # images without a vector embedded per round (0: off)
+    max_verifications: int = 2000  # 每轮对照 collection 检查的台账行数（0：关闭）
+    max_embeddings: int = 100  # 每轮为没有向量的图片计算 embedding 的数量（0：关闭）
 
 
 @dataclass
@@ -87,8 +86,9 @@ class DeletionPass:
 
 @dataclass
 class RoundResult:
-    """skipped: None when the round ran, else why not ('locked'). cursor: where the next round
-    starts its payload pass (None: from the first image)."""
+    """skipped：这一轮跑了时为 None，否则为没跑的原因（'locked'）。cursor：下一轮的 payload
+    推送从哪里开始（None：从第一张图开始）。
+    """
 
     skipped: str | None
     cursor: str | None
@@ -133,10 +133,11 @@ class ReconcileUseCase:
         fill: BuildEmbeddingsUseCase | None = None,
         write_gate: Callable[[], Any] | None = None,
     ) -> None:
-        """ledger: (current model id, its collection, the EmbeddingModelStorePort) to check
-        against the collection's points; fill: the current model's BuildEmbeddingsUseCase (None
-        where there is no encoder); write_gate: held around each fill batch (the API's
-        VectorWriteGate.shared), so a model version switch never races it."""
+        """ledger：（当前模型 id、它的 collection、EmbeddingModelStorePort），用来对照 collection
+        里的向量点检查；fill：当前模型的 BuildEmbeddingsUseCase（没有编码器的地方为 None）；
+        write_gate：每一批补算时持有（API 的 VectorWriteGate.shared），所以切换模型版本
+        永远不会和它竞争。
+        """
         self._metadata = metadata
         self._sync = sync
         self._deletions = deletions
@@ -153,7 +154,7 @@ class ReconcileUseCase:
         verify_cursor: str | None = None,
         embed_cursor: str | None = None,
     ) -> RoundResult:
-        """One round. should_stop is checked between batches (the API is shutting down)."""
+        """一轮。每批之间检查 should_stop（API 正在关闭）。"""
         started = time.monotonic()
         with self._metadata.try_maintenance_lock(RECONCILE_LOCK_KEY) as held:
             if not held:
@@ -182,7 +183,7 @@ class ReconcileUseCase:
     def _vector_pass(
         self, verify_cursor: str | None, embed_cursor: str | None, should_stop: Callable[[], bool]
     ) -> tuple[VectorPass, str | None, str | None]:
-        """Steps 2 and 3: a slice of the ledger checked, then a few missing vectors written."""
+        """第 2、3 步：检查一段台账，然后补写几个缺失的向量。"""
         limits = self._limits
         done = VectorPass()
         if self._ledger is not None and limits.max_verifications > 0 and not should_stop():
@@ -204,7 +205,7 @@ class ReconcileUseCase:
             done.gone += len(batch.gone)
             embed_cursor = None if batch.done else batch.last_id
             if batch.done:
-                break  # the end of the id range: the next round starts from the first image
+                break  # 到了 id 范围的末尾：下一轮从第一张图开始
         if done.embedded or done.failed:
             logger.info(
                 "reconcile: %d image(s) had no vector in the current collection and got one; %d could not be embedded",
@@ -213,18 +214,18 @@ class ReconcileUseCase:
         return done, verify_cursor, embed_cursor
 
     def _push_payloads(self, start: str | None, should_stop: Callable[[], bool]) -> tuple[PayloadPass, str | None]:
-        """(start, end] first, then [first, start]: one lap at most, max_payloads images at most."""
+        """先 (start, end]，再 [first, start]：最多一圈，最多 max_payloads 张图。"""
         limits = self._limits
         done = PayloadPass()
         after: str | None = start
-        until: str | None = None  # second leg: up to the start, inclusive
+        until: str | None = None  # 第二段：到 start 为止，含 start
         while done.scanned < limits.max_payloads and not should_stop():
             ids = self._metadata.list_unsynced_payload_ids(
                 after=after, until=until, limit=min(limits.payload_batch, limits.max_payloads - done.scanned)
             )
             if not ids:
                 if start is None or until is not None:
-                    return done, None  # a full lap: the next round starts from the first image
+                    return done, None  # 走完一整圈：下一轮从第一张图开始
                 after, until = None, start
                 continue
             result = self._sync.push_images(ids)
@@ -233,7 +234,7 @@ class ReconcileUseCase:
             done.missing += len(result.missing)
             done.unconfirmed += len(result.unconfirmed)
             if result.missing and self._ledger is not None:
-                # a ledger row without its point: forget it, the vector pass embeds the image again
+                # 没有向量点的台账行：忘掉它，补算向量那一步会重新计算这张图的 embedding
                 model_id, _vectors, models = self._ledger
                 models.forget_embeddings(model_id, list(result.missing))
             after = ids[-1]
@@ -259,7 +260,7 @@ class ReconcileUseCase:
             for item in run.get("failed") or []:
                 failing[str(item.get("image_id"))] = None
             if not processed:
-                break  # empty, or the oldest rows keep failing: the next batch would retry the same
+                break  # 为空，或者最早的那些行一直失败：下一批也只会重试同样的行
         done.failed = list(failing)
         done.remaining = self._metadata.count_pending_deletions()
         return done

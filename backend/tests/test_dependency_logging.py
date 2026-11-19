@@ -1,4 +1,4 @@
-"""Startup diagnostics identify the dependency and never print its credentials."""
+"""启动诊断能指出是哪个依赖，并且从不打印它的凭证。"""
 
 import copy
 import logging

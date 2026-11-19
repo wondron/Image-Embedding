@@ -1,5 +1,4 @@
-"""Model version routes: see the versions, register the configured encoder, fill its collection,
-switch (or roll back), retire."""
+"""模型版本的路由：查看各版本、登记配置的编码器、补齐它的 collection、切换（或回滚）、下线。"""
 
 from __future__ import annotations
 

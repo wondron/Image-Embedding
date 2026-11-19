@@ -1,33 +1,30 @@
-"""Model versions in the API process: what /api/embedding-models calls.
+"""API 进程里的模型版本：/api/embedding-models 调用的内容。
 
-Changing the embedding model is a sequence, and this is where it runs:
+更换 embedding 模型是一系列步骤，在这里执行：
 
-1. register: the configured encoder (EMBEDDING_CONFIG, the one predict uses) becomes a new version
-   (status building) with its own, empty collection. Search and index stay on the current one.
-2. build: a background thread first checks the ledger against the collection's real points
-   (verify_ledger: rows whose point is gone are forgotten), then embeds every stored image's
-   original that has no vector yet with the version's encoder (services.retrieval
-   .build_embeddings), then catches up payloads that changed meanwhile. The ledger is the
-   progress: stopping and starting again goes on where it stopped. A build that leaves no image
-   behind marks the version ready. The encoder is the configured one, the one search holds, or
-   the version's own loaded again from the weights its fingerprint names (still in the image).
-3. activate: checks the target's ledger against its points, builds its retrieval stack (its
-   encoder, its collection), then closes the vector write gate (app.bootstrap.write_gate: new
-   index requests wait, the ones in flight finish), embeds what the target still lacks (images
-   indexed since its build, at most FINAL_CATCHUP_MAX), makes it current in PostgreSQL (the
-   previous one goes back to ready), swaps the stack in and opens the gate again: no image
-   written meanwhile can miss the new collection. The old stack is closed a little later, after
-   requests that still hold it. A roll back is the same call on the previous version.
-4. retire: a version that is not current loses its collection and its ledger rows.
+1. 登记（register）：配置的编码器（EMBEDDING_CONFIG，预测用的那个）成为一个新版本
+   （状态 building），有自己的空 collection。搜索和入库仍然用当前版本。
+2. 构建（build）：后台线程先用 collection 里真实的向量点核对台账（verify_ledger：向量点已经
+   不在的行被忘掉），然后用该版本的编码器为每张还没有向量的已存图片的原图计算 embedding
+   （services.retrieval.build_embeddings），再补上这期间变化的 payload。台账就是进度：
+   停下再启动会从停下的地方继续。没有遗漏任何图片的构建会把版本标记为 ready。编码器是
+   配置的那个、搜索正在用的那个，或者根据指纹记录的权重（仍在镜像里）重新加载的该版本
+   自己的编码器。
+3. 切换（activate）：用目标版本的向量点核对它的台账，构建它的检索服务（它的编码器、它的
+   collection），然后关闭向量写入闸门（app.bootstrap.write_gate：新的入库请求等待，进行中的
+   完成），为目标版本补算它还缺的（构建之后入库的图片，最多 FINAL_CATCHUP_MAX 张），在
+   PostgreSQL 里把它设为当前版本（之前的回到 ready），换上新的检索服务，再打开闸门：这期间
+   写入的图片不会漏掉新的 collection。旧的检索服务稍后关闭，等仍持有它的请求结束。回滚就是
+   对上一个版本做同样的调用。
+4. 下线（retire）：非当前版本失去它的 collection 和台账行。
 
-It works while the retrieval stack is down: a changed EMBEDDING_CONFIG whose current version
-cannot be paired (bootstrap.retrieval_stack.pair_encoder) is fixed by registering, building and
-switching to the configured encoder's version. Needs the catalog's PostgreSQL store, QDRANT_CONFIG
-and the object storage; one build at a time per process, and a PostgreSQL advisory lock per
-version keeps two processes from building the same one.
+检索服务挂了时也能用：EMBEDDING_CONFIG 改了、当前版本配对不上时
+（bootstrap.retrieval_stack.pair_encoder），通过登记、构建并切换到配置的编码器的版本来修复。
+需要目录的 PostgreSQL 存储、QDRANT_CONFIG 和对象存储；每个进程同时只能有一个构建，每个
+版本一把 PostgreSQL advisory lock，防止两个进程构建同一个版本。
 
-Other API processes do not follow a switch made here: they keep their stack until restarted
-(the API image runs one worker process).
+其他 API 进程不会跟随这里做的切换：它们保留自己的检索服务直到重启
+（API 镜像只运行一个 worker 进程）。
 """
 
 from __future__ import annotations
@@ -64,18 +61,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("model_registry")
 
-# pg_try_advisory_lock key of a build: this base + the version id ("EMB" 0)
+# 一次构建的 pg_try_advisory_lock 键：这个基数 + 版本 id（"EMB" 0）
 BUILD_LOCK_KEY_BASE = 0x454D4200
-# A new pass picks up images stored while the previous one ran
+# 新的一遍会处理上一遍运行期间存入的图片
 MAX_PASSES = 3
-# This many images in a row failing with the same code stops the build (storage down, ...)
+# 连续这么多张图片以同一个错误码失败时停止构建（存储挂了等）
 FAILURE_STREAK_LIMIT = 25
-# Failures kept for the page (the count covers all)
+# 保留给页面显示的失败数（计数覆盖全部）
 MAX_FAILURES_SHOWN = 50
-# Requests that took the old stack just before a switch finish on it for this long
+# 切换前刚拿到旧检索服务的请求，在旧服务上继续运行这么长时间
 RETIRED_STACK_GRACE_SECONDS = 30.0
-# A switch embeds at most this many missing images itself, with index requests held back; a
-# version further behind needs a build first (or allow_missing)
+# 切换时自己最多补算这么多张缺失的图片，期间入库请求被挡住；落后更多的版本需要先构建
+# （或者 allow_missing）
 FINAL_CATCHUP_MAX = 200
 
 
@@ -84,19 +81,19 @@ def _now() -> str:
 
 
 class _Halt(Exception):
-    """The build stops on its own: the message is what the page shows."""
+    """构建自己停下了：信息就是页面上显示的内容。"""
 
 
 @dataclass
 class BuildState:
-    """One build of this process. state: running / stopping / done / stopped / failed."""
+    """本进程的一次构建。state：running / stopping / done / stopped / failed。"""
 
     model_id: int
     state: str
     started_at: str
     finished_at: str | None = None
-    verified: int = 0  # ledger rows checked against the collection's points
-    repaired: int = 0  # of them, rows whose point was gone (embedded again by this build)
+    verified: int = 0  # 用 collection 的向量点核对过的台账行数
+    repaired: int = 0  # 其中向量点已经不在的行数（由这次构建重新计算 embedding）
     embedded: int = 0
     failed: int = 0
     gone: int = 0
@@ -114,15 +111,15 @@ class BuildState:
 class ModelRegistry:
     def __init__(self, runtime: "ApplicationState") -> None:
         self._runtime = runtime
-        self._lock = threading.RLock()  # build start / stop / status
-        self._switch_lock = threading.Lock()  # one activation or retirement at a time
+        self._lock = threading.RLock()  # 构建的启动 / 停止 / 状态
+        self._switch_lock = threading.Lock()  # 同一时间只能有一次切换或下线
         self._client: Any = None
         self._build: BuildState | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._timers: list[threading.Timer] = []
 
-    # -- what it works with -------------------------------------------------------
+    # -- 它用到的东西 ---------------------------------------------------------------
 
     def _store(self) -> Any:
         return self._runtime.require_catalog().store
@@ -136,7 +133,7 @@ class ModelRegistry:
         return _qdrant_connection(self._runtime.config)
 
     def _vectors(self, row: dict[str, Any]) -> QdrantVectorStore:
-        """The version's collection over this registry's own client (it outlives stack swaps)."""
+        """基于本版本登记自己的客户端的版本 collection（它比检索服务的替换活得更久）。"""
         with self._lock:
             if self._client is None:
                 try:
@@ -173,7 +170,7 @@ class ModelRegistry:
             return None
 
     def _encoder_in_memory(self, row: dict[str, Any]) -> tuple[str, Any] | None:
-        """("configured" | "serving", encoder) already loaded for this version, else None."""
+        """已经为这个版本加载好的（"configured" | "serving", 编码器），否则为 None。"""
         fingerprint = row.get("fingerprint")
         if fingerprint is None:
             return None
@@ -186,7 +183,7 @@ class ModelRegistry:
         return None
 
     def _open_collection(self, row: dict[str, Any], store: Any) -> QdrantVectorStore:
-        """The version's collection, made anew when it is gone; then its ledger rows are void."""
+        """版本的 collection，不在了就重新建一个；这时它的台账行就作废了。"""
         vectors = self._vectors(row)
         existed = vectors.collection_exists()
         vectors.ensure_collection(recreate=False)
@@ -197,8 +194,9 @@ class ModelRegistry:
         return vectors
 
     def _encoder_for_build(self, row: dict[str, Any]) -> tuple[str, Any]:
-        """The version's encoder: in memory, else loaded again from the weights its fingerprint
-        names (EMBEDDING_ENCODER_UNAVAILABLE when they are gone or no longer the same)."""
+        """版本的编码器：在内存里就用内存里的，否则根据指纹记录的权重重新加载（权重不在了或者
+        已经不一样了时为 EMBEDDING_ENCODER_UNAVAILABLE）。
+        """
         found = self._encoder_in_memory(row)
         if found is not None:
             return found
@@ -228,14 +226,14 @@ class ModelRegistry:
             )
         return "loaded", encoder
 
-    # -- reading --------------------------------------------------------------------
+    # -- 读取 -------------------------------------------------------------------------
 
     def build_status(self) -> dict[str, Any] | None:
         with self._lock:
             return asdict(self._build) if self._build is not None else None
 
     def overview(self) -> dict[str, Any]:
-        """Every version with its coverage, the configured encoder and what search is paired with."""
+        """每个版本及其覆盖情况、配置的编码器，以及搜索当前配对的版本。"""
         store = self._store()
         data = store.list_embedding_models()
         images = int(data["images"])
@@ -258,7 +256,7 @@ class ModelRegistry:
                 try:
                     points = self._vectors(row).point_count()
                 except Exception:
-                    points = None  # unreachable, or no collection (a build makes it again)
+                    points = None  # 连不上，或者没有 collection（构建会重新创建）
             models.append({
                 "id": int(row["id"]),
                 "name": row["name"],
@@ -315,10 +313,10 @@ class ModelRegistry:
             raise err.embedding_model_not_found(f"embedding model {model_id} does not exist")
         return found
 
-    # -- register ---------------------------------------------------------------------
+    # -- 登记 -------------------------------------------------------------------------
 
     def register(self, *, name: str | None = None, version: str | None = None) -> dict[str, Any]:
-        """The configured encoder as a new version (building) with a new, empty collection."""
+        """把配置的编码器登记为一个新版本（building），带一个新的空 collection。"""
         configured = self._configured()
         fingerprint = self._fingerprint(configured)
         if fingerprint is None:
@@ -340,7 +338,7 @@ class ModelRegistry:
             collection = collection_name(name, version, taken)
             fields = registration_fields(name=name, version=version, collection=collection, fingerprint=fingerprint)
             vectors = self._vectors(fields)
-            if not vectors.collection_exists():  # never reuse points someone else left in Qdrant
+            if not vectors.collection_exists():  # 从不复用别人留在 Qdrant 里的向量点
                 break
             taken.add(collection)
         vectors.ensure_collection(recreate=False)
@@ -355,7 +353,7 @@ class ModelRegistry:
         logger.info("已登记模型版本 %s:%s | id=%s | collection=%s | dim=%s", name, version, row["id"], collection, fields["dim"])
         return row
 
-    # -- build ------------------------------------------------------------------------
+    # -- 构建 -------------------------------------------------------------------------
 
     def start_build(self, model_id: int) -> dict[str, Any]:
         store = self._store()
@@ -369,7 +367,7 @@ class ModelRegistry:
                 raise err.embedding_model_not_found(f"embedding model {model_id} does not exist")
             require_buildable(row)
             found = self._encoder_for_build(row)
-            vectors = self._open_collection(row, store)  # made again if it was dropped by hand
+            vectors = self._open_collection(row, store)  # 如果被手工删了就重新创建
             use_case = BuildEmbeddingsUseCase(
                 model=ActiveModel.from_row(row), encoder=found[1], vectors=vectors,
                 metadata=store, models=store, storage=self._storage(),
@@ -412,7 +410,7 @@ class ModelRegistry:
                     self._record(state, state="stopped")
                     return
                 row = store.get_embedding_model(model.id) or {}
-                if row.get("status") != ModelStatus.CURRENT.value:  # the reconciler catches the current one up
+                if row.get("status") != ModelStatus.CURRENT.value:  # 当前版本由对账任务补齐
                     self._record(state, payloads=use_case.push_payloads(should_stop=self._stopping))
                 remaining = store.count_embedding_backlog(model.id)
                 if remaining == 0 and row.get("status") == ModelStatus.BUILDING.value:
@@ -436,7 +434,7 @@ class ModelRegistry:
             )
 
     def _passes(self, use_case: BuildEmbeddingsUseCase, state: BuildState) -> None:
-        """Pass after pass over the images still without a vector, each tried once per build."""
+        """一遍又一遍地处理还没有向量的图片，每张图片在一次构建里只试一次。"""
         tried: list[str] = []
         streak_code, streak = None, 0
         for number in range(1, MAX_PASSES + 1):
@@ -468,7 +466,7 @@ class ModelRegistry:
             if self._stopping() or not progressed:
                 return
 
-    # -- activate / retire ------------------------------------------------------------
+    # -- 切换 / 下线 ------------------------------------------------------------------
 
     def _swap_in(self, stack: Any) -> None:
         old = self._runtime.replace_retrieval(stack)
@@ -487,7 +485,7 @@ class ModelRegistry:
             self._runtime.reconciler = start_reconciler(self._runtime)
 
     def activate(self, model_id: int, *, allow_missing: bool = False) -> dict[str, Any]:
-        """Switch search and index to this version (a roll back when it was current before)."""
+        """把搜索和入库切换到这个版本（如果它之前是当前版本，就是回滚）。"""
         from app.bootstrap.retrieval_stack import build_retrieval_stack
 
         with self._switch_lock:
@@ -502,11 +500,11 @@ class ModelRegistry:
             already = row["status"] == ModelStatus.CURRENT.value
             if already and stack is not None and stack.model.id == int(model_id):
                 return {"model": row, "previous_id": None, "switched": False}
-            require_activatable(row, backlog=0, allow_missing=True)  # retired: EMBEDDING_MODEL_STATE
+            require_activatable(row, backlog=0, allow_missing=True)  # 已下线：EMBEDDING_MODEL_STATE
             configured = self._configured()
             if configured is None:
                 raise err.not_ready(f"the configured encoder (EMBEDDING_CONFIG) is not loaded: {self._runtime.initialization_error}")
-            # Count what the collection really holds, not what the ledger remembers
+            # 统计 collection 里真正有的，而不是台账记得的
             target = self._vectors(row)
             if target.collection_exists():
                 verify_ledger(int(model_id), target, store)
@@ -526,7 +524,7 @@ class ModelRegistry:
             swapped = False
             try:
                 with self._runtime.vector_writes.exclusive():
-                    # No index request writes from here on until the new stack is in place
+                    # 从这里开始，在新的检索服务就位之前，没有入库请求会写入
                     caught = self._catch_up(new_stack, store) if backlog <= FINAL_CATCHUP_MAX else None
                     remaining = store.count_embedding_backlog(int(model_id))
                     if remaining and not already:
@@ -549,8 +547,9 @@ class ModelRegistry:
             return {**result, "switched": True, "caught_up": (caught or {}).get("embedded", 0), "remaining": remaining}
 
     def _catch_up(self, stack: Any, store: Any) -> dict[str, Any]:
-        """Embed what the switch target still lacks (images indexed since its build), with its
-        own stack, while the write gate is closed; each image is tried once."""
+        """在写入闸门关闭期间，用目标版本自己的检索服务补算它还缺的（构建之后入库的图片）；
+        每张图片只试一次。
+        """
         use_case = BuildEmbeddingsUseCase(
             model=stack.model, encoder=stack.embedding, vectors=stack.infra.vectors,
             metadata=store, models=store, storage=stack.infra.storage,
@@ -566,7 +565,7 @@ class ModelRegistry:
             after = batch.last_id
 
     def retire(self, model_id: int) -> dict[str, Any]:
-        """Drop a version that is not current: its collection, then its ledger rows."""
+        """删除一个非当前版本：先删它的 collection，再删它的台账行。"""
         with self._switch_lock:
             store = self._store()
             row = store.get_embedding_model(model_id)
@@ -586,7 +585,7 @@ class ModelRegistry:
             )
             return {**result, "dropped": dropped}
 
-    # -- lifecycle --------------------------------------------------------------------
+    # -- 生命周期 ---------------------------------------------------------------------
 
     def close(self, timeout: float = 30.0) -> None:
         self._stop.set()
@@ -601,7 +600,7 @@ class ModelRegistry:
             if timer.is_alive():
                 timer.cancel()
                 try:
-                    timer.function()  # close the old stack now
+                    timer.function()  # 现在就关闭旧的检索服务
                 except Exception:
                     logger.exception("关闭旧检索栈失败")
         client, self._client = self._client, None

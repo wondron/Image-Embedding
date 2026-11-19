@@ -1,10 +1,10 @@
-"""Recompute the scene memberships of every stored image and rewrite their vector payloads.
+"""重新计算所有已存图片的场景归属，并重写它们的向量 payload。
 
-Run after changing scene rules, enabling / disabling a scene, or moving categories, when the
-admin page's 「重算场景归属」 is not convenient (e.g. a large library, from cron). Needs PG +
-Qdrant + object storage config, like the other workers; no ONNX model is loaded.
+在修改场景规则、启用 / 停用场景或移动类别之后执行，适用于管理页的「重算场景归属」
+不方便用的时候（例如图库很大，或从 cron 调用）。和其他后台任务一样，需要 PG、
+Qdrant 和对象存储的配置；不加载 ONNX 模型。
 
-Invoke from backend/:
+在 backend/ 下执行：
 
   python -m app.workers.sync_scenes
   python -m app.workers.sync_scenes --batch 500

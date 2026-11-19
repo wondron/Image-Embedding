@@ -1,18 +1,17 @@
-"""Where one stored image stands in the current model's collection (GET /api/images/{image_id}).
+"""一张已存图片在当前模型 collection 里的情况（GET /api/images/{image_id}）。
 
-Reads the image's point (payload only, no vector) and compares it with the payload PostgreSQL
-gives now - scene_membership.build_qdrant_payload, the one index, sync and pushes write - and
-reports the current model's ledger row (image_embeddings):
+读取图片的向量点（只读 payload，不读向量），和 PostgreSQL 现在给出的 payload 比较——
+即 scene_membership.build_qdrant_payload，入库、同步和推送写入的就是它——并报告当前模型的
+台账行（image_embeddings）：
 
-    status    meaning
-    synced    the point exists and its payload matches PostgreSQL: search filters see the image
-              as it is stored
-    stale     the point exists but its payload is behind: push it (POST
-              /api/images/{image_id}/vector-sync, or POST /api/scenes/sync for everything)
-    missing   no point in the current collection: search cannot find the image (index it again)
+    status    含义
+    synced    向量点存在且 payload 和 PostgreSQL 一致：搜索过滤看到的图片和存储的一样
+    stale     向量点存在但 payload 落后：需要推送（POST /api/images/{image_id}/vector-sync，
+              或者用 POST /api/scenes/sync 推送全部）
+    missing   当前 collection 里没有向量点：搜索找不到这张图（需要重新入库）
 
-The HTTP layer (app.api.services.images) answers status=unavailable when the retrieval stack is
-not built or the read fails. Scenes are compared as a set: search only asks "contains".
+检索服务没有构建或读取失败时，HTTP 层（app.api.services.images）返回 status=unavailable。
+场景按集合比较：搜索只问"是否包含"。
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ from app.core.rules.scene_membership import build_qdrant_payload
 
 
 def expected_payload(image: Mapping[str, Any]) -> dict[str, Any]:
-    """The payload the image's point should carry, from its stored fields and effective scenes."""
+    """图片的向量点应该带的 payload，由它存储的字段和生效的场景得出。"""
     return build_qdrant_payload(
         category_id=image.get("category_id"),
         scene_codes=list(image.get("scenes") or []),
@@ -36,8 +35,9 @@ def expected_payload(image: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def payload_matches(actual: Mapping[str, Any], expected: Mapping[str, Any]) -> bool:
-    """True when every field of expected has the same value in actual (scenes as a set); keys
-    that only actual has do not count (no filter reads them)."""
+    """expected 的每个字段在 actual 里都有相同的值时为 True（场景按集合比较）；只有 actual
+    有的键不算（没有过滤会读它们）。
+    """
     for key, want in expected.items():
         have = actual.get(key)
         if key == "scenes":
@@ -54,10 +54,10 @@ class ImageVectorStatusUseCase:
         self._model = model
 
     def statuses(self, expected: Mapping[str, Mapping[str, Any]]) -> dict[str, str]:
-        """{image id: synced / stale / missing} for many images with one read of the collection
-        (a gallery page). expected: {image id: expected_payload(image)}.
+        """一次读取 collection 得到多张图的 {图片 id: synced / stale / missing}（图库的一页）。
+        expected：{图片 id: expected_payload(image)}。
 
-        Raises AppError (SEARCH_QDRANT_FAILED) when the vector store cannot be read.
+        向量库读不了时抛出 AppError（SEARCH_QDRANT_FAILED）。
         """
         if not expected:
             return {}
@@ -69,9 +69,9 @@ class ImageVectorStatusUseCase:
         return out
 
     def inspect(self, image: Mapping[str, Any]) -> dict[str, Any]:
-        """The vector part of the image detail; image is what ManageImagesUseCase.get returns.
+        """图片详情里的向量部分；image 是 ManageImagesUseCase.get 返回的内容。
 
-        Raises AppError (SEARCH_QDRANT_FAILED) when the vector store cannot be read.
+        向量库读不了时抛出 AppError（SEARCH_QDRANT_FAILED）。
         """
         image_id = str(image["id"])
         expected = expected_payload(image)

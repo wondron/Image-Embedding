@@ -1,19 +1,17 @@
-"""Index-image use case (PG v0.1).
+"""图片入库用例（PG v0.1）。
 
-Flow: bytes → sha256/uuid → validate labels → embed (no side effects yet) →
-S3 original+thumb → one PostgreSQL write transaction: insert images, recompute
-image_scenes, read a consistent payload snapshot, stage its embedding ledger,
-upsert Qdrant, then commit. Failed writes roll back without deleting another
-request's image. A re-upload keeps the stored row; when that row's files are under other keys
-(stored before the shard directory or a key_prefix change), the copies just written are removed.
+流程：字节 → sha256/uuid → 校验标注 → 计算 embedding（此时还没有副作用）→
+S3 原图 + 缩略图 → 一个 PostgreSQL 写事务：插入 images、重算 image_scenes、读取一致的
+payload 快照、暂存它的 embedding 台账、upsert 到 Qdrant，然后提交。写入失败会回滚，
+不会删掉另一个请求的图片。重复上传保留已存的行；当这一行的文件在其他 key 下时
+（在分片目录或 key_prefix 变更之前存的），刚写入的副本会被删除。
 
-Path-based local disk store is legacy MVP; when storage is present we prefer
-put_original_and_thumb and DB https URLs (no path column in PG).
+按路径的本地磁盘存储是旧的 MVP 做法；有存储时优先使用 put_original_and_thumb 和
+数据库里的 https URL（PG 里没有 path 列）。
 
-Task center: execute_batch / execute_file write one index_tasks row per file right after it
-(succeeded with the image id, or failed with the code and the client-safe detail). Best effort:
-a record that cannot be written is logged and the index result stands. execute_one records
-nothing (it is the indexing itself).
+任务中心：execute_batch / execute_file 处理完每个文件后立刻写一行 index_tasks
+（成功时带图片 id，失败时带错误码和可以给客户端看的 detail）。尽力而为：
+写不了的记录只写日志，入库结果照常有效。execute_one 不记录任何东西（它就是入库本身）。
 """
 
 from __future__ import annotations
@@ -129,7 +127,7 @@ class IndexImageUseCase:
         license: str | None = None,
         description: str | None = None,
     ) -> dict[str, Any]:
-        # Check optional client scene hints against the scenes table (membership still recomputed from rules)
+        # 用 scenes 表检查客户端传来的可选场景提示（归属仍然按规则重算）
         resolve_index_scenes(self._metadata, scene=scene, scenes=scenes)
 
         if image_bytes is None and not source_path:
@@ -157,7 +155,7 @@ class IndexImageUseCase:
 
         src = coerce_enum(SOURCE_TYPE, source_type, field="source_type", default=DEFAULT_SOURCE_TYPE)
         lic = coerce_enum(LICENSE, license, field="license", default=DEFAULT_LICENSE)
-        # optional food annotation, stored in image_foods (app.core.rules.food_fields)
+        # 可选的食物标注，存在 image_foods 里（app.core.rules.food_fields）
         food_fields = {
             key: coerce_food_field(key, value)
             for key, value in (
@@ -170,16 +168,16 @@ class IndexImageUseCase:
             )
         }
         desc = normalize_description(description)
-        tag_list = normalize_tags(tags)  # PG only, like description: not in the Qdrant payload
+        tag_list = normalize_tags(tags)  # 只存 PG，和 description 一样：不在 Qdrant payload 里
 
-        # Resolve category_id: prefer explicit; optional code lookup on metadata
+        # 确定 category_id：优先用显式传入的；可选地在元数据里按 code 查找
         resolved_category_id = category_id
         if resolved_category_id is None and category:
             resolved_category_id = self._metadata.get_category_id_by_code(str(category).strip())
             if resolved_category_id is None:
                 logger.warning("index: unknown category code %r; storing unlabeled", category)
 
-        # images invariant: label_status = unlabeled  <=>  category_id IS NULL
+        # images 的不变式：label_status = unlabeled  <=>  category_id IS NULL
         if label_status is None or not str(label_status).strip():
             label = LabelStatus.AUTO if resolved_category_id is not None else LabelStatus.UNLABELED
         else:
@@ -193,10 +191,10 @@ class IndexImageUseCase:
                     raise err.validation_error(
                         f"label_status={label.value} requires a category"
                     )
-                # category code given but unknown — keep the image, drop the label
+                # 给了类别 code 但不认识——保留图片，去掉标注
                 label = LabelStatus.UNLABELED
 
-        # Embed before any write: a failure here leaves no S3 objects or rows behind.
+        # 在任何写入之前计算 embedding：这里失败不会留下 S3 对象或数据库行。
         try:
             vector = self._embedding.embed_bytes(image_bytes)
         except err.AppError:
@@ -214,7 +212,7 @@ class IndexImageUseCase:
             original_url = urls["original_url"]
             thumb_url = urls["thumb_url"]
         else:
-            # TODO(M5+): require ImageStoragePort in production; stub https for dry-run
+            # TODO(M5+)：生产环境要求有 ImageStoragePort；dry-run 时用 https 占位
             base = "https://cdn.example.local/image-embedding"
             original_url = public_url(base, original_key(image_id, ext))
             thumb_url = public_url(base, thumb_key(image_id))
@@ -222,7 +220,7 @@ class IndexImageUseCase:
                 "index without ImageStoragePort; stub URLs id=%s (wire storage in stack)",
                 image_id,
             )
-            # Best-effort local mirror for debug
+            # 尽力而为的本地镜像，用于调试
             try:
                 os.makedirs(self._indexed_dir, exist_ok=True)
                 Path(self._indexed_dir, f"{image_id}.{ext}").write_bytes(image_bytes)
@@ -244,8 +242,8 @@ class IndexImageUseCase:
             "tags": tag_list,
             **food_fields,
         }
-        # The row lock stays held through the vector write and ledger commit.
-        # Concurrent uploads use the INSERT outcome, never a separate existence check.
+        # 行锁一直持有到向量写入和台账提交之后。
+        # 并发上传按 INSERT 的结果判断，从不另外做存在性检查。
         with self._metadata.index_image(row, model_id=self._model.id) as indexed:
             stored = indexed.image
             image_id = UUID(str(stored["id"]))
@@ -265,7 +263,7 @@ class IndexImageUseCase:
                 raise err.index_qdrant_failed(f"{type(exc).__name__}: {exc}") from exc
 
         if not indexed.created and self._storage is not None:
-            # Committed: the stored row won, and its URLs are the image's files from now on.
+            # 已提交：已存的行胜出，从现在起它的 URL 就是这张图的文件。
             drop_unused_upload(self._storage, image_id, written=row, stored=stored)
 
         return {
@@ -275,7 +273,7 @@ class IndexImageUseCase:
             "thumb_url": stored["thumb_url"],
             "category_id": stored.get("category_id"),
             "scenes": scene_codes,
-            # the stored row wins: on re-upload the first upload's values are kept
+            # 已存的行胜出：重复上传时保留第一次上传的值
             **{key: stored.get(key) for key in FOOD_FIELDS},
             "label_status": str(stored["label_status"]),
             "width": stored["width"],
@@ -284,7 +282,7 @@ class IndexImageUseCase:
             "tags": stored.get("tags", []),
             "payload_version": payload_version,
             "created_at": stored.get("created_at"),
-            # false: the same bytes were stored before; their row (labels included) was kept
+            # false：同样的字节之前已经存过；保留了它们的行（包括标注）
             "created": indexed.created,
         }
 
@@ -294,8 +292,9 @@ class IndexImageUseCase:
         *,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        """Index each item on its own: {indexed, failed}. Each file's outcome is recorded in
-        index_tasks right after it (task center), with trace_id."""
+        """逐项入库：{indexed, failed}。每个文件的结果在处理完后立刻记录到 index_tasks
+        （任务中心），带 trace_id。
+        """
         if not items:
             raise err.index_empty_request()
         indexed: list[dict[str, Any]] = []
@@ -314,7 +313,7 @@ class IndexImageUseCase:
         return {"indexed": indexed, "failed": failed}
 
     def execute_file(self, item: dict[str, Any], *, trace_id: str | None = None) -> dict[str, Any]:
-        """One file (POST /api/index/file), recorded like a batch item; its failure is raised."""
+        """单个文件（POST /api/index/file），像批量中的一项一样记录；失败会抛出。"""
         started = time.perf_counter()
         try:
             out = self._index_item(item)
@@ -342,7 +341,7 @@ class IndexImageUseCase:
         )
 
     def _record(self, row: dict[str, Any]) -> None:
-        """Best effort: the index result stands when its record cannot be written."""
+        """尽力而为：记录写不了时入库结果照常有效。"""
         try:
             self._metadata.record_index_tasks([row])
         except Exception:
@@ -354,7 +353,7 @@ def _item_label(item: dict[str, Any]) -> str:
 
 
 def _failure(label: str, exc: Exception) -> dict[str, Any]:
-    """{filename, error, detail} as a client may see it; an internal cause stays in the log."""
+    """客户端可以看到的 {filename, error, detail}；内部原因留在日志里。"""
     if isinstance(exc, err.AppError):
         if err.is_internal(exc):
             logger.error("index item failed: %s | %s: %s", label, exc.code, exc.detail, exc_info=exc)

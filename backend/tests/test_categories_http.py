@@ -1,5 +1,6 @@
-"""GET / POST /api/categories, PATCH / DELETE /api/categories/{id}: the real routes, adapter,
-use case and field rules over an in-memory store (the tree rules that need SQL are in test_pg_live)."""
+"""GET / POST /api/categories、PATCH / DELETE /api/categories/{id}：真实的路由、适配层、用例和
+字段规则，存储放在内存里（需要 SQL 的树规则在 test_pg_live 里）。
+"""
 
 import unittest
 from types import SimpleNamespace
@@ -23,14 +24,15 @@ GRILL = {"id": 2, "code": "grill", "name": "烤"}
 
 
 class FakeStore:
-    """Keeps nodes in a dict. Like the real store it normalizes what it is given; unlike it,
-    it knows nothing about parents, roots or uses beyond what a test sets up."""
+    """把节点保存在一个 dict 里。和真实的存储一样会规范化传入的内容；不同的是，除了测试
+    设置的之外，它对父节点、根节点和使用情况一无所知。
+    """
 
     def __init__(self):
         self.nodes = {}
         self.calls = []
-        self.fail = None  # an AppError the next write raises
-        self.membership = None  # what the next update says it recomputed (a move / cuisines change)
+        self.fail = None  # 下一次写入会抛出的 AppError
+        self.membership = None  # 下一次更新会说它重算了什么（移动 / 修改菜系）
 
     def _node(self, category_id, fields, previous=None):
         node = dict(previous or {
@@ -82,7 +84,7 @@ class FakeStore:
 class CategoryEndpointTests(unittest.TestCase):
     def setUp(self):
         self.store = FakeStore()
-        # The catalog only: categories need PostgreSQL, not the retrieval stack
+        # 只有目录：类别需要 PostgreSQL，不需要检索服务
         self.runtime = ApplicationState(
             config={}, config_info={}, http_client=Mock(), settings=SimpleNamespace(),
             catalog=SimpleNamespace(categories_uc=ManageCategoriesUseCase(self.store)),
@@ -118,7 +120,7 @@ class CategoryEndpointTests(unittest.TestCase):
         response = self.client.get("/api/categories")
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
-        self.assertEqual(set(body), {"ok", "categories", "heating_groups", "root_codes"})  # trace id: header only
+        self.assertEqual(set(body), {"ok", "categories", "heating_groups", "root_codes"})  # trace id：只在响应头里
         self.assertTrue(response.headers["X-Trace-Id"])
         self.assertEqual(body["heating_groups"], [GRILL])
         self.assertEqual(body["root_codes"], ["ingredient", "dish", "dessert", "beverage", "mixed", "other"])
@@ -148,7 +150,7 @@ class CategoryEndpointTests(unittest.TestCase):
             {key: fields[key] for key in ("code", "parent_id", "cuisines", "heating_group_id", "sort_order", "is_active")},
             {"code": "dish", "parent_id": None, "cuisines": ["italian"], "heating_group_id": 2, "sort_order": 0, "is_active": True},
         )
-        # every write is logged with the request's trace id
+        # 每次写入都带着请求的 trace id 记日志
         self.assertIn("category created id=1 code=dish parent_id=None | trace_id=trace-create", logs.output[0])
 
     def test_create_rejects_a_bad_body_before_the_store_is_called(self):
@@ -157,12 +159,12 @@ class CategoryEndpointTests(unittest.TestCase):
         cases = {
             "code": dict(good, code="Dish-Pizza"),
             "names": dict(good, names=[]),
-            "parent_id": dict(good, parent_id=True),  # strict: true is not 1
+            "parent_id": dict(good, parent_id=True),  # 严格：true 不是 1
             "sort_order": dict(good, sort_order="3"),
             "is_active": dict(good, is_active="yes"),
             "cuisines": dict(good, cuisines=["Italian"]),
             "heating_group_id": dict(good, heating_group_id=0),
-            "path": dict(good, path="1.2"),  # not writable
+            "path": dict(good, path="1.2"),  # 不可写
         }
         for field, body in cases.items():
             with self.subTest(field=field):
@@ -196,7 +198,7 @@ class CategoryEndpointTests(unittest.TestCase):
         self.assertEqual(self.store.calls[-1], ("update", 1, {"sort_order": 5, "is_active": False}))
         category = response.json()["category"]
         self.assertEqual((category["sort_order"], category["is_active"]), (5, False))
-        self.assertEqual((category["cuisines"], category["heating_group"]), (["italian"], GRILL))  # untouched
+        self.assertEqual((category["cuisines"], category["heating_group"]), (["italian"], GRILL))  # 没有改动
 
     def test_patch_null_moves_to_the_root_or_clears_the_heating_group(self):
         self.create(heating_group_id=2)
@@ -205,10 +207,10 @@ class CategoryEndpointTests(unittest.TestCase):
         self.assertEqual(self.store.calls[-1], ("update", 1, {"parent_id": None, "heating_group_id": None}))
         self.assertIsNone(response.json()["category"]["heating_group"])
 
-    # ---- PATCH: the scenes of the images below a moved category -------------
+    # ---- PATCH：被移动的类别下图片的场景 ----------------------------------
 
     def with_retrieval(self, push):
-        """A retrieval stack whose payload push is `push(image_ids) -> PushResult`."""
+        """payload 推送为 `push(image_ids) -> PushResult` 的检索服务。"""
         sync = Mock()
         sync.push_images.side_effect = push
         self.runtime.retrieval = SimpleNamespace(scene_sync_uc=sync)
@@ -218,7 +220,7 @@ class CategoryEndpointTests(unittest.TestCase):
         self.create()
         self.store.membership = {"images": len(changed_ids) if images is None else images, "changed_ids": changed_ids}
         response = self.client.patch("/api/categories/1", json={"parent_id": None})
-        self.assertEqual(response.status_code, 200, response.text)  # PostgreSQL committed: never fails for the push
+        self.assertEqual(response.status_code, 200, response.text)  # PostgreSQL 已提交：从不因为推送而失败
         return response.json()["scene_sync"]
 
     def test_a_patch_that_cannot_change_scenes_says_nothing_about_them(self):
@@ -292,7 +294,7 @@ class CategoryEndpointTests(unittest.TestCase):
         self.assertIn("category deleted id=1 code=dish", logs.output[0])
         self.assert_error(self.client.delete("/api/categories/1"), 404, "CATEGORY_NOT_FOUND")
 
-    # ---- failures ----------------------------------------------------------
+    # ---- 失败 --------------------------------------------------------------
 
     def test_store_errors_keep_their_code_and_status(self):
         self.create()
@@ -308,10 +310,10 @@ class CategoryEndpointTests(unittest.TestCase):
         with self.assertLogs("api.errors", level="ERROR") as logs:
             error = self.assert_error(self.client.post("/api/categories", json={"code": "dish", "names": [ZH]}), 502, "CATEGORY_POSTGRES_FAILED")
         self.assertEqual(error["detail"], "category database error")
-        self.assertIn("hunter2", logs.output[0])  # the log keeps the cause
+        self.assertIn("hunter2", logs.output[0])  # 日志保留原因
 
     def test_the_routes_work_without_the_retrieval_stack(self):
-        self.assertIsNone(self.runtime.retrieval)  # setUp has no encoder / Qdrant at all
+        self.assertIsNone(self.runtime.retrieval)  # setUp 里完全没有编码器 / Qdrant
         self.assertEqual(self.client.get("/api/categories").status_code, 200)
 
     def test_without_the_catalog_every_route_is_503(self):

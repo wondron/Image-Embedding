@@ -1,18 +1,17 @@
-"""Search-image use case (PG v0.1 §4.3 / A4 / A5 / A6 + §6.1 Wire).
+"""图片搜索用例（PG v0.1 §4.3 / A4 / A5 / A6 + §6.1 Wire）。
 
-Self-built only: resolve the scene (scenes table) → embed → Qdrant top-k filtered by scene
-code → hydrate from PG → map categories to the scene's labels (one query for all hits).
-Empty self-built → source=empty. FlyB OUT OF SCOPE (never called).
-score_threshold: omit→0.55; 0 disables; else {0}∪[0.30,1].
+只查自建库：确定场景（scenes 表）→ 计算 embedding → 按场景 code 过滤的 Qdrant top-k →
+从 PG 补全信息 → 把类别映射到场景的标签（所有结果一次查询）。
+自建库为空 → source=empty。FlyB 不在范围内（从不调用）。
+score_threshold：不传→0.55；0 关闭；其余 {0}∪[0.30,1]。
 
-§6.1 (2026-11-12): items envelope; each hit is the result card shared with FlyB results
-(tags / description / original_url / similarity), every other field in details;
-scene_label string|null; outputs_heating on envelope.
+§6.1（2026-11-12）：items 结构；每条结果是和 FlyB 结果共用的结果卡
+（tags / description / original_url / similarity），其余字段都在 details 里；
+scene_label 为 string|null；outputs_heating 在外层结构上。
 
-A request with several query images (POST /api/search/batch/*) first checks what they share
-(check: top_k, the scene, the threshold), so a bad one fails the request before any image is read,
-then calls execute for every image, several at a time from the thread pool: the use case keeps no
-state between calls.
+带多张查询图的请求（POST /api/search/batch/*）先检查它们共享的内容（check：top_k、
+场景、阈值），这样有一个不合法时，在读任何图片之前请求就失败了；然后对每张图调用
+execute，从线程池里同时调用多个：用例在两次调用之间不保存状态。
 """
 
 from __future__ import annotations
@@ -51,7 +50,7 @@ def _as_id_str(value: Any) -> str | None:
 
 
 def _scene_label_name(scene_label: Any) -> str | None:
-    """P8: wire scene_label is string | null (squeeze repo dict → name)."""
+    """P8：wire 的 scene_label 是 string | null（把仓储返回的 dict 压缩成名称）。"""
     if scene_label is None:
         return None
     if isinstance(scene_label, str):
@@ -78,7 +77,7 @@ def _hit_from_row(
     scene_meta: dict[str, Any] | None,
     scene_label: Any,
 ) -> dict[str, Any]:
-    """One search hit (§6.1.1): the card fields shared with FlyB results, the rest in details."""
+    """一条搜索结果（§6.1.1）：和 FlyB 结果共用的卡片字段，其余放在 details 里。"""
     original = row.get("original_url") or row.get("url")
     details: dict[str, Any] = {
         "id": _as_id_str(row.get("id")),
@@ -86,7 +85,7 @@ def _hit_from_row(
         "category": row.get("category_name") or row.get("category"),
         "scenes": row.get("scenes"),
         "label_status": row.get("label_status"),
-        # same keys as a FlyB result's details.images[]
+        # 和 FlyB 结果 details.images[] 的键相同
         "images": [{
             "image_url": original,
             "thumbnail_url": row.get("thumb_url"),
@@ -94,7 +93,7 @@ def _hit_from_row(
             "height": row.get("height"),
         }],
     }
-    # Optional: include scene_label when mapping was attempted (string|null).
+    # 可选：尝试过映射时带上 scene_label（string|null）。
     if scene_label is not None:
         details["scene_label"] = _scene_label_name(scene_label)
     if _outputs_heating(scene_meta):
@@ -133,11 +132,10 @@ class SearchImageUseCase:
         trace_id: str | None = None,
         timer: timer_tool | None = None,
     ) -> dict[str, Any]:
-        """Search by query image bytes (the HTTP layer downloads img_url inputs).
+        """按查询图的字节搜索（img_url 输入由 HTTP 层下载）。
 
-        timer: the calling interface's timer. The steps embedding推理 / vector搜索 / 后处理 are
-        recorded on it; the interface writes the request's timing line (it logs with trace_id,
-        nothing here does).
+        timer：调用接口的计时器。embedding推理 / vector搜索 / 后处理 这几步记在上面；
+        由接口写出请求的耗时行（它带着 trace_id 写日志，这里不写）。
         """
         timer = timer or timer_tool()
         if not image_bytes:
@@ -218,11 +216,11 @@ class SearchImageUseCase:
         top_k: int = 10,
         score_threshold: float | None = None,
     ) -> dict[str, Any]:
-        """What the query images of one request share, checked without touching an image:
-        {scene: the code searched, outputs_heating, score_threshold: the effective one, 0 = off}.
+        """一个请求的各张查询图共享的内容，不碰任何图片就能检查：
+        {scene: 要搜的 code, outputs_heating, score_threshold: 生效的阈值，0 = 关闭}。
 
-        Raises what execute would for them: VALIDATION_ERROR (top_k), SEARCH_UNKNOWN_SCENE,
-        SEARCH_POSTGRES_FAILED, SEARCH_BAD_SCORE_THRESHOLD.
+        抛出 execute 对它们会抛出的错误：VALIDATION_ERROR（top_k）、SEARCH_UNKNOWN_SCENE、
+        SEARCH_POSTGRES_FAILED、SEARCH_BAD_SCORE_THRESHOLD。
         """
         scene_meta, effective_t = self._resolve(scene, top_k, score_threshold)
         return {
@@ -234,11 +232,11 @@ class SearchImageUseCase:
     def _resolve(
         self, scene: str | None, top_k: int, score_threshold: float | None
     ) -> tuple[dict[str, Any], float]:
-        """(the active scene's row, the effective threshold); top_k is checked first."""
+        """（启用的场景行, 生效的阈值）；先检查 top_k。"""
         if not (1 <= int(top_k) <= 50):
             raise err.validation_error("top_k must be in 1..50")
 
-        # The scene first: an unknown or inactive one is refused before any embedding work.
+        # 先查场景：不存在或停用的场景在任何 embedding 计算之前就被拒绝。
         scene_meta = lookup_scene(
             self._metadata,
             requested_scene_code(scene),
@@ -250,10 +248,10 @@ class SearchImageUseCase:
     def _scene_labels(
         self, scene_meta: dict[str, Any], rows: Any
     ) -> dict[int, dict[str, Any]] | None:
-        """{category_id: scene label} for the hits' categories, in one query.
+        """结果里各类别的 {category_id: 场景标签}，一次查询。
 
-        None when the lookup failed: the hits then carry no scene_label at all (logged), which is
-        what a client sees for a scene without labels too, rather than failing the search.
+        查询失败时为 None：这时结果完全不带 scene_label（写日志），这和客户端在没有标签的
+        场景里看到的一样，而不是让搜索失败。
         """
         category_ids = sorted({int(row["category_id"]) for row in rows if row.get("category_id") is not None})
         if not category_ids:

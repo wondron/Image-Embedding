@@ -277,7 +277,7 @@ def draw_cn_text(img, text, pos=(10, 10), font_size=30):
 
 
 def encode_png_base64(image: Any, *, bgr: bool = False) -> str:
-    """Encode a grayscale or three-channel image array without importing model code."""
+    """把灰度或三通道图像数组编码成字节，不导入模型代码。"""
     if image is None:
         raise ValueError("image is empty")
 

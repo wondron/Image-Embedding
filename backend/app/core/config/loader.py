@@ -8,7 +8,7 @@ from app.core.config.settings import settings
 
 
 def parse_config_text(text: str, source: str = "configuration") -> dict[str, Any]:
-    """Parse a YAML configuration document and require a mapping at its root."""
+    """解析一份 YAML 配置文档，要求根节点是映射。"""
     config = yaml.safe_load(text)
     if not isinstance(config, dict):
         raise ValueError(f"{source} must contain a YAML mapping at the document root")
@@ -28,7 +28,7 @@ def read_text_if_path(d: dict, key: str, new_key: str):
 
 
 def prepare_config(config: dict[str, Any]) -> dict[str, Any]:
-    """Apply the same local-path expansion to local and remote configurations."""
+    """对本地和远程配置做同样的本地路径展开。"""
     config = deepcopy(config)
     for server_key in ("MLLM_SERVER", "DOUBLE_SERVER"):
         server_config = config.get(server_key)

@@ -1,21 +1,18 @@
-"""Write one stored image's point again from its stored original (POST /api/images/{image_id}/reembed).
+"""用存下来的原图重新写入一张已存图片的向量点（POST /api/images/{image_id}/reembed）。
 
-Repairs vector.status=missing - the point was deleted, the collection rebuilt, or the image never
-reached the current model's collection - without the person uploading the file again:
+修复 vector.status=missing——向量点被删了、collection 重建了，或者图片从来没有进入
+当前模型的 collection——不需要用户重新上传文件：
 
-    stored original (object storage) -> current encoder -> lock the image row -> upsert the point
-    with the payload PostgreSQL gives now (the same one the status check expects) -> ledger row of
-    the current model -> unlock
+    存下来的原图（对象存储）-> 当前编码器 -> 锁住图片行 -> 用 PostgreSQL 现在给出的
+    payload（和状态检查期望的相同）upsert 向量点 -> 当前模型的台账行 -> 解锁
 
-Nothing in PostgreSQL changes but the ledger, so the image keeps its annotation. A failure before
-the upsert leaves everything as it was.
+PostgreSQL 里除了台账什么都不变，所以图片保留它的标注。upsert 之前失败时一切保持原样。
 
-The slow part (reading and embedding the original) runs without a lock; the point and its ledger
-row are written while the image row is held (lock_image_for_vector), as at index time. A deletion
-that commits first leaves nothing to write: IMAGE_NOT_FOUND, no point. One that comes later waits,
-and its cleanup then removes the point. Without the lock a deletion could be committed and cleaned
-up between the embedding and the upsert, and the point would come back for an image that no
-longer exists, with no queue row or ledger row left that would ever remove it.
+慢的部分（读取原图、计算 embedding）不加锁执行；向量点和它的台账行在持有图片行时写入
+（lock_image_for_vector），和入库时一样。先提交的删除会让这里没东西可写：IMAGE_NOT_FOUND，
+不写向量点。后来的删除会等待，然后它的清理会删除向量点。如果不加锁，一次删除可能在计算
+embedding 和 upsert 之间提交并清理完，向量点就会为一张已经不存在的图片回来，而且再也没有
+队列行或台账行能删掉它。
 """
 
 from __future__ import annotations
@@ -50,11 +47,11 @@ class ReembedImageUseCase:
         self._storage = storage
 
     def execute(self, image_id: UUID | str) -> dict[str, Any]:
-        """{image_id, payload_version} once the point is written.
+        """向量点写入后返回 {image_id, payload_version}。
 
-        Raises IMAGE_NOT_FOUND (also when the image is deleted while it is embedded),
-        IMAGE_FILE_UNAVAILABLE (the original cannot be read), INDEX_BAD_IMAGE /
-        INDEX_BAD_EMBEDDING (it cannot be embedded), INDEX_QDRANT_FAILED, INDEX_POSTGRES_FAILED.
+        抛出 IMAGE_NOT_FOUND（计算 embedding 期间图片被删除时也是）、IMAGE_FILE_UNAVAILABLE
+        （原图读不了）、INDEX_BAD_IMAGE / INDEX_BAD_EMBEDDING（无法计算 embedding）、
+        INDEX_QDRANT_FAILED、INDEX_POSTGRES_FAILED。
         """
         image = self._metadata.get_by_id(image_id)
         if image is None:
@@ -74,7 +71,7 @@ class ReembedImageUseCase:
             raise err.index_bad_image(f"embed failed: {exc}") from exc
         vector = validate_embedding(vector, for_search=False, expected_dim=self._model.dim)
 
-        # Held from here until the ledger row is committed: see the module docstring
+        # 从这里一直持有到台账行提交：见模块文档字符串
         with self._metadata.lock_image_for_vector(image_id, model_id=self._model.id) as current:
             if current is None:
                 raise err.image_not_found(f"image {image_id} was deleted while it was being embedded")

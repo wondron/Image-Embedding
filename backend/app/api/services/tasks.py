@@ -1,10 +1,9 @@
-"""HTTP adapter for the task center: index records and the deletion queue.
+"""任务中心的 HTTP 适配层：入库记录和删除队列。
 
-Reads and clears go to PostgreSQL through the catalog (app.bootstrap.catalog; NOT_READY 503 while
-it is not built), so the history stays readable while the encoder or Qdrant are down. Draining
-the deletion queue needs the vector store and the object storage: it runs the retrieval stack's
-DeletionWorker (NOT_READY 503 without the stack). Routes are sync: FastAPI runs them in the
-threadpool.
+读取和清空通过 catalog 访问 PostgreSQL（app.bootstrap.catalog；还没构建时
+NOT_READY 503），所以编码器或 Qdrant 挂了时历史记录也能读。处理删除队列需要向量库
+和对象存储：它运行检索服务的 DeletionWorker（没有检索服务时 NOT_READY 503）。
+路由是同步函数：FastAPI 在线程池里执行它们。
 """
 
 from __future__ import annotations
@@ -62,7 +61,7 @@ def list_deletions(runtime: ApplicationState, *, limit: int) -> dict[str, Any]:
 def process_deletions(
     runtime: ApplicationState, request: Request, body: ImageDeletionProcessRequest
 ) -> dict[str, Any]:
-    """Clean the oldest queued deletions now; what fails stays queued (the cause is logged)."""
+    """现在清理最早排队的删除；失败的继续排队（原因写日志）。"""
     tasks = require_catalog(runtime).tasks_uc
     stack = require_retrieval(runtime)
     result = stack.deletion_worker.run_once(limit=body.limit)

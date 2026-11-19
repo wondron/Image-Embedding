@@ -1,11 +1,11 @@
-"""Coerce wire/row values into enum values (VALIDATION_ERROR on bad input).
+"""把请求或数据库行里的值转成枚举值（输入不合法时 VALIDATION_ERROR）。
 
-The first argument picks the source of the allowed values (app.core.enums):
-- a system enum class (StrEnum): returns the member; the DB column also has a CHECK;
-- an editable enum's name (SOURCE_TYPE, LICENSE, FOOD_STATE): returns the plain str, checked
-  against config/param/enums.yaml as it is now (values added at runtime pass at once).
-  Those columns have no CHECK, so this is the only guard.
-Validating here turns a would-be IntegrityError (500) into a 422 that names the field and allowed values.
+第一个参数决定允许值的来源（app.core.enums）：
+- 系统枚举类（StrEnum）：返回枚举成员；数据库列上还有 CHECK 约束；
+- 可编辑枚举的名称（SOURCE_TYPE、LICENSE、FOOD_STATE）：返回普通 str，按
+  config/param/enums.yaml 当前的内容检查（运行时新增的取值立刻可用）。
+  这些列没有 CHECK 约束，所以这里是唯一的把关。
+在这里校验，把本来会出现的 IntegrityError（500）变成指明字段和允许值的 422。
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ def coerce_enum(enum: type[E], value: Any, *, field: str, default: E | None = No
 @overload
 def coerce_enum(enum: str, value: Any, *, field: str, default: str | None = None) -> str: ...
 def coerce_enum(enum: type[StrEnum] | str, value: Any, *, field: str, default: Any = None) -> Any:
-    """Required enum field; blank -> default, or VALIDATION_ERROR when no default."""
+    """必填的枚举字段；为空时用默认值，没有默认值时 VALIDATION_ERROR。"""
     if _blank(value):
         if default is None:
             raise err.validation_error(f"{field} is required")
@@ -41,7 +41,7 @@ def coerce_optional_enum(enum: type[E], value: Any, *, field: str) -> E | None: 
 @overload
 def coerce_optional_enum(enum: str, value: Any, *, field: str) -> str | None: ...
 def coerce_optional_enum(enum: type[StrEnum] | str, value: Any, *, field: str) -> Any:
-    """Nullable enum field; blank -> None."""
+    """可为空的枚举字段；为空时为 None。"""
     if _blank(value):
         return None
     return _parse(enum, value, field=field)
@@ -49,7 +49,7 @@ def coerce_optional_enum(enum: type[StrEnum] | str, value: Any, *, field: str) -
 
 def _parse(enum: type[StrEnum] | str, value: Any, *, field: str) -> Any:
     if isinstance(enum, str):
-        definition = get_enum_store().get(enum)  # ENUM_FILE_INVALID (503) if the file never loaded
+        definition = get_enum_store().get(enum)  # 文件从来没有加载成功时为 ENUM_FILE_INVALID（503）
         text = str(value).strip()
         if text in definition:
             return text

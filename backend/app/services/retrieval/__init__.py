@@ -1,7 +1,7 @@
-"""Retrieval use cases (application layer).
+"""检索用例（应用层）。
 
-DDD D6: do not import app.services.predict / pipeline / flyb_search.
-Predict HTTP must not import this package.
+DDD D6：不要导入 app.services.predict / pipeline / flyb_search。
+预测的 HTTP 接口不能导入这个包。
 """
 
 from app.services.retrieval.delete_image import (

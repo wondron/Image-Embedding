@@ -1,1 +1,1 @@
-"""Shared utilities (image, timer, …)."""
+"""共用工具（图像、计时等）。"""

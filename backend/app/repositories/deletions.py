@@ -9,16 +9,16 @@ from app.core import errors as err
 
 
 class PgDeletionsMixin:
-    """image_deletions enqueue / drain helpers."""
+    """image_deletions 入队 / 清理的辅助函数。"""
 
     def enqueue_image_deletion(self, image_id: UUID | str) -> dict[str, Any]:
-        """TX: capture URLs → DELETE images (CASCADE deps) → INSERT image_deletions.
+        """事务：记下 URL → DELETE images（CASCADE 依赖）→ INSERT image_deletions。
 
-        Contract order: delete from images then insert image_deletions.
-        URLs are selected first so the insert can store original_url/thumb_url.
-        Idempotent: an image already deleted and still queued returns its queue row. An image
-        stored again (same bytes, same id) while its old row is still queued is deleted again and
-        the queue row refreshed. IMAGE_NOT_FOUND when there is neither an image nor a queue row.
+        契约规定的顺序：先从 images 删除，再插入 image_deletions。
+        先查出 URL，这样插入时能存下 original_url/thumb_url。
+        可重复调用：已经删除且仍在排队的图片返回它的队列行。旧行还在排队时又被重新存入的图片
+        （同样的字节，同样的 id）会再次删除，并刷新队列行。既没有图片也没有队列行时为
+        IMAGE_NOT_FOUND。
         """
         self.ensure_schema()
         from sqlalchemy import text
@@ -52,12 +52,12 @@ class PgDeletionsMixin:
                         f"image {uid} missing original_url/thumb_url"
                     )
 
-                # 1) delete images (+ CASCADE image_scenes / image_embeddings / image_foods)
+                # 1) 删除 images（+ CASCADE 删除 image_scenes / image_embeddings / image_foods）
                 conn.execute(
                     text("DELETE FROM images WHERE id = CAST(:id AS uuid)"),
                     {"id": uid},
                 )
-                # 2) queue the Qdrant + S3 cleanup (refresh a row left from an earlier deletion)
+                # 2) 把 Qdrant + S3 的清理加入队列（刷新之前删除留下的行）
                 conn.execute(
                     text(
                         "INSERT INTO image_deletions "
@@ -84,7 +84,7 @@ class PgDeletionsMixin:
             ) from exc
 
     def list_pending_deletions(self, *, limit: int = 50) -> list[dict[str, Any]]:
-        """Oldest-first pending image_deletions rows for the worker."""
+        """给后台任务的待处理 image_deletions 行，最早的在前。"""
         self.ensure_schema()
         from sqlalchemy import text
 
@@ -108,7 +108,7 @@ class PgDeletionsMixin:
             ) from exc
 
     def count_pending_deletions(self) -> int:
-        """How many deleted images still wait for their vector / file cleanup."""
+        """有多少已删除的图片还在等向量 / 文件的清理。"""
         self.ensure_schema()
         from sqlalchemy import text
 
@@ -121,7 +121,7 @@ class PgDeletionsMixin:
             ) from exc
 
     def complete_deletion(self, image_id: UUID | str) -> None:
-        """Remove image_deletions row after Qdrant + S3 cleanup succeeded."""
+        """Qdrant + S3 清理成功后删除 image_deletions 行。"""
         self.ensure_schema()
         from sqlalchemy import text
 

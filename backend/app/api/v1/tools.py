@@ -1,4 +1,4 @@
-"""Low-level model tools exposed for diagnostics and integration."""
+"""为诊断和集成开放的底层模型工具。"""
 
 from __future__ import annotations
 

@@ -1,19 +1,19 @@
-"""embedding_models.fingerprint: which encoder wrote a model version's collection.
+"""embedding_models.fingerprint：哪个编码器写入了一个模型版本的 collection。
 
 Revision ID: 20261112_0009
 Revises: 20261111_0008
 Create Date: 2026-11-12
 
-{spec, probe}: the encoder's preprocessing (and where its weights are) plus its vector for one
-fixed test image (app.clients.inference.Embedder.fingerprint). Retrieval compares it with the
-encoder it is about to use, so a changed EMBEDDING_CONFIG can no longer query or write a
-collection another model made; /api/embedding-models registers, fills and switches versions by it.
+{spec, probe}：编码器的预处理参数（以及权重所在位置），加上它对一张固定测试图的向量
+（app.clients.inference.Embedder.fingerprint）。检索把它和即将使用的编码器比较，所以改了
+EMBEDDING_CONFIG 后再也不会去查询或写入另一个模型建的 collection；/api/embedding-models
+按它登记、补齐和切换版本。
 
-A nullable column without a default: metadata only, no table rewrite, no lock held for long.
-Rows registered before it stay NULL until the API records the fingerprint of the encoder that
-starts on them (after checking a few stored images against their vectors).
+一个不带默认值、可以为空的列：只改元数据，不重写表，不长时间持锁。
+之前登记的行保持 NULL，直到 API 记录在它上面启动的编码器的指纹
+（在用几张已存图片核对它们的向量之后）。
 
-Downgrade drops the column: the recorded fingerprints are lost (the API records them again).
+降级会删除这一列：已记录的指纹会丢失（API 会重新记录）。
 """
 from __future__ import annotations
 

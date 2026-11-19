@@ -1,8 +1,8 @@
-"""HTTP adapter for the enums file (app.core.config.enum_store).
+"""枚举文件的 HTTP 适配层（app.core.config.enum_store）。
 
-Failures are AppError from the store: ENUM_NOT_FOUND 404, ENUM_NOT_EDITABLE 403,
-ENUM_VALUE_EXISTS 409, VALIDATION_ERROR 422, ENUM_FILE_INVALID 503 (file unreadable or
-breaking a rule), ENUM_FILE_WRITE_FAILED 500. Callers run these in the threadpool (file I/O).
+失败都是存储抛出的 AppError：ENUM_NOT_FOUND 404、ENUM_NOT_EDITABLE 403、
+ENUM_VALUE_EXISTS 409、VALIDATION_ERROR 422、ENUM_FILE_INVALID 503（文件读不了或
+违反规则）、ENUM_FILE_WRITE_FAILED 500。调用方在线程池里执行这些函数（文件读写）。
 """
 
 from __future__ import annotations

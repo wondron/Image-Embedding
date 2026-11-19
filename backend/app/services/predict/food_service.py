@@ -1,8 +1,8 @@
-"""Predict-only FoodService facade (legacy inference island).
+"""只用于预测的 FoodService 门面（旧的推理模块）。
 
-DDD D6: used by adapter.http predict routes via bootstrap state.
-Must not be imported by application.retrieval or retrieval_stack.
-Pipeline stages live under domain.pipeline (predict island).
+DDD D6：由 adapter.http 的预测路由通过 bootstrap 的状态使用。
+不能被 application.retrieval 或 retrieval_stack 导入。
+流水线的各个阶段在 domain.pipeline 下（预测模块）。
 """
 
 import logging, cv2
@@ -30,7 +30,7 @@ def is_uuid(value: str) -> bool:
 
 class FoodService:
     def __init__(self, cfg, embedding):
-        """embedding: the process-wide Embedder (built by bootstrap.lifespan)."""
+        """embedding：进程内共用的 Embedder（由 bootstrap.lifespan 构建）。"""
         self.searchTool = GetGlobalData(cfg)
         self.searchFilter = GlobalFilter(cfg, embedding)
         self.embeddingTool = embedding

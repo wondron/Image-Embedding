@@ -1,7 +1,7 @@
-"""Repository subtree updates with a transactional, unique-code-enforcing fake.
+"""用支持事务、强制 code 唯一的假对象测试仓储的子树更新。
 
-The fake rejects intermediate duplicate codes like PostgreSQL's non-deferrable
-index, and restores its rows on rollback. No server or database is contacted.
+这个假对象像 PostgreSQL 的不可延迟索引一样拒绝中间状态的重复 code，并在回滚时恢复
+它的行。不连接任何服务器或数据库。
 """
 
 from contextlib import contextmanager
@@ -133,7 +133,7 @@ class CategorySubtreeUpdateTests(unittest.TestCase):
                     conn.rows[101].update(parent_id=99, code="other.baisye", path="1.99.101")
                     error = "CATEGORY_CODE_EXISTS"
                 else:
-                    conn.rows[20]["code"] = "a" * 116  # new root fits; its descendants exceed 128
+                    conn.rows[20]["code"] = "a" * 116  # 新的根节点放得下；它的后代超过 128
                     error = "VALIDATION_ERROR"
                 before = deepcopy(conn.rows)
                 self.assert_error(error, TransactionalStore(conn).update_category, 99, {"parent_id": 20})

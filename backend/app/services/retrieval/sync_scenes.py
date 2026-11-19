@@ -1,29 +1,26 @@
-"""Bring stored images in line with the current scene configuration (contract §2.9 / §4.4).
+"""让已存图片和当前的场景配置保持一致（契约 §2.9 / §4.4）。
 
-Scene rules, scene flags (is_active, include_all) and the category tree decide which scenes an
-image belongs to. Membership is materialized when an image is written, so after any of them
-changes, stored images keep their old scenes until they are recomputed. One batch here:
+场景规则、场景开关（is_active、include_all）和类别树决定一张图属于哪些场景。归属在图片
+写入时物化，所以其中任何一个变化后，已存图片保留旧的场景，直到被重算。这里的一批：
 
-1. recompute image_scenes for the next images in id order (PG; payload_version is bumped where
-   the effective scene set changed);
-2. write the payload of every image in the batch to the current model's collection, whether or
-   not its version moved: toggling a scene changes the effective sets without bumping any
-   image, and a full write also repairs payloads that drifted for any other reason;
-3. record the pushed versions in image_embeddings.
+1. 按 id 顺序为接下来的图片重算 image_scenes（PG；生效的场景集合变化的图片递增
+   payload_version）；
+2. 把这一批每张图的 payload 写到当前模型的 collection，不管它的版本有没有变：切换一个
+   场景会改变生效的集合，却不会递增任何图片的版本，而全量写入也能修复因其他原因
+   漂移的 payload；
+3. 把推送的版本记录到 image_embeddings。
 
-The caller repeats with next_after until done: POST /api/scenes/sync (the admin page shows the
-progress) or `python -m app.workers.sync_scenes`. A batch that fails half way is safe to run
-again: PG changes are committed per batch, and a payload that was not written is written by
-the next run.
+调用方用 next_after 重复调用直到完成：POST /api/scenes/sync（管理页显示进度）或
+`python -m app.workers.sync_scenes`。中途失败的一批可以安全地重跑：PG 的修改按批提交，
+没写进去的 payload 由下一次运行写入。
 
-push_images does steps 2-3 for a few images whose membership was just committed (a manual
-override, app.api.services.scene_memberships), so search sees the change without a full run.
+push_images 对少数刚提交了归属的图片做第 2-3 步（手工覆盖，
+app.api.services.scene_memberships），这样不用完整跑一遍，搜索就能看到修改。
 
-Both record a version only while it is still the image's current one
-(MetadataStorePort.mark_payloads_pushed). An image written again between reading its payload
-and recording it (a manual change, an index, another sync) is read and pushed again: whichever
-writer pushes last then writes the newest payload, and the ledger never claims a payload the
-collection does not have.
+两者都只在版本仍是图片当前版本时才记录（MetadataStorePort.mark_payloads_pushed）。
+在读取 payload 和记录之间又被写入的图片（手工修改、入库、另一次同步）会重新读取并推送：
+这样最后推送的写入方写的是最新的 payload，台账永远不会声称 collection 里有它实际
+没有的 payload。
 """
 
 from __future__ import annotations
@@ -41,7 +38,7 @@ from app.core.rules.scene_membership import build_qdrant_payload
 
 logger = logging.getLogger("retrieval.sync_scenes")
 
-# Rounds of read -> write payload -> record for images changed by someone else in between
+# 对中间被别人修改的图片，"读取 -> 写 payload -> 记录"的轮数
 PUSH_ROUNDS = 3
 
 
@@ -62,9 +59,10 @@ def _limit(value: Any) -> int:
 
 @dataclass
 class PushResult:
-    """pushed: {image_id: payload_version} written and recorded; missing: no point in the current
-    collection (needs embedding again); unconfirmed: still being changed by others after
-    PUSH_ROUNDS (the writer that changed it pushes it, the next sync repairs it otherwise)."""
+    """pushed：写入并记录的 {image_id: payload_version}；missing：当前 collection 里没有向量点
+    （需要重新计算 embedding）；unconfirmed：PUSH_ROUNDS 轮之后仍在被别人修改（由修改它的
+    写入方推送，否则由下一次同步修复）。
+    """
 
     pushed: dict[str, int] = field(default_factory=dict)
     missing: list[str] = field(default_factory=list)
@@ -78,8 +76,9 @@ class SyncSceneMembershipsUseCase:
         self._model = model
 
     def _push(self, image_ids: list[str]) -> PushResult:
-        """Write these images' payloads (as PG has them now) to the current collection and record
-        them. Images deleted meanwhile are left out of every list."""
+        """把这些图片的 payload（按 PG 现在的内容）写到当前 collection 并记录。
+        这期间被删除的图片不出现在任何列表里。
+        """
         result = PushResult()
         pending = list(image_ids)
         for _ in range(PUSH_ROUNDS):
@@ -110,7 +109,7 @@ class SyncSceneMembershipsUseCase:
         return result
 
     def push_images(self, image_ids: list[str]) -> PushResult:
-        """Push the current payload of a few images whose membership was just committed."""
+        """推送少数刚提交了归属的图片的当前 payload。"""
         result = self._push([str(image_id) for image_id in image_ids])
         logger.info(
             "payload push images=%d pushed=%d missing=%d unconfirmed=%d collection=%s",
@@ -120,11 +119,11 @@ class SyncSceneMembershipsUseCase:
         return result
 
     def run_batch(self, *, after: Any = None, limit: Any = SCENE_SYNC_BATCH_DEFAULT) -> dict[str, Any]:
-        """One batch after image id `after` (None: from the start).
+        """图片 id `after` 之后的一批（None：从头开始）。
 
-        Returns {processed, membership_changed, payload_pushed, payload_missing, next_after, done};
-        payload_missing lists images with no point in the current collection (they need to be
-        embedded again, which this does not do).
+        返回 {processed, membership_changed, payload_pushed, payload_missing, next_after, done}；
+        payload_missing 列出当前 collection 里没有向量点的图片（它们需要重新计算 embedding，
+        这里不做）。
         """
         start = _after_id(after)
         size = _limit(limit)
@@ -148,7 +147,7 @@ class SyncSceneMembershipsUseCase:
         return result
 
     def run_all(self, *, limit: int = SCENE_SYNC_BATCH_DEFAULT) -> dict[str, Any]:
-        """Every batch until done (the worker); totals of the batches."""
+        """一批接一批直到完成（后台任务用）；返回各批的合计。"""
         totals: dict[str, Any] = {"processed": 0, "membership_changed": 0, "payload_pushed": 0, "payload_missing": [], "batches": 0}
         after: str | None = None
         while True:

@@ -1,9 +1,8 @@
-"""Batch search wire (POST /api/search/batch/files, POST /api/search/batch/urls).
+"""多图搜索的 wire（POST /api/search/batch/files、POST /api/search/batch/urls）。
 
-Several query images against the self-built library in one request, all with the same scene, top_k
-and score_threshold (app.api.services.batch_search). The answer has one entry per query image, in
-the order they were sent: its hits (the result cards of POST /api/search), or why that image
-could not be searched. The global search is not involved.
+一次请求用多张查询图搜自建库，所有图片用同样的 scene、top_k 和 score_threshold
+（app.api.services.batch_search）。响应里每张查询图一个条目，顺序和发送时一致：它的结果
+（POST /api/search 的结果卡），或者这张图无法搜索的原因。不涉及 Global 搜图。
 """
 
 from typing import Literal
@@ -14,9 +13,9 @@ from app.schemas.retrieval import SearchHit
 
 BATCH_MAX_IMAGES = 30
 TOP_K_DEFAULT = 10
-TOP_K_MAX = 50  # as POST /api/search
+TOP_K_MAX = 50  # 和 POST /api/search 一样
 
-# Parameter descriptions shared by the files and the urls route
+# files 路由和 urls 路由共用的参数说明
 SCENE_DOC = (
     "检测场景 code，如 general、oven，见 GET /api/scenes；不传为 general。整批图片共用一个场景，"
     "场景不存在或已停用时整个请求返回 SEARCH_UNKNOWN_SCENE"
@@ -33,7 +32,7 @@ TRACE_ID_DOC = (
 
 
 class BatchSearchUrlsRequest(BaseModel):
-    """JSON body of POST /api/search/batch/urls. Unknown fields are refused (422)."""
+    """POST /api/search/batch/urls 的 JSON 请求体。未知字段会被拒绝（422）。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -53,8 +52,9 @@ class BatchSearchUrlsRequest(BaseModel):
 
 
 class BatchSearchResult(BaseModel):
-    """One query image's outcome. ok=true: source / items (and message when nothing was found);
-    ok=false: error / detail. The fields of the other case are absent."""
+    """一张查询图的结果。ok=true：source / items（什么都没找到时还有 message）；
+    ok=false：error / detail。另一种情况的字段不出现。
+    """
 
     index: int = Field(..., description="这张查询图在请求里的序号，从 0 开始")
     input: str = Field(..., description="这张查询图：上传时是文件名，链接时是图片地址")

@@ -1,25 +1,24 @@
-"""Import a category tree file through the category admin use case: upsert by code.
+"""通过类别管理用例导入类别树文件：按 code 新增或更新。
 
-What it reads: the file the admin page downloads ({schema_version: 1, categories: [nodes nested by
-`children`]}), or the body of GET /api/categories ({categories: [flat nodes with id / parent_id]}).
-Either may be edited by hand, or cut down to the nodes to change.
+读取的内容：管理页下载的文件（{schema_version: 1, categories: [通过 `children` 嵌套的节点]}），
+或者 GET /api/categories 的响应体（{categories: [带 id / parent_id 的扁平节点]}）。
+两者都可以手工编辑，也可以删减到只剩要修改的节点。
 
-    a node whose code is not stored       created under the node it is nested in
-    a node whose code is stored           the fields the file gives are compared; those that differ
-                                          are updated (names, cuisines, heating_group, sort_order,
-                                          is_active); a field the file leaves out is not touched
-    a stored node the file does not list  left alone, and reported (not_in_file)
+    code 没有存过的节点          创建在它所嵌套的节点下
+    code 已经存过的节点          比较文件里给出的字段；不同的字段会更新
+                                 （names、cuisines、heating_group、sort_order、is_active）；
+                                 文件里没写的字段不动
+    文件里没有列出的已存节点     不动，并在报告里列出（not_in_file）
 
-A category is identified by its code (ignoring case), so the same file restores a tree into another
-database, whose ids differ; id, path, name, the counts and the timestamps of a node are not read.
-Nothing is moved, renamed or deleted here: a move rewrites the codes of everything below the node,
-so a stored node the file nests under another parent is refused and stays where it is (move it on
-the page). A node's parent is, in this order: the node it is nested in; its `parent_code` (null
-for a root); the file node whose `id` is its `parent_id`; otherwise it is a root.
+类别按 code 识别（不区分大小写），所以同一个文件可以把类别树恢复到 id 不同的另一个
+数据库；节点的 id、path、name、各种计数和时间戳都不读取。
+这里不移动、不改名、不删除任何东西：移动会改写节点下所有东西的 code，所以文件把已存
+节点嵌套到另一个父节点下时会被拒绝，节点保持原位（请在页面上移动）。节点的父节点按以下
+顺序确定：它所嵌套的节点；它的 `parent_code`（根节点为 null）；`id` 等于它的 `parent_id`
+的文件节点；否则它是根节点。
 
-Each node is written in its own transaction (the catalog store's), parents before children. A
-cuisines change recomputes the scenes of the images below the node, as on PATCH: the ids whose
-scenes changed are returned for the HTTP layer to push (scene_membership).
+每个节点在自己的事务里写入（catalog 存储的事务），父节点先于子节点。修改菜系会像 PATCH
+一样重算该节点下图片的场景：场景变化的 id 会返回，由 HTTP 层推送（scene_membership）。
 """
 
 from __future__ import annotations
@@ -51,18 +50,18 @@ _ROW = "category"
 
 @dataclass
 class _FileNode:
-    """One node of the file."""
+    """文件里的一个节点。"""
 
-    where: str  # its place in the file, e.g. categories[0].children[2]
+    where: str  # 它在文件里的位置，例如 categories[0].children[2]
     raw: Mapping[str, Any]
     nested_in: "_FileNode | None" = None
-    code: str | None = None  # None: unusable, problem says why
-    parent_code: str | None = None  # lower case; None for a root
+    code: str | None = None  # None：不可用，problem 说明原因
+    parent_code: str | None = None  # 小写；根节点为 None
     problem: str | None = None
-    level: int = 0  # file ancestors above it: nodes are imported level by level
-    # While importing: "ok" once the node is stored (or, in a dry run, would be); "failed" otherwise
+    level: int = 0  # 它上面的文件祖先节点数：节点逐层导入
+    # 导入过程中：节点存好后（或在 dry run 里会存好时）为 "ok"；否则为 "failed"
     state: str = "pending"
-    stored_id: int | None = None  # None in a dry run for a node about to be created
+    stored_id: int | None = None  # dry run 里即将创建的节点为 None
 
     @property
     def key(self) -> str:
@@ -73,9 +72,9 @@ class _FileNode:
 class _Run:
     report: ImportReport
     dry_run: bool
-    stored: dict[str, Mapping[str, Any]]  # lower-case code -> stored node
+    stored: dict[str, Mapping[str, Any]]  # 小写 code -> 已存节点
     stored_by_id: dict[int, Mapping[str, Any]]
-    groups: dict[str, Mapping[str, Any]]  # heating group code -> {id, code, name}
+    groups: dict[str, Mapping[str, Any]]  # 加热组 code -> {id, code, name}
     by_code: dict[str, _FileNode]
     roots: int
     recomputed: bool = False
@@ -84,7 +83,7 @@ class _Run:
 
 
 def _read_nodes(categories: list[Any]) -> list[_FileNode]:
-    """Every node of the file, a parent before the nodes nested in it."""
+    """文件里的每个节点，父节点排在嵌套在它下面的节点之前。"""
     nodes: list[_FileNode] = []
     pending: list[tuple[Any, str, _FileNode | None, int]] = [
         (raw, f"categories[{index}]", None, 0) for index, raw in reversed(list(enumerate(categories)))
@@ -116,7 +115,7 @@ def _read_nodes(categories: list[Any]) -> list[_FileNode]:
 
 
 def _link_parents(nodes: list[_FileNode]) -> None:
-    """Set each node's parent_code (see the module docstring for the order)."""
+    """设置每个节点的 parent_code（顺序见模块文档字符串）。"""
     by_file_id: dict[int, _FileNode] = {}
     for node in nodes:
         file_id = node.raw.get("id")
@@ -158,7 +157,7 @@ def _link_parents(nodes: list[_FileNode]) -> None:
 
 
 def _index_codes(nodes: list[_FileNode]) -> dict[str, _FileNode]:
-    """lower-case code -> the node that lists it; a code listed again is that node's problem."""
+    """小写 code -> 列出它的节点；重复列出的 code 是那个节点的问题。"""
     by_code: dict[str, _FileNode] = {}
     for node in nodes:
         if node.code is None:
@@ -173,8 +172,9 @@ def _index_codes(nodes: list[_FileNode]) -> dict[str, _FileNode]:
 
 
 def _set_levels(nodes: list[_FileNode], by_code: Mapping[str, _FileNode]) -> None:
-    """How many file nodes sit above each node, so parents are imported first whatever the file's
-    order (a flat list may name a parent that comes later)."""
+    """每个节点上面有多少个文件节点，这样不管文件里的顺序如何，父节点都先导入
+    （扁平列表里的父节点可能出现在后面）。
+    """
     for node in nodes:
         if node.problem is not None or node.code is None:
             continue
@@ -193,8 +193,9 @@ def _set_levels(nodes: list[_FileNode], by_code: Mapping[str, _FileNode]) -> Non
 
 
 def _name_keys(value: Any) -> frozenset[tuple[str, str, str]] | None:
-    """Names as a set (their order is not stored); None when the value is not a list of
-    {lang, name, kind}, which then goes to the normalizer for its error."""
+    """名称作为集合（不保存它们的顺序）；值不是 {lang, name, kind} 列表时为 None，
+    这时交给规范化函数报错。
+    """
     if not isinstance(value, (list, tuple)):
         return None
     keys: set[tuple[str, str, str]] = set()
@@ -218,7 +219,7 @@ def _names_text(names: Any) -> str | None:
 
 
 def _group_id(value: Any, groups: Mapping[str, Mapping[str, Any]]) -> int | None:
-    """heating_group of a file node (null, a code, or {code, ...}) -> heating_groups.id."""
+    """文件节点的 heating_group（null、一个 code，或 {code, ...}）-> heating_groups.id。"""
     code = ref_code(value, "heating_group")
     if code is None:
         return None
@@ -239,9 +240,9 @@ def _group_code(group_id: int | None, groups: Mapping[str, Mapping[str, Any]]) -
 def _diff(
     raw: Mapping[str, Any], current: Mapping[str, Any], groups: Mapping[str, Mapping[str, Any]]
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """(the patch, its report lines) for a stored node: only fields the file gives, and only those
-    whose value differs. A value equal to what is stored is not validated again, so a node that
-    predates a rule (no zh primary name) round-trips unchanged."""
+    """已存节点的（修改内容, 报告行）：只包含文件给出且值不同的字段。和已存值相同的值
+    不再校验，所以早于某条规则的节点（没有 zh 主名称）往返一次也保持不变。
+    """
     fields: dict[str, Any] = {}
     changes: list[dict[str, Any]] = []
     if "names" in raw:
@@ -279,8 +280,9 @@ def _diff(
 def _new_fields(
     node: _FileNode, groups: Mapping[str, Mapping[str, Any]]
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """(the create fields without parent_id, the report lines) for a node that is not stored.
-    `name` alone is enough for the names: it becomes the zh primary name."""
+    """没有存过的节点的（不含 parent_id 的创建字段, 报告行）。
+    只有 `name` 也足够作为名称：它会成为 zh 主名称。
+    """
     raw = node.raw
     fields: dict[str, Any] = {"code": node.code}
     if "names" in raw:
@@ -293,7 +295,7 @@ def _new_fields(
     if "heating_group" in raw:
         fields["heating_group_id"] = _group_id(raw["heating_group"], groups)
     new = normalize_category_fields(fields, partial=False)
-    new.pop("parent_id", None)  # resolved when the node is written
+    new.pop("parent_id", None)  # 在写入节点时解析
     changes = [change("names", None, _names_text(new["names"]))]
     if node.parent_code is not None:
         changes.append(change("parent", None, node.parent_code))
@@ -313,12 +315,12 @@ class ImportCategoriesUseCase:
         self._categories = categories
 
     def execute(self, document: Any, *, dry_run: bool = True) -> dict[str, Any]:
-        """{dry_run, summary, rows, rows_truncated, not_in_file, scene_membership}.
+        """{dry_run, summary, rows, rows_truncated, not_in_file, scene_membership}。
 
-        dry_run: nothing is written; the report says what would happen. scene_membership: None, or
-        {images, changed_ids} when a cuisines change recomputed stored images (not in a dry run).
-        A file that is not a category tree at all raises VALIDATION_ERROR; a database failure
-        while writing raises (rows written before it stay; import the file again to continue).
+        dry_run：什么都不写；报告说明会发生什么。scene_membership：None，或者菜系修改重算了
+        已存图片时为 {images, changed_ids}（dry run 时没有）。
+        完全不是类别树的文件抛出 VALIDATION_ERROR；写入时数据库失败会抛出（之前写入的行
+        保留；再导入一次同一个文件即可继续）。
         """
         nodes = _read_nodes(check_envelope(document, kind=KIND, items_key="categories"))
         _link_parents(nodes)
@@ -336,7 +338,7 @@ class ImportCategoriesUseCase:
             by_code=by_code,
             roots=sum(1 for node in stored_nodes if node.get("parent_id") is None),
         )
-        for node in sorted(nodes, key=lambda entry: entry.level):  # stable: file order within a level
+        for node in sorted(nodes, key=lambda entry: entry.level):  # 稳定排序：同一层内保持文件里的顺序
             self._import_node(run, node)
 
         listed = {node.code.lower() for node in nodes if node.code is not None}
@@ -359,7 +361,7 @@ class ImportCategoriesUseCase:
             report.fail(_ROW, node.key, node.problem or "code is required", **context)
             return
 
-        # Its parent: a node of this file (imported before it), else a stored category
+        # 它的父节点：这个文件里的节点（先于它导入），否则是一个已存类别
         parent_id: int | None = None
         if node.parent_code is not None:
             parent = node.nested_in or run.by_code.get(node.parent_code)
@@ -388,7 +390,7 @@ class ImportCategoriesUseCase:
 
     def _update(self, run: _Run, node: _FileNode, current: Mapping[str, Any], context: dict[str, Any]) -> None:
         report = run.report
-        # Stored either way: the nodes nested in it are imported whatever happens to this one
+        # 不管怎样都已存好：嵌套在它下面的节点都会导入，不管这个节点结果如何
         node.state, node.stored_id = "ok", int(current["id"])
         context = {**context, "name": context["name"] or current.get("name")}
         stored_parent = run.stored_by_id.get(int(current["parent_id"])) if current.get("parent_id") is not None else None

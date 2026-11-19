@@ -1,4 +1,4 @@
-"""Startup diagnostics for the effective PostgreSQL / Qdrant configuration."""
+"""生效的 PostgreSQL / Qdrant 配置的启动诊断。"""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ _URL_SECRET = re.compile(r"(?i)([?&](?:api[_-]?key|token|access_token|password|s
 
 
 def redact_text(text: str, config: Mapping[str, Any]) -> str:
-    """Mask credentials also when a driver echoes them in its error message."""
+    """驱动在错误信息里回显凭证时也要遮盖。"""
     text = _URL_AUTH.sub(r"\1***@", text)
     text = _URL_SECRET.sub(r"\1***", text)
     secrets: set[str] = set()
@@ -40,7 +40,7 @@ def redact_text(text: str, config: Mapping[str, Any]) -> str:
 
 
 def config_summary(config: Mapping[str, Any], name: str) -> dict[str, Any]:
-    """Include defaults and invalid values without dumping unrelated application config."""
+    """包含默认值和非法值，但不输出无关的应用配置。"""
     raw = config.get(name)
     if raw is None:
         return {"status": "missing"}
@@ -49,7 +49,7 @@ def config_summary(config: Mapping[str, Any], name: str) -> dict[str, Any]:
     cls = _SETTINGS[name]
     summary = {f.name: None if f.default is MISSING else f.default for f in fields(cls)}
     if name == "QDRANT_CONFIG":
-        summary["url"] = None  # The bootstrap requires an explicit endpoint.
+        summary["url"] = None  # 启动时要求显式给出 endpoint。
     summary.update({key: raw[key] for key in summary if key in raw})
     try:
         if name == "POSTGRES_CONFIG":
@@ -57,7 +57,7 @@ def config_summary(config: Mapping[str, Any], name: str) -> dict[str, Any]:
         elif raw.get("url") or (raw.get("host") and raw.get("port")):
             summary = asdict(QdrantConnection.from_mapping(raw))
     except (TypeError, ValueError, OverflowError):
-        pass  # Configuration errors must still show the supplied fields.
+        pass  # 配置错误时也必须显示传入的字段。
     if name == "QDRANT_CONFIG":
         summary.update({key: raw[key] for key in ("host", "port") if key in raw})
     for key, value in summary.items():
@@ -74,7 +74,7 @@ def config_summary(config: Mapping[str, Any], name: str) -> dict[str, Any]:
 def dependency_initialization(
     logger: logging.Logger, config: Mapping[str, Any], name: str, *, stage: str, **context: Any
 ) -> Iterator[None]:
-    """Log the failing dependency at its own boundary, preserving the original exception."""
+    """在出问题的依赖自己的边界上记日志，保留原始异常。"""
     try:
         yield
     except Exception as exc:
@@ -88,5 +88,5 @@ def dependency_initialization(
 
 
 def log_startup_exception(logger: logging.Logger, title: str, exc: Exception, config: Mapping[str, Any]) -> None:
-    """Keep the existing startup traceback while masking credentials in its entire cause chain."""
+    """保留原有的启动 traceback，同时遮盖整个异常链里的凭证。"""
     logger.error("%s\n%s", title, redact_text("".join(traceback.format_exception(exc)), config))

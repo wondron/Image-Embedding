@@ -1,23 +1,22 @@
-"""Scene configuration write rules (scenes, scene_labels, scene_rules): what a request may carry.
+"""场景配置的写入规则（scenes、scene_labels、scene_rules）：请求可以带什么。
 
-Everything here needs no database: shapes, lengths and spellings (app.core.scene_rules), plus
+这里的检查都不需要数据库：形状、长度和写法（app.core.scene_rules），以及
 
-- a scene's code is fixed once created (it is in every image's Qdrant payload) and may not be
-  one of the MVP codes that requests still map (SCENE_ALIASES);
-- the default scene (DEFAULT_SCENE) keeps containing every image: it cannot be disabled or turned
-  into a rule-based scene, nor deleted;
-- a rule targets one category (with its subtree) or one cuisine, never both; only a category
-  rule maps to a label. A patch may replace the target in place (one transaction, the rule keeps
-  its id) and change or clear the label.
+- 场景的 code 创建后就固定（它在每张图的 Qdrant payload 里），也不能是
+  请求里仍然会映射的 MVP code 之一（SCENE_ALIASES）；
+- 默认场景（DEFAULT_SCENE）始终包含所有图片：不能停用，不能改成按规则的场景，
+  也不能删除；
+- 一条规则针对一个类别（含其子树）或一个菜系，不能两者都有；只有类别规则能映射到标签。
+  修改请求可以原地替换规则的对象（一个事务，规则保留原 id），也可以修改或清空标签。
 
-Checks that need the stored configuration (the scene exists, a code is free, a label belongs to
-the scene, a rule is not a duplicate) run inside the write transaction, in
-app.repositories.scene_config. Bad input raises VALIDATION_ERROR naming the field.
+需要已存配置的检查（场景存在、code 没被占用、标签属于这个场景、规则没有重复）
+在写入事务里进行，见 app.repositories.scene_config。输入不合法时抛出 VALIDATION_ERROR，
+并指明字段。
 
-Which writes need stored images recomputed (POST /api/scenes/sync) is decided here too
-(scene_flags_need_sync, rule_write_needs_sync): membership follows a scene's is_active /
-include_all and its rules. Names, descriptions, outputs_heating and labels are read per request,
-so changing them shows at once.
+哪些写入需要重算已存图片（POST /api/scenes/sync）也在这里决定
+（scene_flags_need_sync、rule_write_needs_sync）：场景归属取决于场景的 is_active /
+include_all 和它的规则。名称、描述、outputs_heating 和标签每次请求时读取，
+所以修改后立刻生效。
 """
 
 from __future__ import annotations
@@ -56,7 +55,7 @@ _PG_INT_MAX = 2_147_483_647
 
 
 def _text(value: Any, field: str, *, max_len: int) -> str:
-    """Stripped, non-empty text within the bound."""
+    """去掉首尾空白、非空且不超过长度上限的文本。"""
     if not isinstance(value, str):
         raise err.validation_error(f"{field} must be a string, got {type(value).__name__}")
     text = value.strip()
@@ -83,7 +82,7 @@ def _flag(value: Any, field: str) -> bool:
 
 
 def normalize_row_id(value: Any, field: str) -> int:
-    """A row id: a positive int (True must not count as 1)."""
+    """行 id：正整数（True 不能当成 1）。"""
     if isinstance(value, bool) or not isinstance(value, int) or not 0 < value <= _PG_INT_MAX:
         raise err.validation_error(f"{field} must be a positive integer, got {value!r}")
     return value
@@ -100,7 +99,7 @@ def _check_fields(fields: Any, allowed: tuple[str, ...], what: str, *, partial: 
     return fields
 
 
-# -- scenes -----------------------------------------------------------------------------
+# -- 场景 ---------------------------------------------------------------------------------
 
 def normalize_scene_code(value: Any) -> str:
     code = _code(value, "code", pattern=_SCENE_CODE_RE, max_len=SCENE_CODE_MAX_LEN)
@@ -112,7 +111,7 @@ def normalize_scene_code(value: Any) -> str:
 
 
 def _description(value: Any) -> str | None:
-    """Blank -> None (the column is nullable)."""
+    """为空时为 None（这一列可以为空）。"""
     if value is None:
         return None
     if not isinstance(value, str):
@@ -135,7 +134,7 @@ _SCENE_DEFAULTS: dict[str, Any] = {"description": None, "include_all": False, "o
 
 
 def normalize_scene_fields(fields: Any, *, partial: bool) -> dict[str, Any]:
-    """A create request (code and name required) or a patch (only the keys given; code is fixed)."""
+    """创建请求（code 和 name 必填）或修改请求（只处理传来的键；code 不能改）。"""
     fields = _check_fields(fields, SCENE_FIELDS, "scene", partial=partial)
     if partial and "code" in fields:
         raise err.validation_error("a scene's code cannot change (it is in every image's vector payload)")
@@ -151,7 +150,7 @@ def normalize_scene_fields(fields: Any, *, partial: bool) -> dict[str, Any]:
 
 
 def check_default_scene_change(code: str, changes: Mapping[str, Any]) -> str | None:
-    """Why this change is not allowed on the default scene; None when it is (or not the default)."""
+    """默认场景为什么不允许这个修改；允许时（或者不是默认场景）为 None。"""
     if code != DEFAULT_SCENE:
         return None
     if changes.get("is_active") is False:
@@ -162,17 +161,17 @@ def check_default_scene_change(code: str, changes: Mapping[str, Any]) -> str | N
 
 
 def _membership_shape(scene: Mapping[str, Any]) -> tuple[bool, bool]:
-    """What a scene's flags do to membership: (it has members at all, it has every image)."""
+    """场景的开关对归属的影响：（是否有成员，是否包含所有图片）。"""
     active = bool(scene["is_active"])
     return active, active and bool(scene["include_all"])
 
 
 def scene_flags_need_sync(before: Mapping[str, Any] | None, after: Mapping[str, Any]) -> bool:
-    """Whether stored images must be recomputed after a scene is created (before None) or changed.
+    """场景创建（before 为 None）或修改之后，是否需要重算已存图片。
 
-    A new active include_all scene contains every image at once; a new rule-based one has no
-    rules yet. A change matters when it turns the scene on or off, or switches an active scene
-    between every image and its rules (include_all flipped on an inactive scene does nothing).
+    新的启用的 include_all 场景立刻包含所有图片；新的按规则的场景还没有规则。
+    修改只在以下情况有影响：开启或关闭场景，或者让一个启用的场景在"所有图片"和
+    "按规则"之间切换（在停用的场景上切换 include_all 没有影响）。
     """
     if before is None:
         return _membership_shape(after) == (True, True)
@@ -180,13 +179,13 @@ def scene_flags_need_sync(before: Mapping[str, Any] | None, after: Mapping[str, 
 
 
 def rule_write_needs_sync(scene: Mapping[str, Any], *, target_changed: bool = True) -> bool:
-    """Whether a rule write changes membership: only the rules of an active, rule-based scene
-    count (an inactive scene has no members; an include_all one ignores its rules). Changing only
-    a rule's label does not: labels are looked up per search."""
+    """一次规则写入是否改变归属：只有启用的、按规则的场景的规则才算（停用的场景
+    没有成员；include_all 的场景忽略它的规则）。只改规则的标签不算：标签在每次搜索时查。
+    """
     return target_changed and bool(scene["is_active"]) and not bool(scene["include_all"])
 
 
-# -- scene labels -----------------------------------------------------------------------
+# -- 场景标签 -----------------------------------------------------------------------------
 
 def _sort_order(value: Any) -> int:
     if (
@@ -220,7 +219,7 @@ def normalize_label_fields(fields: Any, *, partial: bool) -> dict[str, Any]:
     return out
 
 
-# -- scene rules ------------------------------------------------------------------------
+# -- 场景规则 -----------------------------------------------------------------------------
 
 def _cuisine(value: Any) -> str:
     cuisine = _text(value, "cuisine", max_len=CATEGORY_CUISINE_MAX_LEN)
@@ -244,9 +243,9 @@ def _rule_target(fields: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def check_rule_label(rule: Mapping[str, Any], *, label_sent: bool = True) -> None:
-    """Only a category rule maps to a label (ck_scene_rules_label_needs_category).
+    """只有类别规则能映射到标签（ck_scene_rules_label_needs_category）。
 
-    label_sent False: a patch moved the rule to a cuisine and kept its label; say how to clear it.
+    label_sent 为 False：修改请求把规则改成了菜系规则，却保留了标签；说明怎样清空。
     """
     if rule.get("label_id") is not None and rule.get("category_id") is None:
         hint = "" if label_sent else "; send label_id: null with the new cuisine to clear its label"
@@ -254,12 +253,11 @@ def check_rule_label(rule: Mapping[str, Any], *, label_sent: bool = True) -> Non
 
 
 def normalize_rule_fields(fields: Any, *, partial: bool) -> dict[str, Any]:
-    """Create: {category_id | cuisine, label_id?}.
+    """创建：{category_id | cuisine, label_id?}。
 
-    Patch: only the keys given. A new target (category_id or cuisine, exactly one non-null)
-    replaces the old one, so the result then has both keys; label_id null clears the label.
-    Whether the label still fits the patched rule is checked against the stored rule
-    (check_rule_label).
+    修改：只处理传来的键。新的对象（category_id 或 cuisine，恰好一个非 null）
+    替换旧的，所以结果里两个键都有；label_id 为 null 时清空标签。
+    标签是否仍适用于修改后的规则，对照已存的规则检查（check_rule_label）。
     """
     fields = _check_fields(fields, RULE_FIELDS, "rule", partial=partial)
     out: dict[str, Any] = {}

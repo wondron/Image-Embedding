@@ -1,22 +1,20 @@
-"""categories / category_names / heating_groups as the category admin page reads and edits them.
+"""类别管理页读取和编辑的 categories / category_names / heating_groups。
 
-Reads return the whole tree: it is small (hundreds to a few thousand nodes) and the page needs
-every node to draw it and to offer move targets, so there is no paging.
+读取返回整棵树：它很小（几百到几千个节点），页面需要所有节点来画树、提供可以移动到的
+位置，所以不分页。
 
-Each write is one transaction and first takes the catalog lock (app.repositories.catalog_lock),
-so two writes cannot interleave their checks (A moves under B while B moves under A; a child is
-added while its parent is deleted; a scene rule is created for a category being deleted). The
-database stays the last guard for writers that bypass this store: unique code, RESTRICT on
-children and images, and the path trigger (migration 0001), which rebuilds the paths of the
-subtree whenever parent_id changes.
+每次写入是一个事务，并且先获取目录锁（app.repositories.catalog_lock），这样两次写入的
+检查不会交错（A 移到 B 下的同时 B 移到 A 下；删除父节点的同时添加子节点；为正在删除的
+类别创建场景规则）。对绕过本存储的写入方，数据库仍是最后一道防线：code 唯一约束、
+子节点和图片上的 RESTRICT，以及路径触发器（迁移 0001），parent_id 变化时它会重建
+子树的路径。
 
-Moving a category or changing its cuisines changes which scenes the images below it belong to.
-The same transaction recomputes their image_scenes and bumps payload_version where the effective
-set changed, so PostgreSQL never disagrees with its own rules and the vector ledger shows what
-still has to be pushed (the caller pushes right after the commit; the reconciler catches up).
+移动类别或修改它的菜系会改变它下面的图片属于哪些场景。同一个事务重算它们的
+image_scenes，并在生效集合变化时递增 payload_version，所以 PostgreSQL 永远不会和自己的
+规则不一致，向量台账也能显示还有哪些需要推送（调用方在提交后立刻推送；对账任务负责补齐）。
 
-Deleting refuses a category that is still used. scene_rules would go silently (ON DELETE
-CASCADE) and leave image_scenes stale, so a rule counts as a use too.
+删除会拒绝仍在使用的类别。scene_rules 会被悄悄删掉（ON DELETE CASCADE）并让 image_scenes
+过时，所以规则也算一种使用。
 """
 
 from __future__ import annotations
@@ -42,8 +40,8 @@ from app.core.rules.category_fields import (
 )
 from app.core.rules.category_paths import plan_subtree_codes
 
-# One node as the API returns it. names: the display language first, then by language; in a
-# language the primary name first. Binds :display_lang and :primary_kind.
+# API 返回的一个节点。names：先是显示语言的，再按语言排序；同一种语言里主名称在前。
+# 绑定 :display_lang 和 :primary_kind。
 _NODE_SELECT = (
     "SELECT c.id, c.code, c.parent_id, c.path::text AS path, c.cuisines, c.sort_order, "
     "c.is_active, c.created_at, c.updated_at, "
@@ -58,15 +56,15 @@ _NODE_SELECT = (
     "FROM categories c LEFT JOIN heating_groups hg ON hg.id = c.heating_group_id "
 )
 _NODE_PARAMS = {"display_lang": CATEGORY_DISPLAY_LANG, "primary_kind": NameKind.PRIMARY.value}
-# Columns a patch sets with a plain bind (cuisines needs a cast; names is another table)
+# 修改请求用普通绑定设置的列（cuisines 需要类型转换；names 在另一张表里）
 _PLAIN_COLUMNS = ("code", "parent_id", "heating_group_id", "sort_order", "is_active")
 
 
 def _check_root_capacity(conn: Any) -> None:
-    """Run under the exclusive catalog lock, before adding a root (including a move).
+    """在独占的目录锁下、添加根节点（包括移动）之前执行。
 
-    Count inactive and legacy roots too; the domain whitelist alone cannot bound
-    the total when older roots with other codes are already stored.
+    停用的和旧的根节点也要计入；已经存了其他 code 的旧根节点时，只靠领域白名单
+    无法限制总数。
     """
     count = conn.execute(text("SELECT count(*) FROM categories WHERE parent_id IS NULL")).scalar_one()
     if count >= CATEGORY_MAX_ROOTS:
@@ -74,7 +72,7 @@ def _check_root_capacity(conn: Any) -> None:
 
 
 def _rewrite_subtree_codes(conn: Any, category_id: int, path: str, root_code: str) -> None:
-    """Preflight and write all codes in the caller's locked catalog transaction."""
+    """在调用方已加锁的目录事务里预检并写入所有 code。"""
     nodes = conn.execute(
         text("SELECT id, parent_id, code FROM categories WHERE path <@ CAST(:path AS ltree) "
              "ORDER BY nlevel(path), id FOR UPDATE"),
@@ -95,9 +93,9 @@ def _rewrite_subtree_codes(conn: Any, category_id: int, path: str, root_code: st
                for node in nodes if str(node["code"]) != planned[int(node["id"])]]
     if not changed:
         return
-    # Non-deferrable unique indexes can reject a valid final plan if a target
-    # temporarily belongs to another node of this subtree. Stage only code values;
-    # the ltree parent trigger is not fired until the actual parent update below.
+    # 如果某个目标值暂时属于这个子树里的另一个节点，不可延迟的唯一索引可能会拒绝
+    # 一个合法的最终方案。所以只暂存 code 值；ltree 父节点触发器要到下面真正更新
+    # 父节点时才会触发。
     token = uuid.uuid4().hex
     conn.execute(
         text("UPDATE categories SET code = :code WHERE id = :node_id"),
@@ -161,7 +159,7 @@ def _write_names(conn: Any, category_id: int, names: list[dict[str, str]]) -> No
 
 
 def _constraint_error(op: str, exc: IntegrityError) -> err.AppError:
-    """A constraint that fired although the checks passed: a writer outside this store got in between."""
+    """检查都通过了，约束却触发了：本存储之外的写入方插了进来。"""
     name = getattr(getattr(exc.orig, "diag", None), "constraint_name", None) or "unknown"
     if name in {"uq_categories_code", "uq_categories_code_lower"}:
         return err.category_code_exists("another category already uses this code")
@@ -171,10 +169,10 @@ def _constraint_error(op: str, exc: IntegrityError) -> err.AppError:
 
 
 class PgCategoriesMixin:
-    """The category tree: list, create, patch (rename / move / relabel), delete."""
+    """类别树：列出、创建、修改（改名 / 移动 / 重新标注）、删除。"""
 
     def list_categories(self) -> list[dict[str, Any]]:
-        """Every node: parents before their children, siblings in display order (sort_order, id)."""
+        """所有节点：父节点在子节点之前，同级按显示顺序（sort_order、id）。"""
         self.ensure_schema()
         engine = self._get_engine()
         try:
@@ -187,7 +185,7 @@ class PgCategoriesMixin:
             raise err.category_postgres_failed(f"list_categories: {type(exc).__name__}: {exc}") from exc
 
     def list_heating_groups(self) -> list[dict[str, Any]]:
-        """The heating groups a category can point at (a short reference list)."""
+        """类别可以指向的加热组（一个很短的参照列表）。"""
         self.ensure_schema()
         engine = self._get_engine()
         try:
@@ -200,7 +198,7 @@ class PgCategoriesMixin:
             raise err.category_postgres_failed(f"list_heating_groups: {type(exc).__name__}: {exc}") from exc
 
     def create_category(self, fields: dict[str, Any]) -> dict[str, Any]:
-        """Insert one node with its names and return it; the trigger fills path."""
+        """插入一个节点及其名称并返回它；path 由触发器填写。"""
         new = normalize_category_fields(fields, partial=False)
         self.ensure_schema()
         engine = self._get_engine()
@@ -237,16 +235,15 @@ class PgCategoriesMixin:
             raise err.category_postgres_failed(f"create_category: {type(exc).__name__}: {exc}") from exc
 
     def update_category(self, category_id: int, fields: dict[str, Any]) -> dict[str, Any]:
-        """Patch the given fields. names, when given, replaces every name.
+        """修改传来的字段。传了 names 时，替换所有名称。
 
-        Changing parent_id moves the node with its whole subtree and rebuilds every code
-        under the new parent. Editing code alone also updates descendant codes atomically.
-        A move or a change of cuisines
-        recomputes, in the same transaction, the scene memberships of every image labelled with
-        the node or one below it (repositories.scenes._recompute_subtree).
+        修改 parent_id 会把节点连同整个子树一起移动，并重建新父节点下的所有 code。
+        只改 code 时也会原子地更新后代的 code。
+        移动或修改菜系时，在同一个事务里重算标注为该节点或其下节点的所有图片的场景归属
+        （repositories.scenes._recompute_subtree）。
 
-        Returns {category: the node, scene_membership: None when no membership could change,
-        else {images: how many were recomputed, changed_ids: whose effective scenes changed}}.
+        返回 {category: 节点, scene_membership: 没有归属可能变化时为 None，
+        否则为 {images: 重算了多少张, changed_ids: 生效场景变化的图片}}。
         """
         cid = normalize_category_id(category_id)
         changes = normalize_category_fields(fields, partial=True)
@@ -268,7 +265,7 @@ class PgCategoriesMixin:
                 parent_id = changes["parent_id"] if "parent_id" in changes else current["parent_id"]
                 renamed = code != current["code"]
                 moved = parent_id != current["parent_id"]
-                # Rules match a cuisine by membership, so only the set matters
+                # 规则按包含关系匹配菜系，所以只有集合才重要
                 recuisined = "cuisines" in changes and set(changes["cuisines"]) != set(current["cuisines"] or [])
                 if moved and parent_id is not None:
                     parent = conn.execute(
@@ -288,7 +285,7 @@ class PgCategoriesMixin:
                     code = normalize_category_code(f"{parent['code']}.{segment}" if parent_id is not None else segment)
                     changes["code"] = code
                     renamed = code != current["code"]
-                # Only when the code or the position changes: an older root keeps whatever code it has
+                # 只在 code 或位置变化时：旧的根节点保留它原有的 code
                 if parent_id is None and (renamed or moved):
                     check_root_code(code)
                 _check_heating_group(conn, changes.get("heating_group_id"))
@@ -301,7 +298,7 @@ class PgCategoriesMixin:
                 assignments = [f"{column} = :{column}" for column in _PLAIN_COLUMNS if column in changes]
                 if "cuisines" in changes:
                     assignments.append("cuisines = CAST(:cuisines AS text[])")
-                assignments.append("updated_at = now()")  # raw SQL: onupdate does not fire
+                assignments.append("updated_at = now()")  # 原生 SQL：onupdate 不会触发
                 conn.execute(
                     text(f"UPDATE categories SET {', '.join(assignments)} WHERE id = :id"),
                     {"id": cid, **{key: value for key, value in changes.items() if key != "names"}},
@@ -324,7 +321,7 @@ class PgCategoriesMixin:
             raise err.category_postgres_failed(f"update_category: {type(exc).__name__}: {exc}") from exc
 
     def delete_category(self, category_id: int) -> dict[str, Any]:
-        """Delete a node nothing uses (its names go with it); returns {id, code}."""
+        """删除一个没有被使用的节点（它的名称一起删除）；返回 {id, code}。"""
         cid = normalize_category_id(category_id)
         self.ensure_schema()
         engine = self._get_engine()

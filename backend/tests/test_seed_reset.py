@@ -1,8 +1,8 @@
-"""scripts.seed_data / scripts.reset_data.
+"""scripts.seed_data / scripts.reset_data。
 
-Offline: the base data passes the same rules as API writes, and every table is classified as
-reset or kept. Live (TEST_DATABASE_URL, an EMPTY throwaway database; the schema is dropped and
-recreated through Alembic): seeding is idempotent, reset clears and restores.
+离线：基础数据通过和 API 写入相同的规则，每张表都归类为重置或保留。在线
+（TEST_DATABASE_URL，一个**空的**、可以随便丢弃的数据库；表结构通过 Alembic 删除并
+重建）：数据初始化可以重复执行，重置会清空并恢复。
 """
 
 import os
@@ -21,7 +21,7 @@ class BaseDataDefinitionTests(unittest.TestCase):
         self.assertEqual([s.code for s in BASE_SCENES], ["general", "oven", "range_hood"])
         self.assertEqual([s.name for s in BASE_SCENES], ["通用", "一体机", "抽油烟机"])
         for spec in BASE_SCENES:
-            _scene_fields(spec)  # raises VALIDATION_ERROR otherwise
+            _scene_fields(spec)  # 否则抛出 VALIDATION_ERROR
         default = next(s for s in BASE_SCENES if s.code == DEFAULT_SCENE)
         self.assertTrue(default.include_all and default.is_active)
         self.assertTrue(next(s for s in BASE_SCENES if s.code == "oven").outputs_heating)
@@ -50,7 +50,7 @@ class BaseDataDefinitionTests(unittest.TestCase):
 
         self.assertFalse(set(RESET_TABLES) & set(KEPT_TABLES))
         self.assertEqual(set(IMAGE_TABLES) | set(CATALOG_TABLES), set(RESET_TABLES))
-        # A new table must be classified here before reset_data knows what to do with it
+        # 新表必须先在这里归类，reset_data 才知道怎样处理它
         self.assertEqual(set(RESET_TABLES) | set(KEPT_TABLES), set(Base.metadata.tables))
 
     def test_reset_refuses_prod_before_touching_anything(self):
@@ -68,7 +68,7 @@ class BaseDataDefinitionTests(unittest.TestCase):
                 contextlib.redirect_stderr(io.StringIO()) as err, contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(reset_data.main(["--yes"]), 2)
         engine.assert_not_called()
-        # NACOS_ENV is only a label: the advice must be to switch the connection too, not to relabel
+        # NACOS_ENV 只是一个标签：建议必须是同时切换连接，而不是改标签
         self.assertIn("NACOS_NAMESPACE", err.getvalue())
         self.assertIn("--allow-prod", err.getvalue())
 
@@ -168,19 +168,19 @@ class SeedResetLiveTests(unittest.TestCase):
         self.sql("DELETE FROM categories WHERE code = 'mixed'")
         report = self.seed()
         self.assertEqual(report.created, ["场景 range_hood（抽油烟机）", "根类别 mixed（混合）"])
-        self.assertEqual(len(report.warnings), 1)  # oven's name differs; kept
+        self.assertEqual(len(report.warnings), 1)  # oven 的名称不同；保留
         self.assertEqual(self.sql("SELECT name FROM scenes WHERE code = 'oven'").scalar_one(), "一体机 Pro")
         self.assertEqual(self.sql("SELECT count(*) FROM scenes WHERE code = 'steam_oven'").scalar_one(), 1)
 
     def test_seed_reports_what_it_cannot_fill(self):
-        self.sql("INSERT INTO categories (code) VALUES ('Dish')")  # same code ignoring case
+        self.sql("INSERT INTO categories (code) VALUES ('Dish')")  # 忽略大小写后是同一个 code
         dish = self.sql("SELECT id FROM categories WHERE code = 'Dish'").scalar_one()
         self.sql("INSERT INTO categories (code, parent_id) VALUES ('dessert', :p)", {"p": dish})
         for code in ("legacy_a", "legacy_b", "legacy_c", "legacy_d"):
             self.sql("INSERT INTO categories (code) VALUES (:c)", {"c": code})
         report = self.seed()
         self.assertFalse(report.complete)
-        # Dish kept; dessert is not a root; 5 roots + ingredient = 6, so beverage / mixed / other blocked
+        # Dish 保留；dessert 不是根节点；5 个根节点 + ingredient = 6，所以 beverage / mixed / other 被拦住
         self.assertEqual(len(report.problems), 4)
         self.assertEqual(self.sql("SELECT count(*) FROM categories WHERE parent_id IS NULL").scalar_one(), 6)
 
@@ -200,7 +200,7 @@ class SeedResetLiveTests(unittest.TestCase):
         self.assertEqual([r[0] for r in self.roots()], ["ingredient", "dish", "dessert", "beverage", "mixed", "other"])
         self.assertEqual(self.sql("SELECT count(*) FROM categories").scalar_one(), 6)
         self.assertEqual(self.sql("SELECT count(*) FROM index_tasks").scalar_one(), 0)
-        self.assertEqual(self.sql("SELECT count(*) FROM heating_groups").scalar_one(), 1)  # kept
+        self.assertEqual(self.sql("SELECT count(*) FROM heating_groups").scalar_one(), 1)  # 保留
 
     def test_reset_keep_catalog_keeps_the_tree_and_scene_config(self):
         from scripts.reset_data import IMAGE_TABLES, truncate_and_seed

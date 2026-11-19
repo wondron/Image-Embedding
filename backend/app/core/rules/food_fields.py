@@ -1,19 +1,19 @@
-"""Food annotation of an image: six optional fields, kept in their own table image_foods.
+"""图片的食物标注：六个可选字段，单独存在 image_foods 表里。
 
-Like image_embeddings, food data is a child table of images (app.models.food.ImageFood):
-at most one row per image, deleted with the image; no row means nothing is annotated.
-Every field is optional (非必填):
+和 image_embeddings 一样，食物数据是 images 的子表（app.models.food.ImageFood）：
+每张图最多一行，随图片一起删除；没有这一行表示什么都没标注。
+每个字段都是可选的（非必填）：
 
-- food_state (生/熟/冷冻) and food_processing (切片/切块/整个/切丝……): editable enums
-  (config/param/enums.yaml);
-- food_count: pieces, >= 1;
-- total_mass_g (总质量), main_ingredient_mass_g (主食材质量): grams, >= 1;
-  water_mass_g (含水质量): grams, >= 0.
-The database repeats these bounds as CHECK constraints.
+- food_state（生/熟/冷冻）和 food_processing（切片/切块/整个/切丝……）：可编辑枚举
+  （config/param/enums.yaml）；
+- food_count：个数，>= 1；
+- total_mass_g（总质量）、main_ingredient_mass_g（主食材质量）：克，>= 1；
+  water_mass_g（含水质量）：克，>= 0。
+数据库里用 CHECK 约束重复了这些范围。
 
-Only food_state is in the Qdrant payload (changing it bumps payload_version); the other
-five are plain metadata. Search hits and list items carry all six only when the scene
-outputs_heating (contract §6.1 P9, same rule as heating_group).
+只有 food_state 在 Qdrant payload 里（修改它会递增 payload_version）；其余五个
+只是普通元数据。只有场景开启 outputs_heating 时，搜索结果和列表项才带这六个字段
+（契约 §6.1 P9，和 heating_group 的规则相同）。
 """
 
 from __future__ import annotations
@@ -33,15 +33,15 @@ FOOD_FIELDS = (
     "water_mass_g",
     "main_ingredient_mass_g",
 )
-PG_INT_MAX = 2_147_483_647  # integer columns
+PG_INT_MAX = 2_147_483_647  # 整数列
 
 _FOOD_ENUMS = {"food_state": FOOD_STATE, "food_processing": FOOD_PROCESSING}
-# whole-number fields -> smallest allowed value (the CHECKs on image_foods say the same)
+# 整数字段 -> 允许的最小值（image_foods 上的 CHECK 约束也是这样）
 _FOOD_MINIMUMS = {"food_count": 1, "total_mass_g": 1, "water_mass_g": 0, "main_ingredient_mass_g": 1}
 
 
 def coerce_food_field(key: str, value: Any) -> str | int | None:
-    """One food field from a request or a row; blank -> None, bad -> VALIDATION_ERROR."""
+    """请求或数据库行里的一个食物字段；为空时为 None，不合法时 VALIDATION_ERROR。"""
     if key in _FOOD_ENUMS:
         return coerce_optional_enum(_FOOD_ENUMS[key], value, field=key)
     if key in _FOOD_MINIMUMS:
@@ -50,11 +50,11 @@ def coerce_food_field(key: str, value: Any) -> str | int | None:
 
 
 def coerce_optional_int(value: Any, *, field: str, minimum: int) -> int | None:
-    """Whole number >= minimum (an int, an integral float or a numeric string); blank -> None."""
+    """>= minimum 的整数（int、值为整数的 float 或数字字符串）；为空时为 None。"""
     if value is None or (isinstance(value, str) and not value.strip()):
         return None
     number: int | None = None
-    if isinstance(value, int) and not isinstance(value, bool):  # True must not become 1
+    if isinstance(value, int) and not isinstance(value, bool):  # True 不能变成 1
         number = value
     elif isinstance(value, float) and value.is_integer():
         number = int(value)

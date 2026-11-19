@@ -1,17 +1,17 @@
-"""Category codes keep their spelling and are unique ignoring case.
+"""类别 code 保留原来的写法，并且不区分大小写地唯一。
 
 Revision ID: 20261113_0010
 Revises: 20261112_0009
 Create Date: 2026-11-13
 
-Keep the existing exact-code unique constraint and add a functional unique index
-on lower(code). This also protects writers outside the application catalog lock.
-Existing conflicting spellings are reported with their ids, codes and Chinese
-names; the migration does not rename or delete any category.
+保留现有的按精确 code 的唯一约束，再加一个 lower(code) 上的函数唯一索引。
+这也能防住应用目录锁之外的写入方。
+已有的冲突写法会连同它们的 id、code 和中文名称一起报告；迁移不会重命名或删除
+任何类别。
 
-The preflight is SQL so --sql output enforces the same check when executed later.
-The table lock keeps concurrent writes out between the preflight and index build.
-Downgrade removes only the new index; stored spellings and categories are kept.
+预检用 SQL 实现，这样 --sql 生成的脚本之后执行时也会做同样的检查。
+表锁让并发写入进不来，直到预检和建索引完成。
+降级只删除新的索引；已存的写法和类别都保留。
 """
 from __future__ import annotations
 

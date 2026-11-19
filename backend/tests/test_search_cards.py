@@ -1,5 +1,6 @@
-"""Both search channels answer with the same result card (contract §6.1.1, 2026-11-12):
-tags / description / original_url / similarity at the top level, everything else in details."""
+"""两个搜索通道返回同一种结果卡（契约 §6.1.1，2026-11-12）：
+tags / description / original_url / similarity 在顶层，其余都在 details 里。
+"""
 
 import unittest
 from unittest.mock import Mock, patch
@@ -21,7 +22,7 @@ FLYB_CONFIG = {"FLAB_CONFIG": {
     "API_URL": "https://search.invalid/global_search", "API_KEY": "test-only-key", "DOC_COUNT": 5,
     "MAX_SNIPPET_LENGTH": 300, "THRESHOLD": 0.8, "EnableWaiting": False, "Timeout": 1,
 }}
-# Shaped like the FlyB results logged on 2026-11-12: HostInfo {Hostname, IconUrl}, size names capitalized
+# 形状和 2026-11-12 日志里的 FlyB 结果一样：HostInfo {Hostname, IconUrl}，尺寸名首字母大写
 FISH = {
     "Rank": 1, "Title": "清蒸鲈鱼", "Url": "https://site.example/fish", "HostInfo": {"Hostname": "下厨房", "IconUrl": ""},
     "DocumentInfo": {"PublishTime": "2026-01-01"},
@@ -73,8 +74,8 @@ class CardShapeTests(unittest.TestCase):
                 "document_info": {"PublishTime": "2026-01-01"},
             },
         })
-        # Without an original the largest thumbnail is the card's image: a URL, never the size map
-        # (and Large, not the Tiny that comes first in FlyB's map)
+        # 没有原图时最大的缩略图就是卡片的图片：是 URL，永远不是尺寸映射
+        # （并且是 Large，而不是 FlyB 映射里排在最前的 Tiny）
         self.assertEqual((thumb_only["tags"], thumb_only["description"], thumb_only["original_url"]), ("", "", "https://img.example/l.jpg"))
         self.assertEqual((bare["tags"], bare["original_url"], bare["details"]["images"]), ("", None, []))
         for card in (fish, thumb_only, bare):
@@ -91,19 +92,19 @@ class CardShapeTests(unittest.TestCase):
         self.assertEqual(details["images"], [{
             "image_url": "https://cdn/o/abc.jpg", "thumbnail_url": "https://cdn/t/abc.webp", "width": 8, "height": 6,
         }])
-        self.assertLessEqual(set(details["images"][0]), set(flyb_cards(FISH)[0]["details"]["images"][0]))  # FlyB's image keys
+        self.assertLessEqual(set(details["images"][0]), set(flyb_cards(FISH)[0]["details"]["images"][0]))  # FlyB 的图片键
         self.assertEqual(
             (details["id"], details["category_id"], details["category"], details["scenes"], details["label_status"], details["scene_label"]),
             ("abc", 7, "牛排", ["general", "oven"], "auto", "牛排类"),
         )
         self.assertEqual({key: details[key] for key in (*FOOD_FIELDS, "heating_group")}, {key: ROW[key] for key in (*FOOD_FIELDS, "heating_group")})
-        # Conditional fields stay absent outside heating scenes / without a label mapping
+        # 在非加热场景 / 没有标签映射时，条件字段不出现
         plain = self_built_card(outputs_heating=False)["details"]
         self.assertFalse({*FOOD_FIELDS, "heating_group", "scene_label"} & set(plain))
 
 
 class FakeEmbedding:
-    """Query and "near" point the same way; "far" is orthogonal."""
+    """查询和 "near" 指向同一个方向；"far" 与它们正交。"""
 
     def detect(self, image):
         return np.array([0.0, 1.0]) if image == "far" else np.array([1.0, 0.0])
@@ -112,14 +113,14 @@ class FakeEmbedding:
 class GlobalFilterTests(unittest.TestCase):
     def test_scored_cards_keep_their_shape_and_show_the_compared_image(self):
         fish, thumb_only = flyb_cards(FISH, THUMB_ONLY)
-        downloads = {  # the fish original failed: its large thumbnail was compared
+        downloads = {  # 鱼的原图失败了：比对的是它的大缩略图
             "https://img.example/fish.jpg": ("https://img.example/fish-l.jpg", "near"),
             "https://img.example/l.jpg": ("https://img.example/l.jpg", "far"),
         }
         filtering = GlobalFilter({"GLOBAL_FILTER": {"switch": True, "threshold": 0.5}}, FakeEmbedding())
         with patch("app.services.predict.pipeline.c_embedding.resolve_image_bgr", side_effect=lambda card: downloads[card["original_url"]]):
             kept = filtering.detect("query", [fish, thumb_only])
-        self.assertEqual(len(kept), 1)  # "far" is under the threshold
+        self.assertEqual(len(kept), 1)  # "far" 低于阈值
         self.assertEqual(set(kept[0]), CARD_KEYS)
         self.assertEqual((kept[0]["original_url"], kept[0]["similarity"]), ("https://img.example/fish-l.jpg", 1.0))
 
@@ -131,7 +132,7 @@ class GlobalFilterTests(unittest.TestCase):
 
 
 class SameWireTests(unittest.TestCase):
-    """Through HTTP both endpoints serialize their hits with the same top-level keys."""
+    """通过 HTTP，两个接口序列化结果时使用相同的顶层键。"""
 
     def setUp(self):
         self.runtime = Mock(http_timeout=5, max_image_bytes=1024)
@@ -156,7 +157,7 @@ class SameWireTests(unittest.TestCase):
             "source": "self", "scene": "oven", "outputs_heating": True,
             "items": [self_built_card(scene_label={"name": "牛排类"}), self_built_card(outputs_heating=False)],
         }
-        # FoodService output, plus a stray top-level key the wire must not carry
+        # FoodService 的输出，加上一个 wire 不能带的多余顶层键
         self.runtime.require_food_service.return_value.detect.return_value = [{**flyb_cards(FISH)[0], "image_url": "legacy"}]
 
         hits = self.post("/api/search")["items"]
@@ -165,7 +166,7 @@ class SameWireTests(unittest.TestCase):
             self.assertEqual(set(card), CARD_KEYS)
         self.assertEqual(hits[0]["details"]["heating_group"], {"id": 1, "code": "grill", "name": "烤"})
         self.assertEqual(hits[0]["details"]["scene_label"], "牛排类")
-        # exclude_unset reaches into details: no empty conditional keys
+        # exclude_unset 也作用到 details 里：没有空的条件键
         self.assertFalse({*FOOD_FIELDS, "heating_group", "scene_label"} & set(hits[1]["details"]))
         self.assertEqual(documents[0]["details"]["images"][0]["thumbnail_url"], {"Large": "https://img.example/fish-l.jpg"})
 

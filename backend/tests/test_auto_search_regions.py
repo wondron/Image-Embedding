@@ -1,12 +1,10 @@
-"""Business search's region search (AUTO_SEARCH_REGION_CONFIG, app.api.services.region_search).
+"""业务搜图的区域搜索（AUTO_SEARCH_REGION_CONFIG，app.api.services.region_search）。
 
-It starts beside the whole-image search. When the whole image has no hit, GroundingDINO's boxes
-are cropped and each is searched with the request's scene, top_k and score_threshold; the hits of
-all boxes are merged (one per stored image, its best similarity), highest first, top_k of them,
-each naming its box in details.region. When the whole image has hits they are the answer at once.
+它和整图搜索同时启动。整图没有结果时，裁剪 GroundingDINO 的检测框，每个框都用请求的
+scene、top_k 和 score_threshold 搜索；所有框的结果合并（每张已存图片一条，取最高相似度），
+从高到低取 top_k 条，每条在 details.region 里标明它的框。整图有结果时立即作为答案返回。
 
-The detector and the encoder are fakes: the encoder tells the whole image from the crops by their
-size in pixels, and the vector store answers by the vector.
+检测器和编码器都是假的：编码器按像素尺寸区分整图和裁剪图，向量库按向量回答。
 
     业务搜图(图片链接) | 图像下载 … | embedding推理 … | vector搜索 … | 后处理 … | 目标检测 … | 区域搜索 … | 总耗时 …
 """
@@ -46,14 +44,14 @@ ROW_B = "bbbbbbbb-0000-0000-0000-000000000002"
 ROW_C = "cccccccc-0000-0000-0000-000000000003"
 ROW_D = "dddddddd-0000-0000-0000-000000000004"
 
-# GroundingDINO's boxes (normalized cx, cy, w, h), and what they are in pixels of the query image
+# GroundingDINO 的检测框（归一化的 cx, cy, w, h），以及它们在查询图上的像素位置
 LEFT = (0.25, 0.5, 0.5, 1.0)  # x 0..100, y 0..100
 RIGHT = (0.875, 0.5, 0.25, 0.5)  # x 150..200, y 25..75
-TINY = (0.5, 0.5, 0.0625, 0.0625)  # about 13 x 6 pixels: left out
+TINY = (0.5, 0.5, 0.0625, 0.0625)  # 大约 13 x 6 像素：丢掉
 LEFT_REGION = {"label": "food", "score": 0.75, "box": [0, 0, 100, 100]}
 RIGHT_REGION = {"label": "food", "score": 0.5, "box": [150, 25, 200, 75]}
 
-# The encoder's vector for an image of this size (height, width): the whole image, a crop
+# 编码器对这个尺寸（高, 宽）的图片给出的向量：整图、一张裁剪图
 WHOLE, LEFT_CROP, RIGHT_CROP = (HEIGHT, WIDTH), (100, 100), (50, 50)
 VECTORS = {WHOLE: [1.0, 0.0, 0.0, 0.0], LEFT_CROP: [0.0, 1.0, 0.0, 0.0], RIGHT_CROP: [0.0, 0.0, 1.0, 0.0]}
 
@@ -105,7 +103,7 @@ class FakeDetector:
 
 class FakeEmbedding:
     def __init__(self):
-        self.sizes = []  # the (height, width) of every image embedded, in order
+        self.sizes = []  # 每张计算过 embedding 的图片的（高, 宽），按顺序
         self.on_embed = lambda size: None
 
     def embed_bytes(self, image_bytes):
@@ -201,9 +199,9 @@ class RegionsAndMergeTests(unittest.TestCase):
         )
         self.assertEqual(found, [
             Region("food", 0.75, (150, 25, 200, 75)),
-            Region("plate", 0.6, (162, 25, 200, 75)),  # x2 was 212.5: clipped to the image
+            Region("plate", 0.6, (162, 25, 200, 75)),  # x2 原本是 212.5：裁到图内
             Region("food", 0.5, (0, 0, 100, 100)),
-        ])  # TINY is under MIN_REGION_SIDE on a side
+        ])  # TINY 有一边小于 MIN_REGION_SIDE
         self.assertGreater(MIN_REGION_SIDE, 0.0625 * HEIGHT)
         self.assertEqual(
             regions_of([LEFT, RIGHT], [0.5, 0.75], ["a", "b"], width=WIDTH, height=HEIGHT, limit=1),
@@ -228,12 +226,12 @@ class RegionsAndMergeTests(unittest.TestCase):
             [(ROW_A, 0.8, "food"), (ROW_B, 0.7, "dish"), (ROW_C, 0.65, "dish")],
         )
         self.assertEqual(merged[0]["details"]["region"], {"label": "food", "score": 0.75, "box": [0, 0, 100, 100]})
-        self.assertNotIn("region", entries[0]["items"][0]["details"])  # the entries are left as they were
+        self.assertNotIn("region", entries[0]["items"][0]["details"])  # 条目保持原样
         self.assertEqual([card["details"]["id"] for card in merge([left, right], entries, top_k=2)], [ROW_A, ROW_B])
 
 
 class BusinessSearchRegionTests(unittest.TestCase):
-    """POST /api/search/auto/* with the region search on, the recipe detection off."""
+    """开启区域搜索、关闭菜谱识别时的 POST /api/search/auto/*。"""
 
     def setUp(self):
         self.embedding = FakeEmbedding()
@@ -294,7 +292,7 @@ class BusinessSearchRegionTests(unittest.TestCase):
     def ids(self, body):
         return [item["details"].get("id") for item in body["items"]]
 
-    # -- no whole-image hit: the regions' hits ----------------------------------------------------
+    # -- 整图没有结果：区域的结果 ----------------------------------------------------------
 
     def test_the_regions_hits_are_merged_when_the_whole_image_has_none(self):
         body, records = self.by_url(trace_id="t-9")
@@ -302,7 +300,7 @@ class BusinessSearchRegionTests(unittest.TestCase):
         self.assertNotIn("message", body)
         self.assertEqual(
             [(item["source"], item["details"]["id"], item["similarity"]) for item in body["items"]],
-            [("self", ROW_A, 0.8), ("self", ROW_B, 0.7), ("self", ROW_C, 0.65)],  # B: its best; D: under 0.55
+            [("self", ROW_A, 0.8), ("self", ROW_B, 0.7), ("self", ROW_C, 0.65)],  # B：取它最好的；D：低于 0.55
         )
         self.assertEqual(
             [item["details"]["region"] for item in body["items"]], [LEFT_REGION, RIGHT_REGION, RIGHT_REGION]
@@ -310,13 +308,13 @@ class BusinessSearchRegionTests(unittest.TestCase):
         self.assertEqual(list(body["items"][0]), ["source", "tags", "description", "original_url", "similarity", "details"])
         self.assertIs(body["items"][0]["details"]["outputs_heating"], False)
 
-        # GroundingDINO got the decoded query image and the configured caption and thresholds
+        # GroundingDINO 拿到了解码后的查询图，以及配置的 caption 和阈值
         (call,) = self.detector.calls
         self.assertEqual(call, {
             "shape": (HEIGHT, WIDTH, 3), "dtype": np.uint8, "text_range": "food",
             "box_threshold": 0.4, "text_threshold": 0.4,
         })
-        # The whole image, then every box's crop
+        # 先是整图，然后是每个框的裁剪图
         self.assertEqual(self.embedding.sizes[0], WHOLE)
         self.assertEqual(sorted(self.embedding.sizes[1:]), sorted([LEFT_CROP, RIGHT_CROP]))
 
@@ -329,7 +327,7 @@ class BusinessSearchRegionTests(unittest.TestCase):
 
     def test_top_k_bounds_every_box_and_the_merged_list(self):
         body, _ = self.by_url(top_k=1)
-        self.assertEqual(self.ids(body), [ROW_A])  # LEFT's best (0.8) over RIGHT's best (0.7)
+        self.assertEqual(self.ids(body), [ROW_A])  # LEFT 最好的（0.8）胜过 RIGHT 最好的（0.7）
 
     def test_the_heating_flag_follows_the_scene(self):
         body, _ = self.by_file(scene="oven")
@@ -352,24 +350,24 @@ class BusinessSearchRegionTests(unittest.TestCase):
         self.assertEqual(self.embedding.sizes, [WHOLE, LEFT_CROP])
         self.assertEqual(self.ids(body), [ROW_A, ROW_B])
 
-    # -- a whole-image hit: the answer at once ------------------------------------------------
+    # -- 整图有结果：立即返回 ------------------------------------------------------------
 
     def test_a_whole_image_hit_is_the_answer_without_waiting_for_the_regions(self):
         self.vectors.hits[WHOLE] = [{"id": ROW_D, "score": 0.9}]
         detecting, release = threading.Event(), threading.Event()
         seen = {}
 
-        def detect():  # in the region search's worker thread
+        def detect():  # 在区域搜索的工作线程里
             detecting.set()
             release.wait(5)
 
-        def embed(size):  # the whole image: started with the detection under way
+        def embed(size):  # 整图：在识别进行期间开始
             if size == WHOLE:
                 seen["detection started beside the whole-image search"] = detecting.wait(2)
 
         self.detector.on_detect = detect
         self.embedding.on_embed = embed
-        # One event loop for the whole block: the dropped region search still runs on it
+        # 整个代码块用一个事件循环：被丢弃的区域搜索仍在上面运行
         with TestClient(self.app) as client, self.assertLogs(level="INFO") as logs:
             started = time.monotonic()
             response = client.post("/api/search/auto/file", files={"file": ("q.png", QUERY, "image/png")})
@@ -382,19 +380,20 @@ class BusinessSearchRegionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
         self.assertEqual(seen, {"detection started beside the whole-image search": True})
-        self.assertLess(took, 4)  # GroundingDINO was still held when it answered
+        self.assertLess(took, 4)  # 返回时 GroundingDINO 还被占着
         self.assertEqual([(item["details"]["id"], item["similarity"]) for item in body["items"]], [(ROW_D, 0.9)])
         self.assertNotIn("region", body["items"][0]["details"])
-        self.assertEqual(left_running, 0)  # the dropped search ended ...
-        self.assertEqual(self.embedding.sizes, [WHOLE])  # ... without searching its boxes
-        self.assertEqual(self.region_logs(logs.records), [])  # nobody reads its answer
+        self.assertEqual(left_running, 0)  # 被丢弃的搜索结束了……
+        self.assertEqual(self.embedding.sizes, [WHOLE])  # ……没有搜索它的检测框
+        self.assertEqual(self.region_logs(logs.records), [])  # 没人读它的结果
         self.assertNotIn("目标检测", self.timing_steps(logs.records))
 
     def test_searches_dropped_while_waiting_for_the_model_never_run_it(self):
-        """Every business search starts a region search, and GroundingDINO runs one image at a time:
-        those whose whole image answered leave the queue, so they do not delay one that needs it."""
+        """每个业务搜图都会启动区域搜索，而 GroundingDINO 一次只处理一张图：
+        整图已经有结果的那些离开队列，所以不会耽误需要它的那个。
+        """
 
-        class SlowDetector(FakeDetector):  # the real one infers under a lock, about 0.44 s an image
+        class SlowDetector(FakeDetector):  # 真实的检测器在锁里推理，每张图大约 0.44 秒
             def __init__(self):
                 super().__init__()
                 self.lock = threading.Lock()
@@ -407,8 +406,8 @@ class BusinessSearchRegionTests(unittest.TestCase):
                     return super().detect(image, **kwargs)
 
         self.runtime.detector = detector = SlowDetector()
-        self.vectors.hits[WHOLE] = [{"id": ROW_D, "score": 0.9}]  # QUERY: the whole image answers
-        miss = encoded(300, 150)  # no whole-image hit: its answer waits for its own detection
+        self.vectors.hits[WHOLE] = [{"id": ROW_D, "score": 0.9}]  # QUERY：整图有结果
+        miss = encoded(300, 150)  # 整图没有结果：它的答案要等它自己的检测
 
         async def post(client, data):
             started = time.perf_counter()
@@ -426,16 +425,16 @@ class BusinessSearchRegionTests(unittest.TestCase):
 
         with self.assertLogs(level="INFO"):
             hit_times, waited = asyncio.run(burst())
-        self.assertLess(max(hit_times), 0.3)  # none waited for a detection
-        self.assertEqual(detector.runs, 2)  # the one under way when the hits answered, and the miss's own
-        self.assertLess(waited, 1.2)  # that run and its own; behind every hit's run it was 5 x 0.3 s more
+        self.assertLess(max(hit_times), 0.3)  # 没有一个等了检测
+        self.assertEqual(detector.runs, 2)  # 命中返回时正在进行的那一次，以及没命中的那个自己的一次
+        self.assertLess(waited, 1.2)  # 那一次加上它自己的；如果排在每个命中请求的检测后面，要多 5 x 0.3 秒
 
     def test_a_failed_whole_image_search_fails_the_request(self):
         body, records = self.by_file(data=b"broken", status=422)
         self.assertEqual(body["error"], "SEARCH_BAD_IMAGE")
         self.assertEqual(self.region_logs(records), [])
 
-    # -- nothing from the regions ---------------------------------------------------------------
+    # -- 区域没有结果 -------------------------------------------------------------------
 
     def test_no_box_means_no_region_hit(self):
         self.detector.boxes = [(TINY, 0.9, "crumb")]
@@ -479,18 +478,18 @@ class BusinessSearchRegionTests(unittest.TestCase):
 
         self.embedding.on_embed = embed
         body, records = self.by_url()
-        self.assertEqual(self.ids(body), [ROW_A, ROW_B])  # LEFT's hits only
+        self.assertEqual(self.ids(body), [ROW_A, ROW_B])  # 只有 LEFT 的结果
         ((level, text),) = self.region_logs(records)
         self.assertEqual(level, logging.WARNING)
         self.assertRegex(text, r"^区域搜索完成 \| 检测框=2 \| 结果=2 \| 失败=1 \| 耗时 ")
 
-    # -- off --------------------------------------------------------------------------------------
+    # -- 关闭 ------------------------------------------------------------------------------
 
     def test_the_switch_and_the_threshold_turn_the_step_off(self):
         for config, fields in (
             ({"AUTO_SEARCH_REGION_CONFIG": {**REGION_CONFIG, "enabled": False}}, {}),
             ({}, {}),
-            ({"AUTO_SEARCH_REGION_CONFIG": dict(REGION_CONFIG)}, {"score_threshold": 0}),  # the whole image answers
+            ({"AUTO_SEARCH_REGION_CONFIG": dict(REGION_CONFIG)}, {"score_threshold": 0}),  # 整图有结果
         ):
             with self.subTest(config=config, fields=fields):
                 self.runtime.config = config

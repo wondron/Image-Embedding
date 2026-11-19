@@ -1,4 +1,4 @@
-"""One embedding model per process: lifespan wiring and Nacos reload reuse."""
+"""每个进程一个 embedding 模型：lifespan 的组装和 Nacos 重新加载时的复用。"""
 
 import copy
 import unittest
@@ -85,10 +85,10 @@ class EmbedderSharingTests(unittest.TestCase):
         config = copy.deepcopy(CONFIG)
         config["GLOBAL_FILTER"]["threshold"] = 0.9
         self.assertTrue(self.reload(config))
-        self.assertEqual(len(self.created), 1)  # no ONNX reload
+        self.assertEqual(len(self.created), 1)  # 不重新加载 ONNX
         self.assertIs(self.runtime.food_service.embeddingTool, embedder)
         self.assertEqual(self.runtime.food_service.searchFilter.threshold, 0.9)
-        self.assertEqual(embedder.warmups, [2])  # not re-warmed
+        self.assertEqual(embedder.warmups, [2])  # 不重新预热
 
     def test_model_change_switches_predict_only_and_switching_back_reuses(self):
         original = self.start()
@@ -97,10 +97,10 @@ class EmbedderSharingTests(unittest.TestCase):
         self.assertTrue(self.reload(changed))
         self.assertEqual(len(self.created), 2)
         self.assertIsNot(self.runtime.food_service.embeddingTool, original)
-        self.assertIs(self.runtime.retrieval.embedding, original)  # stays paired with its collection
+        self.assertIs(self.runtime.retrieval.embedding, original)  # 保持和它的 collection 配对
 
         self.assertTrue(self.reload(copy.deepcopy(CONFIG)))
-        self.assertEqual(len(self.created), 2)  # back to the model retrieval still holds
+        self.assertEqual(len(self.created), 2)  # 回到检索仍在使用的模型
         self.assertIs(self.runtime.food_service.embeddingTool, original)
 
     def test_model_load_failure_disables_both_with_reasons(self):
@@ -122,7 +122,7 @@ class EmbedderSharingTests(unittest.TestCase):
 
     def test_bad_retrieval_switch_degrades_retrieval_only(self):
         self.runtime.config["TOTAL_CONFIG"]["retrieval_enabled"] = "flase"
-        embedder = self.start()  # must not raise out of startup
+        embedder = self.start()  # 不能从启动过程中抛出
         self.assertIsNone(self.runtime.retrieval)
         self.assertEqual(self.runtime.retrieval_error_code, "NOT_READY")
         self.assertIn("TOTAL_CONFIG.retrieval_enabled", self.runtime.retrieval_error)

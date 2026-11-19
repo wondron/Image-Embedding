@@ -1,10 +1,9 @@
-"""Download of an image URL given as model input (predict, retrieval search).
+"""下载作为模型输入的图片 URL（预测、检索搜索）。
 
-Same policy as the browser download proxy, through the same fetcher
-(app.clients.public_image): public hosts only (checked after DNS and pinned for the
-connection), ports 80/443, every redirect re-checked, bounded size and time, content
-verified as an image. An upstream failure is DOWNLOAD_FAILED (502) / DOWNLOAD_TIMEOUT
-(504), never the remote status.
+和浏览器下载代理的规则相同，使用同一个下载器（app.clients.public_image）：只允许公网
+地址（DNS 解析后检查，并为这次连接固定地址）、端口 80/443、每次重定向都重新检查、
+限制大小和时间、内容校验为图片。上游失败为 DOWNLOAD_FAILED（502）/ DOWNLOAD_TIMEOUT
+（504），从不使用远端的状态码。
 """
 
 from __future__ import annotations
@@ -20,7 +19,7 @@ logger = logging.getLogger("image_fetch")
 
 
 def clean_url(url: str, *, default_scheme: str = "https") -> str:
-    """Normalize search URLs, accepting missing schemes and protocol-relative URLs."""
+    """规范化搜索 URL，接受缺少协议和以 // 开头的 URL。"""
     url = url.strip()
     if not url:
         raise errors.invalid_url("img_url is empty.")
@@ -43,14 +42,14 @@ def clean_url(url: str, *, default_scheme: str = "https") -> str:
 
 
 async def read_url_bytes(url: str, *, max_image_bytes: int, timeout_s: float) -> bytes:
-    """Normalize the URL and download at most max_image_bytes within timeout_s.
+    """规范化 URL，并在 timeout_s 内最多下载 max_image_bytes 字节。
 
     INVALID_URL (422) / FORBIDDEN_HOST (403) / FILE_TOO_LARGE (413) /
-    UNSUPPORTED_MEDIA_TYPE (415) / DOWNLOAD_FAILED (502) / DOWNLOAD_TIMEOUT (504).
+    UNSUPPORTED_MEDIA_TYPE (415) / DOWNLOAD_FAILED (502) / DOWNLOAD_TIMEOUT (504)。
     """
     url = clean_url(url)
     logger.info("download img_url repr=%r", url)
-    # Blocking socket I/O with its own deadline: keep it off the event loop.
+    # 带自己超时的阻塞 socket I/O：放在事件循环之外执行。
     content, _media_type = await asyncio.to_thread(
         public_image.fetch_image, url, max_bytes=max_image_bytes, total_timeout=timeout_s
     )

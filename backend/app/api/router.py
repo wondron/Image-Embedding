@@ -27,13 +27,13 @@ for sub_router in (
     predict_router,
     tools_router,
     retrieval_router,
-    auto_search_router,  # /api/search/auto/*: self-built first, global as the fallback
-    batch_search_router,  # /api/search/batch/*: several query images, self-built only
+    auto_search_router,  # /api/search/auto/*：先查自建库，Global 兜底
+    batch_search_router,  # /api/search/batch/*：多张查询图，只查自建库
     enums_router,
     categories_router,
     scenes_router,
     scene_memberships_router,
-    images_router,  # after image_download_router: /api/images/{image_id} must not take /download
+    images_router,  # 放在 image_download_router 之后：/api/images/{image_id} 不能吃掉 /download
     tasks_router,
     embedding_models_router,
 ):

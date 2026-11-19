@@ -1,7 +1,7 @@
-"""Recompute image_scenes membership (write-time materialize).
+"""重算 image_scenes 归属（写入时物化）。
 
-Thin application wrapper over MetadataStore.recompute_image_scenes so workers
-and HTTP go through the composition root instead of constructing adapters.
+MetadataStore.recompute_image_scenes 之上的薄应用层包装，让后台任务和 HTTP 通过
+组合根调用，而不是自己构造适配器。
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ logger = logging.getLogger("retrieval.recompute_scenes")
 
 
 class RecomputeScenesUseCase:
-    """Materialize effective scene membership for one image."""
+    """为一张图物化生效的场景归属。"""
 
     def __init__(self, metadata: MetadataStorePort) -> None:
         self._metadata = metadata

@@ -1,4 +1,4 @@
-"""Pure scene-membership rules (include_all, rules, manual overrides, payload)."""
+"""纯粹的场景归属规则（include_all、规则、手工覆盖、payload）。"""
 
 import unittest
 
@@ -40,7 +40,7 @@ class SceneMembershipTests(unittest.TestCase):
     def test_category_rule_matches_subtree_and_cuisine_rule_matches_cuisine(self):
         self.assertEqual(self.members(category_id=9, path="1.7.9"), {2})
         self.assertEqual(self.members(category_id=8, path="1.8", cuisines=["american"]), {3})
-        # "1.70" is not under "1.7"
+        # "1.70" 不在 "1.7" 下面
         self.assertEqual(self.members(category_id=70, path="1.70"), set())
 
     def test_include_all_ids(self):
@@ -56,7 +56,7 @@ class SceneMembershipTests(unittest.TestCase):
         payload = build_qdrant_payload(
             category_id=7,
             scene_codes=["general", "oven"],
-            food_state="cooked",  # editable enum: a plain str from config/param/enums.yaml
+            food_state="cooked",  # 可编辑枚举：来自 config/param/enums.yaml 的普通 str
             label_status=LabelStatus.AUTO,
         )
         self.assertEqual(

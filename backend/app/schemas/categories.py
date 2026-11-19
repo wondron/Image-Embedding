@@ -1,9 +1,9 @@
-"""Categories wire: GET / POST /api/categories, PATCH / DELETE /api/categories/{category_id}.
+"""类别的 wire：GET / POST /api/categories、PATCH / DELETE /api/categories/{category_id}。
 
-The category tree (categories + category_names) as the admin page reads and edits it. Success
-bodies carry no trace_id (it is in the X-Trace-Id header, as for /api/enums). The request
-limits are app.core.category_rules; app.core.rules.category_fields checks them again
-together with the rules a schema cannot say (the zh primary name, one primary per language).
+管理页读取和编辑的类别树（categories + category_names）。成功的响应体不带 trace_id
+（它在 X-Trace-Id 响应头里，和 /api/enums 一样）。请求的限制来自 app.core.category_rules；
+app.core.rules.category_fields 会再检查一次，同时检查 schema 表达不了的规则（zh 主名称、
+每种语言一个主名称）。
 """
 
 from typing import Annotated, Literal
@@ -26,7 +26,7 @@ from app.core.category_rules import (
 from app.core.enums import NameKind
 from app.schemas.retrieval import HeatingGroup
 
-# -- shared parts -----------------------------------------------------------------------
+# -- 共用部分 -----------------------------------------------------------------------------
 
 Cuisine = Annotated[
     str, Field(min_length=1, max_length=CATEGORY_CUISINE_MAX_LEN, pattern=CATEGORY_CUISINE_PATTERN)
@@ -34,7 +34,7 @@ Cuisine = Annotated[
 
 
 class CategoryName(BaseModel):
-    """One row of category_names."""
+    """category_names 的一行。"""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -50,7 +50,7 @@ class CategoryName(BaseModel):
     kind: NameKind = Field(..., description="primary 主名（每种语言最多一个）/ alias 别名")
 
 
-# -- responses --------------------------------------------------------------------------
+# -- 响应 ---------------------------------------------------------------------------------
 
 class CategoryItem(BaseModel):
     id: int
@@ -86,7 +86,7 @@ class CategoryResponse(BaseModel):
 
 
 class CategorySceneSync(BaseModel):
-    """What a move or a cuisines change did to the stored images below the category."""
+    """移动或修改菜系对类别下已存图片造成的影响。"""
 
     images: int = Field(..., description="标在这个类别及其子类别上、已重算场景归属的图片数")
     changed: int = Field(..., description="其中场景归属有变化的图片数（payload_version 已递增）")
@@ -122,7 +122,7 @@ class CategoryDeleteResponse(BaseModel):
     deleted: DeletedCategory
 
 
-# -- requests ---------------------------------------------------------------------------
+# -- 请求 ---------------------------------------------------------------------------------
 
 _CODE = dict(
     min_length=1,
@@ -150,8 +150,9 @@ class CategoryCreateRequest(BaseModel):
 
 
 class CategoryUpdateRequest(BaseModel):
-    """Only the fields sent are changed. parent_id: null moves the node to the root;
-    heating_group_id: null clears it; the other fields cannot be null."""
+    """只修改传来的字段。parent_id 为 null 时把节点移到根；heating_group_id 为 null 时清空它；
+    其他字段不能为 null。
+    """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 

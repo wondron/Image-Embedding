@@ -1,15 +1,14 @@
-"""Drain image_deletions once (contract §2.5).
+"""清理一遍 image_deletions（契约 §2.5）。
 
-Needs only PG + Qdrant + object storage, so it builds RetrievalInfra (no ONNX
-model, no GPU) and closes it when done.
+只需要 PG、Qdrant 和对象存储，所以构建 RetrievalInfra（不加载 ONNX 模型、
+不用 GPU），用完后关闭。
 
-Invoke from backend/:
+在 backend/ 下执行：
 
   python -m app.workers.process_deletions
   python -m app.workers.process_deletions --limit 20
 
-Config: the same effective config as the API (Nacos over the local YAML); the
-PG / Qdrant / storage connections come from it.
+配置：和 API 相同的生效配置（Nacos 覆盖本地 YAML）；PG / Qdrant / 对象存储的连接都取自它。
 """
 
 from __future__ import annotations

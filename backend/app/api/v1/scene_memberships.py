@@ -1,4 +1,4 @@
-"""Image scene membership routes: manual include / exclude, saved in PG, then pushed to Qdrant."""
+"""图片场景归属的路由：手工包含 / 排除，存在 PG 里，然后推送到 Qdrant。"""
 
 from typing import Any
 from uuid import UUID

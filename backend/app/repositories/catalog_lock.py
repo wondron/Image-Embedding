@@ -1,13 +1,12 @@
-"""One transaction-level advisory lock for the catalog: the category tree and the scene configuration.
+"""目录（类别树和场景配置）的事务级 advisory lock，只有一把。
 
-- Admin writes (app.repositories.categories, app.repositories.scene_config) take it exclusively, so
-  two of them never interleave their checks, e.g. a scene rule created for a category while that
-  category is being deleted (the rule would go with it through ON DELETE CASCADE).
-- Membership recomputes (app.repositories.scenes) take it shared: they read scenes, rules and the
-  category tree in several queries and must not see an admin change land halfway.
+- 管理写入（app.repositories.categories、app.repositories.scene_config）独占持有，这样两个
+  写入的检查永远不会交错，例如在删除某个类别的同时为它创建一条场景规则（规则会通过
+  ON DELETE CASCADE 一起被删掉）。
+- 归属重算（app.repositories.scenes）共享持有：它们分几次查询读取场景、规则和类别树，
+  不能看到管理修改落到一半的状态。
 
-Both are released when the transaction ends. Writers that bypass these repositories are not
-covered; the database constraints stay the last guard.
+两者都在事务结束时释放。绕过这些仓储的写入方不受保护；数据库约束仍然是最后一道防线。
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ from typing import Any
 
 from sqlalchemy import text
 
-# pg_advisory_xact_lock key ("CATE"); the value predates the scene configuration, keep it stable
+# pg_advisory_xact_lock 的键（"CATE"）；这个值早于场景配置就有了，保持不变
 CATALOG_LOCK_KEY = 0x43415445
 
 

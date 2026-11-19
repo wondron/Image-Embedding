@@ -1,18 +1,18 @@
-"""images.source_type / license / food_state become editable enums: drop their CHECK lists.
+"""images.source_type / license / food_state 改为可编辑枚举：删除它们的 CHECK 列表。
 
 Revision ID: 20261109_0004
 Revises: 20261106_0003
 Create Date: 2026-11-09
 
-The allowed values of these three columns now live in config/param/enums.yaml and can grow at
-runtime (POST /api/enums/{name}/values), so a CHECK listing them would reject every new value.
-The application validates them before each write (app.services.retrieval.enum_fields); the
-columns stay varchar(32). System enums (label_status, kind, origin, distance, status,
-review_status) keep their CHECK constraints.
+这三列的允许值现在放在 config/param/enums.yaml 里，并且可以在运行时增加
+（POST /api/enums/{name}/values），所以列出取值的 CHECK 会拒绝每一个新值。
+应用在每次写入之前校验它们（app.services.retrieval.enum_fields）；这些列仍然是
+varchar(32)。系统枚举（label_status、kind、origin、distance、status、review_status）
+保留它们的 CHECK 约束。
 
-Dropping a CHECK only touches the catalog (brief ACCESS EXCLUSIVE lock, no table scan).
-Downgrade restores the 0001 CHECK lists and fails with a check violation (rolled back, nothing
-changed) while rows still hold values added after this revision; change those rows first.
+删除 CHECK 只改系统目录（短暂的 ACCESS EXCLUSIVE 锁，不扫描表）。
+降级时恢复 0001 的 CHECK 列表；如果还有行保存着这个版本之后新增的值，降级会因为
+违反检查而失败（回滚，什么都不变）；需要先修改那些行。
 """
 from __future__ import annotations
 

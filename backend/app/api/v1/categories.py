@@ -1,5 +1,6 @@
-"""Category tree admin routes: read the whole tree, create / patch / delete one node, and import
-a tree file (upsert by code)."""
+"""类别树管理的路由：读取整棵树，创建 / 修改 / 删除一个节点，以及导入类别树文件
+（按 code 新增或更新）。
+"""
 
 from __future__ import annotations
 

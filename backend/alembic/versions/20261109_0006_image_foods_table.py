@@ -1,22 +1,21 @@
-"""Food annotation moves out of images into its own table image_foods (like image_embeddings).
+"""食物标注从 images 移到单独的 image_foods 表（和 image_embeddings 一样）。
 
 Revision ID: 20261109_0006
 Revises: 20261109_0005
 Create Date: 2026-11-09
 
-image_foods: one optional row per image (PK image_id, FK images ON DELETE CASCADE), six
-nullable fields — food_state, food_processing, food_count, total_mass_g (总质量),
-water_mass_g (含水质量), main_ingredient_mass_g (主食材质量). food_state / food_processing
-are editable enums (values in config/param/enums.yaml, no CHECK); counts and masses have
-CHECKs (water mass may be 0).
+image_foods：每张图片最多一行（主键 image_id，外键 images ON DELETE CASCADE），六个
+可为空的字段——food_state、food_processing、food_count、total_mass_g（总质量）、
+water_mass_g（含水质量）、main_ingredient_mass_g（主食材质量）。food_state / food_processing
+是可编辑枚举（取值在 config/param/enums.yaml，没有 CHECK）；个数和质量有 CHECK
+（含水质量可以为 0）。
 
-Data: every image with any food column set gets a row; images.food_weight_g becomes
-total_mass_g. Then images.food_state / food_processing / food_weight_g / food_count are
-dropped (their CHECKs go with them). food_state stays in the Qdrant payload with the same
-values, so no re-push is needed.
+数据：设置了任一食物列的图片都得到一行；images.food_weight_g 变成 total_mass_g。
+然后删除 images.food_state / food_processing / food_weight_g / food_count（它们的 CHECK
+随之删除）。food_state 以相同的取值留在 Qdrant payload 里，所以不需要重新推送。
 
-Downgrade puts the four columns back on images (food_weight_g <- total_mass_g) and drops
-image_foods: water_mass_g and main_ingredient_mass_g are lost.
+降级会把这四列放回 images（food_weight_g <- total_mass_g）并删除 image_foods：
+water_mass_g 和 main_ingredient_mass_g 会丢失。
 """
 from __future__ import annotations
 
@@ -70,7 +69,7 @@ COMMENT ON COLUMN image_foods.main_ingredient_mass_g IS '主食材质量（克�
 COMMENT ON COLUMN image_foods.updated_at IS '更新时间';
 """
 
-# Back to the 0005 shape: same types, CHECK names and comments as 0004 / 0005 left them
+# 回到 0005 的结构：类型、CHECK 名称和注释都和 0004 / 0005 留下的一样
 DOWNGRADE_SQL = r"""
 ALTER TABLE images
   ADD COLUMN food_state varchar(32),

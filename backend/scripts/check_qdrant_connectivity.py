@@ -157,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
         for line in summarize_effective(config, source):
             print(line)
     except Exception as exc:
-        # YAML errors may echo complete source lines containing credentials.
+        # YAML 错误可能回显包含凭证的完整源文件行。
         print(f"FAIL 无法加载生效配置或依赖（{type(exc).__name__}），请检查配置文件、Nacos 和后端 Python 环境。")
         return EXIT_CONFIG
     try:

@@ -1,13 +1,13 @@
-"""Recipe detection service: the names of the dishes in an image (RECIPE_DETECT_CONFIG.url).
+"""菜谱识别服务：图片里的菜名（RECIPE_DETECT_CONFIG.url）。
 
-    POST <url>   JSON {"image_url": "...", "traceId": "..."}    the service downloads the image
-                 multipart file=<the image>, traceId=<...>      an image without a link (an upload)
+    POST <url>   JSON {"image_url": "...", "traceId": "..."}    服务自己下载图片
+                 multipart file=<图片>, traceId=<...>           没有链接的图片（上传的）
 
     200 {"code": "200", "success": true, "message": "识别成功", "traceId": "...",
          "model": "detect_recipe_onnx", "data": ["荷塘小炒", "凉拌猪耳", "清蒸鲈鱼"]}
 
-data is [] when no dish is recognised. A failure answers a non-2xx status with success=false
-and the reason in message. Failures raise AppError: UPSTREAM_TIMEOUT / UPSTREAM_ERROR.
+没有识别出菜名时 data 为 []。失败时返回非 2xx 状态码、success=false，原因在 message 里。
+失败时抛出 AppError：UPSTREAM_TIMEOUT / UPSTREAM_ERROR。
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import httpx
 
 from app.core import errors
 
-# What an upload starts with -> (media type, file extension) of its multipart part
+# 上传内容的开头 -> 它在 multipart 中那一部分的（媒体类型, 文件扩展名）
 _SIGNATURES = (
     (b"\xff\xd8\xff", ("image/jpeg", ".jpg")),
     (b"\x89PNG\r\n\x1a\n", ("image/png", ".png")),
@@ -29,7 +29,7 @@ _SIGNATURES = (
 
 
 def _upload_part(image_bytes: bytes) -> tuple[str, bytes, str]:
-    """The multipart file part (filename, content, media type), the type read from the content."""
+    """multipart 的文件部分（文件名, 内容, 媒体类型），类型根据内容判断。"""
     media_type, extension = "application/octet-stream", ""
     if image_bytes[:4] == b"RIFF" and image_bytes[8:12] == b"WEBP":
         media_type, extension = "image/webp", ".webp"
@@ -71,11 +71,10 @@ async def detect_recipes(
     trace_id: str = "",
     timeout: float,
 ) -> list[str]:
-    """The dish names the service recognises in the image, in its order, blanks and repeats left
-    out; [] when it recognises none.
+    """服务在图片里识别出的菜名，保持它给出的顺序，去掉空白项和重复项；没有识别出时为 []。
 
-    image_url when the image has a link (the service downloads it), else image_bytes (uploaded).
-    timeout bounds the whole call, upload included.
+    图片有链接时用 image_url（服务自己下载），否则用 image_bytes（上传）。
+    timeout 限制整个调用，包括上传。
     """
     request: dict[str, Any]
     if image_url:
@@ -85,7 +84,7 @@ async def detect_recipes(
     else:
         raise errors.upstream_error("菜谱识别没有图片可用：既没有图片链接，也没有图片内容")
     try:
-        # httpx applies its timeout to each connect / write / read; wait_for bounds the call as a whole
+        # httpx 的超时分别作用于每次连接 / 写入 / 读取；wait_for 限制整个调用
         response = await asyncio.wait_for(client.post(url, timeout=timeout, **request), timeout)
     except (asyncio.TimeoutError, httpx.TimeoutException) as exc:
         raise errors.upstream_timeout(f"菜谱识别服务 {timeout:g} 秒内没有返回") from exc

@@ -1,12 +1,11 @@
-"""Task center: the real routes, adapter, use case and deletion worker over in-memory stores
-(the SQL is in test_pg_live).
+"""任务中心：真实的路由、适配层、用例和删除任务，存储放在内存里（SQL 在 test_pg_live 里）。
 
-- index records: newest first, a status filter, counts over everything, the image as it is now;
-- a deleted image leaves its record (image_state=deleted), listed and cleared on its own;
-- a repeat upload (new_image false, the image still stored) is counted apart and listed on its own;
-- clearing needs a status or an image state; one record can be deleted by its id;
-- the deletion queue is readable without the retrieval stack; cleaning it needs the stack, and a
-  failure stays queued with a client-safe reason (the cause only in the log).
+- 入库记录：最新的在前、状态过滤、计数覆盖全部、图片是现在的样子；
+- 删除的图片留下它的记录（image_state=deleted），可以单独列出和清空；
+- 重复上传（new_image 为 false，图片仍然存在）单独计数，也可以单独列出；
+- 清空需要一个状态或图片状态；单条记录可以按 id 删除；
+- 删除队列不需要检索服务也能读；清理它需要检索服务，失败的继续排队，并给出可以给
+  客户端看的原因（原因只在日志里）。
 """
 
 import unittest
@@ -29,7 +28,7 @@ IMG_A = "0cf457e2-4a47-9f02-fd4d-34540389f720"
 IMG_B = "11111111-2222-3333-4444-555555555555"
 IMG_C = "99999999-8888-7777-6666-555555555555"
 
-RECORDS = [  # as the repository returns them, newest first
+RECORDS = [  # 和仓储返回的一样，最新的在前
     {"id": 3, "filename": "steak.jpg", "status": "succeeded", "image_id": IMG_A, "new_image": True,
      "error_code": None, "error_detail": None, "duration_ms": 812, "trace_id": "t-3",
      "created_at": "2026-11-11T09:00:03+00:00", "image_exists": True, "thumb_url": "https://cdn/t/a.webp",
@@ -46,7 +45,7 @@ RECORDS = [  # as the repository returns them, newest first
 
 
 class FakeTaskStore:
-    """The task-center part of CatalogStorePort, plus what DeletionWorker needs."""
+    """CatalogStorePort 中任务中心的部分，加上 DeletionWorker 需要的内容。"""
 
     def __init__(self):
         self.records = [dict(r) for r in RECORDS]
@@ -139,7 +138,7 @@ class TaskEndpointTests(unittest.TestCase):
         self.assertEqual(response.json()["error"], code)
         return response.json()
 
-    # ---- index records -------------------------------------------------------------
+    # ---- 入库记录 --------------------------------------------------------------------
 
     def test_records_come_newest_first_with_the_image_as_it_is_now(self):
         body = self.ok(self.client.get("/api/index-tasks"))
@@ -153,7 +152,7 @@ class TaskEndpointTests(unittest.TestCase):
         self.assertEqual(stored["image_state"], "present")
         self.assertEqual((failed["error_code"], failed["error_detail"], failed["image"], failed["image_state"]), (
             "INDEX_BAD_IMAGE", "cannot decode image", None, None))
-        # the image was deleted since: the record keeps its id and says so
+        # 图片之后被删除了：记录保留它的 id 并说明这一点
         self.assertEqual((deleted["status"], deleted["image_id"], deleted["image"], deleted["image_state"]),
                          ("succeeded", IMG_B, None, "deleted"))
         self.assertEqual(self.store.calls[-1], ("list", None, None, None, 1, 50))
@@ -161,7 +160,7 @@ class TaskEndpointTests(unittest.TestCase):
     def test_a_status_filter_and_paging_reach_the_store(self):
         body = self.ok(self.client.get("/api/index-tasks", params={"status": "failed", "page": 1, "page_size": 10}))
         self.assertEqual((body["status"], body["total"], [i["id"] for i in body["items"]]), ("failed", 1, [2]))
-        self.assertEqual(body["counts"], {"succeeded": 2, "failed": 1, "image_deleted": 1, "repeated": 0})  # counts ignore the filter
+        self.assertEqual(body["counts"], {"succeeded": 2, "failed": 1, "image_deleted": 1, "repeated": 0})  # 计数不受过滤影响
         self.assertEqual(self.store.calls[-1], ("list", "failed", None, None, 1, 10))
 
     def test_the_image_state_splits_the_succeeded_records(self):
@@ -173,23 +172,23 @@ class TaskEndpointTests(unittest.TestCase):
         self.assertEqual((body["status"], body["image_state"], [i["id"] for i in body["items"]]), ("succeeded", "deleted", [1]))
 
     def test_a_repeat_upload_is_counted_apart_from_the_new_images(self):
-        # the same file sent twice (the first request abandoned by the browser, finished by the server):
-        # two succeeded records for one stored image, only the first of them stored it
+        # 同一个文件发送了两次（第一次请求被浏览器放弃，但服务端处理完了）：
+        # 同一张已存图片有两条成功记录，只有第一条存了它
         self.store.records.insert(0, {**RECORDS[0], "id": 4, "new_image": False, "trace_id": "t-4"})
         body = self.ok(self.client.get("/api/index-tasks"))
         self.assertEqual(body["counts"], {"succeeded": 3, "failed": 1, "image_deleted": 1, "repeated": 1})
         counts = body["counts"]
-        self.assertEqual(counts["succeeded"] - counts["image_deleted"] - counts["repeated"], 1)  # one new image
+        self.assertEqual(counts["succeeded"] - counts["image_deleted"] - counts["repeated"], 1)  # 一张新图片
         for new_image, ids in ((True, [3]), (False, [4])):
             with self.subTest(new_image=new_image):
                 body = self.ok(self.client.get("/api/index-tasks", params={
                     "status": "succeeded", "image_state": "present", "new_image": new_image}))
                 self.assertEqual((body["new_image"], body["total"], [i["id"] for i in body["items"]]), (new_image, 1, ids))
                 self.assertEqual(self.store.calls[-1], ("list", "succeeded", "present", new_image, 1, 50))
-        # a repeat whose image was deleted since is a deleted-image record, not a repeat
+        # 图片之后被删除了的重复记录算作已删除图片的记录，而不是重复
         body = self.ok(self.client.get("/api/index-tasks", params={"image_state": "deleted", "new_image": False}))
         self.assertEqual([i["id"] for i in body["items"]], [1])
-        # a failed record is neither new nor a repeat
+        # 失败的记录既不是新图片也不是重复
         body = self.ok(self.client.get("/api/index-tasks", params={"status": "failed", "new_image": True}))
         self.assertEqual((body["total"], body["items"]), (0, []))
 
@@ -201,7 +200,7 @@ class TaskEndpointTests(unittest.TestCase):
         self.assertEqual(self.store.calls, [])
 
     def test_clearing_needs_a_filter_and_deletes_only_those_records(self):
-        self.error(self.client.delete("/api/index-tasks"), 422, "VALIDATION_ERROR")  # never everything
+        self.error(self.client.delete("/api/index-tasks"), 422, "VALIDATION_ERROR")  # 永远不会全部删除
         self.error(self.client.delete("/api/index-tasks", params={"status": "all"}), 422, "VALIDATION_ERROR")
         self.error(self.client.delete("/api/index-tasks", params={"image_state": "all"}), 422, "VALIDATION_ERROR")
         self.assertEqual(self.store.calls, [])
@@ -213,24 +212,24 @@ class TaskEndpointTests(unittest.TestCase):
     def test_clearing_the_records_of_deleted_images_keeps_the_others(self):
         body = self.ok(self.client.delete("/api/index-tasks", params={"image_state": "deleted"}))
         self.assertEqual(body, {"ok": True, "status": None, "image_state": "deleted", "deleted": 1})
-        self.assertEqual([r["id"] for r in self.store.records], [3, 2])  # the stored image's and the failure
+        self.assertEqual([r["id"] for r in self.store.records], [3, 2])  # 已存图片的记录和失败的记录
         self.assertEqual(self.store.calls[-1], ("clear", None, "deleted"))
 
     def test_one_record_can_be_deleted_by_its_id(self):
         self.assertEqual(self.ok(self.client.delete("/api/index-tasks/2")), {"ok": True, "id": 2, "deleted": 1})
         self.assertEqual([r["id"] for r in self.store.records], [3, 1])
-        self.assertEqual(self.ok(self.client.delete("/api/index-tasks/2"))["deleted"], 0)  # already gone
+        self.assertEqual(self.ok(self.client.delete("/api/index-tasks/2"))["deleted"], 0)  # 已经没了
         for bad in ("0", "-1", "x", str(2**63)):
             with self.subTest(task_id=bad):
                 self.error(self.client.delete(f"/api/index-tasks/{bad}"), 422, "VALIDATION_ERROR")
         self.assertEqual(self.store.calls, [("delete", 2), ("delete", 2)])
 
-    # ---- deletion queue ------------------------------------------------------------
+    # ---- 删除队列 --------------------------------------------------------------------
 
     def test_the_queue_is_readable_without_the_retrieval_stack(self):
         body = self.ok(self.client.get("/api/image-deletions", params={"limit": 1}))
         self.assertEqual((body["total"], body["cleanup_ready"]), (2, True))
-        self.assertEqual([i["image_id"] for i in body["items"]], [IMG_B])  # oldest first
+        self.assertEqual([i["image_id"] for i in body["items"]], [IMG_B])  # 最早的在前
         self.assertEqual(body["items"][0]["thumb_url"], "https://cdn/t/b.webp")
         self.runtime.retrieval = None
         body = self.ok(self.client.get("/api/image-deletions"))
@@ -243,7 +242,7 @@ class TaskEndpointTests(unittest.TestCase):
         self.vectors.delete.assert_called_once_with(IMG_B)
         self.assertEqual([c.args[0] for c in self.storage.delete_by_url_or_key.call_args_list],
                          ["https://cdn/o/b.jpg", "https://cdn/t/b.webp"])
-        body = self.ok(self.client.post("/api/image-deletions/process"))  # no body: limit 50
+        body = self.ok(self.client.post("/api/image-deletions/process"))  # 没有请求体：limit 为 50
         self.assertEqual((body["processed"], body["remaining"]), ([IMG_C], 0))
 
     def test_a_failure_stays_queued_with_a_client_safe_reason(self):

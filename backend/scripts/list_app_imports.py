@@ -1,6 +1,6 @@
-"""List `from app.` / `import app.` occurrences under backend/app (R0 freeze helper).
+"""列出 backend/app 下所有 `from app.` / `import app.` 的出现位置（R0 冻结辅助脚本）。
 
-Read-only. Usage (from backend/ or repo root):
+只读。用法（在 backend/ 或仓库根目录下）：
   python scripts/list_app_imports.py
 """
 from __future__ import annotations

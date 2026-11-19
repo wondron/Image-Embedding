@@ -1,22 +1,20 @@
-"""scenes / image_scenes: effective membership (write-time materialize) and scene-label mapping.
+"""scenes / image_scenes：生效的归属（写入时物化）和场景标签映射。
 
-Effective membership (contract §2.9): for every active scene that is not include_all, the
-images its rules match, overridden by origin='manual' rows; plus every active include_all
-scene, which keeps no rows. An inactive scene has no members anywhere (rows are kept, so manual
-overrides come back when it is enabled again).
+生效的归属（契约 §2.9）：对每个不是 include_all 的启用场景，是它的规则匹配到的图片，
+再被 origin='manual' 的行覆盖；另外加上每个启用的 include_all 场景，它不保存任何行。
+停用的场景在任何地方都没有成员（行会保留，所以重新启用后手工覆盖会恢复）。
 
-Rule rows are rewritten from the current rules whenever images are recomputed:
+每次重算图片时，规则行都按当前规则重写：
 
-- recompute_image_scenes: one image (after an insert, a manual override, a metadata change);
-- recompute_scene_memberships: a batch of images in id order, after the scenes or their rules
-  changed (POST /api/scenes/sync, app.workers.sync_scenes);
-- _recompute_subtree: the images below one category, inside the transaction that moves it or
-  changes its cuisines (app.repositories.categories.update_category).
+- recompute_image_scenes：一张图（插入、手工覆盖、元数据修改之后）；
+- recompute_scene_memberships：按 id 顺序的一批图片，在场景或其规则变化之后
+  （POST /api/scenes/sync、app.workers.sync_scenes）；
+- _recompute_subtree：一个类别下的图片，在移动它或修改它菜系的那个事务里
+  （app.repositories.categories.update_category）。
 
-Both plan with the pure rules in app.core.rules.scene_membership, bump
-images.payload_version only for images whose effective scene set changed, and read the catalog
-under its shared lock (app.repositories.catalog_lock), so an admin write never lands halfway
-through a plan.
+它们都用 app.core.rules.scene_membership 里的纯规则做规划，只对生效场景集合变化的图片
+递增 images.payload_version，并在共享的目录锁（app.repositories.catalog_lock）下读取目录，
+所以管理写入永远不会落在规划的中途。
 """
 
 from __future__ import annotations
@@ -40,8 +38,8 @@ from app.core.rules.scene_membership import (
     effective_cuisines,
 )
 
-# Effective scene codes per image: active include_all scenes (implicit, no rows) plus member rows
-# of the other active scenes. Ordered by scene id.
+# 每张图片生效的场景 code：启用的 include_all 场景（隐式，没有行）加上其他启用场景的
+# 成员行。按场景 id 排序。
 _SCENE_CODES_SQL = (
     "SELECT x.image_id, array_agg(x.code ORDER BY x.scene_id) AS codes FROM ("
     "  SELECT isc.image_id::text AS image_id, s.id AS scene_id, s.code "
@@ -54,9 +52,8 @@ _SCENE_CODES_SQL = (
     ") x GROUP BY x.image_id"
 )
 
-# For each category: the deepest rule of the scene that covers it (the category itself or an
-# ancestor) and maps to an active label (contract §2.8: the most specific rule wins). Only
-# category rules carry labels (ck_scene_rules_label_needs_category).
+# 对每个类别：场景里覆盖它（类别本身或某个祖先）、并且映射到启用标签的最深的规则
+# （契约 §2.8：最具体的规则胜出）。只有类别规则带标签（ck_scene_rules_label_needs_category）。
 _LABELS_SQL = (
     "SELECT DISTINCT ON (c.id) c.id AS category_id, l.id, l.code, l.name "
     "FROM categories c "
@@ -70,7 +67,7 @@ _LABELS_SQL = (
 
 @dataclass(frozen=True)
 class _Catalog:
-    """What every image is matched against: the active scenes and all rules."""
+    """每张图片都要拿来匹配的内容：启用的场景和所有规则。"""
 
     scenes: list[Mapping[str, Any]]
     rules_by_scene: dict[int, list[Mapping[str, Any]]]
@@ -121,8 +118,9 @@ def _load_catalog(conn: Any) -> _Catalog:
 
 
 def _load_image_categories(conn: Any, category_ids: Iterable[int]) -> dict[int, tuple[str, list[str]]]:
-    """{category_id: (path, effective cuisines)}; cuisines come from the category or its nearest
-    ancestor that has any (scene_membership.effective_cuisines)."""
+    """{category_id: (path, 生效的菜系)}；菜系来自类别本身，或者最近一个有菜系的祖先
+    （scene_membership.effective_cuisines）。
+    """
     ids = sorted(set(category_ids))
     if not ids:
         return {}
@@ -142,7 +140,7 @@ def _load_image_categories(conn: Any, category_ids: Iterable[int]) -> dict[int, 
     out: dict[int, tuple[str, list[str]]] = {}
     for category_id, chain in chains.items():
         own = next((row for row in chain if int(row["id"]) == category_id), None)
-        ancestors = [row for row in chain if int(row["id"]) != category_id]  # root first
+        ancestors = [row for row in chain if int(row["id"]) != category_id]  # 根在前
         out[category_id] = (paths[category_id], effective_cuisines(own, ancestors))
     return out
 
@@ -161,7 +159,7 @@ def _load_rows(conn: Any, image_ids: Sequence[UUID]) -> dict[str, list[Mapping[s
 
 
 def _effective_from_rows(rows: Sequence[Mapping[str, Any]], catalog: _Catalog) -> set[int]:
-    """The effective scene ids the stored rows give (what _SCENE_CODES_SQL reads)."""
+    """已存行给出的生效场景 id（_SCENE_CODES_SQL 读取的内容）。"""
     active, include_all = catalog.code_by_id, catalog.include_all_ids
     members = {
         int(r["scene_id"])
@@ -178,8 +176,7 @@ def _plan_image(
     rows: Sequence[Mapping[str, Any]],
     before: set[int] | None = None,
 ) -> _Plan:
-    """before: the effective set to compare with when the caller changed rows first (a manual
-    override); None compares with the rows as they are now."""
+    """before：调用方先改了行时（手工覆盖）用来比较的生效集合；None 时和现在的行比较。"""
     category_id = image["category_id"]
     path, cuisines = (None, [])
     if category_id is not None:
@@ -200,7 +197,7 @@ def _plan_image(
         image_id=str(image["id"]),
         payload_version=int(image["payload_version"] or 1),
         rule_members=set(rule_members),
-        # A manual row decides that scene; rule rows are kept for the other matches only
+        # 手工的行决定那个场景；规则行只为其他匹配保留
         desired_rule_rows=set(rule_members) - {int(r["scene_id"]) for r in manual},
         current_rule_rows={int(r["scene_id"]) for r in rows if r["origin"] == SceneOrigin.RULE.value},
         old_effective=_effective_from_rows(rows, catalog) if before is None else set(before),
@@ -209,7 +206,7 @@ def _plan_image(
 
 
 def _apply_plans(conn: Any, plans: Sequence[_Plan], *, bump: bool) -> None:
-    """Write the rule-row differences; bump payload_version of the images whose set changed."""
+    """写入规则行的差异；递增集合变化的图片的 payload_version。"""
     drop = [(p.image_id, sid) for p in plans for sid in sorted(p.current_rule_rows - p.desired_rule_rows)]
     add = [(p.image_id, sid) for p in plans for sid in sorted(p.desired_rule_rows - p.current_rule_rows)]
     if drop:
@@ -250,7 +247,7 @@ def _recompute(
     bump: bool,
     before: Mapping[str, set[int]] | None = None,
 ) -> tuple[_Catalog, list[_Plan]]:
-    """Plan and apply for images already locked FOR UPDATE, under the catalog read lock."""
+    """对已经 FOR UPDATE 锁住的图片做规划并应用，在目录读锁下进行。"""
     catalog = _load_catalog(conn)
     categories = _load_image_categories(
         conn, (int(i["category_id"]) for i in images if i["category_id"] is not None)
@@ -265,11 +262,10 @@ def _recompute(
 
 
 def _recompute_subtree(conn: Any, category_id: int, *, chunk: int = 500) -> tuple[int, list[str]]:
-    """Recompute every image labelled with this category or one below it, in id order, chunk
-    by chunk in the caller's transaction (which holds the catalog lock). The category tree must
-    already be as it will be committed: a move has rebuilt the subtree's paths (trigger).
+    """重算标注为这个类别或其下类别的所有图片，按 id 顺序，在调用方的事务里（它持有目录锁）
+    一块一块进行。类别树必须已经是将要提交的样子：移动已经重建了子树的路径（触发器）。
 
-    Returns (images recomputed, ids whose effective scene set changed - payload_version bumped).
+    返回（重算的图片数, 生效场景集合变化的 id——已递增 payload_version）。
     """
     total = 0
     changed: list[str] = []
@@ -316,10 +312,10 @@ def _membership_result(image_id: str, catalog: _Catalog, plan: _Plan) -> dict[st
 
 
 def _read_membership_snapshot(conn: Any, image_id: str) -> dict[str, Any]:
-    """One statement / MVCC view, including an image even if the scene directory is empty.
+    """一条语句 / 一个 MVCC 视图，即使场景目录为空也包含图片。
 
-    Read stored rows only: GET must not preview rules or materialize anything. implicit is a
-    response origin, not a persisted SceneOrigin. A write calls this before releasing its locks.
+    只读取已存的行：GET 不能预览规则或物化任何东西。implicit 是响应里的来源，不是持久化的
+    SceneOrigin。写入在释放锁之前调用这个函数。
     """
     rows = conn.execute(
         text(
@@ -356,7 +352,7 @@ def _read_membership_snapshot(conn: Any, image_id: str) -> dict[str, Any]:
 
 
 def _upsert_manual_row(conn: Any, image_id: str, scene_id: int, is_member: bool) -> None:
-    """Shared with the legacy code-based setter; caller holds catalog then image locks."""
+    """和旧的按 code 设置的函数共用；调用方先持有目录锁，再持有图片锁。"""
     conn.execute(
         text(
             "INSERT INTO image_scenes (image_id, scene_id, origin, is_member, updated_at) "
@@ -371,10 +367,10 @@ def _upsert_manual_row(conn: Any, image_id: str, scene_id: int, is_member: bool)
 
 
 class PgScenesMixin:
-    """scenes lookups, image_scenes materialization and scene-label mapping."""
+    """场景查询、image_scenes 物化和场景标签映射。"""
 
     def _scene_codes_by_image(self, conn, image_ids: list[str]) -> dict[str, list[str]]:
-        """{image_id: [scene codes]} for the given ids (see _SCENE_CODES_SQL)."""
+        """给定 id 的 {image_id: [场景 code]}（见 _SCENE_CODES_SQL）。"""
         if not image_ids:
             return {}
         id_sql, id_params = _uuid_in_clause(image_ids)
@@ -384,7 +380,7 @@ class PgScenesMixin:
         return {str(r["image_id"]): list(r["codes"] or []) for r in rows}
 
     def _scene_membership_row(self, conn, code: str) -> dict[str, Any] | None:
-        """id / include_all / is_active for a scene code, or None if unknown."""
+        """场景 code 对应的 id / include_all / is_active，不存在时为 None。"""
         row = conn.execute(
             text("SELECT id, include_all, is_active FROM scenes WHERE code = :c LIMIT 1"),
             {"c": str(code).strip()},
@@ -440,11 +436,11 @@ class PgScenesMixin:
         *,
         bump_version: bool = True,
     ) -> dict[str, Any]:
-        """Rewrite one image's rule rows from the current rules (manual rows stay).
+        """按当前规则重写一张图片的规则行（手工行保留）。
 
-        bump_version: bump images.payload_version when the effective scene set changed (callers
-        that already bumped, or that push the payload themselves right after, pass False).
-        Returns {image_id, scene_codes, rule_member_ids, effective_ids, payload_version}.
+        bump_version：生效场景集合变化时递增 images.payload_version（已经递增过、或者会在之后
+        立刻自己推送 payload 的调用方传 False）。
+        返回 {image_id, scene_codes, rule_member_ids, effective_ids, payload_version}。
         """
         self.ensure_schema()
         uid = str(_as_uuid(image_id))
@@ -463,9 +459,9 @@ class PgScenesMixin:
             ) from exc
 
     def recompute_scene_memberships(self, *, after: UUID | str | None = None, limit: int = 200) -> dict[str, Any]:
-        """Recompute the next `limit` images after `after` in id order (one transaction).
+        """按 id 顺序重算 `after` 之后的 `limit` 张图片（一个事务）。
 
-        Returns {image_ids, changed_ids, last_id}; last_id is None when no image was left.
+        返回 {image_ids, changed_ids, last_id}；没有剩下的图片时 last_id 为 None。
         """
         self.ensure_schema()
         after_id = _as_uuid(after) if after is not None else None
@@ -497,7 +493,7 @@ class PgScenesMixin:
             ) from exc
 
     def get_scene_memberships(self, image_id: UUID | str) -> dict[str, Any]:
-        """Read the full directory and stored membership in one consistent PG statement."""
+        """在一条一致的 PG 语句里读取完整的目录和已存的归属。"""
         uid = str(_as_uuid(image_id))
         try:
             self.ensure_schema()
@@ -511,13 +507,13 @@ class PgScenesMixin:
     def put_manual_scene_membership(
         self, image_id: UUID | str, scene_id: int, *, is_member: bool
     ) -> dict[str, Any]:
-        """PG-only manual include/exclude, recompute and snapshot in the same transaction."""
+        """只用 PG 的手工包含 / 排除，在同一个事务里重算并生成快照。"""
         if not isinstance(is_member, bool):
             raise err.validation_error("is_member must be true or false")
         return self._change_manual_scene_membership(image_id, scene_id, is_member=is_member)
 
     def clear_manual_scene_membership(self, image_id: UUID | str, scene_id: int) -> dict[str, Any]:
-        """Only clear manual, then restore the current rules, even if no manual row existed."""
+        """只清空手工覆盖，然后恢复当前规则，即使原来没有手工行。"""
         return self._change_manual_scene_membership(image_id, scene_id, is_member=None)
 
     def _change_manual_scene_membership(
@@ -528,7 +524,7 @@ class PgScenesMixin:
         try:
             self.ensure_schema()
             with self._get_engine().begin() as conn:
-                # Same lock order as ingestion / sync: never take a scene write lock here.
+                # 和入库 / 同步相同的加锁顺序：这里从不获取场景写锁。
                 lock_catalog_for_read(conn)
                 image = _lock_image(conn, uid)
                 scene = conn.execute(
@@ -541,7 +537,7 @@ class PgScenesMixin:
                     raise err.validation_error(f"scene {sid} includes all images; manual membership is not allowed")
                 if is_member is not None and not scene["is_active"]:
                     raise err.validation_error(f"scene {sid} is inactive; manual membership cannot be set")
-                # Capture before changing origin: rule=true -> manual=true must not bump.
+                # 在改变 origin 之前记下来：rule=true -> manual=true 不能递增版本。
                 before = _effective_from_rows(
                     _load_rows(conn, [_as_uuid(uid)]).get(uid, []), _load_catalog(conn)
                 )
@@ -559,7 +555,7 @@ class PgScenesMixin:
                 snapshot = _read_membership_snapshot(conn, uid)
             return snapshot
         except SQLAlchemyError as exc:
-            # begin() has rolled back before the database error crosses the repository boundary.
+            # 数据库错误越过仓储边界之前，begin() 已经回滚了。
             raise err.index_postgres_failed(
                 f"change_manual_scene_membership: {type(exc).__name__}: {exc}"
             ) from exc
@@ -571,10 +567,10 @@ class PgScenesMixin:
         *,
         is_member: bool,
     ) -> dict[str, Any]:
-        """Upsert an origin=manual override and recompute, in one transaction; payload_version is
-        bumped when the image's effective scenes changed.
+        """在一个事务里新增或更新 origin=manual 的覆盖并重算；图片生效场景变化时递增
+        payload_version。
 
-        include_all scenes contain every image and take no overrides.
+        include_all 场景包含所有图片，不接受覆盖。
         """
         self.ensure_schema()
         uid = str(_as_uuid(image_id))
@@ -590,7 +586,7 @@ class PgScenesMixin:
         with engine.begin() as conn:
             lock_catalog_for_read(conn)
             image = _lock_image(conn, uid)
-            # The set before the override: the recompute below compares with it, not with the new row
+            # 覆盖之前的集合：下面的重算和它比较，而不是和新行比较
             before = _effective_from_rows(_load_rows(conn, [_as_uuid(uid)]).get(uid, []), _load_catalog(conn))
             _upsert_manual_row(conn, uid, sid, bool(is_member))
             catalog, (plan,) = _recompute(conn, [image], bump=True, before={uid: before})
@@ -601,9 +597,9 @@ class PgScenesMixin:
         scene_id: int,
         category_ids: Sequence[int],
     ) -> dict[int, dict[str, Any]]:
-        """{category_id: {id, code, name}} of the scene's labels for these categories (section 4.3).
+        """这些类别在场景标签里的 {category_id: {id, code, name}}（4.3 节）。
 
-        A category without a covering rule to an active label is left out.
+        没有覆盖它、并映射到启用标签的规则的类别不返回。
         """
         ids = sorted({int(c) for c in category_ids})
         if not ids:

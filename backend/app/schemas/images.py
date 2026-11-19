@@ -1,9 +1,9 @@
-"""One stored image as the gallery admin reads and edits it.
+"""图库管理读取和编辑的一张已存图片。
 
-GET / PATCH / DELETE /api/images/{image_id}, POST /api/images/{image_id}/vector-sync. The image
-carries the list item's fields (§6.1.2, same names) plus what only the detail shows; food fields
-and heating_group are always present. Success bodies carry no trace_id (it is in the X-Trace-Id
-header), as for the scene memberships. Field rules: app.core.rules.image_fields.
+GET / PATCH / DELETE /api/images/{image_id}、POST /api/images/{image_id}/vector-sync。图片
+带着列表项的字段（§6.1.2，名称相同），再加上只有详情才显示的字段；食物字段和
+heating_group 总是出现。成功的响应体不带 trace_id（它在 X-Trace-Id 响应头里），和场景
+归属一样。字段规则：app.core.rules.image_fields。
 """
 
 from typing import Any, Literal
@@ -22,10 +22,10 @@ _VECTOR_SYNC = (
 _SYNC_REQUIRED = "false：检索已能看到修改；true：要等 POST /api/scenes/sync（或修好后用 vector-sync 重推）"
 
 
-# -- responses --------------------------------------------------------------------------
+# -- 响应 ---------------------------------------------------------------------------------
 
 class ImageEmbeddingRecord(BaseModel):
-    """One image_embeddings row: the image's point is in this model version's collection."""
+    """image_embeddings 的一行：图片的向量点在这个模型版本的 collection 里。"""
 
     model_id: int
     name: str = Field(..., description="模型名")
@@ -68,7 +68,7 @@ class ImageDetail(BaseModel):
 
 
 class ImageVectorState(BaseModel):
-    """The image in the current model's collection (services.retrieval.vector_status)."""
+    """图片在当前模型 collection 里的情况（services.retrieval.vector_status）。"""
 
     status: Literal["synced", "stale", "missing", "unavailable"] = Field(
         ...,
@@ -139,10 +139,10 @@ class ImageDeleteResponse(BaseModel):
     )
 
 
-# -- requests ---------------------------------------------------------------------------
+# -- 请求 ---------------------------------------------------------------------------------
 
 class ImageUpdateRequest(BaseModel):
-    """Only the fields sent are changed; see app.core.rules.image_fields for what null means."""
+    """只修改传来的字段；null 的含义见 app.core.rules.image_fields。"""
 
     model_config = ConfigDict(extra="forbid")
 

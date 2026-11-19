@@ -1,14 +1,14 @@
-"""Retrieval ports: what services/retrieval needs from the outside world.
+"""检索端口：services/retrieval 对外部世界的需要。
 
-Implementations: PgMetadataStore (repositories.metadata; both MetadataStorePort for the
-retrieval use cases and CatalogStorePort for the category / scene admin), QdrantVectorStore
-(repositories.vectors, over clients.qdrant.QdrantStore), Mock/S3ImageStorage
-(clients.image_storage), Embedder (clients.inference; one instance shared with predict).
-Wiring: app.bootstrap.catalog (admin, PostgreSQL only) and app.bootstrap.retrieval_stack.
+实现：PgMetadataStore（repositories.metadata；同时是给检索用例的 MetadataStorePort 和
+给类别 / 场景管理的 CatalogStorePort）、QdrantVectorStore（repositories.vectors，基于
+clients.qdrant.QdrantStore）、Mock/S3ImageStorage（clients.image_storage）、Embedder
+（clients.inference；和预测共用一个实例）。
+组装：app.bootstrap.catalog（管理，只用 PostgreSQL）和 app.bootstrap.retrieval_stack。
 
-PG v0.1: point id == images.id (uuid). Collection/dim/distance come from the
-embedding_models row with status='current' (services.retrieval.active_model).
-VECTOR_DIM is only the fallback default (food ONNX = 1024).
+PG v0.1：向量点 id == images.id（uuid）。collection/dim/distance 取自 status='current' 的
+embedding_models 行（services.retrieval.active_model）。
+VECTOR_DIM 只是兜底的默认值（食物 ONNX = 1024）。
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ VECTOR_DIM = 1024
 
 @dataclass(frozen=True)
 class ImageIndexResult:
-    """The stored image snapshot held by one indexing transaction."""
+    """一个入库事务持有的已存图片快照。"""
 
     image: dict[str, Any]
     created: bool
@@ -38,7 +38,7 @@ class EmbeddingPort(Protocol):
 
 
 class VectorStorePort(ABC):
-    """Qdrant read/write. Point ids are uuid (== images.id)."""
+    """Qdrant 读写。向量点 id 是 uuid（== images.id）。"""
 
     @abstractmethod
     def upsert(
@@ -59,7 +59,7 @@ class VectorStorePort(ABC):
         scene: str | None = None,
         filters: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        """Return [{id, score, payload}, ...]. Empty list = no neighbors."""
+        """返回 [{id, score, payload}, ...]。空列表 = 没有近邻。"""
         raise NotImplementedError
 
     @abstractmethod
@@ -68,27 +68,29 @@ class VectorStorePort(ABC):
 
     @abstractmethod
     def set_payloads(self, payloads: dict[str, dict[str, Any]]) -> list[str]:
-        """Write each point's payload fields (vectors untouched); returns the ids that are not in
-        the collection, which are skipped."""
+        """写入每个向量点的 payload 字段（不动向量）；返回不在 collection 里的 id，
+        这些会被跳过。
+        """
         raise NotImplementedError
 
     @abstractmethod
     def get_payloads(self, point_ids: list[UUID | str]) -> dict[str, dict[str, Any]]:
-        """{point id: payload} for the given ids that are points of the collection (no vectors);
-        an id without a point is left out."""
+        """给定 id 中是 collection 里向量点的那些的 {向量点 id: payload}（不含向量）；
+        没有向量点的 id 不返回。
+        """
         raise NotImplementedError
 
     @abstractmethod
     def ping(self) -> dict[str, Any]:
-        """{ok, collection, points_count, ...}; never raises."""
+        """{ok, collection, points_count, ...}；从不抛出。"""
         raise NotImplementedError
 
     def close(self) -> None:
-        """Release the client (idempotent)."""
+        """释放客户端（可重复调用）。"""
 
 
 class MetadataStorePort(ABC):
-    """PostgreSQL metadata (PG v0.1). Backend owns implementation."""
+    """PostgreSQL 元数据（PG v0.1）。由后端负责实现。"""
 
     @abstractmethod
     def insert_image(self, row: dict[str, Any]) -> UUID | str:
@@ -98,11 +100,10 @@ class MetadataStorePort(ABC):
     def index_image(
         self, row: dict[str, Any], *, model_id: int
     ) -> AbstractContextManager[ImageIndexResult]:
-        """Insert or lock an image, recompute its scenes and yield one stored snapshot.
+        """插入或锁住一张图片，重算它的场景，并 yield 一个已存快照。
 
-        The image row and catalog stay locked while the caller writes the vector.
-        Normal exit records that snapshot's version and commits; an exception rolls
-        back the transaction, including a newly inserted image.
+        调用方写入向量期间，图片行和目录一直锁着。正常退出时记录该快照的版本并提交；
+        出现异常时回滚事务，包括新插入的图片。
         """
         raise NotImplementedError
 
@@ -110,9 +111,10 @@ class MetadataStorePort(ABC):
     def lock_image_for_vector(
         self, image_id: UUID | str, *, model_id: int
     ) -> AbstractContextManager[dict[str, Any] | None]:
-        """Lock a stored image while the caller writes its point again; yields the image now
-        (with scenes) or None when it was deleted. A deletion waits for the write. Normal exit
-        records the yielded payload_version in model_id's ledger and commits."""
+        """在调用方重新写入已存图片的向量点期间锁住它；yield 图片现在的样子（带场景），
+        已被删除时为 None。删除会等待这次写入。正常退出时把 yield 出去的 payload_version
+        记录到 model_id 的台账并提交。
+        """
         raise NotImplementedError
 
     @abstractmethod
@@ -142,15 +144,16 @@ class MetadataStorePort(ABC):
         label_status: str | None = None,
         out_of_sync: bool = False,
     ) -> tuple[list[dict[str, Any]], int]:
-        """category_id filters on the category's subtree; label_status on the exact value;
-        out_of_sync keeps images whose current-model ledger row is missing or behind."""
+        """category_id 按类别的子树过滤；label_status 按精确值过滤；
+        out_of_sync 保留当前模型台账行缺失或落后的图片。
+        """
         raise NotImplementedError
 
     @abstractmethod
     def get_by_id(self, image_id: UUID | str) -> dict[str, Any] | None:
         raise NotImplementedError
 
-    # -- categories / scenes ------------------------------------------------
+    # -- 类别 / 场景 ----------------------------------------------------------
 
     @abstractmethod
     def get_category_id_by_code(self, code: str) -> int | None:
@@ -158,7 +161,7 @@ class MetadataStorePort(ABC):
 
     @abstractmethod
     def get_scene_by_code(self, code: str) -> dict[str, Any] | None:
-        """The scenes row (any state) or None."""
+        """scenes 行（任何状态）或 None。"""
         raise NotImplementedError
 
     @abstractmethod
@@ -169,28 +172,28 @@ class MetadataStorePort(ABC):
     def recompute_image_scenes(
         self, image_id: UUID | str, *, bump_version: bool = True
     ) -> dict[str, Any]:
-        """Materialize image_scenes; returns {scene_codes, payload_version, ...}."""
+        """物化 image_scenes；返回 {scene_codes, payload_version, ...}。"""
         raise NotImplementedError
 
     @abstractmethod
     def recompute_scene_memberships(
         self, *, after: UUID | str | None = None, limit: int = 200
     ) -> dict[str, Any]:
-        """Recompute the next batch of images in id order: {image_ids, changed_ids, last_id}."""
+        """按 id 顺序重算下一批图片：{image_ids, changed_ids, last_id}。"""
         raise NotImplementedError
 
     @abstractmethod
     def map_categories_to_scene_labels(
         self, scene_id: int, category_ids: list[int]
     ) -> dict[int, dict[str, Any]]:
-        """{category_id: {id, code, name}} for the categories that map to an active label."""
+        """映射到启用标签的那些类别的 {category_id: {id, code, name}}。"""
         raise NotImplementedError
 
-    # -- embedding models / ledger -----------------------------------------
+    # -- embedding 模型 / 台账 -------------------------------------------------
 
     @abstractmethod
     def get_current_embedding_model(self) -> dict[str, Any]:
-        """The single embedding_models row with status='current' (NOT_READY if none)."""
+        """唯一一行 status='current' 的 embedding_models（没有时 NOT_READY）。"""
         raise NotImplementedError
 
     @abstractmethod
@@ -201,19 +204,21 @@ class MetadataStorePort(ABC):
         image_id: UUID | str,
         synced_version: int | None = None,
     ) -> None:
-        """Record that image_id's payload at synced_version is in model_id's collection."""
+        """记录 image_id 在 synced_version 的 payload 已经在 model_id 的 collection 里。"""
         raise NotImplementedError
 
     @abstractmethod
     def get_payload_rows(self, image_ids: list[str]) -> list[dict[str, Any]]:
-        """What the Qdrant payload of these images is built from: {id, payload_version,
-        category_id, label_status, food_state, scenes} per existing image."""
+        """这些图片的 Qdrant payload 的来源字段：每张已有图片一个 {id, payload_version,
+        category_id, label_status, food_state, scenes}。
+        """
         raise NotImplementedError
 
     @abstractmethod
     def mark_payloads_pushed(self, *, model_id: int, versions: dict[str, int]) -> list[str]:
-        """Ledger: {image_id: payload_version} is now in model_id's collection. Only versions that
-        are still the image's current one are recorded; returns the image ids recorded."""
+        """台账：{image_id: payload_version} 现在已经在 model_id 的 collection 里。只记录仍是图片
+        当前版本的那些；返回记录了的图片 id。
+        """
         raise NotImplementedError
 
     @abstractmethod
@@ -225,18 +230,19 @@ class MetadataStorePort(ABC):
         limit: int = 200,
         model_id: int | None = None,
     ) -> list[str]:
-        """Images whose current-model ledger row (model_id's when given) is behind their
-        payload_version, in id order, after `after` and up to `until` (inclusive). Images
-        without a ledger row are left out."""
+        """当前模型（给了 model_id 时为它）的台账行落后于 payload_version 的图片，按 id 顺序，
+        在 `after` 之后、到 `until` 为止（含）。没有台账行的图片不返回。
+        """
         raise NotImplementedError
 
     @abstractmethod
     def try_maintenance_lock(self, key: int) -> AbstractContextManager[bool]:
-        """Session advisory lock for a maintenance job: yields True while held, False when another
-        process holds it (repositories.maintenance)."""
+        """维护任务用的会话级 advisory lock：持有时 yield True，另一个进程持有时 yield False
+        （repositories.maintenance）。
+        """
         raise NotImplementedError
 
-    # -- deletion queue -----------------------------------------------------
+    # -- 删除队列 -------------------------------------------------------------
 
     @abstractmethod
     def enqueue_image_deletion(self, image_id: UUID | str) -> dict[str, Any]:
@@ -254,36 +260,38 @@ class MetadataStorePort(ABC):
     def count_pending_deletions(self) -> int:
         raise NotImplementedError
 
-    # -- task center ----------------------------------------------------------
+    # -- 任务中心 ---------------------------------------------------------------
 
     @abstractmethod
     def record_index_tasks(self, rows: list[dict[str, Any]]) -> None:
-        """index_tasks: one row per indexed file {filename, status, image_id?, new_image?,
-        error_code?, error_detail?, duration_ms?, trace_id?}."""
+        """index_tasks：每个入库的文件一行 {filename, status, image_id?, new_image?,
+        error_code?, error_detail?, duration_ms?, trace_id?}。
+        """
         raise NotImplementedError
 
-    # -- lifecycle ------------------------------------------------------------
+    # -- 生命周期 ---------------------------------------------------------------
 
     @abstractmethod
     def ping(self) -> dict[str, Any]:
         raise NotImplementedError
 
     def close(self) -> None:
-        """Release the connection pool (idempotent)."""
+        """释放连接池（可重复调用）。"""
 
 
 class EmbeddingModelStorePort(ABC):
-    """The model versions (embedding_models) and their ledger, for /api/embedding-models and the
-    vector builds (services.retrieval.model_versions / build_embeddings)."""
+    """模型版本（embedding_models）及其台账，给 /api/embedding-models 和向量构建用
+    （services.retrieval.model_versions / build_embeddings）。
+    """
 
     @abstractmethod
     def list_embedding_models(self) -> dict[str, Any]:
-        """{images, models: [row + embedded + behind]}, oldest version first."""
+        """{images, models: [行 + embedded + behind]}，最早的版本在前。"""
         raise NotImplementedError
 
     @abstractmethod
     def list_embedding_model_rows(self, *, statuses: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
-        """The version rows without counts (only these statuses when given)."""
+        """各版本的行，不带计数（给了 statuses 时只返回这些状态）。"""
         raise NotImplementedError
 
     @abstractmethod
@@ -292,13 +300,12 @@ class EmbeddingModelStorePort(ABC):
 
     @abstractmethod
     def register_embedding_model(self, fields: dict[str, Any]) -> dict[str, Any]:
-        """A new version, status building (EMBEDDING_MODEL_EXISTS when name + version or the
-        collection is taken)."""
+        """新版本，状态为 building（名称 + 版本或 collection 已被占用时为 EMBEDDING_MODEL_EXISTS）。"""
         raise NotImplementedError
 
     @abstractmethod
     def record_model_fingerprint(self, model_id: int, fingerprint: dict[str, Any]) -> bool:
-        """Fill a missing fingerprint; never overwrites one."""
+        """填上缺失的指纹；从不覆盖已有的。"""
         raise NotImplementedError
 
     @abstractmethod
@@ -307,71 +314,72 @@ class EmbeddingModelStorePort(ABC):
 
     @abstractmethod
     def activate_embedding_model(self, model_id: int) -> dict[str, Any]:
-        """{model, previous_id}: the version is current, the previous current one ready."""
+        """{model, previous_id}：这个版本成为当前版本，之前的当前版本变为 ready。"""
         raise NotImplementedError
 
     @abstractmethod
     def retire_embedding_model(self, model_id: int) -> dict[str, Any]:
-        """{model, ledger_rows}: status retired, its ledger rows deleted (not the current one)."""
+        """{model, ledger_rows}：状态变为 retired，台账行已删除（不能是当前版本）。"""
         raise NotImplementedError
 
     @abstractmethod
     def count_embedding_backlog(self, model_id: int) -> int:
-        """Stored images with no vector in the version's collection."""
+        """在该版本 collection 里没有向量的已存图片数。"""
         raise NotImplementedError
 
     @abstractmethod
     def list_embedding_backlog(
         self, model_id: int, *, after: UUID | str | None = None, limit: int = 16, exclude: list[str] | None = None
     ) -> list[dict[str, Any]]:
-        """[{id, original_url}] of images with no vector in the version's collection, id order."""
+        """在该版本 collection 里没有向量的图片的 [{id, original_url}]，按 id 顺序。"""
         raise NotImplementedError
 
     @abstractmethod
     def record_embeddings(self, *, model_id: int, versions: dict[str, int]) -> list[str]:
-        """Ledger rows for points just written ({image id: payload_version}); returns the ids
-        recorded (an image deleted meanwhile is left out)."""
+        """刚写入的向量点的台账行（{图片 id: payload_version}）；返回记录了的 id
+        （这期间被删除的图片不记录）。
+        """
         raise NotImplementedError
 
     @abstractmethod
     def sample_embedded_images(self, model_id: int, *, limit: int = 3) -> list[dict[str, Any]]:
-        """[{id, original_url}] of images last recorded in the version's collection."""
+        """最近记录在该版本 collection 里的图片的 [{id, original_url}]。"""
         raise NotImplementedError
 
     @abstractmethod
     def list_embedded_ids(self, model_id: int, *, after: UUID | str | None = None, limit: int = 256) -> list[str]:
-        """Image ids with a ledger row for the version, id order (to check their points exist)."""
+        """在该版本下有台账行的图片 id，按 id 顺序（用来检查它们的向量点是否存在）。"""
         raise NotImplementedError
 
     @abstractmethod
     def forget_embeddings(self, model_id: int, image_ids: list[str]) -> int:
-        """Delete these ledger rows (their points are gone); returns how many."""
+        """删除这些台账行（它们的向量点不在了）；返回删除了多少。"""
         raise NotImplementedError
 
     @abstractmethod
     def clear_embeddings(self, model_id: int) -> int:
-        """Delete every ledger row of the version (its collection was made anew)."""
+        """删除该版本的所有台账行（它的 collection 重新建了）。"""
         raise NotImplementedError
 
     @abstractmethod
     def refresh_model_fingerprint(self, model_id: int, fingerprint: dict[str, Any]) -> bool:
-        """Record the same encoder's fingerprint at its new path (and weights_uri)."""
+        """记录同一个编码器在新路径下的指纹（以及 weights_uri）。"""
         raise NotImplementedError
 
 
 class CatalogStorePort(ABC):
-    """The category tree and the scene configuration, as the admin pages edit them.
+    """类别树和场景配置，即管理页编辑的内容。
 
-    PostgreSQL only: the admin use cases (services.retrieval.manage_categories / manage_scenes)
-    work while the encoder, Qdrant or object storage are down. Each write is one transaction
-    under the catalog lock (repositories.catalog_lock). Implemented by PgMetadataStore.
+    只用 PostgreSQL：编码器、Qdrant 或对象存储挂了时，管理用例
+    （services.retrieval.manage_categories / manage_scenes）照样能用。每次写入是目录锁
+    （repositories.catalog_lock）下的一个事务。由 PgMetadataStore 实现。
     """
 
-    # -- category tree ------------------------------------------------------
+    # -- 类别树 ---------------------------------------------------------------
 
     @abstractmethod
     def list_categories(self) -> list[dict[str, Any]]:
-        """Every node, parents before children, siblings in display order."""
+        """所有节点，父节点在子节点之前，同级按显示顺序。"""
         raise NotImplementedError
 
     @abstractmethod
@@ -384,65 +392,70 @@ class CatalogStorePort(ABC):
 
     @abstractmethod
     def update_category(self, category_id: int, fields: dict[str, Any]) -> dict[str, Any]:
-        """Patch the given fields; parent_id moves the node with its subtree. A move or a cuisines
-        change recomputes the scenes of the images below the node in the same transaction; does
-        not push vector payloads (the HTTP layer does that after the commit).
+        """修改传来的字段；parent_id 会把节点连同子树一起移动。移动或修改菜系时，在同一个事务里
+        重算节点下图片的场景；不推送向量 payload（由 HTTP 层在提交后推送）。
 
-        {category, scene_membership: None | {images, changed_ids}}."""
+        {category, scene_membership: None | {images, changed_ids}}。
+        """
         raise NotImplementedError
 
     @abstractmethod
     def delete_category(self, category_id: int) -> dict[str, Any]:
-        """Delete a node nothing uses; CATEGORY_IN_USE otherwise."""
+        """删除一个没有被使用的节点；否则 CATEGORY_IN_USE。"""
         raise NotImplementedError
 
-    # -- image scene memberships (PG only; writes return a consistent snapshot) --
+    # -- 图片的场景归属（只用 PG；写入返回一致的快照）--
 
     @abstractmethod
     def get_scene_memberships(self, image_id: UUID | str) -> dict[str, Any]:
-        """Full scene directory, effective codes and image payload_version; no recompute."""
+        """完整的场景目录、生效的 code 和图片的 payload_version；不重算。"""
         raise NotImplementedError
 
     @abstractmethod
     def put_manual_scene_membership(
         self, image_id: UUID | str, scene_id: int, *, is_member: bool
     ) -> dict[str, Any]:
-        """Upsert manual and recompute atomically; does not push vector payloads (the HTTP layer
-        does that after the commit when the retrieval stack is up)."""
+        """原子地新增或更新手工覆盖并重算；不推送向量 payload（检索服务就绪时，由 HTTP 层
+        在提交后推送）。
+        """
         raise NotImplementedError
 
     @abstractmethod
     def clear_manual_scene_membership(self, image_id: UUID | str, scene_id: int) -> dict[str, Any]:
-        """Clear only manual and recompute atomically (inactive scenes may be cleared)."""
+        """只清空手工覆盖并原子地重算（停用的场景也可以清空）。"""
         raise NotImplementedError
 
-    # -- one stored image (PG only; the HTTP layer brings the vector store along) --
+    # -- 单张已存图片（只用 PG；向量库由 HTTP 层负责跟上）--
 
     @abstractmethod
     def get_image_detail(self, image_id: UUID | str) -> dict[str, Any] | None:
-        """The image with category, heating group, food, effective scenes and its ledger rows
-        (embeddings), read in one snapshot; None when there is no such image."""
+        """带类别、加热组、食物、生效场景及其台账行（embeddings）的图片，在同一个快照里读取；
+        没有这张图片时为 None。
+        """
         raise NotImplementedError
 
     @abstractmethod
     def patch_image(self, image_id: UUID | str, fields: dict[str, Any]) -> dict[str, Any]:
-        """Validate a patch with app.core.rules.image_fields and apply it in one transaction;
-        return the detail as committed; IMAGE_NOT_FOUND when there is no such image."""
+        """用 app.core.rules.image_fields 校验修改并在一个事务里应用；返回提交后的详情；
+        没有这张图片时为 IMAGE_NOT_FOUND。
+        """
         raise NotImplementedError
 
     @abstractmethod
     def enqueue_image_deletion(self, image_id: UUID | str) -> dict[str, Any]:
-        """Delete the image and queue its vector / file cleanup (image_deletions); returns the
-        queue row. IMAGE_NOT_FOUND when there is neither an image nor a queue row."""
+        """删除图片，并把它的向量 / 文件清理加入队列（image_deletions）；返回队列行。
+        既没有图片也没有队列行时为 IMAGE_NOT_FOUND。
+        """
         raise NotImplementedError
 
     @abstractmethod
     def get_image_file_urls(self, image_id: UUID | str) -> dict[str, Any] | None:
-        """{original_url, thumb_url, deleted}: a stored image's, or a deleted one's whose files
-        wait for the cleanup; None when neither knows the id."""
+        """{original_url, thumb_url, deleted}：已存图片的，或者文件等待清理的已删除图片的；
+        两边都不认识这个 id 时为 None。
+        """
         raise NotImplementedError
 
-    # -- task center (PG only: readable while the retrieval stack is down) ------
+    # -- 任务中心（只用 PG：检索服务挂了时也能读）------
 
     @abstractmethod
     def list_index_tasks(
@@ -454,36 +467,38 @@ class CatalogStorePort(ABC):
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
-        """Newest first: {items, total, counts: {succeeded, failed, image_deleted, repeated}}; each
-        item carries its image's thumb_url / category while the image still exists (image_exists).
-        image_state filters the succeeded records: present (image still stored) / deleted (deleted
-        since); new_image those that stored a new image (True) / repeated one already stored
-        (False). counts.repeated: succeeded records of a still-stored image that was stored
-        before (new_image false); with image_deleted it is part of succeeded."""
+        """最新的在前：{items, total, counts: {succeeded, failed, image_deleted, repeated}}；图片仍存在
+        时，每一项带上它的 thumb_url / 类别（image_exists）。
+        image_state 过滤成功的记录：present（图片仍存在）/ deleted（之后被删除了）；new_image
+        过滤存了新图片的（True）/ 重复上传已存图片的（False）。counts.repeated：仍存在、
+        而且之前就存过的图片的成功记录（new_image 为 false）；它和 image_deleted 都是 succeeded
+        的一部分。
+        """
         raise NotImplementedError
 
     @abstractmethod
     def clear_index_tasks(self, *, status: str | None = None, image_state: str | None = None) -> int:
-        """Delete the records the list shows for this filter (status and / or image_state, at least
-        one); returns how many went. Images are not touched."""
+        """删除列表在这个过滤条件下显示的记录（status 和 / 或 image_state，至少一个）；
+        返回删除了多少。不碰图片。
+        """
         raise NotImplementedError
 
     @abstractmethod
     def delete_index_task(self, task_id: int) -> int:
-        """Delete one record: 1 when it was there, 0 when not."""
+        """删除一条记录：存在时返回 1，不存在时返回 0。"""
         raise NotImplementedError
 
     @abstractmethod
     def list_pending_deletions(self, *, limit: int = 50) -> list[dict[str, Any]]:
-        """Queued deletions, oldest first: {image_id, original_url, thumb_url, deleted_at}."""
+        """排队的删除，最早的在前：{image_id, original_url, thumb_url, deleted_at}。"""
         raise NotImplementedError
 
     @abstractmethod
     def count_pending_deletions(self) -> int:
         raise NotImplementedError
 
-    # -- scenes (each write returns the whole scene: fields, labels, rules, plus sync_required:
-    #    whether stored images need POST /api/scenes/sync; a delete returns {id, code, sync_required})
+    # -- 场景（每次写入返回整个场景：字段、标签、规则，加上 sync_required：
+    #    已存图片是否需要 POST /api/scenes/sync；删除返回 {id, code, sync_required}）
 
     @abstractmethod
     def list_scene_configs(self) -> list[dict[str, Any]]:
@@ -499,7 +514,7 @@ class CatalogStorePort(ABC):
 
     @abstractmethod
     def delete_scene(self, scene_id: int) -> dict[str, Any]:
-        """Delete a scene with its labels, rules and memberships; returns {id, code}."""
+        """删除场景及其标签、规则和归属；返回 {id, code}。"""
         raise NotImplementedError
 
     @abstractmethod
@@ -526,18 +541,18 @@ class CatalogStorePort(ABC):
     def delete_scene_rule(self, scene_id: int, rule_id: int) -> dict[str, Any]:
         raise NotImplementedError
 
-    # -- lifecycle ------------------------------------------------------------
+    # -- 生命周期 ---------------------------------------------------------------
 
     @abstractmethod
     def ping(self) -> dict[str, Any]:
         raise NotImplementedError
 
     def close(self) -> None:
-        """Release the connection pool (idempotent)."""
+        """释放连接池（可重复调用）。"""
 
 
 class FlyBFallbackPort(ABC):
-    """PG v0.1: FlyB OUT OF SCOPE (M0). Kept for legacy imports only."""
+    """PG v0.1：FlyB 不在范围内（M0）。只为兼容旧的导入而保留。"""
 
     @abstractmethod
     def search_fallback(
@@ -550,7 +565,7 @@ class FlyBFallbackPort(ABC):
 
 
 class ImageStoragePort(ABC):
-    """S3/OSS object storage (contract §5). Returns full https URLs for DB columns."""
+    """S3/OSS 对象存储（契约 §5）。为数据库列返回完整的 https URL。"""
 
     @abstractmethod
     def put_original(
@@ -561,8 +576,9 @@ class ImageStoragePort(ABC):
         ext: str,
         content_type: str | None = None,
     ) -> str:
-        """Upload original/{shard}/{image_id}.{ext} (shard: SHA-256[0:2] hex; optional key_prefix);
-        return full https original_url."""
+        """上传 original/{shard}/{image_id}.{ext}（shard：SHA-256[0:2] 的十六进制；可选 key_prefix）；
+        返回完整的 https original_url。
+        """
         raise NotImplementedError
 
     @abstractmethod
@@ -573,8 +589,9 @@ class ImageStoragePort(ABC):
         *,
         content_type: str | None = "image/webp",
     ) -> str:
-        """Upload thumb/{shard}/{image_id}.webp (the original's shard; optional key_prefix);
-        return full https thumb_url."""
+        """上传 thumb/{shard}/{image_id}.webp（和原图同一个分片；可选 key_prefix）；
+        返回完整的 https thumb_url。
+        """
         raise NotImplementedError
 
     @abstractmethod
@@ -586,22 +603,23 @@ class ImageStoragePort(ABC):
         ext: str,
         content_type: str | None = None,
     ) -> str:
-        """Upload staging/{candidate_id}.{ext} (optional key_prefix); return full https staged_url."""
+        """上传 staging/{candidate_id}.{ext}（可选 key_prefix）；返回完整的 https staged_url。"""
         raise NotImplementedError
 
     @abstractmethod
     def read_by_url_or_key(self, url_or_key: str) -> bytes:
-        """The bytes of a stored object, by full https URL or object key (re-embedding reads the
-        original back). Raises IMAGE_FILE_UNAVAILABLE when it is gone or cannot be read."""
+        """按完整的 https URL 或对象 key 读取已存对象的字节（重新计算 embedding 时读回原图）。
+        对象不存在或读不了时抛出 IMAGE_FILE_UNAVAILABLE。
+        """
         raise NotImplementedError
 
     @abstractmethod
     def delete_by_url_or_key(self, url_or_key: str) -> None:
-        """Best-effort delete by full https URL or object key. Missing object = ok."""
+        """按完整的 https URL 或对象 key 尽力删除。对象不存在 = 成功。"""
         raise NotImplementedError
 
     @abstractmethod
     def ping(self) -> dict[str, Any]:
-        """{ok, driver, bucket, ...}; never raises."""
+        """{ok, driver, bucket, ...}；从不抛出。"""
         raise NotImplementedError
 

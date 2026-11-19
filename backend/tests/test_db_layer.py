@@ -1,4 +1,4 @@
-"""app.db: layering, row conversion and the expected migration (no database needed)."""
+"""app.db：分层、行转换和预期的迁移版本（不需要数据库）。"""
 
 import subprocess
 import sys
@@ -15,7 +15,7 @@ BACKEND = Path(__file__).resolve().parents[1]
 
 class LayeringTests(unittest.TestCase):
     def test_db_layer_imports_nothing_from_services(self):
-        # Fresh interpreter: importing app.db.session first used to loop back through app.services
+        # 全新的解释器：以前先导入 app.db.session 会经由 app.services 绕回来形成循环
         probe = (
             "import sys, app.db.session, app.db.common; "
             "print(sorted(m for m in sys.modules if m.startswith('app.services')))"
@@ -47,7 +47,7 @@ class RowToDictTests(unittest.TestCase):
         )
         self.assertEqual(out["id"], str(uid))
         self.assertEqual(out["some_new_ref"], str(uid))
-        self.assertEqual(out["created_at"], "2026-11-07T08:30:00+00:00")  # naive is UTC
+        self.assertEqual(out["created_at"], "2026-11-07T08:30:00+00:00")  # 不带时区的按 UTC
         self.assertEqual(out["some_new_time"], "2026-11-07T16:30:00+08:00")
         self.assertEqual(out["sha256"], "01ff")
         self.assertEqual(

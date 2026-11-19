@@ -1,9 +1,9 @@
-"""Image storage: original images, thumbnails and staging files (contract §5).
+"""图片存储：原图、缩略图和暂存文件（契约 §5）。
 
-Any S3-compatible service (AWS S3, MinIO, Aliyun OSS) behind ImageStoragePort.
-Default: MockImageStorage — builds https URLs from public_base_url + key, no upload.
-IMAGE_STORAGE_CONFIG.use_boto3 true: S3ImageStorage uploads through boto3, with the
-credentials from the same section (Nacos / local YAML).
+ImageStoragePort 背后可以是任何兼容 S3 的服务（AWS S3、MinIO、阿里云 OSS）。
+默认：MockImageStorage——用 public_base_url + key 拼出 https URL，不上传。
+IMAGE_STORAGE_CONFIG.use_boto3 为 true：S3ImageStorage 通过 boto3 上传，凭证取自同一个
+配置段（Nacos / 本地 YAML）。
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ def _key_from_url_or_key(url_or_key: str, public_base_url: str) -> str:
 
 
 def _readable_key(url_or_key: str, public_base_url: str) -> str:
-    """The key to read; a URL that is not one of this storage's objects cannot be read back."""
+    """要读取的 key；不是本存储对象的 URL 读不回来。"""
     try:
         return _key_from_url_or_key(url_or_key, public_base_url)
     except err.AppError as exc:
@@ -53,16 +53,16 @@ def _readable_key(url_or_key: str, public_base_url: str) -> str:
 
 
 def s3_client_config(*, endpoint_url: str = "") -> Any:
-    """botocore Config for S3-compatible stores, including Aliyun OSS.
+    """给兼容 S3 的存储（包括阿里云 OSS）用的 botocore Config。
 
-    Newer boto3/botocore defaults request checksums to when_supported, which
-    sends a STREAMING-UNSIGNED-PAYLOAD-TRAILER (aws-chunked) body. Aliyun OSS
-    rejects that encoding with NotImplemented. when_required keeps optional
-    checksums off, so PutObject uses a regular payload.
+    较新的 boto3/botocore 默认把请求校验和设为 when_supported，会发送
+    STREAMING-UNSIGNED-PAYLOAD-TRAILER（aws-chunked）格式的请求体。阿里云 OSS
+    以 NotImplemented 拒绝这种编码。when_required 关闭可选的校验和，
+    所以 PutObject 用普通的请求体。
 
-    Aliyun OSS endpoints use virtual-hosted addressing and V2 signatures.
-    Other custom endpoints retain path-style addressing. Older botocore that
-    does not accept checksum fields retains the same addressing and signature.
+    阿里云 OSS 的 endpoint 使用虚拟主机寻址和 V2 签名。
+    其他自定义 endpoint 保持路径寻址。不接受校验和字段的旧版 botocore
+    保持同样的寻址方式和签名。
     """
     from botocore.client import Config
 
@@ -89,7 +89,7 @@ def s3_client_config(*, endpoint_url: str = "") -> Any:
 
 
 class MockImageStorage(ImageStoragePort):
-    """In-process mock: records puts; optional mirror dir for local bytes."""
+    """进程内的 mock：记录上传；可选的镜像目录保存本地字节。"""
 
     def __init__(self, settings: ImageStorageSettings) -> None:
         self.settings = settings
@@ -142,7 +142,7 @@ class MockImageStorage(ImageStoragePort):
         return self._put(staging_key(candidate_id, ext, key_prefix=self.settings.key_prefix), data)
 
     def read_by_url_or_key(self, url_or_key: str) -> bytes:
-        """From memory, else from the mirror dir: what survives a restart is what was mirrored."""
+        """先从内存读，否则从镜像目录读：重启后还在的只有镜像过的内容。"""
         key = _readable_key(url_or_key, self.public_base_url)
         if key in self._objects:
             return self._objects[key]
@@ -178,10 +178,10 @@ class MockImageStorage(ImageStoragePort):
 
 
 class S3ImageStorage(ImageStoragePort):
-    """Real S3 via boto3 when IMAGE_STORAGE_CONFIG.use_boto3 is true.
+    """IMAGE_STORAGE_CONFIG.use_boto3 为 true 时，通过 boto3 使用真实的 S3。
 
-    Client Config disables optional request/response checksums (when_required)
-    so Aliyun OSS and similar stores do not see AWS flexible-checksum trailers.
+    客户端 Config 关闭可选的请求 / 响应校验和（when_required），这样阿里云 OSS
+    之类的存储不会看到 AWS 灵活校验和的 trailer。
     """
 
     def __init__(self, settings: ImageStorageSettings) -> None:
@@ -250,7 +250,7 @@ class S3ImageStorage(ImageStoragePort):
         key = _readable_key(url_or_key, self.public_base_url)
         try:
             return self._client.get_object(Bucket=self.bucket, Key=key)["Body"].read()
-        except Exception as exc:  # NoSuchKey, access denied, network: all mean "cannot read it now"
+        except Exception as exc:  # NoSuchKey、无权访问、网络问题：都表示"现在读不了"
             raise err.image_file_unavailable(f"get_object {self.bucket}/{key}: {type(exc).__name__}: {exc}") from exc
 
     def delete_by_url_or_key(self, url_or_key: str) -> None:

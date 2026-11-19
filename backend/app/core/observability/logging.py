@@ -19,9 +19,9 @@ def _align(text: str, width: int, align: str) -> str:
     return f"{text:^{width}}"
 
 
-# Exact uvicorn 0.30.6 templates on uvicorn / uvicorn.error only. Applied to a
-# LogRecord copy so the original record.msg / args / exc_info stay unchanged
-# for any other handler. Access logs and other uvicorn messages are left as-is.
+# 只对 uvicorn / uvicorn.error 套用 uvicorn 0.30.6 的原始模板。作用在 LogRecord 的
+# 副本上，所以原始的 record.msg / args / exc_info 对其他处理器保持不变。
+# 访问日志和 uvicorn 的其他消息保持原样。
 _UVICORN_LOGGERS = frozenset({"uvicorn", "uvicorn.error"})
 _UVICORN_MSG_TEMPLATES = {
     "Started server process [%d]": "已启动服务器进程 [%d]",
@@ -38,7 +38,7 @@ _UVICORN_MSG_TEMPLATES = {
     "Uvicorn running on %s://[%s]:%d (Press CTRL+C to quit)": "Uvicorn 运行于 %s://[%s]:%d（按 CTRL+C 退出）",
     "Shutting down": "正在关闭",
 }
-# Reloader parent uses already-interpolated f-strings; match getMessage() only.
+# reloader 父进程用的是已经插值好的 f-string；只匹配 getMessage()。
 _UVICORN_RENDERED_PATTERNS = (
     (re.compile(r"^Started reloader process \[(\d+)\] using (.+)$"), r"已启动 reloader 进程 [\1]，使用 \2"),
     (re.compile(r"^Stopping reloader process \[(\d+)\]$"), r"正在停止 reloader 进程 [\1]"),

@@ -1,29 +1,27 @@
-"""Import a scene configuration file through the scene admin use case: upsert by code.
+"""通过场景管理用例导入场景配置文件：按 code 新增或更新。
 
-What it reads: the file the admin page downloads ({schema_version: 1, kind: "scene_config",
-scenes: [...]}), or the body of GET /api/scenes. Each scene carries its labels and rules, as the
-API returns them; a file may be edited by hand, or cut down to what should change.
+读取的内容：管理页下载的文件（{schema_version: 1, kind: "scene_config", scenes: [...]}），
+或者 GET /api/scenes 的响应体。每个场景带着它的标签和规则，和 API 返回的一样；文件可以
+手工编辑，也可以删减到只剩要修改的部分。
 
-    scene   matched by its code              created, or name / description / include_all /
-                                             outputs_heating / is_active updated where they differ
-    label   matched by its code in a scene   created, or name / sort_order / is_active updated
-    rule    matched by its target in a scene (the category's code, or the cuisine): created, or
-                                             its label changed (`label: null` clears it)
+    场景   按 code 匹配              创建，或者更新不同的 name / description / include_all /
+                                     outputs_heating / is_active
+    标签   在场景内按 code 匹配      创建，或者更新 name / sort_order / is_active
+    规则   在场景内按对象匹配（类别的 code，或菜系）：创建，或者修改它的标签
+                                     （`label: null` 清空标签）
 
-A field, or a whole `labels` / `rules` list, that the file leaves out is not touched. What is stored
-but not listed is left alone, unless prune is set: then, in the scenes the file lists, the rules
-(when the scene has a `rules` list) and the labels (when it has a `labels` list) that the file does
-not list are deleted. A scene is never deleted here (that drops its memberships): scenes the file
-does not list are only reported (not_in_file).
+文件里没写的字段，或者整个 `labels` / `rules` 列表，都不动。已存但没有列出的保持不变，
+除非设置了 prune：这时在文件列出的场景里，文件没有列出的规则（场景有 `rules` 列表时）
+和标签（场景有 `labels` 列表时）会被删除。这里从不删除场景（那会丢掉它的归属）：
+文件没有列出的场景只在报告里列出（not_in_file）。
 
-Ids in the file are not read, so a file restores a configuration into another database: a rule
-names its category and its label by code; the category must already be stored (import the category
-tree first). A code is the identity, so it cannot be changed through a file.
+文件里的 id 不读取，所以文件可以把配置恢复到另一个数据库：规则用 code 指明它的类别和
+标签；类别必须已经存在（先导入类别树）。code 就是身份，所以不能通过文件修改。
 
-Within a scene the order is: the scene, its labels, its rules, then (prune) rules and labels to
-delete. Each write is its own transaction (the catalog store's). sync_required says whether stored
-images follow the new configuration only after POST /api/scenes/sync, as for single writes; in a
-dry run it is what the writes would answer.
+在一个场景内的顺序是：场景、它的标签、它的规则，然后（prune 时）要删除的规则和标签。
+每次写入是一个单独的事务（catalog 存储的事务）。sync_required 说明已存图片是否要在
+POST /api/scenes/sync 之后才会跟随新配置，和单次写入一样；dry run 时就是这些写入
+会返回的值。
 """
 
 from __future__ import annotations
@@ -52,24 +50,24 @@ logger = logging.getLogger("retrieval.import_scenes")
 
 KIND = "scene_config"
 MAX_SCENES = 200
-MAX_ITEMS_PER_SCENE = 5000  # labels, or rules, of one scene
+MAX_ITEMS_PER_SCENE = 5000  # 一个场景的标签或规则
 _SCENE_VALUE_KEYS = ("name", "description", "include_all", "outputs_heating", "is_active")
 _LABEL_VALUE_KEYS = ("name", "sort_order", "is_active")
 
-# A rule's target: ("category", the category's lower-case code) or ("cuisine", the cuisine)
+# 规则的对象：("category", 类别的小写 code) 或 ("cuisine", 菜系)
 Target = tuple[str, str]
 
 
 @dataclass
 class _Scene:
-    """One scene as the import sees it now: what is stored, plus (in a dry run) what would be."""
+    """导入此刻看到的一个场景：已存的内容，加上（dry run 时）将要存的内容。"""
 
     code: str
-    scene_id: int | None  # None: about to be created (dry run)
+    scene_id: int | None  # None：即将创建（dry run）
     is_active: bool
     include_all: bool
     labels: dict[str, dict[str, Any]]  # code -> {id | None, name, sort_order, is_active}
-    rules: dict[Target, dict[str, Any]]  # target -> {id | None, label: code | None}
+    rules: dict[Target, dict[str, Any]]  # 对象 -> {id | None, label: code | None}
 
     @property
     def flags(self) -> dict[str, bool]:
@@ -99,9 +97,9 @@ class _Run:
     report: ImportReport
     dry_run: bool
     prune: bool
-    total: int = 0  # scenes, labels and rules the file lists
+    total: int = 0  # 文件列出的场景、标签和规则
     sync_required: bool = False
-    # lower-case code -> stored category; read on the first category rule
+    # 小写 code -> 已存类别；在第一条类别规则时读取
     category_index: dict[str, Mapping[str, Any]] | None = field(default=None, repr=False)
 
 
@@ -115,10 +113,10 @@ class ImportScenesUseCase:
         self._categories = categories
 
     def execute(self, document: Any, *, dry_run: bool = True, prune: bool = False) -> dict[str, Any]:
-        """{dry_run, prune, summary, rows, rows_truncated, not_in_file, sync_required}.
+        """{dry_run, prune, summary, rows, rows_truncated, not_in_file, sync_required}。
 
-        A file that is not a scene configuration at all raises VALIDATION_ERROR; a database failure
-        while writing raises (rows written before it stay; import the file again to continue).
+        完全不是场景配置的文件抛出 VALIDATION_ERROR；写入时数据库失败会抛出（之前写入的行
+        保留；再导入一次同一个文件即可继续）。
         """
         items = check_envelope(document, kind=KIND, items_key="scenes")
         if len(items) > MAX_SCENES:
@@ -138,7 +136,7 @@ class ImportScenesUseCase:
         body.update(prune=prune, sync_required=run.sync_required)
         return body
 
-    # -- scenes ---------------------------------------------------------------------------
+    # -- 场景 -------------------------------------------------------------------------------
 
     def _import_scene(
         self, run: _Run, raw: Any, where: str, stored: Mapping[str, Mapping[str, Any]], listed: set[str]
@@ -151,7 +149,7 @@ class ImportScenesUseCase:
         code = text_field(raw, "code")
         current = stored.get(code) if code is not None else None
         if current is None:
-            try:  # a scene to create: its code has to be a valid new one
+            try:  # 要创建的场景：它的 code 必须是合法的新 code
                 code = normalize_scene_code(raw.get("code"))
             except err.AppError as exc:
                 report.fail("scene", code or where, exc, **context)
@@ -166,7 +164,7 @@ class ImportScenesUseCase:
 
         scene = self._create_scene(run, raw, code, context) if current is None else self._update_scene(run, raw, current, context)
         if scene is None:
-            return  # not created: nothing to hang its labels and rules on
+            return  # 没有创建：它的标签和规则没有地方挂
         listed_labels = self._import_labels(run, raw, scene, where)
         listed_rules = self._import_rules(run, raw, scene, where)
         if run.prune:
@@ -205,8 +203,9 @@ class ImportScenesUseCase:
         return scene
 
     def _update_scene(self, run: _Run, raw: Mapping[str, Any], current: Mapping[str, Any], context: dict[str, Any]) -> _Scene:
-        """The scene after the update. A refused update is reported and the scene stays as it is:
-        it exists, so its labels and rules are imported all the same."""
+        """更新后的场景。被拒绝的更新会写进报告，场景保持原样：场景存在，
+        所以它的标签和规则照样导入。
+        """
         report = run.report
         scene = _scene_of(current)
         context = {**context, "name": context["name"] or current.get("name")}
@@ -247,11 +246,12 @@ class ImportScenesUseCase:
         report.add("scene", scene.code, "update", changes=changes, **context)
         return scene
 
-    # -- labels ---------------------------------------------------------------------------
+    # -- 标签 -------------------------------------------------------------------------------
 
     def _import_labels(self, run: _Run, raw: Mapping[str, Any], scene: _Scene, where: str) -> set[str] | None:
-        """The label codes the file lists for the scene; None when it has no `labels` list (the
-        scene's labels are then not touched, and not pruned)."""
+        """文件为这个场景列出的标签 code；场景没有 `labels` 列表时为 None（这时场景的标签
+        不动，也不清理）。
+        """
         report = run.report
         if "labels" not in raw:
             return None
@@ -293,7 +293,7 @@ class ImportScenesUseCase:
                             changes.append(change(name, current.get(name), value))
             except err.AppError as exc:
                 if code is not None:
-                    listed.add(code)  # it is listed: never pruned because its row is wrong
+                    listed.add(code)  # 它被列出了：不会因为它的行有问题而被清理
                 report.fail("label", key, exc, **context)
                 continue
             assert code is not None
@@ -330,10 +330,10 @@ class ImportScenesUseCase:
                 report.unchanged()
         return listed
 
-    # -- rules ----------------------------------------------------------------------------
+    # -- 规则 -------------------------------------------------------------------------------
 
     def _import_rules(self, run: _Run, raw: Mapping[str, Any], scene: _Scene, where: str) -> set[Target] | None:
-        """The rule targets the file lists for the scene; None when it has no `rules` list."""
+        """文件为这个场景列出的规则对象；场景没有 `rules` 列表时为 None。"""
         report = run.report
         if "rules" not in raw:
             return None
@@ -371,7 +371,7 @@ class ImportScenesUseCase:
                         )
             except err.AppError as exc:
                 if target is not None:
-                    listed.add(target)  # it is listed: never pruned because its row is wrong
+                    listed.add(target)  # 它被列出了：不会因为它的行有问题而被清理
                 report.fail("rule", key, exc, **context)
                 continue
             assert target is not None
@@ -419,7 +419,7 @@ class ImportScenesUseCase:
         return listed
 
     def _rule_target(self, run: _Run, item: Mapping[str, Any]) -> tuple[Target, Mapping[str, Any] | None]:
-        """(the target, the stored category for a category rule)."""
+        """（对象, 类别规则对应的已存类别）。"""
         category_ref, cuisine = item.get("category"), item.get("cuisine")
         if (category_ref is None) == (cuisine is None):
             raise err.validation_error("a rule needs exactly one of category and cuisine")
@@ -427,7 +427,7 @@ class ImportScenesUseCase:
             return ("cuisine", normalize_rule_fields({"cuisine": cuisine}, partial=False)["cuisine"]), None
         code = ref_code(category_ref, "category")
         assert code is not None
-        if run.category_index is None:  # read once, and only when a file has category rules
+        if run.category_index is None:  # 只读一次，而且只在文件里有类别规则时读
             run.category_index = {
                 str(node["code"]).lower(): node for node in self._categories.tree()["categories"]
             }
@@ -436,13 +436,14 @@ class ImportScenesUseCase:
             raise err.validation_error(f"category {code!r} is not stored; import the category tree first")
         return ("category", code.lower()), category
 
-    # -- prune ----------------------------------------------------------------------------
+    # -- 清理 -------------------------------------------------------------------------------
 
     def _prune(
         self, run: _Run, scene: _Scene, where: str, listed_labels: set[str] | None, listed_rules: set[Target] | None
     ) -> None:
-        """Delete what the scene has stored but its lists in the file do not name: rules first,
-        then labels (a label a remaining rule still maps to is refused, as on DELETE)."""
+        """删除场景已存、但文件里它的列表没有列出的内容：先删规则，再删标签（剩下的规则
+        仍然映射到的标签会被拒绝，和 DELETE 一样）。
+        """
         report = run.report
         if listed_rules is not None:
             for target, rule in list(scene.rules.items()):
@@ -491,17 +492,17 @@ class ImportScenesUseCase:
                     self._refresh(scene, result["scene"])
                 report.add("label", key, "delete", **context)
 
-    # -- helpers --------------------------------------------------------------------------
+    # -- 辅助函数 ---------------------------------------------------------------------------
 
     @staticmethod
     def _scene_id(scene: _Scene) -> int:
-        if scene.scene_id is None:  # only a dry run has scenes without an id, and it does not write
+        if scene.scene_id is None:  # 只有 dry run 才有没有 id 的场景，而 dry run 不写入
             raise err.internal_error(f"scene {scene.code!r} has no id")
         return scene.scene_id
 
     @staticmethod
     def _refresh(scene: _Scene, stored: Mapping[str, Any]) -> None:
-        """Take over what a write answered (the whole scene), so later rows see the new ids."""
+        """接收一次写入返回的内容（整个场景），这样后面的行能看到新的 id。"""
         fresh = _scene_of(stored)
         scene.scene_id = fresh.scene_id
         scene.is_active, scene.include_all = fresh.is_active, fresh.include_all

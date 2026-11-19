@@ -1,1 +1,1 @@
-"""DB session / helpers / declarative base."""
+"""数据库会话、辅助函数和声明式基类。"""

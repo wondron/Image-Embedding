@@ -1,10 +1,9 @@
-"""VectorStorePort for retrieval, over app.clients.qdrant.QdrantStore.
+"""检索用的 VectorStorePort，基于 app.clients.qdrant.QdrantStore。
 
-Retrieval rules for the vector index live here: point id == images.id (uuid),
-which payload fields are filterable (and indexed), the scene filter, and the
-Qdrant error codes. Payload content comes from
-core.rules.scene_membership.build_qdrant_payload; the score threshold
-is decided in services.retrieval.score_threshold (None here = no threshold).
+向量索引的检索规则在这里：向量点 id == images.id（uuid）、哪些 payload 字段可以过滤
+（并建了索引）、场景过滤，以及 Qdrant 的错误码。payload 的内容来自
+core.rules.scene_membership.build_qdrant_payload；分数阈值在
+services.retrieval.score_threshold 里决定（这里的 None = 没有阈值）。
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ from app.clients.qdrant import CollectionMismatchError, QdrantStore
 from app.repositories.ports import VectorStorePort
 from app.core import errors as err
 
-# Filterable payload fields -> Qdrant index schema (contract §4.2)
+# 可过滤的 payload 字段 -> Qdrant 索引结构（契约 §4.2）
 PAYLOAD_INDEXES: dict[str, str] = {
     "scenes": "keyword",
     "label_status": "keyword",
@@ -26,7 +25,7 @@ _EXTRA_FILTER_KEYS = ("label_status", "category_id")
 
 
 def _image_point_id(point_id: UUID | str) -> str:
-    """Points are keyed by images.id; anything else is a caller bug."""
+    """向量点以 images.id 为键；其他情况都是调用方的 bug。"""
     try:
         return str(point_id if isinstance(point_id, UUID) else UUID(str(point_id).strip()))
     except (ValueError, AttributeError) as exc:
@@ -42,7 +41,7 @@ class QdrantVectorStore(VectorStorePort):
         return self._store.collection
 
     def sibling(self, *, collection: str, dim: int, distance: str) -> "QdrantVectorStore":
-        """The collection of another model version over the same client (never close it)."""
+        """同一个客户端上另一个模型版本的 collection（永远不要关闭它）。"""
         return QdrantVectorStore(self._store.sibling(collection=collection, vector_dim=dim, distance=distance))
 
     def ensure_collection(self, *, recreate: bool = False) -> None:
@@ -60,14 +59,14 @@ class QdrantVectorStore(VectorStorePort):
             raise err.index_qdrant_failed(f"collection_exists: {type(exc).__name__}: {exc}") from exc
 
     def drop_collection(self) -> bool:
-        """Delete the whole collection (a retired model version); False when it was not there."""
+        """删除整个 collection（下线的模型版本）；不存在时返回 False。"""
         try:
             return self._store.drop_collection()
         except Exception as exc:
             raise err.index_qdrant_failed(f"drop_collection: {type(exc).__name__}: {exc}") from exc
 
     def existing_ids(self, point_ids: list[UUID | str]) -> set[str]:
-        """The image ids among point_ids that have a point in this collection."""
+        """point_ids 中在这个 collection 里有向量点的图片 id。"""
         ids = [_image_point_id(pid) for pid in point_ids]
         try:
             return {str(pid) for pid in self._store.existing_ids(ids)}
@@ -75,14 +74,14 @@ class QdrantVectorStore(VectorStorePort):
             raise err.search_qdrant_failed(f"existing_ids: {type(exc).__name__}: {exc}") from exc
 
     def point_count(self) -> int:
-        """How many points the collection holds (exact)."""
+        """collection 里有多少个向量点（精确值）。"""
         try:
             return self._store.count()
         except Exception as exc:
             raise err.search_qdrant_failed(f"point_count: {type(exc).__name__}: {exc}") from exc
 
     def get_vectors(self, point_ids: list[UUID | str]) -> dict[str, list[float]]:
-        """{image id: vector} of the images that have a point in this collection."""
+        """在这个 collection 里有向量点的图片的 {图片 id: 向量}。"""
         ids = [_image_point_id(pid) for pid in point_ids]
         try:
             found = self._store.get_vectors(ids)
@@ -120,8 +119,9 @@ class QdrantVectorStore(VectorStorePort):
             raise err.search_qdrant_failed(f"{type(exc).__name__}: {exc}") from exc
 
     def set_payloads(self, payloads: dict[str, dict[str, Any]]) -> list[str]:
-        """Write the payload of each image's point; returns the image ids that have no point in
-        this collection (never embedded into it), which are skipped."""
+        """写入每张图片向量点的 payload；返回在这个 collection 里没有向量点的图片 id
+        （从来没有写进去过），这些会被跳过。
+        """
         if not payloads:
             return []
         by_id = {_image_point_id(pid): payload for pid, payload in payloads.items()}
@@ -133,7 +133,7 @@ class QdrantVectorStore(VectorStorePort):
         return sorted(pid for pid in by_id if pid not in present)
 
     def get_payloads(self, point_ids: list[UUID | str]) -> dict[str, dict[str, Any]]:
-        """{image id: payload} of the images that have a point in this collection."""
+        """在这个 collection 里有向量点的图片的 {图片 id: payload}。"""
         ids = [_image_point_id(pid) for pid in point_ids]
         try:
             found = self._store.get_payloads(ids)

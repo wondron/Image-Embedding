@@ -1,16 +1,15 @@
-"""index_tasks: the outcome of each file of an index request (app.models.task.IndexTask).
+"""index_tasks：入库请求中每个文件的结果（app.models.task.IndexTask）。
 
-Written by the index use case after each file (best effort: a failed write is logged, the index
-result stands); read and cleared by the task center (GET / DELETE /api/index-tasks).
+由入库用例在处理完每个文件后写入（尽力而为：写入失败只写日志，入库结果照常有效）；
+由任务中心读取和清空（GET / DELETE /api/index-tasks）。
 
-A succeeded record keeps its image_id after the image is deleted (no foreign key): joined with
-images, such a record has no image any more ("deleted"), the others still have one ("present").
+成功的记录在图片删除后仍保留 image_id（没有外键）：和 images 关联后，这样的记录已经
+没有图片了（"deleted"），其他的仍然有（"present"）。
 
-Records count uploads, not images: the same bytes indexed again succeed again (new_image false:
-nothing new was stored), e.g. a file sent a second time after the first request was abandoned by
-the client but finished on the server. So the succeeded records whose image is still stored split
-into those that stored it (new_image true) and the repeats (new_image false, counted as
-"repeated"): only the first kind says how many images the uploads put in the gallery.
+记录统计的是上传，不是图片：同样的字节再次入库也会再次成功（new_image 为 false：没有
+存任何新东西），例如客户端放弃了第一次请求、但服务端已经处理完之后，文件又发了一次。
+所以图片仍存在的成功记录分成存了它的（new_image 为 true）和重复的（new_image 为 false，
+计为 "repeated"）：只有前一种说明上传往图库里放了多少张图片。
 """
 
 from __future__ import annotations
@@ -21,8 +20,7 @@ from app.core import errors as err
 from app.core.enums import IndexTaskStatus, NameKind
 from app.db.common import _as_uuid, _row_to_dict
 
-# Bounds for what lands in the record (the columns are text): a pathological filename or
-# message must not bloat the table
+# 写进记录的内容的长度上限（这些列是 text）：异常长的文件名或信息不能撑大这张表
 _MAX_FILENAME = 255
 _MAX_DETAIL = 1000
 _MAX_CODE = 64
@@ -39,11 +37,11 @@ def _clip(value: Any, limit: int) -> str | None:
 def _filter(
     status: str | None, image_state: str | None, new_image: bool | None = None
 ) -> tuple[str, dict[str, Any]]:
-    """WHERE over `index_tasks t LEFT JOIN images i ON i.id = t.image_id`, shared by the list and
-    the clear so that a clear removes exactly what the list shows. image_state: present (a
-    succeeded record whose image is still stored) / deleted (whose image was deleted since).
-    new_image: True (a succeeded record that stored a new image) / False (a repeat: the same
-    bytes were stored before). _matching states the same conditions over the counted groups."""
+    """基于 `index_tasks t LEFT JOIN images i ON i.id = t.image_id` 的 WHERE 条件，列表和清空共用，
+    这样清空删除的正好是列表显示的内容。image_state：present（图片仍存在的成功记录）/
+    deleted（图片之后被删除了的）。new_image：True（存了新图片的成功记录）/ False
+    （重复：同样的字节之前就存过）。_matching 在计数分组上表达同样的条件。
+    """
     clauses: list[str] = []
     params: dict[str, Any] = {}
     if status:
@@ -55,14 +53,14 @@ def _filter(
         clauses.append("t.status = :succeeded AND i.id IS " + ("NOT NULL" if image_state == "present" else "NULL"))
         params["succeeded"] = IndexTaskStatus.SUCCEEDED.value
     if new_image is not None:
-        # IS [NOT] FALSE: a succeeded record without the flag is not known to be a repeat
+        # IS [NOT] FALSE：没有这个标志的成功记录不能认定为重复
         clauses.append("t.status = :succeeded AND t.new_image IS " + ("NOT FALSE" if new_image else "FALSE"))
         params["succeeded"] = IndexTaskStatus.SUCCEEDED.value
     return ("WHERE " + " AND ".join(clauses) + " ") if clauses else "", params
 
 
-# One counted group of records: (status, image_gone, repeated, how many). image_gone: no image row
-# has the record's image_id (always so for a failed record); repeated: new_image IS FALSE.
+# 记录的一个计数分组：(status, image_gone, repeated, 数量)。image_gone：没有哪一行图片的 id
+# 是这条记录的 image_id（失败的记录总是如此）；repeated：new_image IS FALSE。
 _Group = tuple[str, bool, bool, int]
 
 _GROUPS_SQL = (
@@ -72,10 +70,10 @@ _GROUPS_SQL = (
 
 
 def _counts(groups: list[_Group]) -> dict[str, int]:
-    """{succeeded, failed, image_deleted, repeated} over every record. image_deleted and repeated
-    are parts of succeeded and never overlap: a repeat whose image was deleted since counts as
-    image_deleted, so succeeded - image_deleted - repeated is how many records stored an image
-    that is still in the gallery."""
+    """按全部记录统计的 {succeeded, failed, image_deleted, repeated}。image_deleted 和 repeated
+    都是 succeeded 的一部分，并且从不重叠：图片之后被删除了的重复记录计为 image_deleted，
+    所以 succeeded - image_deleted - repeated 就是存了一张至今仍在图库里的图片的记录数。
+    """
     succeeded = IndexTaskStatus.SUCCEEDED.value
     counts = {member.value: 0 for member in IndexTaskStatus}
     counts["image_deleted"] = 0
@@ -94,8 +92,9 @@ def _counts(groups: list[_Group]) -> dict[str, int]:
 def _matching(
     groups: list[_Group], status: str | None, image_state: str | None, new_image: bool | None = None
 ) -> int:
-    """How many records a filter selects, from the counted groups (one read for the counts and
-    the total). The same conditions as _filter."""
+    """一个过滤条件选中多少条记录，从计数分组得出（计数和总数一次读取）。
+    条件和 _filter 相同。
+    """
     succeeded = IndexTaskStatus.SUCCEEDED.value
     wanted = IndexTaskStatus(status).value if status else None
     total = 0
@@ -127,11 +126,12 @@ def _record_params(row: dict[str, Any]) -> dict[str, Any]:
 
 
 class PgIndexTasksMixin:
-    """Task center records."""
+    """任务中心的记录。"""
 
     def record_index_tasks(self, rows: list[dict[str, Any]]) -> None:
-        """Insert one record per file: {filename, status, image_id?, new_image?, error_code?,
-        error_detail?, duration_ms?, trace_id?}. A succeeded record needs its image_id."""
+        """每个文件插入一条记录：{filename, status, image_id?, new_image?, error_code?,
+        error_detail?, duration_ms?, trace_id?}。成功的记录必须有 image_id。
+        """
         if not rows:
             return
         self.ensure_schema()
@@ -161,11 +161,11 @@ class PgIndexTasksMixin:
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
-        """Newest first, optionally one status, image state and / or new-image flag:
-        {items, total, counts: {succeeded, failed, image_deleted, repeated}}. image_deleted: the
-        succeeded records whose image was deleted since; repeated: those whose image is still
-        stored but was stored before that upload (new_image false). Both are counted in succeeded
-        too. Each item carries its image's thumbnail and category while the image still exists."""
+        """最新的在前，可选按一个状态、图片状态和 / 或新图片标志过滤：
+        {items, total, counts: {succeeded, failed, image_deleted, repeated}}。image_deleted：图片之后
+        被删除了的成功记录；repeated：图片仍存在、但在这次上传之前就已经存过的（new_image 为
+        false）。两者也都计入 succeeded。图片仍存在时，每一项带上它的缩略图和类别。
+        """
         self.ensure_schema()
         from sqlalchemy import text
 
@@ -203,8 +203,9 @@ class PgIndexTasksMixin:
         }
 
     def clear_index_tasks(self, *, status: str | None = None, image_state: str | None = None) -> int:
-        """Delete the records the list shows for this filter (at least one of the two: never
-        everything by accident); returns how many went. Only records: images are not touched."""
+        """删除列表在这个过滤条件下显示的记录（两者至少一个：永远不会意外删光）；
+        返回删除了多少。只删记录：不碰图片。
+        """
         if not status and not image_state:
             raise ValueError("clear_index_tasks needs a status or an image_state")
         self.ensure_schema()
@@ -224,7 +225,7 @@ class PgIndexTasksMixin:
             raise err.index_postgres_failed(f"clear_index_tasks: {type(exc).__name__}: {exc}") from exc
 
     def delete_index_task(self, task_id: int) -> int:
-        """Delete one record; 1 when it was there, 0 when not. The image is not touched."""
+        """删除一条记录；存在时返回 1，不存在时返回 0。不碰图片。"""
         self.ensure_schema()
         from sqlalchemy import text
 

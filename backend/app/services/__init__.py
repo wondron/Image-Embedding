@@ -1,1 +1,1 @@
-"""Business services (retrieval + predict island)."""
+"""业务服务（检索 + 预测模块）。"""

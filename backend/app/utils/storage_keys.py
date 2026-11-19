@@ -1,16 +1,16 @@
-"""S3 object key helpers (contract §5). Keys never include scene/category.
+"""S3 对象 key 的辅助函数（契约 §5）。key 里从不包含场景或类别。
 
-An image's original and thumbnail sit in a shard directory: the first two hex characters of
-the original's SHA-256, which are the first two of the image id (contract A7: the id is
-SHA-256[0:16]), e.g. original/a3/{image_id}.jpg and thumb/a3/{image_id}.webp. Staging keys
-have none (a candidate id is random, not a content hash).
+一张图的原图和缩略图放在一个分片目录里：原图 SHA-256 的前两个十六进制字符，
+也就是图片 id 的前两个字符（契约 A7：id 是 SHA-256[0:16]），例如
+original/a3/{image_id}.jpg 和 thumb/a3/{image_id}.webp。暂存区的 key
+没有分片目录（候选 id 是随机的，不是内容哈希）。
 
-Optional IMAGE_STORAGE_CONFIG.key_prefix is prepended to the relative
-original / thumb / staging key when non-empty after normalization.
-public_base_url remains the bucket/CDN URL root and is not the object-key prefix.
+可选的 IMAGE_STORAGE_CONFIG.key_prefix 规范化后不为空时，加在相对的
+original / thumb / staging key 前面。
+public_base_url 仍是存储桶 / CDN 的 URL 根，不是对象 key 的前缀。
 
-Objects stored before the shard directory (original/{image_id}.{ext}) keep their keys: reads
-and deletes go by the stored URL, never by a key computed again.
+有分片目录之前存的对象（original/{image_id}.{ext}）保留原来的 key：读取和删除
+都按存下来的 URL，从不重新计算 key。
 """
 
 from __future__ import annotations
@@ -44,9 +44,9 @@ __all__ = (
 
 
 def apply_key_prefix(key_prefix: str, rel: str) -> str:
-    """Compose ``{key_prefix}/{rel}`` when the prefix is non-empty; otherwise ``rel``.
+    """前缀不为空时拼成 ``{key_prefix}/{rel}``，否则就是 ``rel``。
 
-    ``key_prefix`` must already be normalized (see :func:`normalize_key_prefix`).
+    ``key_prefix`` 必须已经规范化（见 :func:`normalize_key_prefix`）。
     """
     prefix = key_prefix or ""
     relative = (rel or "").lstrip("/")
@@ -74,8 +74,9 @@ def _norm_ext(ext: str | None, *, default: str = "jpg") -> str:
 
 
 def shard_dir(image_id: UUID | str) -> str:
-    """The shard directory of an image's objects: the first two hex characters of its id, which
-    are the first two of the original's SHA-256 (contract A7), in lowercase."""
+    """一张图的对象所在的分片目录：图片 id 的前两个十六进制字符，也就是原图
+    SHA-256 的前两个字符（契约 A7），小写。
+    """
     return _norm_uuid(image_id)[:SHARD_HEX_CHARS]
 
 
@@ -85,28 +86,27 @@ def _image_key(directory: str, image_id: UUID | str, ext: str, key_prefix: str) 
 
 
 def original_key(image_id: UUID | str, ext: str, *, key_prefix: str = "") -> str:
-    """original/{shard}/{image_id}.{ext}, optionally under key_prefix."""
+    """original/{shard}/{image_id}.{ext}，可选地放在 key_prefix 下。"""
     return _image_key("original", image_id, _norm_ext(ext), key_prefix)
 
 
 def thumb_key(image_id: UUID | str, *, key_prefix: str = "") -> str:
-    """thumb/{shard}/{image_id}.webp (long-edge 512 WebP by contract), optionally under key_prefix."""
+    """thumb/{shard}/{image_id}.webp（按契约是长边 512 的 WebP），可选地放在 key_prefix 下。"""
     return _image_key("thumb", image_id, THUMB_EXT, key_prefix)
 
 
 def staging_key(candidate_id: UUID | str, ext: str, *, key_prefix: str = "") -> str:
-    """staging/{candidate_id}.{ext}, optionally under key_prefix (no shard: the id is random)."""
+    """staging/{candidate_id}.{ext}，可选地放在 key_prefix 下（没有分片：id 是随机的）。"""
     return apply_key_prefix(key_prefix, f"staging/{_norm_uuid(candidate_id)}.{_norm_ext(ext)}")
 
 
 def relative_key(url_or_key: str | None) -> str | None:
-    """The relative key (contract §5) of a stored URL or object key: the key from its
-    original / thumb / staging directory on, without URL root or key_prefix, e.g.
-    ``original/a3/{image_id}.jpg``. None when the path has no such directory.
+    """一个存储 URL 或对象 key 的相对 key（契约 §5）：从 original / thumb / staging
+    目录开始的部分，不含 URL 根和 key_prefix，例如 ``original/a3/{image_id}.jpg``。
+    路径里没有这类目录时为 None。
 
-    The last such directory is the key's own: key_prefix may not name one, and the URL root
-    comes before it. So one object always has one relative key, and different relative keys
-    are different objects.
+    取最后一个这类目录：key_prefix 里不会出现这些目录名，URL 根在它前面。
+    所以一个对象总是只有一个相对 key，不同的相对 key 就是不同的对象。
     """
     path = (url_or_key or "").strip()
     if path.startswith(("http://", "https://")):
@@ -119,8 +119,9 @@ def relative_key(url_or_key: str | None) -> str | None:
 
 
 def different_objects(url_or_key: str | None, other: str | None) -> bool:
-    """Whether two stored URLs (or keys) are certainly different objects: both have a relative
-    key and the keys differ. Same relative keys, or a form without one, may be one object."""
+    """两个存储 URL（或 key）是否一定是不同的对象：两者都有相对 key 且不相同。
+    相对 key 相同，或者有一方没有相对 key，都可能是同一个对象。
+    """
     key, other_key = relative_key(url_or_key), relative_key(other)
     return key is not None and other_key is not None and key != other_key
 

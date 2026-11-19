@@ -1,7 +1,6 @@
-"""One stored image: detail (with its state in the vector store), its stored files, patch, delete,
-payload push.
+"""单张已存图片：详情（含它在向量库里的状态）、存下来的文件、修改、删除、推送 payload。
 
-Registered after app.api.v1.image_download, so GET /api/images/download keeps its own route.
+注册在 app.api.v1.image_download 之后，所以 GET /api/images/download 保留自己的路由。
 """
 
 from __future__ import annotations

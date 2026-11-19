@@ -149,7 +149,7 @@ class OnnxEmbedding:
         )
 
     def set_input_size(self, width: int, height: int) -> None:
-        """Set the preprocessing size for a dynamic-input ONNX model."""
+        """为动态输入的 ONNX 模型设置预处理尺寸。"""
         if width <= 0 or height <= 0:
             raise err.validation_error("embedding 输入宽高必须大于 0")
         self.input_w = int(width)

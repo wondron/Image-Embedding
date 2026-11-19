@@ -1,4 +1,4 @@
-"""Processing and validation for diagnostic model operations."""
+"""诊断用模型操作的处理和校验。"""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def _segment_response(
     output_vis: bool,
     started: float,
 ) -> SegmentResponse:
-    """Run inference and image encoding together in a worker thread."""
+    """在一个工作线程里同时完成推理和图像编码。"""
     mask, visual, original = segmentor.detect(image_bytes, output_vis=output_vis)
     original = None
     if original is None or getattr(original, "ndim", 0) < 2:
@@ -66,7 +66,7 @@ def _embedding_response(
     *,
     started: float,
 ) -> EmbeddingResponse:
-    """Keep inference, vector conversion and validation off the event loop."""
+    """把推理、向量转换和校验都放在事件循环之外。"""
     vector = embedding_model.detect(image_bytes)
     if getattr(vector, "ndim", 0) != 1:
         raise ValueError(

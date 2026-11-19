@@ -1,4 +1,4 @@
-"""Health and runtime diagnostic endpoints."""
+"""健康检查和运行时诊断接口。"""
 
 from __future__ import annotations
 
@@ -39,12 +39,12 @@ def readyz(request: Request) -> dict[str, Any]:
     """
     try:
         runtime = get_application_state(request)
-        service = runtime.require_food_service()  # NOT_READY when the service is not loaded
+        service = runtime.require_food_service()  # 服务没有加载时为 NOT_READY
         return readiness_info(runtime, service)
     except AppError:
         raise
     except Exception as exc:
-        logger.exception("readyz failed: %s", exc)  # the exception text stays in the log
+        logger.exception("readyz failed: %s", exc)  # 异常文本留在日志里
         raise errors.not_ready("not ready: readiness check failed") from exc
 
 

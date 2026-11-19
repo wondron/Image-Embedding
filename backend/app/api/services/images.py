@@ -1,25 +1,25 @@
-"""HTTP adapter for one stored image: detail, patch, delete, payload push.
+"""单张已存图片的 HTTP 适配层：详情、修改、删除、推送 payload。
 
-PostgreSQL first, through the catalog (app.bootstrap.catalog; NOT_READY 503 while it is not
-built), so edits and deletions work while the encoder or Qdrant are down. The vector side follows
-when the retrieval stack is up and never fails a request whose PostgreSQL part succeeded:
+先处理 PostgreSQL，通过 catalog（app.bootstrap.catalog；还没构建时 NOT_READY 503），
+所以编码器或 Qdrant 挂了时也能编辑和删除。向量这一侧在检索服务就绪时跟上，而且
+PostgreSQL 部分成功的请求不会因为它失败：
 
-- GET adds vector: the image in the current collection (services.retrieval.vector_status), or
-  status=unavailable with the reason;
-- PATCH and POST .../vector-sync push the committed payload: vector_sync / sync_required as for
-  the scene memberships (app.api.services.vector_sync);
-- DELETE removes the point and the two files at once: cleanup=done, or queued when that is not
-  possible now (the image_deletions worker finishes it). The image leaves the gallery and the
-  search results either way: both read PostgreSQL.
-- POST .../reembed writes the point again from the stored original (services.retrieval
-  reembed_image): the one write here that needs the whole retrieval stack.
-- GET .../file serves the stored thumbnail or original through the configured object storage,
-  for when its URL cannot be loaded directly (the mock driver's placeholder host, a private
-  bucket): the retrieval stack's storage when it is up, else one built from the same config.
+- GET 额外返回 vector：图片在当前 collection 里的情况（services.retrieval.vector_status），
+  或者 status=unavailable 并给出原因；
+- PATCH 和 POST .../vector-sync 推送已提交的 payload：vector_sync / sync_required 的含义
+  和场景归属的一样（app.api.services.vector_sync）；
+- DELETE 立刻删除向量点和两个文件：cleanup=done；现在做不到时为 queued（由
+  image_deletions 后台任务完成）。不管哪种，图片都会立刻从图库和搜索结果里消失：
+  两者都读 PostgreSQL。
+- POST .../reembed 用存下来的原图重新写入向量点（services.retrieval reembed_image）：
+  这里唯一需要完整检索服务的写入。
+- GET .../file 通过配置的对象存储返回存下来的缩略图或原图，用于图片 URL 无法直接加载
+  的情况（mock 驱动的占位域名、私有存储桶）：检索服务就绪时用它的存储，否则用同一份
+  配置构建一个。
 
-Failures are AppError: IMAGE_NOT_FOUND 404, VALIDATION_ERROR 422, SEARCH_POSTGRES_FAILED /
-INDEX_POSTGRES_FAILED / IMAGE_FILE_UNAVAILABLE 502, NOT_READY 503. Routes are sync, so FastAPI
-runs them in the threadpool.
+失败都是 AppError：IMAGE_NOT_FOUND 404、VALIDATION_ERROR 422、SEARCH_POSTGRES_FAILED /
+INDEX_POSTGRES_FAILED / IMAGE_FILE_UNAVAILABLE 502、NOT_READY 503。路由是同步函数，
+所以 FastAPI 在线程池里执行它们。
 """
 
 from __future__ import annotations
@@ -69,8 +69,9 @@ def get_image(runtime: ApplicationState, image_id: UUID) -> dict[str, Any]:
 
 
 def _after_push(runtime: ApplicationState, image_id: UUID, image: dict[str, Any], sync: dict[str, Any]) -> dict[str, Any]:
-    """The image as it stands after the push: a push moves its ledger row (synced_version), so
-    read it again; keep the given one when there was no push or the image went away meanwhile."""
+    """推送之后图片现在的样子：推送会改动它的台账行（synced_version），所以重新读一次；
+    没有推送，或者图片在这期间被删了，就保留传入的那份。
+    """
     if sync["vector_sync"] == "not_ready":
         return image
     try:
@@ -82,7 +83,7 @@ def _after_push(runtime: ApplicationState, image_id: UUID, image: dict[str, Any]
 def update_image(
     runtime: ApplicationState, request: Request, image_id: UUID, body: ImageUpdateRequest
 ) -> dict[str, Any]:
-    fields = body.model_dump(exclude_unset=True)  # absent stays unchanged; an explicit null is kept
+    fields = body.model_dump(exclude_unset=True)  # 没传的保持不变；显式传 null 会保留
     image = require_catalog(runtime).images_uc.update(image_id, fields)
     sync = push_image_payload(runtime, image_id)
     image = _after_push(runtime, image_id, image, sync)
@@ -90,13 +91,13 @@ def update_image(
         "image updated id=%s fields=%s payload_version=%s vector_sync=%s | trace_id=%s",
         image_id, ",".join(sorted(fields)), image.get("payload_version"), sync["vector_sync"], get_trace_id(request),
     )
-    # vector: what the detail would show now, so the page needs no second request
+    # vector：详情页现在会显示的内容，这样页面不用再发第二个请求
     return {"ok": True, "image": image, "vector": _vector_state(runtime, image), **sync}
 
 
 def push_vector(runtime: ApplicationState, request: Request, image_id: UUID) -> dict[str, Any]:
-    """Write the image's current payload to the current collection again (repairs stale)."""
-    image = require_catalog(runtime).images_uc.get(image_id)  # IMAGE_NOT_FOUND before any push
+    """把图片当前的 payload 重新写到当前 collection（修复 stale）。"""
+    image = require_catalog(runtime).images_uc.get(image_id)  # 推送之前先确定 IMAGE_NOT_FOUND
     sync = push_image_payload(runtime, image_id)
     image = _after_push(runtime, image_id, image, sync)
     logger.info(
@@ -113,13 +114,14 @@ def push_vector(runtime: ApplicationState, request: Request, image_id: UUID) -> 
 
 
 def reembed_image(runtime: ApplicationState, request: Request, image_id: UUID) -> dict[str, Any]:
-    """Embed the stored original again and write the point (repairs vector.status=missing).
-    Needs the whole retrieval stack: encoder, Qdrant and object storage (NOT_READY otherwise)."""
-    require_catalog(runtime).images_uc.get(image_id)  # IMAGE_NOT_FOUND before anything else
+    """用存下来的原图重新计算 embedding 并写入向量点（修复 vector.status=missing）。
+    需要完整的检索服务：编码器、Qdrant 和对象存储（否则 NOT_READY）。
+    """
+    require_catalog(runtime).images_uc.get(image_id)  # 先于其他一切确定 IMAGE_NOT_FOUND
     require_retrieval(runtime)
-    with runtime.vector_writes.shared():  # a model version switch: wait, then use its stack
+    with runtime.vector_writes.shared():  # 正在切换模型版本：等待，然后用切换后的检索服务
         require_retrieval(runtime).reembed_uc.execute(image_id)
-    image = require_catalog(runtime).images_uc.get(image_id)  # the ledger row moved
+    image = require_catalog(runtime).images_uc.get(image_id)  # 台账行已经变了
     logger.info(
         "image re-embedded id=%s payload_version=%s | trace_id=%s",
         image_id, image.get("payload_version"), get_trace_id(request),
@@ -145,7 +147,7 @@ def delete_image(runtime: ApplicationState, request: Request, image_id: UUID) ->
     return {"ok": True, "image_id": str(queued["image_id"]), "deleted_at": queued.get("deleted_at"), "cleanup": cleanup}
 
 
-# What a stored file may be served as: the image types the index accepts, told by their bytes
+# 存储的文件可以作为什么类型返回：入库接受的图片类型，按文件内容判断
 _SIGNATURES = (
     (b"\xff\xd8\xff", "image/jpeg"),
     (b"\x89PNG\r\n\x1a\n", "image/png"),
@@ -153,7 +155,7 @@ _SIGNATURES = (
     (b"GIF89a", "image/gif"),
     (b"BM", "image/bmp"),
 )
-# The bytes of an id never change (the id is their hash), so a browser may keep them
+# 一个 id 对应的内容永远不变（id 就是内容的哈希），所以浏览器可以一直缓存
 _FILE_HEADERS = {
     "Cache-Control": "public, max-age=31536000, immutable",
     "X-Content-Type-Options": "nosniff",
@@ -162,31 +164,32 @@ _FILE_HEADERS = {
 
 
 def image_media_type(data: bytes) -> str | None:
-    """The image type of these bytes, or None when they are not one of the served types."""
+    """这些字节的图片类型；不是可返回的类型时为 None。"""
     if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "image/webp"
     return next((media for magic, media in _SIGNATURES if data.startswith(magic)), None)
 
 
 def _file_storage(runtime: ApplicationState):
-    """The stack's storage when it is up (the instance that wrote the files: the mock driver keeps
-    them in memory too), else the catalog's."""
+    """检索服务就绪时用它的存储（写入这些文件的那个实例：mock 驱动还把它们放在内存里），
+    否则用 catalog 的。
+    """
     try:
         return runtime.require_retrieval().infra.storage
     except err.NotReadyError:
         pass
     try:
         return require_catalog(runtime).file_storage()
-    except (ValueError, err.AppError) as exc:  # a bad IMAGE_STORAGE_CONFIG, boto3 missing
+    except (ValueError, err.AppError) as exc:  # IMAGE_STORAGE_CONFIG 有误，或者没有安装 boto3
         detail = exc.detail if isinstance(exc, err.AppError) else str(exc)
         raise err.not_ready(f"object storage unavailable: {detail}") from exc
 
 
 def image_file(runtime: ApplicationState, image_id: UUID, variant: str) -> Response:
-    """The bytes of the image's thumbnail or original, with their image type."""
+    """图片缩略图或原图的字节，以及它们的图片类型。"""
     url = require_catalog(runtime).images_uc.file_url(image_id, variant)
-    data = _file_storage(runtime).read_by_url_or_key(url)  # IMAGE_FILE_UNAVAILABLE when it cannot
+    data = _file_storage(runtime).read_by_url_or_key(url)  # 读不了时为 IMAGE_FILE_UNAVAILABLE
     media_type = image_media_type(data)
-    if media_type is None:  # never hand out bytes a browser might run
+    if media_type is None:  # 绝不返回浏览器可能执行的内容
         raise err.image_file_unavailable(f"stored {variant} of {image_id} is not a served image type")
     return Response(content=data, media_type=media_type, headers=_FILE_HEADERS)

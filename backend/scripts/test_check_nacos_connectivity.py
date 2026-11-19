@@ -1,4 +1,4 @@
-"""Nacos probe tests using fake clients and a local Nacos HTTP stub."""
+"""用假客户端和本地 Nacos HTTP 桩测试 Nacos 探测。"""
 
 from __future__ import annotations
 

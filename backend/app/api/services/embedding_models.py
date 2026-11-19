@@ -1,8 +1,8 @@
-"""HTTP adapter for the model versions (app.bootstrap.model_registry).
+"""模型版本的 HTTP 适配层（app.bootstrap.model_registry）。
 
-NOT_READY 503 while the registry is not built (retrieval switched off) or the catalog's
-PostgreSQL is down. Routes are sync: FastAPI runs them in the threadpool (a switch loads the
-version's encoder and opens its collection before it answers).
+版本登记还没构建（检索关闭）或 catalog 的 PostgreSQL 挂了时为 NOT_READY 503。
+路由是同步函数：FastAPI 在线程池里执行它们（切换版本时先加载该版本的编码器、
+打开它的 collection，然后才返回）。
 """
 
 from __future__ import annotations

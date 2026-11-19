@@ -1,11 +1,11 @@
-"""Decode GroundingDINO scores and normalized boxes without NMS."""
+"""解码 GroundingDINO 的分数和归一化的检测框，不做 NMS。"""
 
 import numpy as np
 
 
 def postprocess(pred_logits, pred_boxes, tokenizer, metadata, box_threshold=0.35,
                 text_threshold=0.25, *, validate_thresholds=True):
-    """Match original predict(): strict thresholds, normalized cxcywh, no NMS."""
+    """与原版 predict() 一致：严格阈值、归一化的 cxcywh、不做 NMS。"""
     if validate_thresholds and (not 0 <= box_threshold <= 1 or not 0 <= text_threshold <= 1):
         raise ValueError("Thresholds must be between zero and one")
     pred_logits = np.asarray(pred_logits)
@@ -23,7 +23,7 @@ def postprocess(pred_logits, pred_boxes, tokenizer, metadata, box_threshold=0.35
     token_ids = metadata["token_ids"]
     phrases = []
     for row in selected_logits:
-        # get_phrases_from_posmap excludes token 0 and all indices >=255.
+        # get_phrases_from_posmap 排除 token 0 以及所有 >=255 的下标。
         indices = np.flatnonzero(row > text_threshold)
         indices = indices[(indices > 0) & (indices < min(255, len(token_ids)))]
         phrases.append(tokenizer.decode([token_ids[i] for i in indices]).replace(".", ""))

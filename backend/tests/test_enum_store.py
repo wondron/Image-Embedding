@@ -1,4 +1,4 @@
-"""config/param/enums.yaml: file rules, checks against the code, reload on change, append."""
+"""config/param/enums.yaml：文件规则、对照代码的检查、变化时重新加载、追加取值。"""
 
 import os
 import tempfile
@@ -28,7 +28,7 @@ def shipped_doc() -> dict:
 
 
 def write_and_touch(path: Path, text: str) -> None:
-    """Rewrite path and move its mtime forward, so coarse mtime clocks still see a change."""
+    """重写 path 并把它的 mtime 往后调，这样粗粒度的 mtime 时钟也能看到变化。"""
     path.write_bytes(text.encode("utf-8"))
     st = os.stat(path)
     os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 2_000_000_000))
@@ -42,7 +42,7 @@ class ShippedFileTests(unittest.TestCase):
         self.assertEqual({item.value: item.label for item in domain.values}["other"], "其他")
 
     def test_shipped_file_passes_every_rule(self):
-        catalog = read_catalog(SHIPPED)  # also checks system values against app.core.enums
+        catalog = read_catalog(SHIPPED)  # 也对照 app.core.enums 检查系统取值
         self.assertEqual(set(catalog.names()), set(enums.SYSTEM_ENUMS) | set(enums.EDITABLE_ENUMS))
         for name in enums.EDITABLE_ENUMS:
             self.assertTrue(catalog.get(name).editable, name)
@@ -135,7 +135,7 @@ class EnumStoreTests(unittest.TestCase):
         food = self.store.add_value("food_state", "thawed", " 解冻 ", "冷冻后化开")
         self.assertEqual(food.value_list(), ["raw", "cooked", "frozen", "thawed"])
         self.assertIn("thawed", self.store.get("food_state"))
-        on_disk = read_catalog(self.path).get("food_state")  # what a fresh process would read
+        on_disk = read_catalog(self.path).get("food_state")  # 全新的进程会读到的内容
         self.assertEqual((on_disk.values[-1].label, on_disk.values[-1].description), ("解冻", "冷冻后化开"))
         self.assertEqual(self.path.read_text(encoding="utf-8"), dump_catalog(read_catalog(self.path)))
         self.assertEqual(list(self.dir.glob(".*.tmp")), [])
@@ -180,8 +180,8 @@ class EnumStoreTests(unittest.TestCase):
             self.assertIn("raw", self.store.get("food_state"))
         self.assertIn("invalid YAML", self.store.error)
         self.assert_app_error("ENUM_FILE_INVALID", self.store.add_value, "food_state", "thawed", "解冻")
-        self.assertEqual(self.path.read_text(encoding="utf-8"), "food_state: [")  # not clobbered
-        write_and_touch(self.path, SHIPPED.read_text(encoding="utf-8"))  # fixed again
+        self.assertEqual(self.path.read_text(encoding="utf-8"), "food_state: [")  # 没有被覆盖
+        write_and_touch(self.path, SHIPPED.read_text(encoding="utf-8"))  # 又修好了
         self.assertIsNone(self.store.error)
 
     def test_without_a_good_version_the_store_is_not_ready(self):
@@ -189,10 +189,10 @@ class EnumStoreTests(unittest.TestCase):
             store = EnumStore(self.dir / "missing.yaml")
             error = self.assert_app_error("ENUM_FILE_INVALID", store.catalog)
         self.assertIn("missing.yaml", error.detail)
-        self.assert_app_error("ENUM_FILE_INVALID", store.get, "food_state")  # no log spam: same file state
+        self.assert_app_error("ENUM_FILE_INVALID", store.get, "food_state")  # 不刷日志：文件状态相同
 
     def test_a_file_that_cannot_be_renamed_onto_is_overwritten_in_place(self):
-        # docker bind-mounts of a single file refuse os.replace with EBUSY
+        # docker 单独 bind mount 的文件会以 EBUSY 拒绝 os.replace
         with patch.object(enum_store.os, "replace", side_effect=OSError(16, "Device or resource busy")):
             with self.assertLogs("config.enums", level="WARNING"):
                 self.store.add_value("license", "cc_by", "CC BY")

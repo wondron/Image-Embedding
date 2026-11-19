@@ -1,18 +1,18 @@
-"""images: food attributes besides food_state — food_processing, food_weight_g, food_count.
+"""images：food_state 之外的食物属性——food_processing、food_weight_g、food_count。
 
 Revision ID: 20261109_0005
 Revises: 20261109_0004
 Create Date: 2026-11-09
 
-All three are nullable (unknown):
-- food_processing: editable enum like food_state (values in config/param/enums.yaml, no CHECK);
-- food_weight_g:   grams, CHECK > 0;
-- food_count:      pieces, CHECK > 0.
-None of them is in the Qdrant payload, so existing points need no re-push.
+三个都可以为空（未知）：
+- food_processing：和 food_state 一样的可编辑枚举（取值在 config/param/enums.yaml，没有 CHECK）；
+- food_weight_g：  克，CHECK > 0；
+- food_count：     个数，CHECK > 0。
+它们都不在 Qdrant payload 里，所以已有的向量点不需要重新推送。
 
-ADD COLUMN without a default only touches the catalog. Each new CHECK makes PostgreSQL scan
-images once under the ALTER's ACCESS EXCLUSIVE lock (every row is NULL there, so it cannot
-fail); on a large table run this at a quiet time. Downgrade drops the columns and their data.
+不带默认值的 ADD COLUMN 只改系统目录。每个新的 CHECK 都会让 PostgreSQL 在 ALTER 的
+ACCESS EXCLUSIVE 锁下扫描一次 images（这时每一行都是 NULL，所以不会失败）；表很大时
+请在空闲时段执行。降级会删除这些列及其数据。
 """
 from __future__ import annotations
 

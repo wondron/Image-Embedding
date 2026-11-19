@@ -1,8 +1,7 @@
-"""Model versions without a database: the fingerprint (which encoder writes which embedding
-space), naming, the status rules, one build batch, deletions across versions, and how the
-retrieval stack pairs an encoder with the current version.
+"""不用数据库的模型版本测试：指纹（哪个编码器写入哪个 embedding 空间）、命名、状态规则、
+一批构建、跨版本的删除，以及检索服务怎样把编码器和当前版本配对。
 
-The SQL is in test_pg_live; the registry and its HTTP routes in test_embedding_models_http.
+SQL 在 test_pg_live 里；版本登记及其 HTTP 路由在 test_embedding_models_http 里。
 """
 
 import contextlib
@@ -36,28 +35,28 @@ def fingerprint(probe, **spec):
 
 
 PROBE_A = unit([0.9, 0.1, 0.3, 0.2])
-PROBE_B = unit([0.1, 0.9, 0.2, 0.4])  # other weights
+PROBE_B = unit([0.1, 0.9, 0.2, 0.4])  # 不同的权重
 
 
 class FingerprintTests(unittest.TestCase):
     def test_the_same_encoder_on_other_hardware_is_the_same_space(self):
         a = fingerprint(PROBE_A)
-        jitter = [v + 1e-5 * (-1) ** i for i, v in enumerate(PROBE_A)]  # GPU vs CPU arithmetic
+        jitter = [v + 1e-5 * (-1) ** i for i, v in enumerate(PROBE_A)]  # GPU 与 CPU 的算术差异
         self.assertTrue(mv.same_encoder(a, fingerprint(jitter)))
-        self.assertTrue(mv.same_encoder(a, fingerprint(PROBE_A, model_path="/elsewhere/a.onnx")))  # moved file
+        self.assertTrue(mv.same_encoder(a, fingerprint(PROBE_A, model_path="/elsewhere/a.onnx")))  # 移动过的文件
         self.assertTrue(mv.same_encoder(a, fingerprint(PROBE_A, img_interp="CUBIC")))
 
     def test_other_weights_or_preprocessing_are_another_space(self):
         a = fingerprint(PROBE_A)
         self.assertFalse(mv.same_encoder(a, fingerprint(PROBE_B)))
-        tuned = unit([0.9, 0.2, 0.3, 0.2])  # a light fine-tune of the same weights
+        tuned = unit([0.9, 0.2, 0.3, 0.2])  # 同一份权重的轻量微调
         self.assertLess(mv.cosine(PROBE_A, tuned), mv.SAME_MODEL_MIN_COSINE)
         self.assertGreater(mv.cosine(PROBE_A, tuned), 0.98)
         self.assertFalse(mv.same_encoder(a, fingerprint(tuned)))
         for change in ({"scale": [336, 336]}, {"mean": [0.5, 0.5, 0.5]}, {"img_interp": "linear"}, {"output_name": "x"}):
             with self.subTest(change=change):
                 self.assertFalse(mv.same_encoder(a, fingerprint(PROBE_A, **change)))
-        self.assertFalse(mv.same_encoder(a, fingerprint(PROBE_A + [0.0])))  # other dim
+        self.assertFalse(mv.same_encoder(a, fingerprint(PROBE_A + [0.0])))  # 不同的维度
 
     def test_missing_or_malformed_fingerprints_never_match(self):
         a = fingerprint(PROBE_A)
@@ -74,7 +73,7 @@ class FingerprintTests(unittest.TestCase):
         self.assertEqual(image.shape, (*PROBE_SHAPE, 3))
         self.assertEqual(image.dtype, np.uint8)
         np.testing.assert_array_equal(image, probe_image())
-        self.assertGreater(len(np.unique(image.reshape(-1, 3), axis=0)), 1000)  # not a flat image
+        self.assertGreater(len(np.unique(image.reshape(-1, 3), axis=0)), 1000)  # 不是纯色图
 
     def test_an_encoder_fingerprints_its_effective_preprocessing_once(self):
         model = SimpleNamespace(input_h=256, input_w=192, detect=Mock(return_value=np.asarray([3.0, 4.0], dtype=np.float32)))
@@ -82,8 +81,8 @@ class FingerprintTests(unittest.TestCase):
         encoder._model, encoder._lock, encoder._fingerprint = model, contextlib.nullcontext(), None
         encoder.spec = EmbeddingSpec.from_config({"EMBEDDING_CONFIG": {"model_path": "config\\model\\x.onnx"}})
         fp = encoder.fingerprint()
-        self.assertEqual(fp["spec"]["model_path"], "config/model/x.onnx")  # loads on Linux too
-        self.assertEqual(fp["spec"]["scale"], [256, 192])  # what the ONNX input forced, not the config default
+        self.assertEqual(fp["spec"]["model_path"], "config/model/x.onnx")  # 在 Linux 上也能加载
+        self.assertEqual(fp["spec"]["scale"], [256, 192])  # ONNX 输入强制的尺寸，而不是配置的默认值
         self.assertEqual(fp["probe"], [3.0, 4.0])
         self.assertIs(encoder.fingerprint(), fp)
         model.detect.assert_called_once()
@@ -137,7 +136,7 @@ class NamingAndStatusTests(unittest.TestCase):
                 check()
             self.assertEqual(ctx.exception.code, "EMBEDDING_MODEL_STATE")
         mv.require_retirable({**row, "status": "ready"})
-        mv.require_buildable({**row, "status": "current"})  # filling the current version's gaps
+        mv.require_buildable({**row, "status": "current"})  # 补上当前版本的缺口
 
     def test_checking_a_collection_against_an_encoder(self):
         samples = [{"id": "a", "original_url": "u/a"}, {"id": "b", "original_url": "u/b"}, {"id": "c", "original_url": None}]
@@ -156,7 +155,7 @@ class NamingAndStatusTests(unittest.TestCase):
         self.assertEqual((none["checked"], none["matches"]), (0, None))
 
 
-# -- one build batch ---------------------------------------------------------------------
+# -- 一批构建 -----------------------------------------------------------------------------
 
 IMG = [f"0000000{n}-0000-4000-8000-000000000000" for n in range(1, 6)]
 MODEL = ActiveModel(id=2, name="dino", version="v2", collection="c2", dim=4, distance="cosine")
@@ -203,15 +202,15 @@ class BuildBatchTests(unittest.TestCase):
         self.assertEqual(batch.embedded, [IMG[0]])
         self.assertEqual([(f["image_id"], f["code"]) for f in batch.failures],
                          [(IMG[1], "IMAGE_FILE_UNAVAILABLE"), (IMG[2], "INDEX_BAD_IMAGE"), (IMG[3], "INDEX_BAD_EMBEDDING")])
-        self.assertNotIn("secret", batch.failures[0]["detail"])  # internal detail stays in the log
-        self.assertTrue(batch.done)  # fewer than the limit: nothing after
+        self.assertNotIn("secret", batch.failures[0]["detail"])  # 内部细节留在日志里
+        self.assertTrue(batch.done)  # 少于上限：后面没有了
 
     def test_images_deleted_meanwhile_leave_no_point_behind(self):
-        self.metadata.get_payload_rows.return_value = self.metadata.get_payload_rows.return_value[1:]  # IMG[0] gone already
+        self.metadata.get_payload_rows.return_value = self.metadata.get_payload_rows.return_value[1:]  # IMG[0] 已经没了
         self.models.record_embeddings.side_effect = lambda *, model_id, versions: sorted(set(versions) - {IMG[2]})
         batch = self.uc.run_batch(limit=16)
         self.assertEqual(sorted(batch.gone), sorted([IMG[0], IMG[2]]))
-        self.vectors.delete.assert_called_once_with(IMG[2])  # written, then its image went away
+        self.vectors.delete.assert_called_once_with(IMG[2])  # 写入之后，它的图片被删了
         self.assertNotIn(IMG[0], [c.args[0] for c in self.vectors.upsert.call_args_list])
 
     def test_a_vector_store_failure_stops_the_build(self):
@@ -239,7 +238,7 @@ class BuildBatchTests(unittest.TestCase):
         self.assertEqual(self.metadata.mark_payloads_pushed.call_args.kwargs["model_id"], 2)
 
 
-# -- deletions reach every version still in use ----------------------------------------------
+# -- 删除会作用到每个仍在使用的版本 ----------------------------------------------------------
 
 class DeletionAcrossVersionsTests(unittest.TestCase):
     def test_a_deleted_image_leaves_every_live_collection(self):
@@ -273,13 +272,13 @@ class DeletionAcrossVersionsTests(unittest.TestCase):
         vectors.sibling.side_effect = lambda *, collection, dim, distance: siblings[collection]
         infra = rs.RetrievalInfra(metadata=metadata, vectors=vectors, storage=Mock(),
                                   model=ActiveModel(id=2, name="d", version="v", collection="c2", dim=4, distance="cosine"))
-        self.assertEqual(infra.other_vectors(), [siblings["c1"]])  # c3 was dropped from Qdrant by hand
+        self.assertEqual(infra.other_vectors(), [siblings["c1"]])  # c3 被手工从 Qdrant 删掉了
         self.assertEqual(metadata.list_embedding_model_rows.call_args.kwargs["statuses"], ("building", "ready"))
         infra.other_vectors()
-        self.assertEqual(vectors.sibling.call_count, 2)  # one store per collection
+        self.assertEqual(vectors.sibling.call_count, 2)  # 每个 collection 一个存储
 
 
-# -- pairing the encoder with the current version --------------------------------------------
+# -- 把编码器和当前版本配对 ----------------------------------------------------------------
 
 class FakeEncoder:
     def __init__(self, probe, path="config/model/dino/a.onnx", **spec):
@@ -331,7 +330,7 @@ class PairingTests(unittest.TestCase):
         own = FakeEncoder(PROBE_A)
         self.load.return_value = own
         stack = self.build(FakeEncoder(PROBE_B, path="config/model/dino/b.onnx"))
-        self.assertIs(stack.embedding, own)  # search keeps the encoder that wrote c1
+        self.assertIs(stack.embedding, own)  # 搜索保留写入 c1 的那个编码器
         self.assertEqual(self.load.call_args.args[0]["model_path"], SPEC["model_path"])
         self.assertIs(stack.index_uc._embedding, own)
 
@@ -344,7 +343,7 @@ class PairingTests(unittest.TestCase):
 
     def test_retrieval_refuses_to_start_when_the_version_encoder_is_gone(self):
         self.row["fingerprint"] = fingerprint(PROBE_A)
-        for outcome in (FileNotFoundError("no onnx"), FakeEncoder(PROBE_B)):  # missing, or overwritten in place
+        for outcome in (FileNotFoundError("no onnx"), FakeEncoder(PROBE_B)):  # 不存在，或者被原地覆盖
             with self.subTest(outcome=type(outcome).__name__):
                 self.load.reset_mock()
                 self.load.side_effect = outcome if isinstance(outcome, Exception) else None
@@ -353,7 +352,7 @@ class PairingTests(unittest.TestCase):
                 with self.assertRaises(AppError) as ctx:
                     self.build(FakeEncoder(PROBE_B, path="config/model/dino/b.onnx"))
                 self.assertEqual(ctx.exception.code, "EMBEDDING_MODEL_MISMATCH")
-                self.vectors.close.assert_called_once()  # what was opened is released
+                self.vectors.close.assert_called_once()  # 打开的东西都被释放
 
     def test_a_version_without_fingerprint_adopts_the_encoder_its_images_agree_with(self):
         samples = [{"id": IMG[0], "original_url": "https://cdn/o/1.jpg"}]
@@ -369,7 +368,7 @@ class PairingTests(unittest.TestCase):
 
     def test_a_version_without_fingerprint_refuses_an_encoder_its_images_disagree_with(self):
         self.metadata.sample_embedded_images.return_value = [{"id": IMG[0], "original_url": "https://cdn/o/1.jpg"}]
-        self.vectors.get_vectors.return_value = {IMG[0]: PROBE_B}  # written by the old model
+        self.vectors.get_vectors.return_value = {IMG[0]: PROBE_B}  # 由旧模型写入
         with self.assertRaises(AppError) as ctx:
             self.build(FakeEncoder(PROBE_A))
         self.assertEqual(ctx.exception.code, "EMBEDDING_MODEL_MISMATCH")
@@ -383,7 +382,7 @@ class PairingTests(unittest.TestCase):
         configured = FakeEncoder(PROBE_A)
         stack = self.build(configured)
         self.assertIs(stack.embedding, configured)
-        self.metadata.record_model_fingerprint.assert_not_called()  # the next start checks again
+        self.metadata.record_model_fingerprint.assert_not_called()  # 下次启动时再核对
         self.assertIsNone(stack.model.fingerprint)
 
     def test_an_empty_version_without_fingerprint_adopts_directly(self):

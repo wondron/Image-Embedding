@@ -1,14 +1,14 @@
-"""Category tree write rules (categories + category_names): what a create or patch may carry.
+"""类别树的写入规则（categories + category_names）：创建或修改请求可以带什么。
 
-Everything here needs no database: shapes, lengths and spellings (app.core.category_rules), plus
+这里的检查都不需要数据库：形状、长度和写法（app.core.category_rules），以及
 
-- names: one row per (lang, name); at most one primary per language; the zh primary is
-  required, because results and the gallery show it as the image's category;
-- roots: only the domains (app.core.enums.CategoryDomain) may sit at the top of the tree.
+- 名称：每个 (lang, name) 一行；每种语言最多一个主名称；必须有 zh 主名称，
+  因为结果和图库把它显示为图片的类别；
+- 根节点：只有领域（app.core.enums.CategoryDomain）可以位于树的顶层。
 
-Checks that need the stored tree (the parent exists, the code is free, no move under an own
-descendant) run inside the write transaction, in app.repositories.categories.
-Bad input raises VALIDATION_ERROR naming the field.
+需要已存的树才能做的检查（父节点存在、code 没被占用、不能移到自己的后代下面）
+在写入事务里进行，见 app.repositories.categories。
+输入不合法时抛出 VALIDATION_ERROR，并指明字段。
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from app.core.category_rules import (
 from app.core.enums import CategoryDomain, NameKind
 from app.core.rules.enum_fields import coerce_enum
 
-# The columns a request may set, in the order they are checked
+# 请求可以设置的列，按检查顺序排列
 CATEGORY_WRITE_FIELDS = (
     "code",
     "parent_id",
@@ -45,7 +45,7 @@ CATEGORY_WRITE_FIELDS = (
     "sort_order",
     "is_active",
 )
-# Codes a root may use
+# 根节点可以使用的 code
 ROOT_CODES = tuple(member.value for member in CategoryDomain)
 
 _CODE_RE = re.compile(CATEGORY_CODE_PATTERN)
@@ -55,7 +55,7 @@ _PG_INT_MAX = 2_147_483_647
 
 
 def _text(value: Any, field: str, *, max_len: int) -> str:
-    """Stripped, non-empty text within the bound."""
+    """去掉首尾空白、非空且不超过长度上限的文本。"""
     if not isinstance(value, str):
         raise err.validation_error(f"{field} must be a string, got {type(value).__name__}")
     text = value.strip()
@@ -67,7 +67,7 @@ def _text(value: Any, field: str, *, max_len: int) -> str:
 
 
 def normalize_category_id(value: Any, field: str = "category_id") -> int:
-    """A row id: a positive int (True must not count as 1)."""
+    """行 id：正整数（True 不能当成 1）。"""
     if isinstance(value, bool) or not isinstance(value, int) or not 0 < value <= _PG_INT_MAX:
         raise err.validation_error(f"{field} must be a positive integer, got {value!r}")
     return value
@@ -88,7 +88,7 @@ def normalize_category_code(value: Any) -> str:
 
 
 def normalize_category_names(value: Any) -> list[dict[str, str]]:
-    """[{lang, name, kind}] in the given order; see the module docstring for the rules."""
+    """按给定顺序的 [{lang, name, kind}]；规则见模块文档字符串。"""
     if not isinstance(value, (list, tuple)):
         raise err.validation_error(f"names must be an array, got {type(value).__name__}")
     if len(value) > CATEGORY_MAX_NAMES:
@@ -122,7 +122,7 @@ def normalize_category_names(value: Any) -> list[dict[str, str]]:
 
 
 def normalize_cuisines(value: Any) -> list[str]:
-    """Cuisine codes, duplicates removed (the first one keeps its place)."""
+    """菜系 code，去掉重复项（重复的保留第一次出现的位置）。"""
     if not isinstance(value, (list, tuple)):
         raise err.validation_error(f"cuisines must be an array of strings, got {type(value).__name__}")
     cuisines: list[str] = []
@@ -165,7 +165,7 @@ _NORMALIZERS = {
     "sort_order": _sort_order,
     "is_active": _is_active,
 }
-# What a create request may leave out
+# 创建请求可以不写的字段
 _CREATE_DEFAULTS: dict[str, Any] = {
     "parent_id": None,
     "cuisines": [],
@@ -176,9 +176,9 @@ _CREATE_DEFAULTS: dict[str, Any] = {
 
 
 def normalize_category_fields(fields: Any, *, partial: bool) -> dict[str, Any]:
-    """A create request (partial=False: code and names required, the rest defaulted) or a patch
-    (partial=True: only the keys given, at least one). A key outside CATEGORY_WRITE_FIELDS is
-    rejected; in a patch, parent_id / heating_group_id may be None (move to the root / clear).
+    """创建请求（partial=False：code 和 names 必填，其余取默认值）或修改请求
+    （partial=True：只处理传来的键，至少一个）。CATEGORY_WRITE_FIELDS 以外的键会被拒绝；
+    修改请求里 parent_id / heating_group_id 可以为 None（移到根节点 / 清空）。
     """
     if not isinstance(fields, Mapping):
         raise err.validation_error("category fields must be an object")
@@ -200,7 +200,7 @@ def normalize_category_fields(fields: Any, *, partial: bool) -> dict[str, Any]:
 
 
 def check_root_code(code: str) -> None:
-    """Roots are the domains; any other code needs a parent."""
+    """根节点是各个领域；其他 code 都需要父节点。"""
     if code.lower() not in ROOT_CODES:
         raise err.validation_error(
             f"a root category must use a domain code ({', '.join(ROOT_CODES)}); {code!r} needs a parent"
@@ -208,7 +208,7 @@ def check_root_code(code: str) -> None:
 
 
 def display_name(names: Sequence[Mapping[str, Any]]) -> str | None:
-    """The name results show for a category: its zh primary name, if it has one."""
+    """结果里显示的类别名：它的 zh 主名称（有的话）。"""
     for entry in names:
         if entry.get("lang") == CATEGORY_DISPLAY_LANG and entry.get("kind") == NameKind.PRIMARY.value:
             return str(entry.get("name"))

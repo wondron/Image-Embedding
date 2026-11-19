@@ -1,4 +1,4 @@
-"""Food annotation fields (stored in image_foods): rules and where they show up."""
+"""食物标注字段（存在 image_foods 里）：规则以及它们出现在哪里。"""
 
 import unittest
 from types import SimpleNamespace
@@ -57,7 +57,7 @@ class FoodFieldTests(unittest.TestCase):
         with self.assertRaises(AppError) as ctx:
             coerce_food_field("food_processing", "minced")
         self.assertEqual(ctx.exception.code, "VALIDATION_ERROR")
-        self.assertIn("shredded", ctx.exception.detail)  # names the allowed values
+        self.assertIn("shredded", ctx.exception.detail)  # 列出允许的值
 
     def test_unknown_key_is_a_programming_error(self):
         with self.assertRaises(KeyError):
@@ -74,7 +74,7 @@ FOOD = {key: ROW[key] for key in FOOD_FIELDS}
 
 
 class HeatingOutputTests(unittest.TestCase):
-    """The food annotation goes with heating_group: only when the scene outputs_heating (§6.1 P9)."""
+    """食物标注和 heating_group 同进同出：只在场景开启 outputs_heating 时出现（§6.1 P9）。"""
 
     def list_item(self, outputs_heating):
         meta = SimpleNamespace(

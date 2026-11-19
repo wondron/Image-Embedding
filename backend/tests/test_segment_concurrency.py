@@ -1,4 +1,4 @@
-"""Concurrent segment inference over fake sessions; no model or GPU is required."""
+"""在假 session 上并发进行分割推理；不需要模型或 GPU。"""
 
 import threading
 import unittest
@@ -12,7 +12,7 @@ from app.services.predict.pipeline.a_onnx_segment import OnnxSegmentPy
 
 
 class ObservedLock:
-    """A real lock that lets a test observe when the second caller tries to enter."""
+    """一把真实的锁，让测试能观察到第二个调用方什么时候尝试进入。"""
 
     def __init__(self, lock):
         self.lock = lock

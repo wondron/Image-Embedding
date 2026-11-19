@@ -1,4 +1,4 @@
-"""Category tree write rules (app.core.rules.category_fields): no database needed."""
+"""类别树的写入规则（app.core.rules.category_fields）：不需要数据库。"""
 
 import unittest
 
@@ -44,7 +44,7 @@ class CategoryFieldsTests(unittest.TestCase):
 
     def test_patch_keeps_only_the_given_keys(self):
         self.assertEqual(normalize_category_fields({"sort_order": 3}, partial=True), {"sort_order": 3})
-        # null is a value for the two nullable columns: move to the root, clear the heating group
+        # 对两个可为空的列来说 null 是一个值：移到根节点、清空加热组
         self.assertEqual(
             normalize_category_fields({"parent_id": None, "heating_group_id": None}, partial=True),
             {"parent_id": None, "heating_group_id": None},
@@ -52,7 +52,7 @@ class CategoryFieldsTests(unittest.TestCase):
 
     def test_patch_rejects_nothing_unknown_keys_and_null_for_required_columns(self):
         self.assertIn("no category fields", self.assert_invalid(normalize_category_fields, {}, partial=True))
-        # path is maintained by the database; id never changes
+        # path 由数据库维护；id 永远不变
         self.assertIn("path", self.assert_invalid(normalize_category_fields, {"path": "1.2"}, partial=True))
         self.assert_invalid(normalize_category_fields, {"id": 9, "sort_order": 1}, partial=True)
         self.assert_invalid(normalize_category_fields, ["code"], partial=True)

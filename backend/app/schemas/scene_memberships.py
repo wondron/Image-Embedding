@@ -1,8 +1,8 @@
-"""Image membership wire; implicit is derived, never a database enum.
+"""图片归属的 wire；implicit 是推导出来的，从来不是数据库枚举。
 
-A write is saved in PostgreSQL, then the image's vector payload is pushed when the retrieval
-stack is up (app.api.services.scene_memberships): vector_sync says how that went and
-sync_required whether search still waits for POST /api/scenes/sync.
+写入先存到 PostgreSQL，然后检索服务就绪时推送图片的向量 payload
+（app.api.services.scene_memberships）：vector_sync 说明推送结果，sync_required 说明搜索
+是否还在等 POST /api/scenes/sync。
 """
 
 from typing import Literal

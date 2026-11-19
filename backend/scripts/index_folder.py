@@ -92,7 +92,7 @@ STATUS_TEXT = {"created": "新入库", "existed": "已存在", "failed": "失败
 
 @dataclass(frozen=True)
 class Outcome:
-    status: str  # created / existed / failed
+    status: str  # 新入库 / 已存在 / 失败
     image_id: str = ""
     error: str = ""  # 错误码，如 INDEX_BAD_IMAGE；请求没发出去时是异常类名，如 ConnectionError
     detail: str = ""

@@ -1,4 +1,4 @@
-"""GroundingDINO image/text preprocessing with the original resize and token masks."""
+"""GroundingDINO 的图像 / 文本预处理，使用原版的缩放方式和 token 掩码。"""
 
 import numpy as np
 from PIL import Image
@@ -19,7 +19,7 @@ def _fixed_dimension(value):
 
 
 def _resize_shape(width, height, short_side=800, max_size=1333):
-    """Match groundingdino.datasets.transforms.resize's integer rounding."""
+    """与 groundingdino.datasets.transforms.resize 的整数取整方式一致。"""
     if min(width, height, short_side, max_size) <= 0:
         raise ValueError("Image dimensions and resize settings must be positive")
     size = int(short_side)
@@ -34,7 +34,7 @@ def _resize_shape(width, height, short_side=800, max_size=1333):
 
 def preprocess_image(image, image_shape=None, short_side=800, max_size=1333,
                      mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)):
-    """Normalize a path, RGB PIL image or OpenCV uint8 BGR array to NCHW."""
+    """把路径、RGB PIL 图像或 OpenCV uint8 BGR 数组规范化成 NCHW。"""
     if isinstance(image, np.ndarray):
         if image.ndim != 3 or image.shape[2] != 3 or image.size == 0 or image.dtype != np.uint8:
             raise ValueError("OpenCV images must be nonempty uint8 BGR arrays with shape [H,W,3]")
@@ -82,10 +82,10 @@ def preprocess_image(image, image_shape=None, short_side=800, max_size=1333,
 
 
 def prepare_text_inputs(caption, tokenizer, max_text_len=256, fixed_text_len=None):
-    """Build original GroundingDINO sentence masks before truncation/padding.
+    """在截断 / 填充之前构建原版 GroundingDINO 的句子掩码。
 
-    Returns (input_arrays, metadata). All arrays have batch size one. The BERT
-    tokenizer remains outside the ONNX graph so captions can change at runtime.
+    返回（输入数组, 元数据）。所有数组的 batch 都是 1。BERT 分词器放在 ONNX 计算图之外，
+    这样 caption 可以在运行时修改。
     """
     if max_text_len < 1:
         raise ValueError("max_text_len must be positive")
@@ -142,11 +142,10 @@ def prepare_text_inputs(caption, tokenizer, max_text_len=256, fixed_text_len=Non
 def prepare_inputs(image, caption, tokenizer, input_shapes=None, short_side=800,
                    max_size=1333, max_text_len=256,
                    mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)):
-    """Return (feed dictionary, metadata) for a batch-one ONNX model.
+    """为 batch 为 1 的 ONNX 模型返回（输入字典, 元数据）。
 
-    input_shapes is an optional mapping from ONNX input names to declared shapes.
-    Symbolic dimensions (strings/None) remain dynamic. Static text inputs are
-    padded with the tokenizer pad id; truncation is performed after mask creation.
+    input_shapes 是可选的映射，从 ONNX 输入名到声明的形状。符号维度（字符串 / None）
+    保持动态。静态的文本输入用分词器的 pad id 填充；截断在创建掩码之后进行。
     """
     shapes = input_shapes or {}
     images, metadata = preprocess_image(image, shapes.get("images"), short_side, max_size, mean, std)

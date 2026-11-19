@@ -1,4 +1,4 @@
-"""Retrieval HTTP surface with a fake stack: parsing, threadpool offload, health."""
+"""用假的检索服务测试检索 HTTP 接口：解析、放到线程池执行、健康检查。"""
 
 import asyncio
 import unittest
@@ -84,7 +84,7 @@ class RetrievalHttpTests(unittest.TestCase):
         p = patch.object(routes, "get_application_state", return_value=self.runtime)
         p.start()
         self.addCleanup(p.stop)
-        # img_url inputs are downloaded by the HTTP layer (bounded fetcher), not the use case
+        # img_url 输入由 HTTP 层下载（有限制的下载器），不是用例
         self.fetch = AsyncMock(return_value=b"downloaded")
         p = patch("app.api.services.retrieval.read_url_bytes", self.fetch)
         p.start()
@@ -102,7 +102,7 @@ class RetrievalHttpTests(unittest.TestCase):
         self.assertEqual([i["image_bytes"] for i in items], [b"aaa", b"bbb"])
         self.assertEqual({i["category"] for i in items}, {"dish.steak"})
         self.assertTrue(self.calls["index"]["off_loop"])
-        # the task records of this request carry its trace id
+        # 这次请求的任务记录带着它的 trace id
         self.assertEqual(self.calls["index"]["trace_id"], response.json()["trace_id"])
 
     def test_index_takes_at_most_500_files_per_request(self):
@@ -118,7 +118,7 @@ class RetrievalHttpTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422, response.text)
         self.assertEqual(response.json()["error"], "VALIDATION_ERROR")
         self.assertIn("max 500", response.json()["detail"])
-        self.assertNotIn("index", self.calls)  # refused before any file is indexed
+        self.assertNotIn("index", self.calls)  # 在任何文件入库之前就被拒绝
 
     def test_index_without_files_is_400(self):
         response = self.client.post("/api/index", data={"category": "x"})
@@ -172,7 +172,7 @@ class RetrievalHttpTests(unittest.TestCase):
         self.assertNotIn("index_file", self.calls)
 
     def test_index_file_preserves_use_case_error_codes_and_statuses(self):
-        # A client error keeps its detail; an internal code (vector store) shows its public message.
+        # 客户端错误保留它的 detail；内部错误码（向量库）显示它的公开信息。
         for code, status, detail in (
             ("INDEX_BAD_IMAGE", 422, "index failed"),
             ("INDEX_QDRANT_FAILED", 502, "vector store write failed"),
@@ -216,7 +216,7 @@ class RetrievalHttpTests(unittest.TestCase):
         response = self.client.post("/api/search", json={"img_url": "https://x/a.jpg", "trace_id": "t-42"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["trace_id"], "t-42")
-        self.assertEqual(self.calls["search"]["trace_id"], "t-42")  # correlate per-step timing logs
+        self.assertEqual(self.calls["search"]["trace_id"], "t-42")  # 关联每一步的耗时日志
 
     def test_bad_score_threshold_literal_has_its_own_code(self):
         response = self.client.post("/api/search", data={"img_url": "https://x/a.jpg", "score_threshold": "high"})
@@ -266,7 +266,7 @@ class RetrievalHttpTests(unittest.TestCase):
         self.assertEqual(self.calls["index"]["items"][0]["description"], "红烧肉")
 
         response = self.client.post("/api/index", files=[("file", ("a.png", b"aaa", "image/png"))])
-        self.assertIsNone(self.calls["index"]["items"][0]["description"])  # use case stores ""
+        self.assertIsNone(self.calls["index"]["items"][0]["description"])  # 用例存 ""
         self.assertEqual(response.json()["indexed"][0]["description"], "")
 
         self.client.post("/api/index", json={"path": "/data/a.png", "description": "清蒸鱼"})
@@ -279,7 +279,7 @@ class RetrievalHttpTests(unittest.TestCase):
         self.client.post("/api/index", files=upload, data={"tags": '["红薯叶", "带皮"]'})
         self.assertEqual(self.calls["index"]["items"][0]["tags"], ["红薯叶", "带皮"])
         response = self.client.post("/api/index", files=upload)
-        self.assertIsNone(self.calls["index"]["items"][0]["tags"])  # use case stores []
+        self.assertIsNone(self.calls["index"]["items"][0]["tags"])  # 用例存 []
         self.assertEqual(response.json()["indexed"][0]["tags"], [])
 
         self.client.post("/api/index", json={"path": "/data/a.png", "tags": ["清蒸"]})
@@ -287,7 +287,7 @@ class RetrievalHttpTests(unittest.TestCase):
 
     def test_index_rejects_tags_that_are_not_a_string_array(self):
         upload = [("file", ("a.png", b"aaa", "image/png"))]
-        for form in ({"tags": "红薯叶"}, {"tags": '{"a": 1}'}):  # multipart: must be a JSON array
+        for form in ({"tags": "红薯叶"}, {"tags": '{"a": 1}'}):  # multipart：必须是 JSON 数组
             with self.subTest(form=form):
                 response = self.client.post("/api/index", files=upload, data=form)
                 self.assertEqual((response.status_code, response.json()["error"]), (422, "VALIDATION_ERROR"))
@@ -324,7 +324,7 @@ class RetrievalHttpTests(unittest.TestCase):
         )
         body = self.client.get("/api/images").json()
         self.assertEqual([item["vector_status"] for item in body["items"]], ["synced", "stale"])
-        self.assertEqual(reads, [expected])  # one read for the page
+        self.assertEqual(reads, [expected])  # 整页读一次
         self.assertNotIn("expected_payloads", body)
 
         def broken(_):
@@ -332,10 +332,10 @@ class RetrievalHttpTests(unittest.TestCase):
 
         self.stack.vector_status_uc = SimpleNamespace(statuses=broken)
         response = self.client.get("/api/images")
-        self.assertEqual(response.status_code, 200)  # the list is PostgreSQL's answer
+        self.assertEqual(response.status_code, 200)  # 列表是 PostgreSQL 给出的
         self.assertEqual([item["vector_status"] for item in response.json()["items"]], ["unavailable", "unavailable"])
 
-        # Encoder / Qdrant down: the gallery still lists
+        # 编码器 / Qdrant 挂了：图库照样能列出
         self.runtime.retrieval, self.runtime.retrieval_error = None, "embedding model unavailable"
         response = self.client.get("/api/images")
         self.assertEqual(response.status_code, 200, response.text)
@@ -370,7 +370,7 @@ class RetrievalHttpTests(unittest.TestCase):
             item = self.calls["index"]["items"][0]
             return {key: item[key] for key in FOOD_FIELDS}
 
-        # every food field the use case knows is forwarded (form values stay strings)
+        # 用例认识的每个食物字段都会转发（表单值保持字符串）
         form = {
             "food_state": "raw", "food_processing": "sliced", "food_count": "4",
             "total_mass_g": "350", "water_mass_g": "50", "main_ingredient_mass_g": "300",
@@ -385,7 +385,7 @@ class RetrievalHttpTests(unittest.TestCase):
         }
         self.client.post("/api/index", json={"path": "/data/a.png", **body})
         self.assertEqual(food_of_last_item(), body)
-        self.client.post("/api/index", json={"path": "/data/a.png"})  # all optional
+        self.client.post("/api/index", json={"path": "/data/a.png"})  # 全部可选
         self.assertEqual(food_of_last_item(), dict.fromkeys(FOOD_FIELDS))
 
     def test_index_labelling_from_form_and_json_reaches_the_use_case(self):
@@ -397,7 +397,7 @@ class RetrievalHttpTests(unittest.TestCase):
         self.client.post("/api/index", files=[("file", ("a.png", b"aaa", "image/png"))], data=form)
         self.assertEqual(labels_of_last_item(), {"label_status": "verified", "source_type": "crawled", "license": "commercial"})
         self.client.post("/api/index", files=[("file", ("a.png", b"aaa", "image/png"))], data={"license": " "})
-        self.assertEqual(labels_of_last_item(), dict.fromkeys(("label_status", "source_type", "license")))  # defaults apply
+        self.assertEqual(labels_of_last_item(), dict.fromkeys(("label_status", "source_type", "license")))  # 使用默认值
 
         self.client.post("/api/index", json={"path": "/data/a.png", "label_status": "auto", "source_type": "device"})
         self.assertEqual(labels_of_last_item(), {"label_status": "auto", "source_type": "device", "license": None})

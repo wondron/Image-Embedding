@@ -1,11 +1,11 @@
-"""Draw normalized detection results on images."""
+"""在图像上绘制归一化的检测结果。"""
 
 from pathlib import Path
 from PIL import Image, ImageDraw
 
 
 def annotate(image, result, output):
-    """Draw normalized cxcywh detections on the original RGB image."""
+    """在原始 RGB 图像上绘制归一化 cxcywh 格式的检测结果。"""
     if not isinstance(image, Image.Image):
         with Image.open(image) as source:
             image = source.convert("RGB")

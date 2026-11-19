@@ -1,10 +1,10 @@
-"""One stored image: the real routes, adapters, use cases and field rules over in-memory stores
-(what needs SQL or Qdrant is in test_pg_live).
+"""单张已存图片：真实的路由、适配层、用例和字段规则，存储放在内存里
+（需要 SQL 或 Qdrant 的在 test_pg_live 里）。
 
-- a patch carries only the fields sent, with their null meanings (image_fields);
-- label_status follows the category unless it is sent (resolve_label_status);
-- the detail compares the point's payload with PostgreSQL (vector_status);
-- writes are pushed / cleaned up when retrieval is up and are saved whatever that does.
+- 修改请求只带传来的字段，以及它们各自的 null 含义（image_fields）；
+- 没传 label_status 时它跟随类别（resolve_label_status）；
+- 详情把向量点的 payload 和 PostgreSQL 比较（vector_status）；
+- 检索服务就绪时写入会被推送 / 清理，不管结果如何都会保存。
 """
 
 import unittest
@@ -77,11 +77,11 @@ class FieldRuleTests(unittest.TestCase):
                 current_label=current, current_category_id=current_cat, new_category_id=new_cat, requested=requested
             ).value
 
-        self.assertEqual(label("auto", 5, None), "unlabeled")  # category cleared
-        self.assertEqual(label("unlabeled", None, 5), "verified")  # a person picked it
-        self.assertEqual(label("auto", 5, 6), "verified")  # a person changed it
-        self.assertEqual(label("auto", 5, 5), "auto")  # unchanged
-        self.assertEqual(label("verified", 5, 6, "auto"), "auto")  # a label sent wins when it fits
+        self.assertEqual(label("auto", 5, None), "unlabeled")  # 类别被清空
+        self.assertEqual(label("unlabeled", None, 5), "verified")  # 有人选了它
+        self.assertEqual(label("auto", 5, 6), "verified")  # 有人改了它
+        self.assertEqual(label("auto", 5, 5), "auto")  # 没有变化
+        self.assertEqual(label("verified", 5, 6, "auto"), "auto")  # 传来的标注状态和类别相符时胜出
         self.assertEqual(label("unlabeled", None, None), "unlabeled")
         for current, current_cat, new_cat, requested in (("auto", 5, 5, "unlabeled"), ("unlabeled", None, None, "auto"),
                                                          ("auto", 5, None, "verified")):
@@ -112,13 +112,13 @@ class VectorStatusTests(unittest.TestCase):
         self.assertFalse(payload_matches({**expected, "scenes": ["general"]}, expected))
         self.assertFalse(payload_matches({**expected, "category_id": 2}, expected))
         self.assertFalse(payload_matches({"scenes": ["general", "oven"], "label_status": "auto", "category_id": 1},
-                                         {**expected, "food_state": "raw"}))  # a missing key reads as null
+                                         {**expected, "food_state": "raw"}))  # 缺失的键读作 null
 
     def test_synced_stale_and_missing(self):
         state = self.inspect({IMAGE: SYNCED_PAYLOAD})
         self.assertEqual((state["status"], state["exists"], state["payload_matches"]), ("synced", True, True))
         self.assertEqual((state["collection"], state["embedding_space_id"]), ("c_dino_v2", "dino:v2"))
-        # the ledger row of the current model, not of an older one
+        # 当前模型的台账行，不是旧模型的
         self.assertEqual((state["synced_version"], state["payload_version"]), (4, 4))
         self.assertEqual(state["expected_payload"]["scenes"], ["general", "oven"])
 
@@ -132,7 +132,7 @@ class VectorStatusTests(unittest.TestCase):
 
     def test_no_ledger_row_for_the_current_model(self):
         image = ManageImagesUseCase(FakeImageStore()).get(IMAGE)
-        image["embeddings"] = image["embeddings"][:1]  # only the retired model's row
+        image["embeddings"] = image["embeddings"][:1]  # 只有已下线模型的行
         state = self.inspect({IMAGE: SYNCED_PAYLOAD}, image)
         self.assertEqual((state["status"], state["synced_version"], state["embedded_at"]), ("synced", None, None))
 
@@ -147,11 +147,11 @@ class VectorStatusTests(unittest.TestCase):
         )
         self.assertEqual(statuses, {IMAGE: "synced", OTHER: "stale", third: "missing"})
         self.assertEqual(reads, [[IMAGE, OTHER, third]])
-        self.assertEqual(ImageVectorStatusUseCase(vectors, model=MODEL).statuses({}), {})  # nothing to read
+        self.assertEqual(ImageVectorStatusUseCase(vectors, model=MODEL).statuses({}), {})  # 没什么可读的
         self.assertEqual(len(reads), 1)
 
     def test_a_gallery_page_expects_the_payload_the_detail_expects(self):
-        # The cards and the dialog must agree: the list builds each expected payload the same way
+        # 卡片和对话框必须一致：列表用同样的方式构建每个预期的 payload
         class Store:
             def get_scene_by_code(self, code):
                 return {"code": code, "is_active": True, "outputs_heating": False}
@@ -162,7 +162,7 @@ class VectorStatusTests(unittest.TestCase):
         result = ListImagesUseCase(Store()).execute()
         detail = ManageImagesUseCase(FakeImageStore()).get(IMAGE)
         self.assertEqual(result["expected_payloads"], {IMAGE: expected_payload(detail)})
-        self.assertNotIn("food_state", result["items"][0])  # not a heating scene: still not on the wire
+        self.assertNotIn("food_state", result["items"][0])  # 不是加热场景：仍然不出现在 wire 上
 
     def test_the_out_of_sync_filter_reaches_the_store(self):
         seen = []
@@ -181,7 +181,7 @@ class VectorStatusTests(unittest.TestCase):
 
 
 class FakeImageStore:
-    """The catalog store's image methods, answering like the repository."""
+    """目录存储的图片方法，回答方式和仓储一样。"""
 
     def __init__(self):
         self.rows = {IMAGE: {**ROW, "embeddings": [dict(e) for e in ROW["embeddings"]]}}
@@ -221,7 +221,7 @@ class FakeImageStore:
 
 
 class ImageEndpointCase(unittest.TestCase):
-    """The real image routes over the fake store and a fake retrieval stack."""
+    """基于假存储和假检索服务的真实图片路由。"""
 
     def setUp(self):
         self.store = FakeImageStore()
@@ -272,7 +272,7 @@ class EndpointTests(ImageEndpointCase):
         body = self.ok(self.client.get(f"/api/images/{IMAGE}"))
         image = body["image"]
         self.assertEqual((image["category"], image["category_code"], image["label_status"]), ("牛排", "dish.steak", "auto"))
-        self.assertEqual({k: image[k] for k in FOOD}, FOOD)  # food fields whatever the scene
+        self.assertEqual({k: image[k] for k in FOOD}, FOOD)  # 不管什么场景都有食物字段
         self.assertEqual(image["heating_group"]["code"], "grill")
         self.assertEqual([e["model_status"] for e in image["embeddings"]], ["retired", "current"])
         self.assertNotIn("trace_id", body)
@@ -287,7 +287,7 @@ class EndpointTests(ImageEndpointCase):
         self.vectors.fail = err.search_qdrant_failed("get_payloads: ConnectionError: 10.0.0.5:6334 refused")
         vector = self.ok(self.client.get(f"/api/images/{IMAGE}"))["vector"]
         self.assertEqual((vector["status"], vector["collection"]), ("unavailable", "c_dino_v2"))
-        self.assertEqual(vector["detail"], "vector search failed")  # the public message, no address
+        self.assertEqual(vector["detail"], "vector search failed")  # 公开信息，不带地址
         self.vectors.fail = RuntimeError("boom")
         vector = self.ok(self.client.get(f"/api/images/{IMAGE}"))["vector"]
         self.assertEqual((vector["status"], vector["detail"]), ("unavailable", "vector store read failed"))
@@ -296,7 +296,7 @@ class EndpointTests(ImageEndpointCase):
         body = self.ok(self.client.get(f"/api/images/{IMAGE}"))
         self.assertEqual(body["vector"]["status"], "unavailable")
         self.assertIn("embedding model unavailable", body["vector"]["detail"])
-        self.assertEqual(body["image"]["id"], IMAGE)  # PostgreSQL still answers
+        self.assertEqual(body["image"]["id"], IMAGE)  # PostgreSQL 仍然有回答
 
     def test_without_the_catalog_it_is_not_ready(self):
         self.runtime.catalog, self.runtime.catalog_error = None, "postgres down"
@@ -312,7 +312,7 @@ class EndpointTests(ImageEndpointCase):
         self.sync_uc.push_images.assert_called_once_with([IMAGE])
 
     def test_a_write_answers_the_vector_state_after_its_push(self):
-        def push(ids):  # like the real push: the point gets the payload, the ledger moves
+        def push(ids):  # 和真实的推送一样：向量点拿到 payload，台账前进
             row = self.store.rows[IMAGE]
             self.vectors.points[IMAGE] = {"category_id": row["category_id"], "scenes": row["scenes"],
                                           "food_state": row["food_state"], "label_status": row["label_status"]}
@@ -325,7 +325,7 @@ class EndpointTests(ImageEndpointCase):
         self.assertEqual((vector["status"], vector["payload_version"], vector["synced_version"]), ("synced", 5, 5))
         self.assertEqual(body["image"]["payload_version"], 5)
 
-        self.vectors.points[IMAGE] = {**SYNCED_PAYLOAD, "label_status": "auto"}  # drifted again
+        self.vectors.points[IMAGE] = {**SYNCED_PAYLOAD, "label_status": "auto"}  # 又漂移了
         body = self.ok(self.client.post(f"/api/images/{IMAGE}/vector-sync"))
         self.assertEqual((body["vector_sync"], body["vector"]["status"], body["vector"]["synced_version"]), ("pushed", "synced", 5))
 
@@ -372,15 +372,15 @@ class EndpointTests(ImageEndpointCase):
                                 "vector_sync": "pushed", "sync_required": False})
         self.assertEqual((vector["status"], vector["collection"]), ("synced", "c_dino_v2"))
         self.error(self.client.post(f"/api/images/{OTHER}/vector-sync"), 404, "IMAGE_NOT_FOUND")
-        self.sync_uc.push_images.assert_called_once_with([IMAGE])  # nothing pushed for the unknown id
+        self.sync_uc.push_images.assert_called_once_with([IMAGE])  # 不认识的 id 不推送任何东西
 
     # ---- POST reembed --------------------------------------------------------------
 
     def test_a_reembed_writes_the_point_and_answers_the_state_after_it(self):
-        self.vectors.points.pop(IMAGE)  # missing
+        self.vectors.points.pop(IMAGE)  # 缺失
         self.assertEqual(self.ok(self.client.get(f"/api/images/{IMAGE}"))["vector"]["status"], "missing")
 
-        def reembed(image_id):  # like the use case: the point comes back, the ledger moves
+        def reembed(image_id):  # 和用例一样：向量点回来了，台账前进
             self.vectors.points[IMAGE] = dict(SYNCED_PAYLOAD)
             self.store.rows[IMAGE]["embeddings"][1]["synced_version"] = 4
             return {"image_id": str(image_id), "payload_version": 4}
@@ -394,11 +394,11 @@ class EndpointTests(ImageEndpointCase):
 
     def test_a_reembed_needs_the_image_the_stack_and_a_readable_original(self):
         self.error(self.client.post(f"/api/images/{OTHER}/reembed"), 404, "IMAGE_NOT_FOUND")
-        self.reembed_uc.execute.assert_not_called()  # PostgreSQL answers first
+        self.reembed_uc.execute.assert_not_called()  # PostgreSQL 先回答
 
         self.reembed_uc.execute.side_effect = err.image_file_unavailable("get_object image-embedding/original/x.png: NoSuchKey")
         body = self.error(self.client.post(f"/api/images/{IMAGE}/reembed"), 502, "IMAGE_FILE_UNAVAILABLE")
-        self.assertNotIn("NoSuchKey", body["detail"])  # bucket and key stay in the log
+        self.assertNotIn("NoSuchKey", body["detail"])  # 存储桶和 key 留在日志里
 
         self.retrieval_down()
         self.error(self.client.post(f"/api/images/{IMAGE}/reembed"), 503, "NOT_READY")
@@ -412,7 +412,7 @@ class EndpointTests(ImageEndpointCase):
         self.assertEqual((queued["image_id"], queued["original_url"]), (IMAGE, "https://cdn/o.jpg"))
         self.error(self.client.get(f"/api/images/{IMAGE}"), 404, "IMAGE_NOT_FOUND")
 
-        self.deletion_worker.clean_up.return_value = False  # still queued: deleting again is fine
+        self.deletion_worker.clean_up.return_value = False  # 仍在排队：再删一次没问题
         self.assertEqual(self.ok(self.client.delete(f"/api/images/{IMAGE}"))["cleanup"], "queued")
         self.retrieval_down()
         self.assertEqual(self.ok(self.client.delete(f"/api/images/{IMAGE}"))["cleanup"], "queued")
@@ -424,7 +424,7 @@ JPEG = bytes.fromhex("ffd8ffe000104a464946") + bytes(16)
 
 
 class ImageFileTests(ImageEndpointCase):
-    """GET /api/images/{id}/file: the stored files through the storage port."""
+    """GET /api/images/{id}/file：通过存储端口读取已存文件。"""
 
     def setUp(self):
         super().setUp()
@@ -447,15 +447,15 @@ class ImageFileTests(ImageEndpointCase):
     def test_the_original_and_the_fallback_to_it(self):
         response = self.file(variant="original")
         self.assertEqual((response.content, response.headers["content-type"]), (JPEG, "image/jpeg"))
-        self.store.rows[IMAGE]["thumb_url"] = ""  # no thumbnail stored: the original stands in
+        self.store.rows[IMAGE]["thumb_url"] = ""  # 没有存缩略图：用原图代替
         self.assertEqual(self.file().headers["content-type"], "image/jpeg")
         self.error(self.file(variant="large"), 422, "VALIDATION_ERROR")
 
     def test_a_deleted_image_is_readable_until_its_files_are_cleaned(self):
-        self.deletion_worker.clean_up.return_value = False  # queued
+        self.deletion_worker.clean_up.return_value = False  # 排队中
         self.ok(self.client.delete(f"/api/images/{IMAGE}"))
         self.assertEqual(self.file().content, WEBP)
-        self.store.queue.clear()  # cleaned
+        self.store.queue.clear()  # 已清理
         self.error(self.file(), 404, "IMAGE_NOT_FOUND")
         self.error(self.file(OTHER), 404, "IMAGE_NOT_FOUND")
 
@@ -463,7 +463,7 @@ class ImageFileTests(ImageEndpointCase):
         self.storage.read_by_url_or_key.side_effect = err.image_file_unavailable("get_object bucket/thumb/x.webp: NoSuchKey")
         with self.assertLogs("api.errors", level="WARNING"):
             body = self.error(self.file(), 502, "IMAGE_FILE_UNAVAILABLE")
-        self.assertNotIn("bucket", body["detail"])  # keys and buckets stay in the log
+        self.assertNotIn("bucket", body["detail"])  # key 和存储桶留在日志里
         self.storage.read_by_url_or_key.side_effect = None
         self.storage.read_by_url_or_key.return_value = b"<svg xmlns='http://www.w3.org/2000/svg'/>"
         with self.assertLogs("api.errors", level="WARNING"):
@@ -491,7 +491,7 @@ class RouteOrderTests(unittest.TestCase):
 
 class FakeQueueStore:
     def __init__(self, *, stored_again=False, urls=None):
-        """urls: the original_url / thumb_url of the row stored again."""
+        """urls：重新存入的那一行的 original_url / thumb_url。"""
         self.stored_again = stored_again
         self.urls = urls or {}
         self.completed = []
@@ -505,7 +505,7 @@ class FakeQueueStore:
 
 class DeletionCleanupTests(unittest.TestCase):
     ROW = {"image_id": IMAGE, "original_url": "https://cdn/o.jpg", "thumb_url": "https://cdn/t.webp"}
-    # The same image's files before the shard directory (flat) and in it
+    # 同一张图片在分片目录之前（扁平）和之内的文件
     FLAT = {"original_url": f"https://cdn/original/{IMAGE}.jpg", "thumb_url": f"https://cdn/thumb/{IMAGE}.webp"}
     SHARDED = {"original_url": f"https://cdn/original/0c/{IMAGE}.jpg", "thumb_url": f"https://cdn/thumb/0c/{IMAGE}.webp"}
 
@@ -527,7 +527,7 @@ class DeletionCleanupTests(unittest.TestCase):
     def test_an_image_stored_again_under_the_shard_directory_loses_only_its_old_files(self):
         store, vectors, storage = FakeQueueStore(stored_again=True, urls=self.SHARDED), Mock(), Mock()
         self.assertTrue(DeletionWorker(store, vectors, storage).clean_up({"image_id": IMAGE, **self.FLAT}))
-        vectors.delete.assert_not_called()  # the point is the new row's too
+        vectors.delete.assert_not_called()  # 向量点也是新行的
         self.assertEqual([c.args[0] for c in storage.delete_by_url_or_key.call_args_list], list(self.FLAT.values()))
         self.assertEqual(store.completed, [IMAGE])
 

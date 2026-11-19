@@ -64,8 +64,8 @@ class Category:
 
 
 def category_code(identifier: str, parent_code: str = "ingredient") -> str:
-    # Preserve the identifier, including its casing. Validate the whole tree before writing;
-    # do not silently replace characters or add suffixes to resolve collisions.
+    # 保留 identifier，包括它的大小写。写入之前校验整棵树；
+    # 不悄悄替换字符或添加后缀来解决冲突。
     return f"{parent_code}.{identifier}"
 
 
@@ -223,9 +223,9 @@ def import_tree(nodes: list[Category], api: CategoryAPI) -> tuple[int, int]:
             continue
         flat_code = category_code(node.source_id).lower()
         row = by_code.get(flat_code)
-        # A planned top-level category legitimately keeps its two-segment code.
-        # Other matching flat codes came from the earlier importer: do not create
-        # a second node for the same source item under its new full-path code.
+        # 规划中的顶层类别可以合理地保留两段式 code。
+        # 其他匹配的扁平 code 来自之前的导入程序：不要为同一个源条目
+        # 在它新的完整路径 code 下再创建第二个节点。
         if row is not None and flat_code not in planned_codes:
             flat_rows.append((row, node))
     if flat_rows:
@@ -233,8 +233,8 @@ def import_tree(nodes: list[Category], api: CategoryAPI) -> tuple[int, int]:
         for row, node in flat_rows:
             logger.error("  已有节点 id=%s 名称=%r：%s → %s", row["id"], row.get("name"), row["code"], node.code)
         raise ValueError("检测到旧版两段编码，完整父级路径已在日志中列出。本次未新增或修改节点。")
-    # Preflight the entire plan before the first write: a late conflict cannot leave
-    # half an import behind. Network failures during creation can still be resumed.
+    # 在第一次写入之前预检整个计划：后面才发现的冲突不会留下导入了一半的结果。
+    # 创建过程中的网络失败仍然可以续传。
     for node in nodes:
         row = by_code.get(node.code.lower())
         if row is None:

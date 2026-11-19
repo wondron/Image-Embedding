@@ -55,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ask-password", action="store_true", help="交互输入密码（不回显），覆盖配置中的密码")
     args = parser.parse_args(argv)
 
-    # Resolve CLI paths before switching cwd; application config paths are backend-relative.
+    # 在切换工作目录之前解析命令行里的路径；应用配置里的路径相对于 backend。
     config_path = args.config.resolve() if args.config else BACKEND_ROOT / "config/param/config.yaml"
     if str(BACKEND_ROOT) not in sys.path:
         sys.path.insert(0, str(BACKEND_ROOT))
@@ -98,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
         if not math.isfinite(pg.connect_timeout) or pg.connect_timeout <= 0:
             raise ValueError("POSTGRES_CONFIG.connect_timeout 必须是大于 0 的有限数值")
     except Exception as exc:
-        # YAML/parser errors may contain complete source lines, including credentials.
+        # YAML / 解析器的错误里可能包含完整的源文件行，其中有凭证。
         print(f"FAIL 无法加载 PostgreSQL 配置（{type(exc).__name__}）。请检查 POSTGRES_CONFIG、配置路径及命令行参数。")
         return 2
 

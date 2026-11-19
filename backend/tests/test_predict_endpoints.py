@@ -14,7 +14,7 @@ class PredictEndpointTests(unittest.TestCase):
     def setUp(self):
         self.requests = []
 
-        def fetch_image(url, **limits):  # the public-host fetcher behind read_url_bytes
+        def fetch_image(url, **limits):  # read_url_bytes 背后的公网地址下载器
             self.requests.append(url)
             return b"query-image", "image/png"
 

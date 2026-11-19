@@ -1,4 +1,4 @@
-"""images.tags on the read side: the list tag filter and the tags field of list items / search hits."""
+"""读取一侧的 images.tags：列表的标签过滤，以及列表项 / 搜索结果的 tags 字段。"""
 
 import unittest
 from types import SimpleNamespace
@@ -22,7 +22,7 @@ class ListTagFilterTests(unittest.TestCase):
 
     def test_tag_is_stripped_and_blank_means_no_filter(self):
         self.assertEqual(self.run_list(tag="  红薯叶 ")[1]["tag"], "红薯叶")
-        for blank in (None, "", "   "):  # a blank tag would otherwise match nothing
+        for blank in (None, "", "   "):  # 否则空白的标签什么都匹配不上
             with self.subTest(tag=blank):
                 self.assertIsNone(self.run_list(tag=blank)[1]["tag"])
 

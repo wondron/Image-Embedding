@@ -1,4 +1,4 @@
-"""Enum values and labels (config/param/enums.yaml); editable enums accept new values."""
+"""枚举的取值和显示名（config/param/enums.yaml）；可编辑的枚举可以新增取值。"""
 
 from __future__ import annotations
 

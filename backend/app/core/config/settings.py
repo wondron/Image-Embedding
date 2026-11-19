@@ -321,18 +321,18 @@ class PostgresSettings:
 
 @dataclass(frozen=True, slots=True)
 class ImageStorageSettings:
-    """Image storage: originals / thumbnails / staging files (contract §5), from IMAGE_STORAGE_CONFIG.
+    """图片存储：原图 / 缩略图 / 暂存文件（契约 §5），取自 IMAGE_STORAGE_CONFIG。
 
-    Any S3-compatible service (AWS S3, MinIO, OSS). use_boto3 false (the default) is the
-    mock driver: URLs are built from public_base_url + key and nothing is uploaded. Keys
-    missing from the section fall back to the IMAGE_STORAGE_DEFAULT_* constants.
+    支持任何兼容 S3 的服务（AWS S3、MinIO、OSS）。use_boto3 为 false（默认）时是
+    mock 驱动：URL 由 public_base_url + key 拼出，不上传任何东西。配置里没写的键
+    退回到 IMAGE_STORAGE_DEFAULT_* 常量。
 
-    ASSUMPTION A8: public_base_url is the CDN/bucket HTTPS prefix baked into
-    original_url / thumb_url / staged_url, not the object-key prefix. Optional
-    key_prefix (same layer as bucket / public_base_url) is prepended to new
-    original / thumb / staging keys when non-empty after normalization; omit,
-    null, empty, or a value that normalizes to empty is stored as "".
-    ImageEmbedding is not a code default. Keys never include scene/category.
+    假设 A8：public_base_url 是写进 original_url / thumb_url / staged_url 的
+    CDN / 存储桶 HTTPS 前缀，不是对象 key 的前缀。可选的 key_prefix
+    （和 bucket / public_base_url 同一层）规范化后不为空时，加在新的
+    original / thumb / staging key 前面；不写、null、空字符串，或规范化后为空的值，
+    都存为 ""。
+    ImageEmbedding 不是代码里的默认值。key 里从不包含场景或类别。
     """
 
     use_boto3: bool = False
@@ -343,7 +343,7 @@ class ImageStorageSettings:
     access_key_id: str = field(default="", repr=False)
     secret_access_key: str = field(default="", repr=False)
     mock_mirror_dir: str = ""  # mock 驱动另存一份字节的目录；空表示只在内存里
-    key_prefix: str = ""  # optional object-key prefix; "" = current-production keys
+    key_prefix: str = ""  # 可选的对象 key 前缀；"" 表示现在生产环境用的 key
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "key_prefix", normalize_key_prefix(self.key_prefix))
@@ -370,10 +370,10 @@ class ImageStorageSettings:
 
 @dataclass(frozen=True, slots=True)
 class ImageDownloadSettings:
-    """Remote image downloads (browser proxy and model-input URLs), from IMAGE_DOWNLOAD_CONFIG.
+    """远程图片下载（浏览器代理和模型输入的 URL），取自 IMAGE_DOWNLOAD_CONFIG。
 
-    Only public hosts are fetched. trusted_networks are treated as public too: keep it empty
-    in production; a machine behind a fake-IP proxy lists 198.18.0.0/15 and 2001:2::/48.
+    只下载公网地址。trusted_networks 里的网段也按公网处理：生产环境保持为空；
+    在 fake-IP 代理后面的机器写 198.18.0.0/15 和 2001:2::/48。
     """
 
     trusted_networks: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = ()
@@ -395,19 +395,19 @@ class ImageDownloadSettings:
 
 @dataclass(frozen=True, slots=True)
 class ReconcileSettings:
-    """Background reconciliation of the vector store with PostgreSQL, from RECONCILE_CONFIG.
+    """向量库与 PostgreSQL 的后台对账，取自 RECONCILE_CONFIG。
 
-    Each round pushes the payloads the ledger says are behind and drains the deletion queue
-    (app.services.retrieval.reconcile). Read at startup.
+    每一轮补推台账显示落后的 payload，并清理删除队列
+    （app.services.retrieval.reconcile）。启动时读取。
     """
 
     enabled: bool = True
     interval_seconds: float = 300.0
     initial_delay_seconds: float = 30.0
-    max_payloads: int = 2000  # payloads pushed per round at most
-    max_deletions: int = 200  # queued deletions tried per round at most
-    max_verifications: int = 2000  # ledger rows checked against the collection per round (0: off)
-    max_embeddings: int = 100  # images without a vector in the current collection embedded per round (0: off)
+    max_payloads: int = 2000  # 每轮最多补推的 payload 数
+    max_deletions: int = 200  # 每轮最多处理的排队删除数
+    max_verifications: int = 2000  # 每轮对照 collection 检查的台账行数（0：关闭）
+    max_embeddings: int = 100  # 每轮为当前 collection 里没有向量的图片补算 embedding 的数量（0：关闭）
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> ReconcileSettings:
@@ -438,16 +438,16 @@ class ReconcileSettings:
 
 @dataclass(frozen=True, slots=True)
 class RecipeDetectSettings:
-    """Recipe detection, the step the business search runs beside the self-built search
-    (app.api.services.auto_search), from RECIPE_DETECT_CONFIG.
+    """菜谱识别：业务搜图和自建库搜索同时进行的一步
+    （app.api.services.auto_search），取自 RECIPE_DETECT_CONFIG。
 
-    Parsed on every request, so a change in Nacos (the switch, the address) applies without a
-    restart. Without the section the step is off. url and timeout are checked only when it is on.
+    每次请求都解析，所以 Nacos 里的修改（开关、地址）不用重启就生效。没有这一节时
+    这一步关闭。url 和 timeout 只在开启时检查。
     """
 
     enabled: bool = False
-    url: str = ""  # the detection endpoint itself, e.g. http://host:8866/detect_recipe_onnx
-    timeout: float = RECIPE_DETECT_TIMEOUT_SECONDS  # seconds for one call, as a whole
+    url: str = ""  # 识别接口本身的地址，如 http://host:8866/detect_recipe_onnx
+    timeout: float = RECIPE_DETECT_TIMEOUT_SECONDS  # 一次调用的总秒数
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> RecipeDetectSettings:
@@ -469,26 +469,25 @@ class RecipeDetectSettings:
         return settings
 
 
-# Boxes of one query image the region search may search at most (AUTO_SEARCH_REGION_CONFIG.max_regions)
+# 区域搜索对一张查询图最多搜索的检测框数（AUTO_SEARCH_REGION_CONFIG.max_regions 的上限）
 AUTO_SEARCH_MAX_REGIONS = 20
 
 
 @dataclass(frozen=True, slots=True)
 class AutoSearchRegionSettings:
-    """Region search, the step the business search starts beside the whole-image search
-    (app.api.services.region_search), from AUTO_SEARCH_REGION_CONFIG: GroundingDINO finds what
-    caption names in the query image, and every box found is searched as a query image of its own.
+    """区域搜索：业务搜图和整图搜索同时启动的一步（app.api.services.region_search），
+    取自 AUTO_SEARCH_REGION_CONFIG：GroundingDINO 在查询图里找 caption 说的目标，
+    找到的每个框都单独作为一张查询图去搜索。
 
-    Parsed on every request, so a change in Nacos applies without a restart (the model is
-    GROUNDINGDINO_CONFIG's, loaded at startup). Without the section the step is off. The other
-    values are checked only when it is on.
+    每次请求都解析，所以 Nacos 里的修改不用重启就生效（模型按 GROUNDINGDINO_CONFIG，
+    启动时加载）。没有这一节时这一步关闭。其余的值只在开启时检查。
     """
 
     enabled: bool = False
-    caption: str = "food"  # what to detect; several classes as "food . dish"
+    caption: str = "food"  # 检测什么；多个类别写成 "food . dish"
     box_threshold: float = 0.4
     text_threshold: float = 0.4
-    max_regions: int = 5  # the boxes searched, highest detection score first
+    max_regions: int = 5  # 搜索的检测框数，按检测置信度从高到低
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> AutoSearchRegionSettings:
@@ -506,7 +505,7 @@ class AutoSearchRegionSettings:
             return settings
         for key in ("box_threshold", "text_threshold"):
             value = getattr(settings, key)
-            if not 0 <= value <= 1:  # NaN fails too
+            if not 0 <= value <= 1:  # NaN 也不通过
                 raise ValueError(f"{name}.{key} must be between 0 and 1, got {value!r}")
         if not 1 <= settings.max_regions <= AUTO_SEARCH_MAX_REGIONS:
             raise ValueError(

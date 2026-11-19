@@ -1,15 +1,15 @@
-"""Every error code of the service, and the exception that carries one.
+"""服务的全部错误码，以及携带错误码的异常。
 
-ERROR_CODES is the one registry: code -> HTTP status, and whether its detail may reach
-the client. Raise AppError through the constructors below (or AppError(code, detail) for a
-registered code); app.core.exceptions renders every failure as one envelope:
+ERROR_CODES 是唯一的登记表：错误码 -> HTTP 状态码，以及 detail 能不能给客户端看。
+通过下面的构造函数抛出 AppError（已登记的错误码也可以直接 AppError(code, detail)）；
+app.core.exceptions 把每个失败都渲染成同一种结构：
 
     {"ok": false, "error": "<CODE>", "detail": "<message>", "trace_id": "<id>"}
 
-Detail policy: codes registered with a public message wrap internal failures (database,
-vector store, models) and their detail may carry exception text, SQL or paths. Clients
-get the public message; the log keeps the detail and the cause, with the trace id. Every
-other code writes its detail for the client. Framework-free: any layer may raise these.
+detail 规则：登记了公开信息的错误码包装的是内部失败（数据库、向量库、模型），
+它们的 detail 可能带异常文本、SQL 或路径。客户端拿到公开信息；日志里保留 detail
+和原因，并带上 trace id。其他错误码的 detail 是写给客户端看的。不依赖框架：
+任何一层都可以抛出这些错误。
 """
 
 from __future__ import annotations
@@ -20,12 +20,12 @@ from dataclasses import dataclass
 @dataclass(frozen=True, slots=True)
 class ErrorSpec:
     http_status: int
-    # Set for codes whose detail is internal: clients get this text instead of the detail.
+    # detail 属于内部信息的错误码才设置：客户端拿到这段文字，而不是 detail。
     public_detail: str | None = None
 
 
 ERROR_CODES: dict[str, ErrorSpec] = {
-    # -- generic; the first six are also the codes of the framework's own HTTP errors
+    # -- 通用；前六个也是框架自身 HTTP 错误使用的错误码
     "BAD_REQUEST": ErrorSpec(400),
     "UNAUTHORIZED": ErrorSpec(401),
     "FORBIDDEN": ErrorSpec(403),
@@ -35,7 +35,7 @@ ERROR_CODES: dict[str, ErrorSpec] = {
     "VALIDATION_ERROR": ErrorSpec(422),
     "NOT_READY": ErrorSpec(503),
     "INTERNAL_ERROR": ErrorSpec(500, "internal server error"),
-    # -- uploads and image URLs
+    # -- 上传和图片 URL
     "EMPTY_FILE": ErrorSpec(400),
     "FILE_TOO_LARGE": ErrorSpec(413),
     "UNSUPPORTED_MEDIA_TYPE": ErrorSpec(415),
@@ -43,21 +43,21 @@ ERROR_CODES: dict[str, ErrorSpec] = {
     "FORBIDDEN_HOST": ErrorSpec(403),
     "DOWNLOAD_FAILED": ErrorSpec(502),
     "DOWNLOAD_TIMEOUT": ErrorSpec(504),
-    # -- upstream services (global search)
+    # -- 上游服务（Global 搜图）
     "UPSTREAM_ERROR": ErrorSpec(502),
     "UPSTREAM_TIMEOUT": ErrorSpec(504),
-    # -- predict and diagnostic tools (raised inline in app.api.services.predict / tools)
+    # -- 预测和诊断工具（直接在 app.api.services.predict / tools 里抛出）
     "PREDICT_FAILED": ErrorSpec(500, "image search failed"),
     "INVALID_IMAGE": ErrorSpec(422),
     "TOOL_FAILED": ErrorSpec(500, "tool failed"),
-    # -- retrieval: index (contract §4.2)
+    # -- 检索：入库（契约 §4.2）
     "INDEX_EMPTY_REQUEST": ErrorSpec(400),
     "INDEX_BAD_IMAGE": ErrorSpec(422),
     "INDEX_BAD_EMBEDDING": ErrorSpec(422),
     "INDEX_UNKNOWN_SCENE": ErrorSpec(422),
     "INDEX_QDRANT_FAILED": ErrorSpec(502, "vector store write failed"),
     "INDEX_POSTGRES_FAILED": ErrorSpec(502, "metadata database error"),
-    # -- retrieval: search
+    # -- 检索：搜索
     "SEARCH_BAD_IMAGE": ErrorSpec(422),
     "SEARCH_UNKNOWN_SCENE": ErrorSpec(422),
     "SEARCH_BAD_SCORE_THRESHOLD": ErrorSpec(422),
@@ -65,31 +65,31 @@ ERROR_CODES: dict[str, ErrorSpec] = {
     "SEARCH_QDRANT_FAILED": ErrorSpec(502, "vector search failed"),
     "SEARCH_POSTGRES_FAILED": ErrorSpec(502, "metadata lookup failed"),
     "VECTOR_DIM_MISMATCH": ErrorSpec(503),
-    # -- retrieval: gallery list
+    # -- 检索：图库列表
     "LIST_UNKNOWN_SCENE": ErrorSpec(422),
     "LIST_POSTGRES_FAILED": ErrorSpec(502, "metadata list query failed"),
-    # -- one stored image (GET / PATCH / DELETE /api/images/{image_id})
+    # -- 单张已存图片（GET / PATCH / DELETE /api/images/{image_id}）
     "IMAGE_NOT_FOUND": ErrorSpec(404),
     "IMAGE_FILE_UNAVAILABLE": ErrorSpec(502, "stored original could not be read"),
-    # -- enums (config/param/enums.yaml, app.core.config.enum_store)
+    # -- 枚举（config/param/enums.yaml，app.core.config.enum_store）
     "ENUM_NOT_FOUND": ErrorSpec(404),
     "ENUM_NOT_EDITABLE": ErrorSpec(403),
     "ENUM_VALUE_EXISTS": ErrorSpec(409),
     "ENUM_FILE_INVALID": ErrorSpec(503),
     "ENUM_FILE_WRITE_FAILED": ErrorSpec(500, "enum file write failed"),
-    # -- categories (the category tree, app.repositories.categories)
+    # -- 类别（类别树，app.repositories.categories）
     "CATEGORY_NOT_FOUND": ErrorSpec(404),
     "CATEGORY_CODE_EXISTS": ErrorSpec(409),
     "CATEGORY_IN_USE": ErrorSpec(409),
     "CATEGORY_POSTGRES_FAILED": ErrorSpec(502, "category database error"),
-    # -- scenes (the scene configuration, app.repositories.scene_config)
+    # -- 场景（场景配置，app.repositories.scene_config）
     "SCENE_NOT_FOUND": ErrorSpec(404),
     "SCENE_CODE_EXISTS": ErrorSpec(409),
     "SCENE_RULE_EXISTS": ErrorSpec(409),
     "SCENE_IN_USE": ErrorSpec(409),
     "SCENE_PROTECTED": ErrorSpec(403),
     "SCENE_POSTGRES_FAILED": ErrorSpec(502, "scene database error"),
-    # embedding model versions (/api/embedding-models)
+    # embedding 模型版本（/api/embedding-models）
     "EMBEDDING_MODEL_NOT_FOUND": ErrorSpec(404),
     "EMBEDDING_MODEL_EXISTS": ErrorSpec(409),
     "EMBEDDING_MODEL_STATE": ErrorSpec(409),
@@ -103,7 +103,7 @@ _UNREGISTERED_5XX = ERROR_CODES["INTERNAL_ERROR"].public_detail or "internal ser
 
 
 class AppError(Exception):
-    """A failure with a stable code; http_status defaults to the code's registered status."""
+    """带稳定错误码的失败；http_status 默认取该错误码登记的状态码。"""
 
     def __init__(
         self,
@@ -118,12 +118,12 @@ class AppError(Exception):
         self.code = code
         self.detail = detail
         self.http_status = int(http_status if http_status is not None else (spec.http_status if spec else 500))
-        # log-only extra context; never sent to the client envelope
+        # 只写日志的额外上下文；不会出现在给客户端的错误结构里
         self.show_text = show_text or ""
 
     @property
     def status_code(self) -> int:
-        """Same attribute name as Starlette's HTTPException."""
+        """和 Starlette 的 HTTPException 用同样的属性名。"""
         return self.http_status
 
     def __repr__(self) -> str:
@@ -131,15 +131,16 @@ class AppError(Exception):
 
 
 class NotReadyError(AppError):
-    """NOT_READY (503): a resource is not up yet. Callers that can do without it catch this
-    class instead of checking exc.code."""
+    """NOT_READY（503）：某个资源还没就绪。缺了它也能继续的调用方捕获这个类，
+    不用再检查 exc.code。
+    """
 
     def __init__(self, detail: str) -> None:
         super().__init__("NOT_READY", detail)
 
 
 def is_internal(exc: AppError) -> bool:
-    """True when the detail must stay in the log (registered as internal, or an unregistered 5xx)."""
+    """detail 必须只留在日志里时为 True（登记为内部错误，或者未登记的 5xx）。"""
     spec = ERROR_CODES.get(exc.code)
     if spec is None:
         return exc.http_status >= 500
@@ -147,14 +148,14 @@ def is_internal(exc: AppError) -> bool:
 
 
 def client_detail(exc: AppError) -> str:
-    """The detail a client may see: an internal code's public message, otherwise the detail."""
+    """客户端能看到的 detail：内部错误码给公开信息，其他给 detail 本身。"""
     if not is_internal(exc):
         return exc.detail
     spec = ERROR_CODES.get(exc.code)
     return spec.public_detail if spec is not None and spec.public_detail else _UNREGISTERED_5XX
 
 
-# -- generic ---------------------------------------------------------------------
+# -- 通用 ------------------------------------------------------------------------
 
 def validation_error(detail: str) -> AppError:
     return AppError("VALIDATION_ERROR", detail)
@@ -168,7 +169,7 @@ def internal_error(detail: str) -> AppError:
     return AppError("INTERNAL_ERROR", detail)
 
 
-# -- uploads and image URLs ------------------------------------------------------
+# -- 上传和图片 URL --------------------------------------------------------------
 
 def empty_file(detail: str) -> AppError:
     return AppError("EMPTY_FILE", detail)
@@ -191,7 +192,7 @@ def forbidden_host(detail: str) -> AppError:
 
 
 def download_failed(detail: str) -> AppError:
-    """The remote image server failed; always 502, never the remote status."""
+    """远程图片服务器出错；总是 502，不用远端返回的状态码。"""
     return AppError("DOWNLOAD_FAILED", detail)
 
 
@@ -199,10 +200,10 @@ def download_timeout(detail: str) -> AppError:
     return AppError("DOWNLOAD_TIMEOUT", detail)
 
 
-# -- upstream services -----------------------------------------------------------
+# -- 上游服务 --------------------------------------------------------------------
 
 def upstream_error(detail: str, *, http_status: int = 502) -> AppError:
-    """http_status may be a gateway status (502 / 503 / 504) the upstream itself returned."""
+    """http_status 可以是上游自己返回的网关状态码（502 / 503 / 504）。"""
     return AppError("UPSTREAM_ERROR", detail, http_status=http_status)
 
 
@@ -210,7 +211,7 @@ def upstream_timeout(detail: str) -> AppError:
     return AppError("UPSTREAM_TIMEOUT", detail)
 
 
-# -- retrieval: index ------------------------------------------------------------
+# -- 检索：入库 ------------------------------------------------------------------
 
 def index_empty_request(detail: str = "no file and no path") -> AppError:
     return AppError("INDEX_EMPTY_REQUEST", detail)
@@ -233,11 +234,11 @@ def index_qdrant_failed(detail: str) -> AppError:
 
 
 def index_postgres_failed(detail: str) -> AppError:
-    """Write / connection failure of the metadata database (ingest, deletions, scenes, startup)."""
+    """元数据库写入或连接失败（入库、删除、场景、启动）。"""
     return AppError("INDEX_POSTGRES_FAILED", detail)
 
 
-# -- retrieval: search -----------------------------------------------------------
+# -- 检索：搜索 ------------------------------------------------------------------
 
 def search_bad_image(detail: str) -> AppError:
     return AppError("SEARCH_BAD_IMAGE", detail)
@@ -267,7 +268,7 @@ def vector_dim_mismatch(detail: str) -> AppError:
     return AppError("VECTOR_DIM_MISMATCH", detail)
 
 
-# -- retrieval: gallery list -----------------------------------------------------
+# -- 检索：图库列表 --------------------------------------------------------------
 
 def list_unknown_scene(detail: str) -> AppError:
     return AppError("LIST_UNKNOWN_SCENE", detail)
@@ -277,27 +278,28 @@ def list_postgres_failed(detail: str) -> AppError:
     return AppError("LIST_POSTGRES_FAILED", detail)
 
 
-# -- one stored image ------------------------------------------------------------
+# -- 单张已存图片 ----------------------------------------------------------------
 
 def image_not_found(detail: str) -> AppError:
-    """No images row with this id (a deleted image counts as gone)."""
+    """images 表里没有这个 id 的行（已删除的图片也算不存在）。"""
     return AppError("IMAGE_NOT_FOUND", detail)
 
 
 def image_file_unavailable(detail: str) -> AppError:
-    """The image's stored original could not be read from object storage (gone, or the storage
-    failed); the detail may name buckets and keys, so clients get the public message."""
+    """图片存下来的原图无法从对象存储读取（不存在，或存储出错）；detail 里可能有
+    存储桶名和 key，所以客户端拿到的是公开信息。
+    """
     return AppError("IMAGE_FILE_UNAVAILABLE", detail)
 
 
-# -- enums -----------------------------------------------------------------------
+# -- 枚举 ------------------------------------------------------------------------
 
 def enum_not_found(detail: str) -> AppError:
     return AppError("ENUM_NOT_FOUND", detail)
 
 
 def enum_not_editable(detail: str) -> AppError:
-    """A system enum, or an editable one locked with editable: false."""
+    """系统枚举，或者设置了 editable: false 而锁定的可编辑枚举。"""
     return AppError("ENUM_NOT_EDITABLE", detail)
 
 
@@ -306,7 +308,7 @@ def enum_value_exists(detail: str) -> AppError:
 
 
 def enum_file_invalid(detail: str) -> AppError:
-    """The enums file cannot be read or breaks a rule; the detail says where, for whoever fixes it."""
+    """枚举文件读不了或违反了规则；detail 会说明位置，方便修复的人定位。"""
     return AppError("ENUM_FILE_INVALID", detail)
 
 
@@ -314,7 +316,7 @@ def enum_file_write_failed(detail: str) -> AppError:
     return AppError("ENUM_FILE_WRITE_FAILED", detail)
 
 
-# -- categories ------------------------------------------------------------------
+# -- 类别 ------------------------------------------------------------------------
 
 def category_not_found(detail: str) -> AppError:
     return AppError("CATEGORY_NOT_FOUND", detail)
@@ -325,7 +327,7 @@ def category_code_exists(detail: str) -> AppError:
 
 
 def category_in_use(detail: str) -> AppError:
-    """Delete refused: the category still has children, images or scene rules."""
+    """拒绝删除：这个类别还有子类别、图片或场景规则。"""
     return AppError("CATEGORY_IN_USE", detail)
 
 
@@ -333,15 +335,15 @@ def category_postgres_failed(detail: str) -> AppError:
     return AppError("CATEGORY_POSTGRES_FAILED", detail)
 
 
-# -- scenes ----------------------------------------------------------------------
+# -- 场景 ------------------------------------------------------------------------
 
 def scene_not_found(detail: str) -> AppError:
-    """A scene, or a label / rule of a scene, that does not exist."""
+    """不存在的场景，或场景下不存在的标签 / 规则。"""
     return AppError("SCENE_NOT_FOUND", detail)
 
 
 def scene_code_exists(detail: str) -> AppError:
-    """A scene code, or a label code within a scene, already taken."""
+    """场景 code，或某个场景内的标签 code，已经被占用。"""
     return AppError("SCENE_CODE_EXISTS", detail)
 
 
@@ -350,12 +352,12 @@ def scene_rule_exists(detail: str) -> AppError:
 
 
 def scene_in_use(detail: str) -> AppError:
-    """Delete refused: a label still referenced by rules."""
+    """拒绝删除：标签还被规则引用。"""
     return AppError("SCENE_IN_USE", detail)
 
 
 def scene_protected(detail: str) -> AppError:
-    """A change the default scene does not allow."""
+    """默认场景不允许的修改。"""
     return AppError("SCENE_PROTECTED", detail)
 
 
@@ -363,29 +365,29 @@ def scene_postgres_failed(detail: str) -> AppError:
     return AppError("SCENE_POSTGRES_FAILED", detail)
 
 
-# -- embedding model versions ------------------------------------------------------
+# -- embedding 模型版本 ----------------------------------------------------------
 
 def embedding_model_not_found(detail: str) -> AppError:
     return AppError("EMBEDDING_MODEL_NOT_FOUND", detail)
 
 
 def embedding_model_exists(detail: str) -> AppError:
-    """The configured encoder, or the name + version, is already registered."""
+    """配置的编码器，或者这个名称 + 版本，已经登记过了。"""
     return AppError("EMBEDDING_MODEL_EXISTS", detail)
 
 
 def embedding_model_state(detail: str) -> AppError:
-    """The version's status does not allow the action (e.g. retiring the current one)."""
+    """版本的状态不允许这个操作（例如下线当前正在使用的版本）。"""
     return AppError("EMBEDDING_MODEL_STATE", detail)
 
 
 def embedding_model_incomplete(detail: str) -> AppError:
-    """Switching to a version that lacks vectors for some stored images, without allow_missing."""
+    """要切换到的版本缺少部分已存图片的向量，而且没有传 allow_missing。"""
     return AppError("EMBEDDING_MODEL_INCOMPLETE", detail)
 
 
 def embedding_encoder_unavailable(detail: str) -> AppError:
-    """No encoder of this version is loaded (or can be loaded) in this process."""
+    """这个进程里没有加载（也加载不了）这个版本的编码器。"""
     return AppError("EMBEDDING_ENCODER_UNAVAILABLE", detail)
 
 
@@ -394,11 +396,11 @@ def embedding_build_running(detail: str) -> AppError:
 
 
 def embedding_model_mismatch(detail: str) -> AppError:
-    """The encoder would write or query a collection made by another model: retrieval refuses to pair them."""
+    """编码器会写入或查询另一个模型建的 collection：检索拒绝这样配对。"""
     return AppError("EMBEDDING_MODEL_MISMATCH", detail)
 
 
-# Codes for HTTPExceptions raised by the framework itself (404 route, 405 method, ...)
+# 框架自身抛出的 HTTPException 对应的错误码（404 路由不存在、405 方法不允许等）
 _STATUS_CODES = {
     400: "BAD_REQUEST",
     401: "UNAUTHORIZED",

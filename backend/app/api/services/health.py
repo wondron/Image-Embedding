@@ -1,4 +1,4 @@
-"""Build health diagnostics from application resources."""
+"""根据应用资源生成健康诊断信息。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 
 def model_paths(config: dict[str, Any]) -> dict[str, Any]:
-    """Read model locations without inspecting or initializing model sessions."""
+    """读取模型的位置，不检查也不初始化模型 session。"""
     embedding_config = config.get("EMBEDDING_CONFIG") or {}
     return {
         "embedding": embedding_config.get("model_path")
@@ -20,7 +20,7 @@ def model_paths(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def _providers(component: Any) -> list[str]:
-    """Collect optional provider diagnostics without affecting readiness."""
+    """收集可选的 provider 诊断信息，不影响就绪状态。"""
     try:
         if component and getattr(component, "sess", None):
             return list(component.sess.get_providers() or [])
@@ -32,7 +32,7 @@ def _providers(component: Any) -> list[str]:
 
 
 def dependency_stubs(runtime: ApplicationState | None = None) -> dict[str, Any]:
-    """Report Qdrant/PostgreSQL wiring; does not affect model readiness (/readyz)."""
+    """报告 Qdrant / PostgreSQL 的接入情况；不影响模型的就绪状态（/readyz）。"""
     retrieval = getattr(runtime, "retrieval", None) if runtime is not None else None
     if retrieval is None:
         detail = None
@@ -64,7 +64,7 @@ def dependency_stubs(runtime: ApplicationState | None = None) -> dict[str, Any]:
 
 
 def readiness_info(runtime: ApplicationState, service: FoodService) -> dict[str, Any]:
-    """Report loaded components and preserve runtime readiness failures."""
+    """报告已加载的组件，并保留运行时的就绪失败信息。"""
     embedding = getattr(service, "embeddingTool", None)
     embedding_ok = embedding is not None
     embedding_providers = _providers(embedding)

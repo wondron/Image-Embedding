@@ -1,10 +1,8 @@
-"""Composition root for the catalog admin (category tree, scene configuration, stored images,
-task center).
+"""目录管理的组合根（类别树、场景配置、已存图片、任务中心）。
 
-Needs PostgreSQL only, so it is built on its own: the admin pages keep working while the
-encoder, Qdrant or object storage are down, or when retrieval is switched off
-(TOTAL_CONFIG.retrieval_enabled: false). The retrieval stack borrows this store
-(app.bootstrap.retrieval_stack, metadata=...) so the API process keeps one connection pool.
+只需要 PostgreSQL，所以单独构建：编码器、Qdrant 或对象存储挂了时，或者检索被关闭时
+（TOTAL_CONFIG.retrieval_enabled: false），管理页照样能用。检索服务借用这个存储
+（app.bootstrap.retrieval_stack，metadata=...），所以 API 进程只有一个连接池。
 """
 
 from __future__ import annotations
@@ -31,7 +29,7 @@ logger = logging.getLogger("catalog")
 
 @dataclass
 class CatalogServices:
-    """What the catalog HTTP layer calls. Owns the PostgreSQL store."""
+    """目录 HTTP 层调用的内容。持有 PostgreSQL 存储。"""
 
     store: PgMetadataStore
     categories_uc: ManageCategoriesUseCase
@@ -44,8 +42,9 @@ class CatalogServices:
     _file_storage_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     def file_storage(self) -> ImageStoragePort:
-        """Object storage to read stored files back while the retrieval stack is not up (built
-        on first use from IMAGE_STORAGE_CONFIG; the mock driver reads its mirror dir)."""
+        """检索服务没起来时用来读回已存文件的对象存储（第一次使用时用 IMAGE_STORAGE_CONFIG 构建；
+        mock 驱动读取它的镜像目录）。
+        """
         with self._file_storage_lock:
             if self._file_storage is None:
                 self._file_storage = build_image_storage(ImageStorageSettings.from_config(self.config))
@@ -56,7 +55,7 @@ class CatalogServices:
 
 
 def build_catalog(config: Mapping[str, Any]) -> CatalogServices:
-    """POSTGRES_CONFIG -> store (schema checked) -> admin use cases."""
+    """POSTGRES_CONFIG -> 存储（检查表结构）-> 管理用例。"""
     with dependency_initialization(logger, config, "POSTGRES_CONFIG", stage="Catalog 配置及连接检查"):
         pg = PostgresSettings.from_config(config)
         store = PgMetadataStore(url=pg.url(), connect_timeout=pg.connect_timeout)

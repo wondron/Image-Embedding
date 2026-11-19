@@ -1,4 +1,4 @@
-"""Index transaction boundaries under concurrent requests, without external services."""
+"""并发请求下入库事务的边界，不需要外部服务。"""
 
 import copy
 import hashlib
@@ -36,7 +36,7 @@ class Embedding:
 
 
 class Storage:
-    """Real object keys, no bytes; records what is deleted."""
+    """真实的对象 key，没有字节内容；记录删除了什么。"""
 
     def __init__(self):
         self.deleted = []
@@ -52,7 +52,7 @@ class Storage:
 
 
 class TransactionalMetadata:
-    """Stage row and ledger changes behind the image lock until the caller succeeds."""
+    """在图片锁之后暂存行和台账的修改，直到调用方成功。"""
 
     def __init__(self):
         self.rows = {}
@@ -90,8 +90,8 @@ class TransactionalMetadata:
                 self.rows[image_id] = image
                 self.ledger[(model_id, image_id)] = image["payload_version"]
             except BaseException:
-                # A timed-out write may have reached the vector store. A prior
-                # ledger row survives rollback but must be reconciled again.
+                # 超时的写入可能已经到达向量库。之前的台账行会在回滚后保留，
+                # 但必须重新对账。
                 ledger_key = (model_id, image_id)
                 if ledger_key in self.ledger:
                     self.ledger[ledger_key] = 0
@@ -205,7 +205,7 @@ class IndexConcurrencyTests(unittest.TestCase):
         self.assertTrue(
             all(payload["category_id"] == 7 for _, payload in vectors.calls)
         )
-        # Both wrote the same keys, which the stored row names: the follower deletes nothing
+        # 两者写入了相同的 key，而已存的行引用的就是它们：后来的那个什么都不删
         self.assertEqual(second_result["original_url"], first_result["original_url"])
         self.assertEqual(self.storage.deleted, [])
 
@@ -280,7 +280,7 @@ class IndexConcurrencyTests(unittest.TestCase):
         self.assertEqual(response["scenes"], ["general", "oven"])
         self.assertEqual(response["description"], "stored annotation")
         self.assertEqual(response["tags"], ["stored"])
-        # The stored row keeps its files; the copies this upload wrote under other keys go
+        # 已存的行保留它的文件；这次上传写在其他 key 下的副本被删除
         self.assertEqual(response["original_url"], "https://storage.example/original/stored.png")
         self.assertEqual(
             self.storage.deleted,

@@ -1,4 +1,4 @@
-"""Plan category codes from structural parent links, without touching the database."""
+"""根据结构上的父子关系规划类别 code，不访问数据库。"""
 
 from __future__ import annotations
 
@@ -13,10 +13,10 @@ from app.core.rules.category_fields import normalize_category_code
 def plan_subtree_codes(
     nodes: Sequence[Mapping[str, Any]], root_id: int, root_code: str,
 ) -> dict[int, str]:
-    """Keep each descendant's last code segment under its actual parent's new code.
+    """让每个后代的最后一段 code 跟在它实际父节点的新 code 后面。
 
-    This also repairs older flat codes while moving a subtree. The caller checks
-    the resulting codes against nodes outside the subtree before writing anything.
+    移动子树时这也会修复旧的扁平 code。调用方在写入之前，
+    用子树之外的节点检查得到的 code。
     """
     by_id = {int(node["id"]): node for node in nodes}
     if root_id not in by_id or len(by_id) != len(nodes):

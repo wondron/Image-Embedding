@@ -1,9 +1,9 @@
-"""Membership HTTP adapter: save in PostgreSQL, then bring the image's vector payload along.
+"""场景归属的 HTTP 适配层：先存到 PostgreSQL，再把图片的向量 payload 同步过去。
 
-The manual change itself needs the catalog only (PostgreSQL), so it is saved while the encoder
-or Qdrant are down. Right after the commit the image's payload is pushed to the current
-collection when the retrieval stack is up (app.api.services.vector_sync, which lists what
-vector_sync / sync_required mean); the push never fails the request.
+手工修改本身只需要 catalog（PostgreSQL），所以编码器或 Qdrant 挂了时也能保存。
+提交之后，检索服务就绪时立刻把图片的 payload 推送到当前 collection
+（app.api.services.vector_sync，那里列出了 vector_sync / sync_required 的含义）；
+推送失败不会让请求失败。
 """
 
 from __future__ import annotations

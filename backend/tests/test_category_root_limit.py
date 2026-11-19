@@ -1,7 +1,7 @@
-"""Root-cap checks through repository entry points, without a real database.
+"""通过仓储入口检查根节点数量上限，不需要真实的数据库。
 
-The fake SQL connection records lock/check/write ordering. It lets these tests
-cover legacy/inactive roots even though new roots must use six unique codes.
+假的 SQL 连接记录加锁 / 检查 / 写入的顺序。它让这些测试能覆盖旧的 / 停用的根节点，
+尽管新的根节点必须使用六个唯一的 code。
 """
 
 from __future__ import annotations
@@ -126,7 +126,7 @@ class CategoryRootLimitTests(unittest.TestCase):
         self.assertIsNone(conn.writes[0][1]["parent_id"])
 
     def test_six_or_more_roots_blocks_new_root_before_any_write(self):
-        # SQL deliberately has no active/domain-code filter: all existing roots count.
+        # SQL 故意不按启用状态 / 领域 code 过滤：所有已有的根节点都计入。
         for count in (6, 7):
             with self.subTest(root_count=count):
                 conn = Connection(root_count=count)

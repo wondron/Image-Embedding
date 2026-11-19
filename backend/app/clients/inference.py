@@ -1,18 +1,15 @@
-"""Shared ONNX embedding encoder: one session per model spec per process.
+"""共用的 ONNX embedding 编码器：每个进程里每种模型规格一个 session。
 
-The composition root (app.bootstrap.lifespan) builds one Embedder from
-EMBEDDING_CONFIG and injects it into predict (FoodService / GlobalFilter) and
-retrieval (index / search use cases). A config reload keeps the same instance
-unless the EmbeddingSpec changed, so the model is never loaded twice for the
-same weights.
+组合根（app.bootstrap.lifespan）用 EMBEDDING_CONFIG 构建一个 Embedder，注入到预测
+（FoodService / GlobalFilter）和检索（入库 / 搜索用例）。重新加载配置时，只要
+EmbeddingSpec 没变就保留同一个实例，所以同一份权重永远不会加载两次。
 
-Embedder.fingerprint() says which embedding space an encoder writes: its preprocessing, the
-SHA-256 of its weight files (the .onnx and the external data it names) and its vector for one
-fixed test image (probe_image). embedding_models.fingerprint keeps it per model version, so
-retrieval never pairs an encoder with a collection another model wrote
-(services.retrieval.model_versions.same_encoder compares two of them), and a version's
-encoder can be loaded again from it (config_for_fingerprint). weights_status() tells whether a
-recorded version's weight files are still where they were, unchanged.
+Embedder.fingerprint() 说明编码器写入哪个 embedding 空间：它的预处理参数、权重文件
+（.onnx 以及它引用的外部数据）的 SHA-256，以及它对一张固定测试图（probe_image）的向量。
+embedding_models.fingerprint 按模型版本保存它，所以检索永远不会把编码器和另一个模型写的
+collection 配对（services.retrieval.model_versions.same_encoder 比较两个指纹），并且可以
+根据它重新加载一个版本的编码器（config_for_fingerprint）。weights_status() 说明一个已记录
+版本的权重文件是否还在原处、没有被改动。
 """
 
 from __future__ import annotations
@@ -32,12 +29,12 @@ from app.clients.inference_onnx import OnnxEmbedding
 logger = logging.getLogger("embedder")
 
 _HASH_CHUNK = 8 << 20
-_hashes: dict[tuple[str, int, int], str] = {}  # (absolute path, size, mtime_ns) -> sha256
+_hashes: dict[tuple[str, int, int], str] = {}  # （绝对路径, 大小, mtime_ns）-> sha256
 _hashes_lock = threading.Lock()
 
 
 def _sha256(path: str, stat: os.stat_result) -> str:
-    """SHA-256 of a file, remembered while its size and mtime stay the same (1.2 GB: ~1 s)."""
+    """文件的 SHA-256，在大小和 mtime 不变期间记住它（1.2 GB 约 1 秒）。"""
     key = (os.path.abspath(path), stat.st_size, stat.st_mtime_ns)
     with _hashes_lock:
         known = _hashes.get(key)
@@ -54,7 +51,7 @@ def _sha256(path: str, stat: os.stat_result) -> str:
 
 
 def _external_data_names(model_path: str) -> list[str]:
-    """The external data files the ONNX graph names (relative to its folder), without loading them."""
+    """ONNX 计算图引用的外部数据文件（相对于它所在的目录），不加载它们。"""
     import onnx
     from onnx.external_data_helper import _get_all_tensors, uses_external_data
 
@@ -70,7 +67,7 @@ def _external_data_names(model_path: str) -> list[str]:
 
 
 def model_files(model_path: str) -> list[dict[str, Any]]:
-    """[{name, size, sha256}] of the weight files: the .onnx first, then its external data."""
+    """权重文件的 [{name, size, sha256}]：先是 .onnx，然后是它的外部数据。"""
     folder = os.path.dirname(os.path.abspath(model_path))
     names = [os.path.basename(model_path), *_external_data_names(model_path)]
     out = []
@@ -82,8 +79,9 @@ def model_files(model_path: str) -> list[dict[str, Any]]:
 
 
 def artifact_hash(files: list[Mapping[str, Any]]) -> str:
-    """One hash for the weights: the file's SHA-256 for a single-file model, else the SHA-256 of
-    the sorted file hashes (names left out: renaming a file keeps the weights)."""
+    """权重的总哈希：单文件模型为文件的 SHA-256，否则为排序后的各文件哈希的 SHA-256
+    （不含文件名：重命名文件仍是同一份权重）。
+    """
     hashes = sorted(str(f["sha256"]) for f in files)
     if len(hashes) == 1:
         return hashes[0]
@@ -91,8 +89,9 @@ def artifact_hash(files: list[Mapping[str, Any]]) -> str:
 
 
 def weights_status(fingerprint: Mapping[str, Any] | None) -> str | None:
-    """Whether a version's recorded weight files are still there, unchanged: ok / missing /
-    changed; None when its fingerprint recorded no files (nothing to compare)."""
+    """一个版本记录的权重文件是否还在、没有被改动：ok / missing / changed；
+    它的指纹没有记录文件时为 None（没有可比较的）。
+    """
     if not isinstance(fingerprint, Mapping):
         return None
     files = fingerprint.get("files")
@@ -117,8 +116,9 @@ def weights_status(fingerprint: Mapping[str, Any] | None) -> str | None:
 
 
 def _file_stats(model_path: str) -> tuple[tuple[str, int, int], ...] | None:
-    """(path, size, mtime_ns) of the weight files, to notice one replaced in place; None when
-    they cannot be listed (the encoder is then never reused on a reload)."""
+    """权重文件的（路径, 大小, mtime_ns），用来发现被原地替换的文件；列不出来时为 None
+    （这时重新加载配置时从不复用这个编码器）。
+    """
     try:
         folder = os.path.dirname(os.path.abspath(model_path))
         names = [os.path.basename(model_path), *_external_data_names(model_path)]
@@ -131,16 +131,17 @@ def _file_stats(model_path: str) -> tuple[tuple[str, int, int], ...] | None:
     except Exception:
         return None
 
-# [height, width] of the fingerprint's test image: never an encoder's input size, so the
-# resize (scale, interpolation) is part of what the fingerprint sees
+# 指纹测试图的 [高, 宽]：从来不是编码器的输入尺寸，所以缩放（尺寸、插值方式）
+# 也在指纹能看到的范围内
 PROBE_SHAPE = (240, 320)
-# Rounding of the stored probe vector (keeps the JSON small; far below what tells models apart)
+# 保存的测试向量的取整精度（让 JSON 保持小；远小于区分模型所需的精度）
 PROBE_DECIMALS = 6
 
 
 def probe_image() -> np.ndarray:
-    """The fixed BGR test image of the fingerprint: built from formulas only, so it is the same
-    on every machine and numpy version (no random generator, no file)."""
+    """指纹用的固定 BGR 测试图：只用公式生成，所以在每台机器、每个 numpy 版本上都一样
+    （不用随机数，不读文件）。
+    """
     height, width = PROBE_SHAPE
     y, x = np.mgrid[0:height, 0:width].astype(np.float64)
     blue = 127.5 + 127.5 * np.sin(x / 11.0) * np.cos(y / 17.0)
@@ -152,9 +153,9 @@ def probe_image() -> np.ndarray:
 
 @dataclass(frozen=True, slots=True)
 class EmbeddingSpec:
-    """Everything that makes two encoders interchangeable.
+    """决定两个编码器能否互换的全部内容。
 
-    Defaults mirror OnnxEmbedding.load_config so equal specs mean equal sessions.
+    默认值和 OnnxEmbedding.load_config 一致，所以规格相同就意味着 session 相同。
     """
 
     model_path: str
@@ -185,7 +186,7 @@ class EmbeddingSpec:
 
     @classmethod
     def try_from_config(cls, config: Mapping[str, Any]) -> "EmbeddingSpec | None":
-        """None when EMBEDDING_CONFIG is malformed (building the encoder will say why)."""
+        """EMBEDDING_CONFIG 格式不对时为 None（构建编码器时会说明原因）。"""
         try:
             return cls.from_config(config)
         except (TypeError, ValueError):
@@ -193,8 +194,9 @@ class EmbeddingSpec:
 
 
 def config_for_fingerprint(spec: Mapping[str, Any], base: Mapping[str, Any]) -> dict[str, Any]:
-    """The config that loads the encoder a fingerprint's spec describes (an older model version),
-    with this process's runtime flags (GPU, io-binding, device) taken from base."""
+    """加载指纹 spec 所描述的编码器（一个较早的模型版本）用的配置，运行时开关（GPU、
+    io-binding、设备）取自 base，即本进程的设置。
+    """
     emb = dict(base.get("EMBEDDING_CONFIG") or {})
     total = dict(base.get("TOTAL_CONFIG") or {})
     return {
@@ -213,26 +215,27 @@ def config_for_fingerprint(spec: Mapping[str, Any], base: Mapping[str, Any]) -> 
 
 
 class Embedder:
-    """One ONNX embedding session shared by predict and retrieval.
+    """预测和检索共用的一个 ONNX embedding session。
 
-    ORT ``Session.run`` is thread-safe; the cached io-binding path in
-    OnnxEmbedding is not, so calls are serialized only when io-binding is on.
+    ORT 的 ``Session.run`` 是线程安全的；OnnxEmbedding 里缓存的 io-binding 路径不是，
+    所以只在开启 io-binding 时才串行调用。
     """
 
     def __init__(self, config: Mapping[str, Any]) -> None:
-        self._model = OnnxEmbedding(dict(config))  # validates config with precise messages
+        self._model = OnnxEmbedding(dict(config))  # 用准确的信息校验配置
         self.spec = EmbeddingSpec.from_config(config)
         self._lock: Any = threading.Lock() if self._model.use_iobinding else contextlib.nullcontext()
         self._fingerprint: dict[str, Any] | None = None
-        # the weight files as loaded: a file replaced in place since is a different model
+        # 加载时的权重文件：之后被原地替换的文件就是另一个模型
         self._loaded_files = _file_stats(self.spec.model_path)
 
     def files_unchanged(self) -> bool:
-        """True while the weight files at model_path are the ones this session loaded (same
-        size and mtime): a reload may reuse it. A file replaced in place needs a new session."""
+        """model_path 上的权重文件仍是这个 session 加载的那些（大小和 mtime 相同）时为 True：
+        重新加载配置时可以复用。被原地替换的文件需要新的 session。
+        """
         return self._loaded_files is not None and _file_stats(self.spec.model_path) == self._loaded_files
 
-    # -- diagnostics ----------------------------------------------------------
+    # -- 诊断 -----------------------------------------------------------------
 
     @property
     def model_path(self) -> str:
@@ -240,17 +243,17 @@ class Embedder:
 
     @property
     def sess(self) -> Any:
-        """Underlying ORT session (provider diagnostics in /api/readyz)."""
+        """底层的 ORT session（用于 /api/readyz 里的 provider 诊断）。"""
         return self._model.sess
 
     def providers(self) -> list[str]:
         sess = self._model.sess
         return list(sess.get_providers() or []) if sess is not None else []
 
-    # -- predict island (OnnxEmbedding-compatible) -----------------------------
+    # -- 预测模块（兼容 OnnxEmbedding）---------------------------------------
 
     def detect(self, img_data: Union[np.ndarray, bytes]) -> np.ndarray:
-        """L2-normalized embedding ``(dim,)`` from a BGR array or encoded image bytes."""
+        """从 BGR 数组或编码后的图片字节得到 L2 归一化的 embedding ``(dim,)``。"""
         with self._lock:
             return self._model.detect(img_data)
 
@@ -259,28 +262,26 @@ class Embedder:
             self._model.warmup(runs)
 
     def probe_dim(self) -> int:
-        """Run one inference on a gray image and return the output dim (also warms up)."""
+        """在一张灰色图上推理一次并返回输出维度（同时也起到预热作用）。"""
         dummy = np.full((self._model.input_h, self._model.input_w, 3), 127, dtype=np.uint8)
         with self._lock:
             out = self._model.infer(dummy)
         return int(np.asarray(out).shape[-1])
 
     def fingerprint(self) -> dict[str, Any]:
-        """{spec, files, artifact, probe}: the embedding space this encoder writes (computed once
-        per instance).
+        """{spec, files, artifact, probe}：这个编码器写入的 embedding 空间（每个实例只计算一次）。
 
-        spec: what loads it again (model_path) and how images are prepared (the effective input
-        size, mean, std, interpolation, output); files: name, size and SHA-256 of the weight files
-        as they are now (the .onnx and its external data); artifact: one hash over them
-        (artifact_hash); probe: its L2-normalized vector for probe_image(). Runtime flags (GPU,
-        io-binding, device) are left out: they do not change the space. files / artifact are
-        missing when the files cannot be read (the probe still identifies the encoder then).
+        spec：重新加载它需要的信息（model_path）以及图片怎样预处理（生效的输入尺寸、mean、
+        std、插值方式、输出）；files：权重文件现在的名称、大小和 SHA-256（.onnx 及其外部
+        数据）；artifact：它们的总哈希（artifact_hash）；probe：它对 probe_image() 的 L2 归一化
+        向量。不包含运行时开关（GPU、io-binding、设备）：它们不改变 embedding 空间。文件读不了
+        时没有 files / artifact（这时仍然可以用 probe 识别编码器）。
         """
         if self._fingerprint is None:
             vector = self.detect(probe_image())
             fingerprint: dict[str, Any] = {
                 "spec": {
-                    # forward slashes: a version recorded on Windows still loads in the Linux image
+                    # 使用正斜杠：在 Windows 上记录的版本在 Linux 镜像里也能加载
                     "model_path": self.spec.model_path.replace("\\", "/"),
                     "output_name": self.spec.output_name,
                     "scale": [int(self._model.input_h), int(self._model.input_w)],
@@ -299,7 +300,7 @@ class Embedder:
             self._fingerprint = fingerprint
         return self._fingerprint
 
-    # -- retrieval EmbeddingPort -------------------------------------------------
+    # -- 检索的 EmbeddingPort -------------------------------------------------------
 
     def embed_bytes(self, image_bytes: bytes) -> list[float]:
         if not image_bytes:

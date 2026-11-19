@@ -118,7 +118,7 @@ class HealthEndpointTests(unittest.TestCase):
                 response = self.client.get("/api/readyz")
 
         self.assert_not_ready(response, "not ready: readiness check failed")
-        self.assertNotIn("missing state", response.text)  # the exception text stays in the log
+        self.assertNotIn("missing state", response.text)  # 异常文本留在日志里
         self.assertIn("missing state", "\n".join(logs.output))
 
     def test_liveness_version_and_config_do_not_require_models(self):

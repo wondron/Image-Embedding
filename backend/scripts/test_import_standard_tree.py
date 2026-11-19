@@ -166,7 +166,7 @@ class ImportStandardTreeTests(unittest.TestCase):
         self.assertEqual(api.rows[2]['parent_id'], api.rows[1]['id'])
         self.assertEqual(api.rows[2]['code'], 'ingredient.GrainX.RiceAA')
         self.assertEqual(api.rows[2]['names'][1]['name'], '米饭')
-        self.assertTrue(api.rows[1]['is_active'])  # recognition type=False is not an inactive category
+        self.assertTrue(api.rows[1]['is_active'])  # 识别类型 type=False 不代表类别停用
         self.assertEqual(importer.import_tree(self.nodes, api), (0, 6))
         self.assertEqual(api.writes, 6)
 
@@ -302,7 +302,7 @@ class ImportStandardTreeTests(unittest.TestCase):
         self.assertEqual(importer.import_tree(self.nodes, api), (5, 1))
         self.assertEqual(api.rows[1]['parent_id'], 10)
         self.assertEqual(api.rows[0]['name'], '现有食材域')
-        # Last planned node was moved by a user: validate all conflicts up front.
+        # 最后一个规划中的节点被用户移动过：预先校验所有冲突。
         api.rows[-1]['parent_id'] = 10
         api.rows.pop(2)
         api.writes = 0

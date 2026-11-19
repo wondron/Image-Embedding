@@ -1,4 +1,4 @@
-"""Runtime embedding checks per SSOT §1.2."""
+"""按 SSOT §1.2 做的运行时 embedding 检查。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ def validate_embedding(
     for_search: bool = False,
     expected_dim: int = VECTOR_DIM,
 ) -> list[float]:
-    """Numeric, finite, non-zero, and expected_dim long (= current model's dim)."""
+    """是数字、有限、非零，且长度为 expected_dim（= 当前模型的维度）。"""
     code_bad = err.search_bad_embedding if for_search else err.index_bad_embedding
     try:
         values = [float(x) for x in vector]

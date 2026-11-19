@@ -1,7 +1,7 @@
-"""Enums wire: GET /api/enums, GET /api/enums/{name}, POST /api/enums/{name}/values.
+"""枚举的 wire：GET /api/enums、GET /api/enums/{name}、POST /api/enums/{name}/values。
 
-Values, labels and editability come from config/param/enums.yaml (app.core.config.enum_store).
-The request limits below are the file's rules (app.core.enums); the store checks them again.
+取值、显示名和是否可编辑来自 config/param/enums.yaml（app.core.config.enum_store）。
+下面的请求限制就是文件的规则（app.core.enums）；存储会再检查一次。
 """
 
 from pydantic import BaseModel, ConfigDict, Field

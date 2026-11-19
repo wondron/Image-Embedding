@@ -1,11 +1,10 @@
-"""List-images use case (PG v0.1 + §6.1 Wire).
+"""图片列表用例（PG v0.1 + §6.1 Wire）。
 
-Library pagination via image_scenes membership for the requested scene (scenes table;
-default general). Attach heating_group and the food attributes
-(food_fields.FOOD_FIELDS) only when scene.outputs_heating (P9).
+按请求场景的 image_scenes 归属分页列出图库（scenes 表；默认 general）。只有
+scene.outputs_heating 时才附带 heating_group 和食物属性（food_fields.FOOD_FIELDS）（P9）。
 
-Needs PostgreSQL only (built by app.bootstrap.catalog), so the gallery lists while the encoder
-or Qdrant are down; the HTTP layer adds each item's vector state when the vector store is up.
+只需要 PostgreSQL（由 app.bootstrap.catalog 构建），所以编码器或 Qdrant 挂了时图库也能
+列出；向量库可用时，HTTP 层为每一项加上向量状态。
 """
 
 from __future__ import annotations
@@ -34,7 +33,7 @@ def _item_from_row(
     *,
     scene_meta: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """Build one List item per §6.1.2 (authoritative fields only)."""
+    """按 §6.1.2 构建一个列表项（只用权威字段）。"""
     image_id = _as_id(row["id"])
     item: dict[str, Any] = {
         "id": image_id,
@@ -105,7 +104,7 @@ class ListImagesUseCase:
             if c:
                 cat_norm = c
 
-        tag_norm: str | None = None  # stored tags are stripped, so strip the filter too
+        tag_norm: str | None = None  # 存储的标签去掉了首尾空白，所以过滤条件也要去掉
         if tag is not None:
             t = str(tag).strip()
             if t:
@@ -134,7 +133,7 @@ class ListImagesUseCase:
             "page_size": page_size_i,
             "total": int(total),
             "items": items,
-            # Not part of the wire: what each image's point should carry, so the HTTP layer can
-            # tell the vector state of the page when the vector store is up (one read per page)
+            # 不属于 wire：每张图的向量点应该带的内容，这样向量库可用时，HTTP 层能判断这一页的
+            # 向量状态（每页读一次）
             "expected_payloads": {item["id"]: expected_payload(row) for item, row in zip(items, rows)},
         }

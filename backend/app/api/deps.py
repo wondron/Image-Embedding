@@ -1,4 +1,4 @@
-"""Access to application resources; unavailable ones become NOT_READY (503)."""
+"""访问应用资源；不可用的资源变成 NOT_READY（503）。"""
 
 from __future__ import annotations
 
@@ -21,5 +21,5 @@ def require_retrieval(runtime: ApplicationState) -> "RetrievalStack":
 
 
 def require_catalog(runtime: ApplicationState) -> "CatalogServices":
-    """The category / scene admin (PostgreSQL only)."""
+    """类别 / 场景管理（只用 PostgreSQL）。"""
     return runtime.require_catalog()

@@ -1,9 +1,9 @@
-"""Qdrant access for one collection with the named vector ``global``.
+"""访问一个使用命名向量 ``global`` 的 Qdrant collection。
 
-Mechanism only: connection, collection lifecycle, point CRUD, filtered top-k.
-Retrieval rules (point id == images.id uuid, filterable payload fields and their
-indexes, score policy, error codes) live in app.repositories.vectors and
-app.services.retrieval. This module imports nothing from ``app``.
+只负责机制：连接、collection 生命周期、向量点的增删改查、带过滤的 top-k。
+检索规则（向量点 id == images.id 的 uuid、可过滤的 payload 字段及其索引、分数策略、
+错误码）在 app.repositories.vectors 和 app.services.retrieval 里。本模块不从 ``app``
+导入任何东西。
 """
 
 from __future__ import annotations
@@ -25,24 +25,24 @@ PointId = Union[int, str, uuid.UUID]
 
 
 class CollectionMismatchError(ValueError):
-    """The existing collection does not have the requested shape."""
+    """已有的 collection 和要求的结构不一致。"""
 
     error_code = "VECTOR_DIM_MISMATCH"
 
 
 class VectorDimMismatchError(CollectionMismatchError):
-    """Vector length or collection size differs from vector_dim."""
+    """向量长度或 collection 的维度与 vector_dim 不同。"""
 
 
 class BadEmbeddingError(ValueError):
-    """Vector is not 1-D, not finite, or zero."""
+    """向量不是一维、不是有限值，或者为零。"""
 
     error_code = "BAD_EMBEDDING"
 
 
 @dataclass(frozen=True, slots=True)
 class QdrantConnection:
-    """How to reach Qdrant. ``url=":memory:"`` gives an in-process local instance."""
+    """怎样连接 Qdrant。``url=":memory:"`` 表示进程内的本地实例。"""
 
     url: str = DEFAULT_URL
     api_key: Optional[str] = None
@@ -52,7 +52,7 @@ class QdrantConnection:
 
     @classmethod
     def from_mapping(cls, conf: Mapping[str, Any], **overrides: Any) -> "QdrantConnection":
-        """From a QDRANT_CONFIG-style dict; non-None overrides win."""
+        """从 QDRANT_CONFIG 格式的 dict 构建；非 None 的覆盖值优先。"""
         url = conf.get("url")
         if not url and conf.get("host") is not None and conf.get("port") is not None:
             url = f"http://{conf['host']}:{int(conf['port'])}"
@@ -85,7 +85,7 @@ class QdrantConnection:
 
 
 def _point_id(point_id: PointId) -> Union[int, str]:
-    """Qdrant point ids are unsigned ints or UUIDs (canonical string)."""
+    """Qdrant 的向量点 id 是无符号整数或 UUID（规范字符串形式）。"""
     if isinstance(point_id, bool):
         raise TypeError("point id must be an unsigned int or uuid, got bool")
     if isinstance(point_id, int):
@@ -100,7 +100,7 @@ def _point_id(point_id: PointId) -> Union[int, str]:
 
 
 class QdrantStore:
-    """One collection: named vector ``global`` of size vector_dim with the given distance."""
+    """一个 collection：大小为 vector_dim、使用给定距离的命名向量 ``global``。"""
 
     def __init__(
         self,
@@ -133,8 +133,9 @@ class QdrantStore:
         return self._client
 
     def sibling(self, *, collection: str, vector_dim: int, distance: str) -> "QdrantStore":
-        """Another collection over this store's client (one connection for several model
-        versions). Never close a sibling: closing either one closes the shared client."""
+        """基于本存储客户端的另一个 collection（多个模型版本共用一个连接）。不要关闭兄弟实例：
+        关闭其中任何一个都会关闭共用的客户端。
+        """
         return QdrantStore(
             self.connection, collection=collection, vector_dim=vector_dim, distance=distance, client=self.client
         )
@@ -145,7 +146,7 @@ class QdrantStore:
         return self.collection in {c.name for c in self.client.get_collections().collections}
 
     def drop_collection(self) -> bool:
-        """Delete the collection with every point; False when it did not exist."""
+        """删除 collection 及其所有向量点；不存在时返回 False。"""
         if not self.collection_exists():
             return False
         self.client.delete_collection(self.collection)
@@ -158,9 +159,9 @@ class QdrantStore:
         recreate: bool = False,
         payload_indexes: Optional[Mapping[str, str]] = None,
     ) -> None:
-        """Create the collection if missing (or drop + create); verify an existing one.
+        """collection 不存在时创建（或者删掉重建）；已存在时校验它。
 
-        payload_indexes: {field: "keyword" | "integer" | ...} created idempotently.
+        payload_indexes：{字段: "keyword" | "integer" | ...}，可重复地创建。
         """
         from qdrant_client.http import models as rest
 
@@ -226,10 +227,10 @@ class QdrantStore:
                     field_schema=rest.PayloadSchemaType(str(schema).lower()),
                     wait=True,
                 )
-            except Exception as exc:  # index is an optimization; filtering still works
+            except Exception as exc:  # 索引只是优化；没有它过滤照样能用
                 logger.warning("create_payload_index %s（collection=%s）失败：%s", field_name, self.collection, exc)
 
-    # -- points ----------------------------------------------------------------
+    # -- 向量点 ----------------------------------------------------------------
 
     def _as_vector(self, vector: Union[np.ndarray, Sequence[float]]) -> List[float]:
         arr = np.asarray(vector, dtype=np.float32)
@@ -257,7 +258,7 @@ class QdrantStore:
         return pid
 
     def upsert_batch(self, points: Iterable[Mapping[str, Any]]) -> int:
-        """Each item: {id, vector, payload?}."""
+        """每一项：{id, vector, payload?}。"""
         from qdrant_client.http import models as rest
 
         structs = [
@@ -281,10 +282,10 @@ class QdrantStore:
         must: Optional[Mapping[str, Any]] = None,
         with_payload: bool = True,
     ) -> List[Dict[str, Any]]:
-        """Top-k on the named vector -> [{id, score, payload}].
+        """在命名向量上做 top-k -> [{id, score, payload}]。
 
-        score_threshold None = no threshold. must = {payload_key: value}, all must
-        match (for list fields such as ``scenes`` "match" means "contains").
+        score_threshold 为 None 表示没有阈值。must = {payload_key: value}，必须全部匹配
+        （对 ``scenes`` 这样的列表字段，"匹配"表示"包含"）。
         """
         if int(top_k) <= 0:
             raise ValueError("top_k must be > 0")
@@ -310,7 +311,7 @@ class QdrantStore:
         ]
 
     def existing_ids(self, point_ids: Sequence[PointId]) -> set[Union[int, str]]:
-        """The given ids that are points of the collection (canonical form, as _point_id gives)."""
+        """给定 id 中是 collection 里向量点的那些（规范形式，和 _point_id 给出的一样）。"""
         if not point_ids:
             return set()
         records = self.client.retrieve(
@@ -322,7 +323,7 @@ class QdrantStore:
         return {_point_id(record.id) for record in records}
 
     def get_payloads(self, point_ids: Sequence[PointId]) -> Dict[Union[int, str], Dict[str, Any]]:
-        """{id: payload} of the given ids that are points of the collection (canonical ids, no vectors)."""
+        """给定 id 中是 collection 里向量点的那些的 {id: payload}（规范 id，不含向量）。"""
         if not point_ids:
             return {}
         records = self.client.retrieve(
@@ -334,7 +335,7 @@ class QdrantStore:
         return {_point_id(record.id): dict(record.payload or {}) for record in records}
 
     def get_vectors(self, point_ids: Sequence[PointId]) -> Dict[Union[int, str], List[float]]:
-        """{id: vector} of the given ids that are points of the collection (the named vector)."""
+        """给定 id 中是 collection 里向量点的那些的 {id: vector}（命名向量）。"""
         if not point_ids:
             return {}
         records = self.client.retrieve(
@@ -351,10 +352,10 @@ class QdrantStore:
         return out
 
     def set_payloads(self, payloads: Mapping[PointId, Mapping[str, Any]]) -> int:
-        """Set payload fields per point in one request (other fields and vectors stay).
+        """在一个请求里逐个向量点设置 payload 字段（其他字段和向量保持不变）。
 
-        Every id must already be a point: Qdrant refuses the whole request otherwise, so callers
-        filter with existing_ids first.
+        每个 id 都必须已经是向量点：否则 Qdrant 会拒绝整个请求，所以调用方先用 existing_ids
+        过滤。
         """
         from qdrant_client.http import models as rest
 
@@ -381,7 +382,7 @@ class QdrantStore:
         )
 
     def delete_all_points(self) -> None:
-        """Remove every point; the collection, its vector config and payload indexes stay."""
+        """删除所有向量点；collection、它的向量配置和 payload 索引保留。"""
         from qdrant_client.http import models as rest
 
         self.client.delete(
@@ -393,10 +394,10 @@ class QdrantStore:
     def count(self) -> int:
         return int(self.client.count(collection_name=self.collection, exact=True).count)
 
-    # -- lifecycle ---------------------------------------------------------------
+    # -- 生命周期 ---------------------------------------------------------------
 
     def ping(self) -> Dict[str, Any]:
-        """{ok, url, collection, points_count, vector_size, named_vector}; never raises."""
+        """{ok, url, collection, points_count, vector_size, named_vector}；从不抛出。"""
         try:
             points_count = None
             if self.collection_exists():
@@ -418,7 +419,7 @@ class QdrantStore:
             }
 
     def close(self) -> None:
-        """Close the client (idempotent); the next call reconnects lazily."""
+        """关闭客户端（可重复调用）；下次调用时按需重新连接。"""
         client, self._client = self._client, None
         if client is not None:
             try:

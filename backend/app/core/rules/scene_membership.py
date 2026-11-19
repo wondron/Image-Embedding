@@ -1,21 +1,20 @@
-"""Effective scene membership (contract §2.8–2.9 / §4.2).
+"""生效的场景归属（契约 §2.8–2.9 / §4.2）。
 
-STRATEGY (M5 choice — write-time materialize):
-  1. include_all scenes (general) contain every image while active. They are
-     never written to image_scenes and cannot be overridden manually
-     (app.models.scene.ImageScene).
-  2. Derive rule membership per other active scene: any scene_rules hit —
-     category subtree (ltree path <@ rule path) OR cuisine in effective
-     category.cuisines (own else nearest ancestor).
-  3. Apply image_scenes origin=manual overrides (include/exclude) on top.
-  4. Persist: replace origin=rule rows for the image; leave manual rows intact.
-  5. Effective codes (include_all ∪ rule/manual) → Qdrant payload.scenes; bump
-     images.payload_version when membership/category/food_state/label_status changes.
-  Inactive scenes take no part: they have no members until enabled again.
+策略（M5 的选择——写入时物化）：
+  1. include_all 场景（general）启用时包含所有图片。它们从不写入 image_scenes，
+     也不能手工覆盖（app.models.scene.ImageScene）。
+  2. 对其他每个启用的场景按规则推导归属：命中任意一条 scene_rules 即可——
+     类别子树（ltree 路径 <@ 规则路径），或者菜系在生效的类别菜系里
+     （自己的，否则取最近的祖先的）。
+  3. 再叠加 image_scenes 里 origin=manual 的手工覆盖（包含 / 排除）。
+  4. 持久化：替换这张图 origin=rule 的行；手工的行保持不变。
+  5. 生效的 code（include_all ∪ 规则 / 手工）→ Qdrant payload.scenes；归属 / 类别 /
+     food_state / label_status 变化时递增 images.payload_version。
+  停用的场景不参与：重新启用之前没有成员。
 
-Recompute entrypoints (app.repositories.scenes): recompute_image_scenes for one image,
-recompute_scene_memberships for a batch after the catalog changed. Mapping categories to
-scene labels is one SQL query there (the deepest covering rule with an active label).
+重算入口（app.repositories.scenes）：recompute_image_scenes 重算一张图，
+recompute_scene_memberships 在目录变化后批量重算。类别到场景标签的映射在那里
+是一条 SQL 查询（覆盖它的最深的、标签启用的规则）。
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ from app.core.enums import LabelStatus
 
 
 def include_all_scene_ids(scenes: Sequence[Mapping[str, Any]]) -> set[int]:
-    """Scenes that implicitly contain every image (no image_scenes rows)."""
+    """隐式包含所有图片的场景（没有 image_scenes 行）。"""
     return {int(sc["id"]) for sc in scenes if sc.get("include_all")}
 
 
@@ -34,7 +33,7 @@ def effective_cuisines(
     category_row: Mapping[str, Any] | None,
     ancestors_root_first: Sequence[Mapping[str, Any]],
 ) -> list[str]:
-    """Own cuisines if non-empty; else first non-empty ancestor (root→leaf order)."""
+    """自己的菜系不为空就用自己的；否则取第一个不为空的祖先的（从根到叶的顺序）。"""
     if category_row is not None:
         own = list(category_row.get("cuisines") or [])
         if own:
@@ -54,13 +53,13 @@ def rule_matches_category(
     rule: Mapping[str, Any],
     rule_category_path: str | None,
 ) -> bool:
-    """True if one scene_rule matches this image's category/cuisine."""
+    """有一条 scene_rule 匹配这张图的类别 / 菜系时为 True。"""
     if image_category_id is None:
         return False
     rule_cat = rule.get("category_id")
     rule_cuisine = rule.get("cuisine")
     if rule_cat is not None:
-        # Subtree: image path is equal to or under rule category path (ltree <@)
+        # 子树：图片路径等于规则类别路径，或在它下面（ltree <@）
         if not image_path or not rule_category_path:
             return int(rule_cat) == int(image_category_id)
         return _ltree_is_descendant_or_equal(image_path, rule_category_path)
@@ -86,7 +85,7 @@ def compute_rule_member_scene_ids(
     image_path: str | None,
     image_cuisines: Sequence[str],
 ) -> set[int]:
-    """Rule-derived members among non-include_all scenes (the rows to persist)."""
+    """非 include_all 场景里按规则推导出的成员（要持久化的行）。"""
     members: set[int] = set()
     for sc in scenes:
         sid = int(sc["id"])
@@ -111,7 +110,7 @@ def apply_manual_overrides(
     rule_member_ids: set[int],
     manual_rows: Iterable[Mapping[str, Any]],
 ) -> set[int]:
-    """Manual include/exclude wins over rule membership."""
+    """手工的包含 / 排除优先于按规则的归属。"""
     effective = set(rule_member_ids)
     for row in manual_rows:
         sid = int(row["scene_id"])
@@ -129,7 +128,7 @@ def build_qdrant_payload(
     food_state: str | None,
     label_status: LabelStatus | str | None,
 ) -> dict[str, Any]:
-    """Contract §4.2 filter payload (plain JSON strings, same values as PG)."""
+    """契约 §4.2 的过滤用 payload（普通 JSON 字符串，取值和 PG 里相同）。"""
     return {
         "category_id": category_id,
         "scenes": [str(c) for c in scene_codes],

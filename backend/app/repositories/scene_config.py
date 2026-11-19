@@ -1,19 +1,17 @@
-"""scenes / scene_labels / scene_rules as the scene admin page reads and edits them.
+"""场景管理页读取和编辑的 scenes / scene_labels / scene_rules。
 
-Reads return every scene with its labels and rules: scenes are few (tens) and rules a few
-hundred, and the page shows them all. Each write is one transaction under the catalog lock
-(app.repositories.catalog_lock) and answers with the whole scene, so the page replaces one
-entry of its list, plus sync_required (see below).
+读取返回所有场景及其标签和规则：场景很少（几十个），规则几百条，页面全部显示。
+每次写入是目录锁（app.repositories.catalog_lock）下的一个事务，返回整个场景，这样页面
+替换列表里的一项即可，另外返回 sync_required（见下文）。
 
-What a write does not do: recompute which scenes stored images belong to. Rules, a scene's
-is_active / include_all and the category tree all feed membership; the change reaches stored
-images and their vector payloads through POST /api/scenes/sync (services.retrieval.sync_scenes).
-Each write says whether it needs that (sync_required, decided in
-core.rules.scene_fields): labels, names, descriptions and outputs_heating are read at
-request time, so changing them shows at once.
+写入不做的事：重算已存图片属于哪些场景。规则、场景的 is_active / include_all 和类别树都
+影响归属；修改通过 POST /api/scenes/sync（services.retrieval.sync_scenes）作用到已存图片
+及其向量 payload。每次写入都说明是否需要同步（sync_required，在
+core.rules.scene_fields 里决定）：标签、名称、描述和 outputs_heating 在请求时读取，
+所以修改后立刻生效。
 
-Deleting a scene takes its labels, rules and image_scenes rows with it (ON DELETE CASCADE); the
-default scene cannot be deleted. A label still used by a rule is not deleted (SCENE_IN_USE).
+删除场景会连带删除它的标签、规则和 image_scenes 行（ON DELETE CASCADE）；默认场景
+不能删除。仍被规则使用的标签不会删除（SCENE_IN_USE）。
 """
 
 from __future__ import annotations
@@ -41,7 +39,7 @@ from app.core.rules.scene_fields import (
     scene_flags_need_sync,
 )
 
-# member_count: effective members (an inactive scene has none; an include_all one has every image)
+# member_count：生效成员数（停用的场景没有成员；include_all 的场景包含所有图片）
 _SCENE_SELECT = (
     "SELECT s.id, s.code, s.name, s.description, s.include_all, s.outputs_heating, s.is_active, s.created_at, "
     "CASE WHEN NOT s.is_active THEN 0 "
@@ -54,7 +52,7 @@ _LABEL_SELECT = (
     "(SELECT count(*) FROM scene_rules r WHERE r.label_id = l.id) AS rule_count "
     "FROM scene_labels l "
 )
-# Category rules first, in tree order; then cuisine rules
+# 先是类别规则，按树的顺序；然后是菜系规则
 _RULE_SELECT = (
     "SELECT r.id, r.scene_id, r.category_id, c.code AS category_code, cn.name AS category_name, "
     "r.cuisine, r.label_id, l.code AS label_code, l.name AS label_name "
@@ -65,7 +63,7 @@ _RULE_SELECT = (
 )
 _NAME_PARAMS = {"display_lang": CATEGORY_DISPLAY_LANG, "primary_kind": NameKind.PRIMARY.value}
 
-# Constraint -> error for writers that slipped past the checks (outside this store)
+# 约束 -> 错误，给绕过检查的写入方（本存储之外）
 _CONFLICTS = {
     "uq_scenes_code": lambda: err.scene_code_exists("another scene already uses this code"),
     "uq_scene_labels_scene_id_code": lambda: err.scene_code_exists("another label of this scene already uses this code"),
@@ -161,7 +159,7 @@ def _rule_or_404(conn: Any, scene_id: int, rule_id: int) -> Mapping[str, Any]:
 
 
 def _check_rule_target(conn: Any, scene_id: int, target: Mapping[str, Any], *, except_id: int | None = None) -> None:
-    """The category exists and no other rule of the scene has this target."""
+    """类别存在，并且场景里没有其他规则以它为对象。"""
     if target["category_id"] is not None:
         if conn.execute(text("SELECT 1 FROM categories WHERE id = :cid"), {"cid": target["category_id"]}).fetchone() is None:
             raise err.validation_error(f"category_id {target['category_id']} does not exist")
@@ -181,7 +179,7 @@ def _check_rule_target(conn: Any, scene_id: int, target: Mapping[str, Any], *, e
 
 
 def _had_members(conn: Any, scene_id: int) -> bool:
-    """Whether the scene has effective members now (its code is then in their vector payloads)."""
+    """场景现在是否有生效成员（有的话它的 code 就在这些成员的向量 payload 里）。"""
     return bool(
         conn.execute(
             text(
@@ -196,7 +194,7 @@ def _had_members(conn: Any, scene_id: int) -> bool:
 
 
 def _written(scene: dict[str, Any], sync_required: bool) -> dict[str, Any]:
-    """What a write answers: the scene as stored now, plus whether stored images need a sync."""
+    """写入的返回值：场景现在存储的样子，加上已存图片是否需要同步。"""
     return {**scene, "sync_required": sync_required}
 
 
@@ -226,10 +224,10 @@ def _constraint_error(op: str, exc: IntegrityError) -> err.AppError:
 
 
 class PgSceneConfigMixin:
-    """The scene configuration: scenes with their labels and rules."""
+    """场景配置：场景及其标签和规则。"""
 
     def _scene_write(self, op: str, work: Any) -> Any:
-        """Run work(conn) in one transaction under the catalog write lock; map failures."""
+        """在目录写锁下的一个事务里执行 work(conn)；映射失败。"""
         self.ensure_schema()
         engine = self._get_engine()
         try:
@@ -244,7 +242,7 @@ class PgSceneConfigMixin:
             raise err.scene_postgres_failed(f"{op}: {type(exc).__name__}: {exc}") from exc
 
     def list_scene_configs(self) -> list[dict[str, Any]]:
-        """Every scene in id order, each with its labels (display order) and rules."""
+        """按 id 顺序的所有场景，每个带着它的标签（按显示顺序）和规则。"""
         self.ensure_schema()
         engine = self._get_engine()
         try:
@@ -253,7 +251,7 @@ class PgSceneConfigMixin:
         except Exception as exc:
             raise err.scene_postgres_failed(f"list_scene_configs: {type(exc).__name__}: {exc}") from exc
 
-    # -- scenes -------------------------------------------------------------------------
+    # -- 场景 -----------------------------------------------------------------------------
 
     def create_scene(self, fields: dict[str, Any]) -> dict[str, Any]:
         new = normalize_scene_fields(fields, partial=False)
@@ -294,14 +292,14 @@ class PgSceneConfigMixin:
             current = _scene_or_404(conn, sid)
             if current["code"] == DEFAULT_SCENE:
                 raise err.scene_protected(f"the default scene {DEFAULT_SCENE!r} cannot be deleted")
-            # Its code stays in the members' vector payloads until they are rewritten
+            # 它的 code 会留在成员的向量 payload 里，直到这些 payload 被重写
             sync_required = _had_members(conn, sid)
             conn.execute(text("DELETE FROM scenes WHERE id = :sid"), {"sid": sid})
             return {"id": sid, "code": current["code"], "sync_required": sync_required}
 
         return self._scene_write("delete_scene", work)
 
-    # -- labels -------------------------------------------------------------------------
+    # -- 标签 -----------------------------------------------------------------------------
 
     def create_scene_label(self, scene_id: int, fields: dict[str, Any]) -> dict[str, Any]:
         sid = normalize_row_id(scene_id, "scene_id")
@@ -352,7 +350,7 @@ class PgSceneConfigMixin:
 
         return self._scene_write("delete_scene_label", work)
 
-    # -- rules --------------------------------------------------------------------------
+    # -- 规则 -----------------------------------------------------------------------------
 
     def create_scene_rule(self, scene_id: int, fields: dict[str, Any]) -> dict[str, Any]:
         sid = normalize_row_id(scene_id, "scene_id")
@@ -374,7 +372,7 @@ class PgSceneConfigMixin:
         return self._scene_write("create_scene_rule", work)
 
     def update_scene_rule(self, scene_id: int, rule_id: int, fields: dict[str, Any]) -> dict[str, Any]:
-        """Change the rule's label and / or replace its target in place (one transaction)."""
+        """原地修改规则的标签和 / 或替换它的对象（一个事务）。"""
         sid = normalize_row_id(scene_id, "scene_id")
         rid = normalize_row_id(rule_id, "rule_id")
         changes = normalize_rule_fields(fields, partial=True)

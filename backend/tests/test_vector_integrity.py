@@ -1,13 +1,12 @@
-"""What keeps a model version's vectors honest, without a database or a real Qdrant:
+"""在不需要数据库或真实 Qdrant 的情况下，保证模型版本向量可信的那些机制：
 
-- the weight files' SHA-256 (the .onnx and the external data it names), on a real tiny ONNX;
-- the identity rule (preprocessing + file hashes + test vector) and weights that moved;
-- the ledger checked against the collection's real points (verify_ledger);
-- the write gate a model version switch closes;
-- the reconciler's vector pass (ledger slices, missing vectors embedded behind the gate);
-- the composition root clearing the ledger of a collection made anew, following moved weights,
-  and refusing at once when a version's weights are gone;
-- a hot reload never reusing a session whose weight files were replaced in place.
+- 权重文件的 SHA-256（.onnx 及其引用的外部数据），用一个真实的小 ONNX 测试；
+- 身份规则（预处理 + 文件哈希 + 测试向量）以及被移动的权重；
+- 用 collection 里真实的向量点核对台账（verify_ledger）；
+- 切换模型版本时关闭的写入闸门；
+- 对账任务的向量补算（分段核对台账，在闸门之后补算缺失的向量）；
+- 组合根清空重建的 collection 的台账、跟随被移动的权重，以及版本的权重不在时立刻拒绝；
+- 热重载永远不会复用权重文件被原地替换过的 session。
 """
 
 import contextlib
@@ -56,7 +55,7 @@ def fingerprint(*, path=SPEC["model_path"], hashes=None, probe=PROBE, **spec):
 
 
 def tiny_onnx(folder, *, name="model.onnx", data="model.onnx.data", value=1.0):
-    """A one-MatMul ONNX whose weight lives in an external data file, like the production encoder."""
+    """一个只有一次 MatMul 的 ONNX，权重放在外部数据文件里，和生产编码器一样。"""
     import onnx
     from onnx import TensorProto, helper, numpy_helper
 
@@ -90,20 +89,20 @@ class WeightFilesTests(unittest.TestCase):
         self.assertEqual([f["sha256"] for f in files], [sha(self.path), sha(os.path.join(self.dir, "model.onnx.data"))])
         self.assertEqual([f["size"] for f in files], [os.path.getsize(os.path.join(self.dir, f["name"])) for f in files])
         self.assertEqual(artifact_hash(files), hashlib.sha256("\n".join(sorted(f["sha256"] for f in files)).encode()).hexdigest())
-        self.assertEqual(artifact_hash(files[:1]), files[0]["sha256"])  # a single-file model: its own hash
+        self.assertEqual(artifact_hash(files[:1]), files[0]["sha256"])  # 单文件模型：用它自己的哈希
 
     def test_a_recorded_version_knows_whether_its_weights_are_still_there(self):
         recorded = {"spec": {"model_path": self.path.replace("\\", "/")}, "files": model_files(self.path)}
         self.assertEqual(weights_status(recorded), "ok")
         data = os.path.join(self.dir, "model.onnx.data")
-        with open(data, "r+b") as fh:  # other weights of the same size, written in place
+        with open(data, "r+b") as fh:  # 大小相同的另一份权重，原地写入
             fh.seek(0)
             fh.write(b"\x00\x00\x80\x40")
         os.utime(data, ns=(time.time_ns() + 10**9, time.time_ns() + 10**9))
         self.assertEqual(weights_status(recorded), "changed")
         os.remove(data)
         self.assertEqual(weights_status(recorded), "missing")
-        self.assertIsNone(weights_status({"spec": {"model_path": self.path}}))  # no files recorded
+        self.assertIsNone(weights_status({"spec": {"model_path": self.path}}))  # 没有记录文件
         self.assertIsNone(weights_status(None))
 
     def test_a_session_notices_its_weights_replaced_in_place(self):
@@ -111,10 +110,10 @@ class WeightFilesTests(unittest.TestCase):
         encoder.spec = SimpleNamespace(model_path=self.path)
         encoder._loaded_files = inference._file_stats(self.path)
         self.assertTrue(encoder.files_unchanged())
-        tiny_onnx(self.dir, value=2.0)  # a new export at the same path
+        tiny_onnx(self.dir, value=2.0)  # 同一个路径下的新导出
         os.utime(os.path.join(self.dir, "model.onnx.data"), ns=(time.time_ns() + 2 * 10**9,) * 2)
         self.assertFalse(encoder.files_unchanged())
-        encoder._loaded_files = None  # files that could not be listed: never reused
+        encoder._loaded_files = None  # 列不出来的文件：永远不复用
         self.assertFalse(encoder.files_unchanged())
 
 
@@ -122,8 +121,8 @@ class IdentityTests(unittest.TestCase):
     def test_the_file_hashes_tell_weights_apart_whatever_the_test_vector_says(self):
         recorded = fingerprint(hashes=["a" * 64, "b" * 64])
         self.assertTrue(mv.same_encoder(recorded, fingerprint(hashes=["b" * 64, "a" * 64])))
-        self.assertFalse(mv.same_encoder(recorded, fingerprint(hashes=["a" * 64, "c" * 64])))  # a light fine-tune
-        self.assertTrue(mv.same_encoder(recorded, fingerprint()))  # recorded before files: the test vector decides
+        self.assertFalse(mv.same_encoder(recorded, fingerprint(hashes=["a" * 64, "c" * 64])))  # 轻量微调
+        self.assertTrue(mv.same_encoder(recorded, fingerprint()))  # 在记录文件之前登记的：由测试向量决定
         self.assertFalse(mv.same_encoder(recorded, fingerprint(hashes=["a" * 64, "b" * 64], probe=[0.8, 0.6, 0, 0])))
         self.assertEqual(mv.file_hashes(recorded), ["a" * 64, "b" * 64])
         self.assertEqual(mv.artifact_of(recorded), "a" * 64)
@@ -133,8 +132,8 @@ class IdentityTests(unittest.TestCase):
         recorded = fingerprint(hashes=["a" * 64])
         self.assertTrue(mv.moved(recorded, fingerprint(path="config/model/embedding/embeddingcls-bbbb/model.onnx", hashes=["a" * 64])))
         self.assertFalse(mv.moved(recorded, fingerprint(hashes=["a" * 64])))
-        self.assertTrue(mv.moved(fingerprint(), fingerprint(hashes=["a" * 64])))  # the record learns the hashes
-        self.assertFalse(mv.moved(recorded, fingerprint(path="elsewhere.onnx", hashes=["c" * 64])))  # another model
+        self.assertTrue(mv.moved(fingerprint(), fingerprint(hashes=["a" * 64])))  # 记录学到了哈希
+        self.assertFalse(mv.moved(recorded, fingerprint(path="elsewhere.onnx", hashes=["c" * 64])))  # 另一个模型
 
 
 class FakeLedger:
@@ -178,11 +177,11 @@ class WriteGateTests(unittest.TestCase):
     def test_writers_run_together_and_a_switch_waits_for_them(self):
         gate = VectorWriteGate(wait_seconds=2)
         order = []
-        with gate.shared(), gate.shared():  # two writes at once
+        with gate.shared(), gate.shared():  # 同时两次写入
             switch = threading.Thread(target=lambda: (gate.exclusive().__enter__(), order.append("switch")))
             switch.start()
             time.sleep(0.1)
-            self.assertEqual(order, [])  # waiting for the writes in flight
+            self.assertEqual(order, [])  # 等待进行中的写入
             self.assertTrue(gate.closed)
             order.append("writes done")
         switch.join(2)
@@ -215,7 +214,7 @@ class WriteGateTests(unittest.TestCase):
 
 
 class FakeFill:
-    """The current model's BuildEmbeddingsUseCase: backlog ids, `failing` ones cannot be read."""
+    """当前模型的 BuildEmbeddingsUseCase：待处理列表的 id，`failing` 的读不了。"""
 
     def __init__(self, backlog, failing=()):
         self.backlog = sorted(backlog)
@@ -268,13 +267,13 @@ class ReconcileVectorPassTests(unittest.TestCase):
         fill = FakeFill(ids(4, 5, 6, 7, 8), failing=ids(5))
         use_case, entered = self.round(ledger=ledger, points=Points(ids(1, 3)), fill=fill, max_verifications=2, max_embeddings=3)
         result = use_case.run_once()
-        self.assertEqual((result.vectors.verified, result.vectors.forgotten), (2, 1))  # ids(2) lost its point
-        self.assertEqual(result.verify_cursor, ids(2)[0])  # the next round checks from there
+        self.assertEqual((result.vectors.verified, result.vectors.forgotten), (2, 1))  # ids(2) 的向量点丢了
+        self.assertEqual(result.verify_cursor, ids(2)[0])  # 下一轮从那里开始核对
         self.assertEqual((result.vectors.embedded, result.vectors.failed), (2, 1))
         self.assertEqual(result.embed_cursor, ids(6)[0])
-        self.assertEqual(len(entered), len(fill.calls))  # every batch behind the write gate
+        self.assertEqual(len(entered), len(fill.calls))  # 每一批都在写入闸门之后
         again = use_case.run_once(verify_cursor=result.verify_cursor, embed_cursor=result.embed_cursor)
-        self.assertEqual((again.vectors.verified, again.verify_cursor), (1, None))  # the end: start over next time
+        self.assertEqual((again.vectors.verified, again.verify_cursor), (1, None))  # 到末尾了：下次从头开始
         self.assertEqual(again.vectors.embedded, 2)
         self.assertIsNone(again.embed_cursor)
 

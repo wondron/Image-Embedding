@@ -1,4 +1,4 @@
-"""Optional GroundingDINO startup, shared access and atomic configuration reload."""
+"""可选的 GroundingDINO 启动、共享访问和原子的配置重新加载。"""
 
 import asyncio
 import copy

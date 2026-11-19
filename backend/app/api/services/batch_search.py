@@ -1,32 +1,27 @@
-"""Batch search (POST /api/search/batch/files, /api/search/batch/urls): several query images
-against the self-built library in one request.
+"""多图搜索（POST /api/search/batch/files、/api/search/batch/urls）：一次请求用多张
+查询图搜自建库。
 
-    shared parameters (scene, top_k, score_threshold)   checked once; a bad one fails the request
-    every query image, SEARCH_CONCURRENCY at a time:
-        read it (upload) or download it (URL)
-        self-built search, as POST /api/search          -> results[i] = {ok: true, source, items}
-        that image failed                               -> results[i] = {ok: false, error, detail}
+    共享参数（scene、top_k、score_threshold）    只检查一次；有一个不合法就让请求失败
+    每张查询图，同时最多 SEARCH_CONCURRENCY 张：
+        读取（上传）或下载（URL）
+        搜自建库，同 POST /api/search                    -> results[i] = {ok: true, source, items}
+        这张图失败了                                     -> results[i] = {ok: false, error, detail}
 
-One image that cannot be read, downloaded or decoded does not take the others down: its entry says
-why and the request still answers 200. The request itself fails when nothing can be searched at
-all: the retrieval stack is not ready (NOT_READY), a shared parameter is bad, or every image failed
-with the same service failure (the vector store or the database is down), which is then raised
-instead of being repeated in every entry.
+一张图读不了、下载不了或解码不了，不会拖垮其他图：它的条目说明原因，请求仍然返回 200。
+完全无法搜索时请求本身才失败：检索服务未就绪（NOT_READY）、共享参数不合法，或者
+每张图都因同一个服务故障失败（向量库或数据库挂了），这时抛出那个错误，而不是在每个
+条目里重复一遍。
 
-search_images is the part other flows call too (the crops of the objects detected in one picture,
-say: QueryImage.from_bytes for an image already in memory). It takes shared parameters the caller
-has checked and answers the entries of results[], in the order the images were given whichever
-finishes first.
+search_images 是其他流程也会调用的部分（比如一张图里检测到的物体的裁剪图：已经在内存里的
+图片用 QueryImage.from_bytes）。它接收调用方已经检查过的共享参数，返回 results[] 的各个
+条目，顺序和传入图片的顺序一致，不管谁先完成。
 
-An image is read only once it has one of the SEARCH_CONCURRENCY slots, so a request holds at most
-that many images in memory; its search runs in the thread pool (the encoder and the Qdrant and
-PostgreSQL clients are shared between threads). What overlaps is the download, the decoding and
-resizing, and the Qdrant / PostgreSQL round trips: on the GPU the encoder's session runs one
-inference after another, so small images such as crops gain little (the current model takes a
-batch of one only). Each image records its steps on a timer of its own, added to the request's
-timer in request order once all are done: the timing line gives every step's total over the batch,
-in a fixed order, and as the images overlap the steps can add up to more than the total. The
-global search is never called.
+一张图拿到 SEARCH_CONCURRENCY 个名额中的一个之后才会读取，所以一个请求同时最多在内存里
+放这么多张图；搜索在线程池里执行（编码器以及 Qdrant 和 PostgreSQL 客户端由各线程共用）。
+能重叠的是下载、解码和缩放，以及 Qdrant / PostgreSQL 的往返：在 GPU 上编码器的 session
+一次只做一次推理，所以裁剪图这类小图收益不大（当前模型只支持 batch 为 1）。每张图把步骤
+记在自己的计时器上，全部完成后按请求顺序加到请求的计时器里：耗时行给出每一步在整批上的
+合计，顺序固定；因为各张图同时处理，各步骤相加可能超过总耗时。不会调用 Global 搜图。
 """
 
 from __future__ import annotations
@@ -52,19 +47,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("svc.batch_search")
 
-# Images of one request read and searched at the same time. The web client sends 5 per request
-# (frontend LOCAL_BATCH_SIZE), so each of its requests runs in one go. Bounded because every
-# search holds a worker of the thread pool all requests share (40) while it runs, and its image
-# in memory
+# 一个请求里同时读取和搜索的图片数。网页端每次请求发 5 张（前端 LOCAL_BATCH_SIZE），
+# 所以它的每个请求一轮就能处理完。要设上限，是因为每次搜索在运行时都占着所有请求共用的
+# 线程池（40 个）里的一个线程，以及内存里的一张图
 SEARCH_CONCURRENCY = 5
 
-# Failures of the service rather than of one image, besides the codes registered as internal
+# 除了登记为内部错误的错误码之外，属于服务故障而不是单张图问题的错误码
 _SERVICE_CODES = frozenset({"NOT_READY", "VECTOR_DIM_MISMATCH", "EMBEDDING_MODEL_MISMATCH"})
 
 
 @dataclass(frozen=True)
 class QueryImage:
-    """One query image of a batch: how results[] names it, and how to get its bytes."""
+    """批量里的一张查询图：results[] 怎么称呼它，以及怎么拿到它的内容。"""
 
     label: str
     read: Callable[[], Awaitable[bytes]]
@@ -72,7 +66,7 @@ class QueryImage:
 
     @classmethod
     def from_bytes(cls, label: str, image_bytes: bytes) -> QueryImage:
-        """An image already in memory, encoded as an upload would be (a crop, say)."""
+        """已经在内存里的图片，编码方式和上传的一样（比如一张裁剪图）。"""
 
         async def read() -> bytes:
             return image_bytes
@@ -89,7 +83,7 @@ def _is_service_failure(exc: err.AppError) -> bool:
 
 
 def _raise_if_service_down(failures: Sequence[err.AppError], total: int) -> None:
-    """Every image failed the same way and it is the service's failure: report that error."""
+    """每张图都以同样的方式失败，而且是服务的故障：报告这个错误。"""
     if not failures or len(failures) < total:
         return
     first = failures[0]
@@ -108,7 +102,7 @@ async def _search_one(
     trace_id: str,
     timer: timer_tool,
 ) -> tuple[dict[str, Any], err.AppError | None]:
-    """This image's entry of results[], and why it could not be searched (None when it was)."""
+    """这张图在 results[] 里的条目，以及它无法搜索的原因（能搜索时为 None）。"""
     started = time.perf_counter()
     entry: dict[str, Any] = {"index": index, "input": image.label}
     try:
@@ -128,7 +122,7 @@ async def _search_one(
         )
     except err.AppError as exc:
         failure = exc
-    except Exception as exc:  # one image must not take the others down
+    except Exception as exc:  # 一张图不能拖垮其他图
         logger.exception("batch search: image %d (%s) failed | trace_id=%s", index, image.label, trace_id)
         failure = err.internal_error(f"{type(exc).__name__}: {exc}")
     else:
@@ -157,23 +151,22 @@ async def search_images(
     timer: timer_tool | None = None,
     concurrency: int = SEARCH_CONCURRENCY,
 ) -> list[dict[str, Any]]:
-    """Every image searched in the self-built library as POST /api/search, at most `concurrency`
-    at a time. One entry per image, in the order given (the entries of results[]):
+    """每张图都像 POST /api/search 一样搜自建库，同时最多 `concurrency` 张。每张图一个条目，
+    顺序和传入的一致（就是 results[] 的条目）：
 
         {index, input, ok: true, source, items[, message], elapsed_ms}
         {index, input, ok: false, error, detail, elapsed_ms}
 
-    The caller checks what the images share first (stack.search_uc.check), so that a bad scene,
-    top_k or threshold fails its request before any image is read, and passes check's scene. One
-    image's failure is its entry; this raises only when every image failed with the same service
-    failure. No image, no entry.
+    调用方先检查这些图共享的参数（stack.search_uc.check），这样场景、top_k 或阈值不合法时，
+    在读任何图片之前请求就失败了，并传入 check 返回的 scene。单张图的失败就是它的条目；
+    只有每张图都因同一个服务故障失败时才抛出。没有图片就没有条目。
 
-    timer: the caller's timer. Every image's steps (图像下载 / embedding推理 / vector搜索 / 后处理)
-    are added to it once all are done, image after image in the order given.
+    timer：调用方的计时器。全部完成后，每张图的步骤（图像下载 / embedding推理 / vector搜索 /
+    后处理）按传入顺序一张接一张加到它上面。
     """
     if concurrency < 1:
         raise ValueError(f"concurrency must be at least 1, got {concurrency}")
-    images = list(images)  # walked twice below: the second walk of a generator would find nothing
+    images = list(images)  # 下面要遍历两次：生成器第二次遍历什么也拿不到
     slots = asyncio.Semaphore(concurrency)
     timers = [timer_tool() for _ in images]
 
@@ -206,11 +199,11 @@ async def run_batch_search(
     trace_id: str,
     input_type: str,
 ) -> dict[str, Any]:
-    """The response body ({ok, trace_id, scene, outputs_heating, top_k, score_threshold, total,
-    succeeded, matched, failed, results}). input_type names the route in the log (files / urls).
+    """响应体（{ok, trace_id, scene, outputs_heating, top_k, score_threshold, total,
+    succeeded, matched, failed, results}）。input_type 在日志里标明路由（files / urls）。
 
-    One timer for the request, which every image's steps are added to: the timing line gives every
-    step's total over the batch."""
+    整个请求一个计时器，每张图的步骤都加到上面：耗时行给出每一步在整批上的合计。
+    """
     timer = timer_tool()
     stack = require_retrieval(runtime)
     if not images:
@@ -218,7 +211,7 @@ async def run_batch_search(
     if len(images) > BATCH_MAX_IMAGES:
         raise err.validation_error(f"too many query images ({len(images)} > {BATCH_MAX_IMAGES})")
 
-    # Before any image is read: a bad scene, top_k or threshold is the request's failure
+    # 在读取任何图片之前：场景、top_k 或阈值不合法就是请求的失败
     shared = await run_in_threadpool(
         stack.search_uc.check, scene=scene, top_k=top_k, score_threshold=score_threshold
     )

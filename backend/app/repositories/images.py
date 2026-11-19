@@ -32,8 +32,8 @@ from app.core.rules.image_fields import normalize_image_patch, resolve_label_sta
 from app.core.rules.image_ids import uuid_from_sha256
 from app.core.rules.text_fields import normalize_description, normalize_tags
 
-# Category display name (zh primary) + nearest ancestor's heating group.
-# Expects aliases i (images) and c (categories); binds :primary_kind.
+# 类别显示名（zh 主名称）+ 最近祖先的加热组。
+# 需要别名 i（images）和 c（categories）；绑定 :primary_kind。
 _CATEGORY_NAME_JOIN = (
     "LEFT JOIN category_names cn "
     "  ON cn.category_id = c.id AND cn.lang = 'zh' AND cn.kind = :primary_kind "
@@ -47,13 +47,13 @@ _HEATING_GROUP_JOIN = (
     "  ORDER BY nlevel(anc.path) DESC LIMIT 1"
     ") hg ON true "
 )
-# + the food annotation (image_foods, needs FOOD_JOIN)
+# + 食物标注（image_foods，需要 FOOD_JOIN）
 _HYDRATE_SELECT = (
     "SELECT i.*, cn.name AS category_name, "
     "hg.id AS heating_group_id, hg.code AS heating_group_code, "
     f"hg.name AS heating_group_name, {FOOD_SELECT} "
 )
-# The ledger of one image: which model versions' collections have its point, at which version
+# 一张图片的台账：哪些模型版本的 collection 里有它的向量点，是哪个版本
 _LEDGER_SQL = (
     "SELECT e.model_id, m.name, m.version, m.collection, m.status AS model_status, "
     "e.synced_version, e.embedded_at "
@@ -63,7 +63,7 @@ _LEDGER_SQL = (
 
 
 def _check_label_matches_category(label: LabelStatus, category_id: Any) -> None:
-    """Mirror ck_images_label_matches_category: unlabeled iff no category."""
+    """与 ck_images_label_matches_category 一致：没有类别当且仅当 unlabeled。"""
     if (label is LabelStatus.UNLABELED) != (category_id is None):
         raise err.validation_error(
             "label_status='unlabeled' must go with category_id IS NULL "
@@ -82,7 +82,7 @@ def _positive_int(value: Any, field: str) -> int:
 
 
 def _decorate(row: Any, codes_by: dict[str, list[str]]) -> dict[str, Any]:
-    """Row -> wire dict with scenes + heating_group object."""
+    """数据库行 -> 带 scenes 和 heating_group 对象的 wire dict。"""
     d = _row_to_dict(row)
     d["scenes"] = codes_by.get(str(d["id"]), [])
     if d.get("heating_group_id") is not None:
@@ -97,7 +97,7 @@ def _decorate(row: Any, codes_by: dict[str, list[str]]) -> dict[str, Any]:
 
 
 def _prepare_image_insert(row: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Normalize the shared insert fields before opening a transaction."""
+    """在开启事务之前规范化共用的插入字段。"""
     sha = row.get("sha256")
     if isinstance(sha, str):
         sha = bytes.fromhex(sha)
@@ -140,7 +140,7 @@ def _prepare_image_insert(row: dict[str, Any]) -> tuple[dict[str, Any], dict[str
 def _insert_image(
     conn: Any, values: dict[str, Any], food: dict[str, Any]
 ) -> tuple[UUID, bool]:
-    """Insert on this connection and return the id with its atomic created flag."""
+    """在这个连接上插入，返回 id 以及原子判断的 created 标志。"""
     from sqlalchemy import text
 
     inserted = conn.execute(
@@ -170,13 +170,12 @@ def _insert_image(
 
 
 class PgImagesMixin:
-    """images table CRUD / list / hydrate helpers."""
+    """images 表的增删改查 / 列表 / 补全辅助函数。"""
 
     def insert_image(self, row: dict[str, Any]) -> UUID | str:
-        """Insert images row (uuid PK = sha256[:16]) and, when given, its image_foods row.
+        """插入 images 行（uuid 主键 = sha256[:16]），给了食物标注时一并插入 image_foods 行。
 
-        Identical bytes are stored once: on conflict the existing id is returned
-        and the first upload's columns (food annotation included) are kept.
+        相同的字节只存一次：冲突时返回已有的 id，保留第一次上传的各列（包括食物标注）。
         """
         self.ensure_schema()
         values, food = _prepare_image_insert(row)
@@ -196,12 +195,11 @@ class PgImagesMixin:
     def index_image(
         self, row: dict[str, Any], *, model_id: int
     ) -> Iterator[ImageIndexResult]:
-        """Hold one image's write transaction until its vector write finishes.
+        """持有一张图片的写事务，直到它的向量写入完成。
 
-        Insert conflicts and the image row lock serialize uploads of identical
-        bytes across processes. The catalog lock keeps effective scene flags
-        stable too. Ledger SQL runs before yielding, but becomes visible only
-        when the caller completes successfully and this transaction commits.
+        插入冲突和图片行锁让跨进程的相同字节上传串行进行。目录锁还保证生效的场景开关
+        保持稳定。台账 SQL 在 yield 之前执行，但只有调用方成功完成、这个事务提交后
+        才可见。
         """
         self.ensure_schema()
         values, food = _prepare_image_insert(row)
@@ -214,8 +212,7 @@ class PgImagesMixin:
                 image_id, created = _insert_image(conn, values, food)
                 uid = str(image_id)
                 image = _lock_image(conn, uid)
-                # New images start at version 1. Re-uploads must advance it if
-                # current rules change an existing image's effective scenes.
+                # 新图片从版本 1 开始。如果当前规则改变了已有图片的生效场景，重复上传必须递增版本。
                 _recompute(conn, [image], bump=not created)
                 snapshot = self._image_detail(conn, uid)
                 if snapshot is None:
@@ -233,9 +230,8 @@ class PgImagesMixin:
                     consumer_failed = True
                     raise
         except BaseException as exc:
-            # A timed-out vector write or a failed PG commit may have changed
-            # the external point. A surviving image must therefore be checked
-            # again, even if another request has since committed its version.
+            # 超时的向量写入或失败的 PG 提交可能已经改变了外部的向量点。所以留存下来的图片
+            # 必须重新检查，即使之后另一个请求已经提交了它的版本。
             if yielded and image_id is not None:
                 self._mark_index_embedding_stale(model_id=model_id, image_id=image_id)
             if isinstance(exc, err.AppError) or consumer_failed or not isinstance(exc, Exception):
@@ -246,19 +242,16 @@ class PgImagesMixin:
     def lock_image_for_vector(
         self, image_id: UUID | str, *, model_id: int
     ) -> Iterator[dict[str, Any] | None]:
-        """Hold one stored image while the caller writes its point again (reembed).
+        """在调用方重新写入一张已存图片的向量点期间持有它（reembed）。
 
-        Yields the image as it is now, with its effective scenes (what the point's payload is
-        built from), or None when it is gone (deleted meanwhile): then no point may be written.
-        The row stays locked until the caller is done, so a deletion waits for the write, and its
-        cleanup, which runs after the deletion commits, removes the point written here. Without
-        the lock a deletion could commit and be cleaned up while the point was being written, and
-        the point would come back with nothing left to remove it: no image, no queue row, no
-        ledger row for the reconciler to check.
+        yield 图片现在的样子及其生效场景（向量点 payload 的来源），图片已经不在（这期间被删除）时
+        yield None：这时不能写入向量点。这一行一直锁到调用方完成，所以删除会等待这次写入，
+        而删除提交之后才运行的清理会删除这里写入的向量点。如果不加锁，删除可能在写入向量点期间
+        提交并清理完，向量点就会回来，而且再也没有东西能删掉它：没有图片、没有队列行、也没有
+        供对账任务检查的台账行。
 
-        Normal exit records the yielded payload_version in model_id's ledger and commits; an
-        exception rolls back and leaves the ledger as it was. Edits wait for the write too, so
-        the payload written is the one the ledger records.
+        正常退出时把 yield 出去的 payload_version 记录到 model_id 的台账并提交；出现异常时回滚，
+        台账保持原样。编辑也会等待这次写入，所以写入的 payload 就是台账记录的那个。
         """
         self.ensure_schema()
         from sqlalchemy import text
@@ -267,8 +260,8 @@ class PgImagesMixin:
         consumer_failed = False
         try:
             with self._get_engine().begin() as conn:
-                # Lock first, then read: in READ COMMITTED the second statement sees whatever the
-                # writer we waited for committed (its image_foods and image_scenes rows too)
+                # 先加锁再读取：在 READ COMMITTED 下，第二条语句能看到我们等待的那个写入方提交的内容
+                # （包括它的 image_foods 和 image_scenes 行）
                 locked = conn.execute(
                     text("SELECT 1 FROM images WHERE id = CAST(:id AS uuid) FOR UPDATE"), {"id": uid}
                 ).fetchone()
@@ -298,7 +291,7 @@ class PgImagesMixin:
             raise err.index_postgres_failed(f"lock_image_for_vector: {type(exc).__name__}: {exc}") from exc
 
     def _mark_index_embedding_stale(self, *, model_id: int, image_id: UUID) -> None:
-        """Best effort after an uncertain external write; preserve every image."""
+        """在结果不确定的外部写入之后尽力而为；保留每一张图片。"""
         from sqlalchemy import text
 
         try:
@@ -314,7 +307,7 @@ class PgImagesMixin:
             logger.exception("index_image: could not mark uncertain embedding stale id=%s", image_id)
 
     def mark_deleted(self, image_id: UUID | str) -> None:
-        """Port alias: enqueue hard-delete into image_deletions (§2.5)."""
+        """端口别名：把硬删除加入 image_deletions 队列（§2.5）。"""
         self.enqueue_image_deletion(image_id)
 
     def get_active_by_ids(
@@ -323,7 +316,7 @@ class PgImagesMixin:
         *,
         scene: str | None = None,
     ) -> dict[str, dict[str, Any]]:
-        """Hydrate images by uuid; optional scene membership filter."""
+        """按 uuid 补全图片信息；可选按场景归属过滤。"""
         self.ensure_schema()
         from sqlalchemy import text
 
@@ -370,7 +363,7 @@ class PgImagesMixin:
     def _scene_member_ids(
         self, conn, scene: str, id_sql: str, id_params: dict[str, str]
     ) -> set[str]:
-        """Which of the given ids are members of scene code (empty if unknown or inactive)."""
+        """给定的 id 中哪些是场景 code 的成员（场景不存在或停用时为空）。"""
         from sqlalchemy import text
 
         meta = self._scene_membership_row(conn, scene)
@@ -403,15 +396,14 @@ class PgImagesMixin:
         label_status: str | None = None,
         out_of_sync: bool = False,
     ) -> tuple[list[dict[str, Any]], int]:
-        """Paginate images that are effective members of scene code.
+        """分页列出场景 code 的生效成员图片。
 
-        q: substring of the category name, any tag, the original URL or the id.
-        tag: exact match on one element of images.tags.
-        category_id: that category and every category below it (an unlabeled image never matches).
-        label_status: exact value (unlabeled / auto / verified).
-        out_of_sync: only images whose current-model ledger row is missing or behind their
-        payload_version - they need a push, or a vector. By the ledger, not by reading Qdrant:
-        a point deleted behind the ledger's back is not found this way.
+        q：类别名、任一标签、原图 URL 或 id 的子串。
+        tag：与 images.tags 中某个元素完全相等。
+        category_id：这个类别及其下所有类别（未标注的图片永远不匹配）。
+        label_status：精确值（unlabeled / auto / verified）。
+        out_of_sync：只返回当前模型的台账行缺失或落后于 payload_version 的图片——它们需要推送，
+        或者需要向量。依据是台账，不读 Qdrant：背着台账被删除的向量点用这种方式找不到。
         """
         self.ensure_schema()
         from sqlalchemy import text
@@ -423,7 +415,7 @@ class PgImagesMixin:
         try:
             with engine.connect() as conn:
                 meta = self._scene_membership_row(conn, scene)
-                if meta is None or not meta["is_active"]:  # an inactive scene has no members
+                if meta is None or not meta["is_active"]:  # 停用的场景没有成员
                     return [], 0
 
                 params: dict[str, Any] = {
@@ -434,7 +426,7 @@ class PgImagesMixin:
                 if meta["include_all"]:
                     member_join = ""
                 else:
-                    # served by ix_image_scenes_scene_member (partial on is_member)
+                    # 由 ix_image_scenes_scene_member 支撑（is_member 上的部分索引）
                     member_join = (
                         "JOIN image_scenes isc ON isc.image_id = i.id "
                         "AND isc.scene_id = :sid AND isc.is_member "
@@ -449,18 +441,18 @@ class PgImagesMixin:
                     params["cat"] = category
                     params["cat_like"] = f"%{category}%"
                 if tag:
-                    # served by ix_images_tags_gin (@>, not = ANY, so the index applies)
+                    # 由 ix_images_tags_gin 支撑（用 @> 而不是 = ANY，这样才能用上索引）
                     where.append("i.tags @> ARRAY[CAST(:tag AS text)]")
                     params["tag"] = tag
                 if category_id is not None:
-                    # the subtree: ltree <@ (ix_categories_path_gist); an unknown id matches nothing
+                    # 子树：ltree <@（ix_categories_path_gist）；不存在的 id 什么都不匹配
                     where.append("c.path <@ (SELECT path FROM categories WHERE id = :cat_id)")
                     params["cat_id"] = int(category_id)
                 if label_status:
                     where.append("i.label_status = :label_status")
                     params["label_status"] = label_status
                 if out_of_sync:
-                    # served by pk_image_embeddings (model_id, image_id); no current model: every image
+                    # 由 pk_image_embeddings（model_id, image_id）支撑；没有当前模型时：所有图片
                     where.append(
                         "NOT EXISTS (SELECT 1 FROM image_embeddings e "
                         "JOIN embedding_models m ON m.id = e.model_id AND m.status = :current_status "
@@ -508,14 +500,15 @@ class PgImagesMixin:
         row = self.get_image_by_uuid(image_id)
         if not row:
             return None
-        # attach scene codes
+        # 附上场景 code
         codes = self.get_effective_scene_codes(image_id)
         row["scenes"] = codes
         return row
 
     def get_image_file_urls(self, image_id: UUID | str) -> dict[str, Any] | None:
-        """{original_url, thumb_url, deleted} of a stored image, or of one deleted whose files wait
-        in image_deletions for the cleanup (deleted=True); None when neither knows the id."""
+        """已存图片的 {original_url, thumb_url, deleted}，或者文件在 image_deletions 里等待清理的
+        已删除图片的（deleted=True）；两边都不认识这个 id 时为 None。
+        """
         self.ensure_schema()
         from sqlalchemy import text
 
@@ -550,10 +543,10 @@ class PgImagesMixin:
         except Exception as exc:
             raise err.search_postgres_failed(f"{type(exc).__name__}: {exc}") from exc
 
-    # -- one image as the gallery admin reads and edits it ----------------------------
+    # -- 图库管理读取和编辑的单张图片 ----------------------------------------------------
 
     def _image_detail(self, conn: Any, uid: str) -> dict[str, Any] | None:
-        """Row + category (zh name, code) + heating group + food + effective scenes + ledger."""
+        """行 + 类别（zh 名称、code）+ 加热组 + 食物 + 生效场景 + 台账。"""
         from sqlalchemy import text
 
         row = conn.execute(
@@ -578,8 +571,9 @@ class PgImagesMixin:
         return detail
 
     def get_image_detail(self, image_id: UUID | str) -> dict[str, Any] | None:
-        """One image with everything the gallery shows of it, or None. One snapshot: the payload
-        fields and the scenes are read together, so they can be compared with the vector store."""
+        """带着图库显示的所有内容的一张图片，或者 None。同一个快照：payload 字段和场景一起读取，
+        所以能和向量库比较。
+        """
         self.ensure_schema()
         uid = str(_as_uuid(image_id))
         try:
@@ -593,14 +587,12 @@ class PgImagesMixin:
             raise err.search_postgres_failed(f"get_image_detail: {type(exc).__name__}: {exc}") from exc
 
     def patch_image(self, image_id: UUID | str, fields: dict[str, Any]) -> dict[str, Any]:
-        """Validate and apply a gallery patch in one transaction; return its committed detail.
+        """在一个事务里校验并应用图库的修改；返回提交后的详情。
 
-        Takes the catalog read lock, then the image row lock (the order of every image writer),
-        so the category checked here cannot be deleted or disabled before the commit. Settles
-        label_status (image_fields.resolve_label_status), bumps payload_version once when a
-        payload field (category_id, label_status, food_state) actually changes, and rewrites the
-        image's rule memberships when the category changes. The vector store is not touched:
-        the HTTP layer pushes the payload after the commit.
+        先获取目录读锁，再获取图片行锁（所有图片写入方都是这个顺序），所以这里检查过的类别
+        在提交前不会被删除或停用。确定 label_status（image_fields.resolve_label_status），
+        payload 字段（category_id、label_status、food_state）确实变化时递增一次 payload_version，
+        类别变化时重写图片的规则归属。不碰向量库：由 HTTP 层在提交后推送 payload。
         """
         fields = normalize_image_patch(fields)
         self.ensure_schema()
@@ -665,7 +657,7 @@ class PgImagesMixin:
                 if food:
                     write_image_food(conn, uid, food)
                 if category_changed:
-                    # Rule memberships follow the category; the version is already bumped above
+                    # 规则归属跟随类别；版本已经在上面递增过了
                     image = {"id": uid, "category_id": category_id, "payload_version": current["payload_version"]}
                     _recompute(conn, [image], bump=False)
                 return self._image_detail(conn, uid)

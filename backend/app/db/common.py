@@ -1,4 +1,4 @@
-"""Shared helpers for PostgreSQL metadata adapters (PG v0.1)."""
+"""PostgreSQL 元数据适配器共用的辅助函数（PG v0.1）。"""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def _as_uuid(image_id: UUID | str) -> uuid.UUID:
     return uuid.UUID(str(image_id).strip())
 
 def _uuid_in_clause(image_ids: list[str]) -> tuple[str, dict[str, str]]:
-    """Expand uuid list to IN (:id0, :id1, ...) for driver-safe binding."""
+    """把 uuid 列表展开成 IN (:id0, :id1, ...)，便于驱动安全地绑定参数。"""
     if not image_ids:
         return "(NULL)", {}
     params: dict[str, str] = {}
@@ -36,7 +36,7 @@ def _uuid_in_clause(image_ids: list[str]) -> tuple[str, dict[str, str]]:
     return "(" + ", ".join(parts) + ")", params
 
 def _jsonable(value: Any) -> Any:
-    """datetime -> ISO 8601 (naive means UTC), UUID -> str, bytea (sha256) -> hex; the rest as-is."""
+    """datetime 转 ISO 8601（不带时区的按 UTC），UUID 转 str，bytea（sha256）转十六进制；其余原样返回。"""
     if isinstance(value, datetime):
         return _iso(value)
     if isinstance(value, uuid.UUID):
@@ -46,7 +46,7 @@ def _jsonable(value: Any) -> Any:
     return value
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
-    """A result row as a JSON-friendly dict. Converts by value type, so new columns need no edit here."""
+    """把一行结果转成可 JSON 序列化的 dict。按值的类型转换，所以新增列不用改这里。"""
     if row is None:
         return {}
     mapping = row._mapping if hasattr(row, "_mapping") else row

@@ -1,4 +1,4 @@
-"""ORM schema (app.models) — static checks that need no database."""
+"""ORM 表结构（app.models）——不需要数据库的静态检查。"""
 
 import re
 import unittest
@@ -15,14 +15,14 @@ from app.db.base import Base
 
 BACKEND = Path(__file__).resolve().parents[1]
 
-# The 12 tables of contract v0.1 + image_foods (0006) + index_tasks (0008); ensure_schema checks
-# whatever app.models registers
+# 契约 v0.1 的 12 张表 + image_foods（0006）+ index_tasks（0008）；ensure_schema 检查
+# app.models 登记的所有表
 TABLES = {
     "heating_groups", "categories", "category_names", "images", "image_deletions", "scenes",
     "scene_labels", "scene_rules", "image_scenes", "embedding_models", "image_embeddings",
     "external_candidates", "image_foods", "index_tasks",
 }
-# editable enum (app.core.enums.EDITABLE_ENUMS) -> the column that stores it
+# 可编辑枚举（app.core.enums.EDITABLE_ENUMS）-> 存储它的列
 EDITABLE_COLUMNS = {
     "source_type": ("images", "source_type"),
     "license": ("images", "license"),
@@ -34,7 +34,7 @@ EDITABLE_COLUMNS = {
 class ModelsSchemaTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        configure_mappers()  # relationship strings resolve
+        configure_mappers()  # relationship 字符串能解析
         cls.tables = Base.metadata.tables
 
     def test_models_register_exactly_the_contract_tables(self):
@@ -50,7 +50,7 @@ class ModelsSchemaTests(unittest.TestCase):
             names += [str(ix.name) for ix in table.indexes]
             for name in names:
                 self.assertTrue(name.startswith(prefixes), f"{table.name}: {name}")
-            # PG truncates identifiers past 63 bytes; keep names exact
+            # PG 会截断超过 63 字节的标识符；名称要保持准确
             self.assertTrue(all(len(n) <= 63 for n in names), names)
 
     def test_system_enum_columns_store_enum_values_with_check_constraints(self):
@@ -71,11 +71,11 @@ class ModelsSchemaTests(unittest.TestCase):
             self.assertEqual(col_type.length, enums.ENUM_VALUE_MAX_LEN)
 
     def test_editable_enum_columns_are_varchar_without_a_check_list(self):
-        # values live in config/param/enums.yaml and grow at runtime (migration 0004)
+        # 取值放在 config/param/enums.yaml 里，并在运行时增加（迁移 0004）
         self.assertEqual(set(EDITABLE_COLUMNS), set(enums.EDITABLE_ENUMS))
         for table, column in EDITABLE_COLUMNS.values():
             col_type = self.tables[table].c[column].type
-            self.assertNotIsInstance(col_type, Enum, column)  # Enum subclasses String
+            self.assertNotIsInstance(col_type, Enum, column)  # Enum 是 String 的子类
             self.assertIsInstance(col_type, String, column)
             self.assertEqual(col_type.length, enums.ENUM_VALUE_MAX_LEN)
             ddl = str(CreateTable(self.tables[table]).compile(dialect=postgresql.dialect()))
@@ -92,14 +92,14 @@ class ModelsSchemaTests(unittest.TestCase):
         self.assertIn("(label_status = 'unlabeled') = (category_id IS NULL)", checks.values())
         self.assertIn("width > 0 AND height > 0", checks.values())
         self.assertFalse(self.tables["images"].c.width.nullable)
-        # the food annotation lives in image_foods since 0006
+        # 从 0006 起食物标注放在 image_foods 里
         self.assertFalse({"food_state", "food_processing", "food_count"} & set(self.tables["images"].c.keys()))
 
     def test_image_foods_is_an_optional_one_row_child_of_images(self):
         from app.core.rules.food_fields import FOOD_FIELDS
 
         foods = self.tables["image_foods"]
-        self.assertEqual([c.name for c in foods.primary_key.columns], ["image_id"])  # at most one row per image
+        self.assertEqual([c.name for c in foods.primary_key.columns], ["image_id"])  # 每张图片最多一行
         (fk,) = foods.c.image_id.foreign_keys
         self.assertEqual((fk.column.table.name, fk.ondelete), ("images", "CASCADE"))
         for column in FOOD_FIELDS:  # 非必填

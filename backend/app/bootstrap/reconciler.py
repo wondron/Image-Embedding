@@ -1,10 +1,9 @@
-"""The API process's background reconciler (RECONCILE_CONFIG): a daemon thread that runs a
-reconcile round (app.services.retrieval.reconcile) every interval_seconds on the retrieval stack.
+"""API 进程的后台对账（RECONCILE_CONFIG）：一个守护线程，每隔 interval_seconds 在检索服务上
+运行一轮对账（app.services.retrieval.reconcile）。
 
-Started by the lifespan once the retrieval stack is up; stopped by ApplicationState.close() before
-the stack is closed. A round that is running when the API stops ends at its next batch boundary.
-Several API worker processes each run one; the round's advisory lock lets one of them work and
-the others skip. A failed round is logged and the next one tries again.
+检索服务起来后由 lifespan 启动；在检索服务关闭之前由 ApplicationState.close() 停止。
+API 停止时正在运行的一轮在下一个批次边界结束。多个 API worker 进程各自运行一个；一轮的
+advisory lock 让其中一个工作，其他的跳过。失败的一轮写日志，下一轮再试。
 """
 
 from __future__ import annotations
@@ -53,7 +52,7 @@ class BackgroundReconciler:
         )
 
     def stop(self, timeout: float = 30.0) -> None:
-        """Ask the loop to end and wait for a running round to reach its next batch boundary."""
+        """让循环结束，并等正在运行的一轮到达下一个批次边界。"""
         self._stop.set()
         thread, self._thread = self._thread, None
         if thread is not None:
@@ -75,7 +74,7 @@ class BackgroundReconciler:
                 return
 
     def run_round(self) -> RoundResult | None:
-        """One round now, on the current stack; None when skipped for want of one, or failed."""
+        """现在在当前检索服务上跑一轮；没有检索服务而跳过或失败时为 None。"""
         if self._stopping():
             return None
         try:
@@ -86,7 +85,7 @@ class BackgroundReconciler:
         followed = self._follow_current(stack)
         if followed is not None:
             stack = followed
-        if stack is not self._stack:  # a new stack (new collection): start the laps over
+        if stack is not self._stack:  # 新的检索服务（新的 collection）：从头开始绕圈
             self._stack, self._cursor = stack, None
             self._verify_cursor = self._embed_cursor = None
         ledger, fill = self._vector_parts(stack)
@@ -110,8 +109,9 @@ class BackgroundReconciler:
 
     @staticmethod
     def _vector_parts(stack: Any) -> tuple[Any, Any]:
-        """(ledger, fill) for the round's vector pass on this stack: its model, collection and store,
-        and a BuildEmbeddingsUseCase with its encoder. (None, None) for a stack without them."""
+        """这个检索服务上本轮补算向量用的（ledger, fill）：它的模型、collection 和存储，以及一个用
+        它的编码器的 BuildEmbeddingsUseCase。没有这些的检索服务返回 (None, None)。
+        """
         infra = stack.infra
         vectors, storage = getattr(infra, "vectors", None), getattr(infra, "storage", None)
         model, encoder = getattr(stack, "model", None), getattr(stack, "embedding", None)
@@ -126,16 +126,17 @@ class BackgroundReconciler:
         return ledger, fill
 
     def _follow_current(self, stack: Any) -> Any:
-        """The current model version was switched by another process (or by hand in PostgreSQL):
-        rebuild this process's stack on it, so it stops searching and indexing the old collection.
-        Returns the new stack, or None when nothing changed or the switch could not be followed."""
+        """当前模型版本被另一个进程切换了（或者在 PostgreSQL 里被手工改了）：在它上面重建本进程的
+        检索服务，不再搜索和写入旧的 collection。返回新的检索服务；没有变化或者跟不上这次切换时
+        为 None。
+        """
         models = self._runtime.models
         if models is None:
             return None
         try:
             current = stack.infra.metadata.get_current_embedding_model()
         except Exception:
-            return None  # the round itself reports a database that cannot be read
+            return None  # 数据库读不了由这一轮自己报告
         current_id = int(current["id"])
         if current_id == stack.model.id:
             return None
@@ -155,7 +156,7 @@ class BackgroundReconciler:
 
 
 def start_reconciler(runtime: "ApplicationState") -> BackgroundReconciler | None:
-    """Start the background reconciler when RECONCILE_CONFIG enables it and retrieval is up."""
+    """RECONCILE_CONFIG 启用且检索服务起来时，启动后台对账。"""
     try:
         settings = ReconcileSettings.from_config(runtime.config)
     except ValueError as exc:

@@ -1,7 +1,7 @@
-"""Model versions wire (/api/embedding-models): list, register, build, switch, retire.
+"""模型版本的 wire（/api/embedding-models）：列出、登记、构建、切换、下线。
 
-Success bodies carry no trace_id (it is in the X-Trace-Id header), as for the gallery admin.
-Runtime: app.bootstrap.model_registry; rules: app.services.retrieval.model_versions.
+成功的响应体不带 trace_id（它在 X-Trace-Id 响应头里），和图库管理一样。
+运行时：app.bootstrap.model_registry；规则：app.services.retrieval.model_versions。
 """
 
 from typing import Literal

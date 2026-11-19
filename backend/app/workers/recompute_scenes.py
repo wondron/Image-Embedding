@@ -1,11 +1,11 @@
-"""Recompute image_scenes for one image (write-time materialize).
+"""重新计算一张图的 image_scenes（写入时物化）。
 
-Needs only PG, but builds RetrievalInfra like the other workers so the schema
-and current model are checked the same way; no ONNX model is loaded.
-payload_version is bumped only when the image's scenes changed; the vector payload is not
-written here (app.workers.sync_scenes recomputes every image and writes the payloads).
+只需要 PG，但和其他后台任务一样构建 RetrievalInfra，以便用同样的方式检查表结构
+和当前模型；不加载 ONNX 模型。
+只有图片的场景归属变了才递增 payload_version；这里不写向量的 payload
+（app.workers.sync_scenes 会重算所有图片并写入 payload）。
 
-Invoke from backend/:
+在 backend/ 下执行：
 
   python -m app.workers.recompute_scenes --image-id <uuid>
   python -m app.workers.recompute_scenes --image-id <uuid> --no-bump

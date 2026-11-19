@@ -1,4 +1,4 @@
-"""Indexing transaction boundaries over in-memory SQL, without PostgreSQL or vectors."""
+"""基于内存 SQL 的入库事务边界，不需要 PostgreSQL 或向量。"""
 
 import json
 import unittest
@@ -15,7 +15,7 @@ from app.services.retrieval.active_model import ActiveModel
 
 
 class SqliteIndexStore(images.PgImagesMixin):
-    """Use real SQL transactions while replacing PostgreSQL-specific statements."""
+    """使用真实的 SQL 事务，同时替换 PostgreSQL 特有的语句。"""
 
     def __init__(self):
         self.engine = create_engine("sqlite+pysqlite:///:memory:")
@@ -206,7 +206,7 @@ class IndexRepositoryTests(unittest.TestCase):
         commit_error = RuntimeError("commit response was lost")
 
         class LostCommitEngine:
-            """Commit once, then simulate losing the acknowledgement to that commit."""
+            """提交一次，然后模拟丢失这次提交的确认。"""
 
             def __init__(self, engine):
                 self.engine = engine

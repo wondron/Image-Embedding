@@ -1,5 +1,4 @@
-"""Scene configuration routes (scenes, their labels and rules), the import of a configuration
-file, and the membership sync."""
+"""场景配置的路由（场景及其标签和规则）、配置文件导入，以及场景归属同步。"""
 
 from __future__ import annotations
 

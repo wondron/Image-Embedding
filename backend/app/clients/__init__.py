@@ -1,1 +1,1 @@
-"""External clients: Qdrant, S3, inference."""
+"""外部客户端：Qdrant、S3、推理。"""

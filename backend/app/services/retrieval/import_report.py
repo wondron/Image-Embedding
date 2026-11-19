@@ -1,11 +1,9 @@
-"""What importing a configuration file answers (the category tree, the scene configuration).
+"""导入配置文件（类别树、场景配置）的返回结果。
 
-A file is applied item by item through the admin use cases, so every item gets the checks and the
-transaction a request from the admin page would get. The report has one row per item that was
-created, updated or deleted (in a dry run: would be), or that could not be imported; items that
-already match what is stored are only counted. An import is not one transaction: a row that fails
-leaves the rows before it applied, and running the same file again continues where it stopped
-(what is already stored is then unchanged).
+文件通过管理用例逐项应用，所以每一项都经过和管理页请求相同的检查和事务。
+报告里每一项占一行：创建、更新或删除的（dry run 时：将要的），或者无法导入的；
+和已存内容一致的项只计数。导入不是一个事务：某一行失败时，它前面的行已经生效，
+再运行同一个文件会从停下的地方继续（已经存好的保持不变）。
 """
 
 from __future__ import annotations
@@ -16,17 +14,18 @@ from typing import Any
 from app.core import errors as err
 
 SCHEMA_VERSION = 1
-# Rows a response carries at most; rows that failed are kept first
+# 响应最多带的行数；失败的行排在前面
 ROW_LIMIT = 1000
-# Stored items the file does not list, named in the response at most this many (all are counted)
+# 文件里没有列出的已存项，响应里最多列出这么多个（全部都会计数）
 LEFTOVER_LIMIT = 200
 
 _ACTIONS = ("create", "update", "delete", "unchanged", "error")
 
 
 def check_envelope(document: Any, *, kind: str, items_key: str) -> list[Any]:
-    """The file's item list. schema_version and kind are optional (GET bodies have neither); when
-    present they must be this server's version and the kind this endpoint imports."""
+    """文件的条目列表。schema_version 和 kind 是可选的（GET 的响应体两个都没有）；
+    出现时必须是本服务的版本，以及本接口导入的类型。
+    """
     if not isinstance(document, Mapping):
         raise err.validation_error("the file must be a JSON object")
     version = document.get("schema_version")
@@ -42,7 +41,7 @@ def check_envelope(document: Any, *, kind: str, items_key: str) -> list[Any]:
 
 
 def ref_code(value: Any, field: str) -> str | None:
-    """A reference to a coded row: its code, or an object carrying it ({code, ...}). None stays None."""
+    """对带 code 的行的引用：它的 code，或者带 code 的对象（{code, ...}）。None 保持 None。"""
     if value is None:
         return None
     code = value.get("code") if isinstance(value, Mapping) else value
@@ -52,7 +51,7 @@ def ref_code(value: Any, field: str) -> str | None:
 
 
 def text_of(value: Any) -> str | None:
-    """A value as a report shows it; None for nothing (null, an empty list)."""
+    """报告里显示的值；没有内容时为 None（null、空列表）。"""
     if value is None:
         return None
     if isinstance(value, bool):
@@ -67,13 +66,13 @@ def change(field: str, before: Any, after: Any) -> dict[str, Any]:
 
 
 def text_field(raw: Mapping[str, Any], key: str) -> str | None:
-    """raw[key] when it is non-blank text (for naming a row before the item is validated)."""
+    """raw[key] 是非空文本时返回它（用于在条目校验之前给行命名）。"""
     value = raw.get(key)
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 class ImportReport:
-    """Collects the rows and the counts of one import."""
+    """收集一次导入的各行和计数。"""
 
     def __init__(self, *, dry_run: bool) -> None:
         self.dry_run = dry_run
@@ -96,8 +95,9 @@ class ImportReport:
         error: str | None = None,
         detail: str | None = None,
     ) -> None:
-        """kind: category / scene / label / rule. key: what identifies the item (its code or
-        target). where: its place in the file, e.g. categories[0].children[2]."""
+        """kind：category / scene / label / rule。key：识别这一项的内容（它的 code 或对象）。
+        where：它在文件里的位置，例如 categories[0].children[2]。
+        """
         self._counts[action] += 1
         self._rows.append({
             "kind": kind,
@@ -112,15 +112,16 @@ class ImportReport:
         })
 
     def fail(self, kind: str, key: str, reason: err.AppError | str, **context: Any) -> None:
-        """An item that is not imported: an AppError from the rules or the store, or a reason about
-        the file itself (then VALIDATION_ERROR)."""
+        """没有导入的一项：规则或存储抛出的 AppError，或者关于文件本身的原因（这时为
+        VALIDATION_ERROR）。
+        """
         if isinstance(reason, err.AppError):
             self.add(kind, key, "error", error=reason.code, detail=err.client_detail(reason), **context)
         else:
             self.add(kind, key, "error", error="VALIDATION_ERROR", detail=reason, **context)
 
     def body(self, *, total: int, not_in_file: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-        """{dry_run, summary, rows, rows_truncated, not_in_file}. total: items the file lists."""
+        """{dry_run, summary, rows, rows_truncated, not_in_file}。total：文件列出的项数。"""
         rows = self._rows
         truncated = len(rows) > ROW_LIMIT
         if truncated:

@@ -1,4 +1,4 @@
-"""Predict wire: image search through FoodService (FlyB global search)."""
+"""预测的 wire：通过 FoodService 搜图（FlyB Global 搜图）。"""
 
 from typing import Any
 
@@ -16,7 +16,7 @@ class PredictUrlBody(BaseModel):
 
 
 class PredictHitDetails(BaseModel):
-    """Everything of a FlyB result besides the card fields; values as FlyB sends them."""
+    """FlyB 结果中除卡片字段之外的全部内容；值保持 FlyB 发来的原样。"""
 
     model_config = ConfigDict(extra="allow")
 
@@ -34,13 +34,13 @@ class PredictHitDetails(BaseModel):
 
 
 class PredictHit(SearchHitBase):
-    """One FlyB result: the same card as a self-built hit (app.schemas.retrieval.SearchHit)."""
+    """一条 FlyB 结果：和自建库结果是同一种卡（app.schemas.retrieval.SearchHit）。"""
 
     details: PredictHitDetails = Field(default_factory=PredictHitDetails)
 
 
 class PredictUpstreamEmpty(BaseModel):
-    """FlyB answered that it found nothing (status=upstream_empty_response)."""
+    """FlyB 回复什么都没找到（status=upstream_empty_response）。"""
 
     request_id: Any = None
     total_doc_count: int = 0

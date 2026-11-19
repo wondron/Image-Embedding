@@ -1,12 +1,10 @@
-"""Category tree admin use case: read the tree, create / patch / delete one node.
+"""类别树管理用例：读取整棵树，创建 / 修改 / 删除一个节点。
 
-Field rules live in app.core.rules.category_fields; the checks against the stored tree
-and the writes are one transaction each in the catalog store (app.repositories.categories).
-Needs PostgreSQL only (app.bootstrap.catalog).
+字段规则在 app.core.rules.category_fields；对照已存树的检查和写入，在 catalog 存储里
+各自是一个事务（app.repositories.categories）。只需要 PostgreSQL（app.bootstrap.catalog）。
 
-Moving a category or changing its cuisines changes which scenes the images below it belong to;
-the store recomputes them in the same transaction and says which changed, and the HTTP layer
-pushes their payloads after the commit (app.api.services.categories).
+移动类别或修改它的菜系会改变它下面的图片属于哪些场景；存储在同一个事务里重算它们，
+并说明哪些变了，由 HTTP 层在提交后推送它们的 payload（app.api.services.categories）。
 """
 
 from __future__ import annotations
@@ -22,8 +20,7 @@ class ManageCategoriesUseCase:
         self._catalog = catalog
 
     def tree(self) -> dict[str, Any]:
-        """What the admin page loads: every node, the heating groups a node can point at, and
-        the codes a root may use."""
+        """管理页加载的内容：所有节点、节点可以指向的加热组，以及根节点可以用的 code。"""
         return {
             "categories": self._catalog.list_categories(),
             "heating_groups": self._catalog.list_heating_groups(),
@@ -34,9 +31,9 @@ class ManageCategoriesUseCase:
         return self._catalog.create_category(fields)
 
     def update(self, category_id: int, fields: dict[str, Any]) -> dict[str, Any]:
-        """{category, scene_membership: None | {images, changed_ids}}."""
+        """{category, scene_membership: None | {images, changed_ids}}。"""
         return self._catalog.update_category(category_id, fields)
 
     def delete(self, category_id: int) -> dict[str, Any]:
-        """{id, code} of the deleted node."""
+        """被删除节点的 {id, code}。"""
         return self._catalog.delete_category(category_id)

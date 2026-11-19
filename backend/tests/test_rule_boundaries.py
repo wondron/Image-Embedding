@@ -1,4 +1,4 @@
-"""Keep shared rules and infrastructure independent of service orchestration."""
+"""让共用规则和基础设施独立于服务编排。"""
 
 import ast
 import importlib.util
@@ -34,7 +34,7 @@ class RuleBoundaryTests(unittest.TestCase):
         for path in (APP / "core/rules").rglob("*.py"):
             for line, module in imports(path):
                 if module == "app":
-                    continue  # from app import core is checked as app.core below
+                    continue  # from app import core 在下面按 app.core 检查
                 allowed = (
                     module == "app.core" or module.startswith("app.core.")
                     if module.startswith("app.")
@@ -54,8 +54,8 @@ class RuleBoundaryTests(unittest.TestCase):
         self.assertEqual(violations, [], "Infrastructure imports service orchestration")
 
     def test_cold_infrastructure_imports_do_not_load_services(self):
-        # A fresh interpreter catches imports triggered by package __init__ files,
-        # even when the ordinary test runner has already loaded every use case.
+        # 全新的解释器能发现由包的 __init__ 文件触发的导入，
+        # 即使普通的测试运行器已经加载了所有用例。
         code = """
 import socket
 import sys

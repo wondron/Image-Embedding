@@ -56,12 +56,12 @@ _VALUE_RE = re.compile(ENUM_VALUE_PATTERN)
 _ENUM_KEYS = ("label", "description", "editable", "values")
 _VALUE_KEYS = ("value", "label", "description")
 _KNOWN_ENUMS = (*SYSTEM_ENUMS, *EDITABLE_ENUMS)
-_YAML_WIDTH = 10_000  # one line per value: never fold
-_UNREAD = object()  # EnumStore._stamp before the first read
+_YAML_WIDTH = 10_000  # 每个取值一行：不折行
+_UNREAD = object()  # 第一次读取之前的 EnumStore._stamp
 
 
 class EnumFileError(ValueError):
-    """The enums file cannot be read or breaks a rule; the message says where."""
+    """枚举文件读不了或违反了规则；信息里会说明位置。"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,7 +88,7 @@ class EnumDef:
 
 @dataclass(frozen=True, slots=True)
 class EnumCatalog:
-    """One consistent version of the file; enums keep the file's order."""
+    """文件的一个一致版本；枚举保持文件里的顺序。"""
 
     enums: tuple[EnumDef, ...]
 
@@ -102,15 +102,15 @@ class EnumCatalog:
         return [d.name for d in self.enums]
 
     def replacing(self, definition: EnumDef) -> EnumCatalog:
-        """A copy with the enum of the same name replaced by definition."""
+        """一份副本，其中同名的枚举换成 definition。"""
         return EnumCatalog(tuple(definition if d.name == definition.name else d for d in self.enums))
 
 
-# -- rules shared by the file and the API ------------------------------------------
+# -- 文件和 API 共用的规则 -----------------------------------------------------------
 
 
 def value_problem(value: Any) -> str | None:
-    """Why value cannot be an enum value; None when it can."""
+    """value 为什么不能作为枚举值；可以时为 None。"""
     if not isinstance(value, str):
         return f"must be a string, got {value!r} (quote yes / no / on / off / null in YAML)"
     if len(value) > ENUM_VALUE_MAX_LEN or not _VALUE_RE.fullmatch(value):
@@ -133,11 +133,11 @@ def _text_problem(value: Any, *, required: bool, max_len: int) -> str | None:
     return None
 
 
-# -- parse / dump ------------------------------------------------------------------
+# -- 解析 / 输出 -------------------------------------------------------------------
 
 
 def parse_catalog(data: Any, source: str) -> EnumCatalog:
-    """Check a loaded YAML document against the file rules and the code (app.core.enums)."""
+    """按文件规则和代码（app.core.enums）检查加载出来的 YAML 文档。"""
     if not isinstance(data, Mapping) or not data:
         raise EnumFileError(f"{source}: must be a mapping of enum name -> definition")
     enums = []
@@ -229,7 +229,7 @@ def _check_against_code(definition: EnumDef, where: str) -> None:
 
 
 def read_catalog(path: Path) -> EnumCatalog:
-    """Read and check the file (no caching)."""
+    """读取并检查文件（不缓存）。"""
     where = path.as_posix()
     try:
         text = path.read_text(encoding="utf-8-sig")
@@ -243,7 +243,7 @@ def read_catalog(path: Path) -> EnumCatalog:
 
 
 def dump_catalog(catalog: EnumCatalog) -> str:
-    """The file text for a catalog: FILE_HEADER, then one block per enum and one line per value."""
+    """一份目录对应的文件文本：先是 FILE_HEADER，然后每个枚举一段、每个取值一行。"""
     blocks = [
         yaml.safe_dump(
             {d.name: _enum_doc(d)},
@@ -274,10 +274,10 @@ def _value_doc(value: EnumValue) -> dict[str, str]:
 
 
 def _write_text(path: Path, text: str) -> None:
-    """Write through a temp file in the same directory + os.replace, so readers never see half a file.
+    """先写到同目录下的临时文件，再 os.replace，这样读的一方永远不会看到写了一半的文件。
 
-    Falls back to overwriting in place when the replace is impossible: a file bind-mounted on its
-    own into a container (rename onto a mount point fails with EBUSY) or a read-only directory.
+    无法替换时退回到原地覆盖：文件被单独 bind mount 进容器（rename 到挂载点上会报 EBUSY），
+    或者目录是只读的。
     """
     data = text.encode("utf-8")
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
@@ -299,18 +299,18 @@ def _write_bytes(path: Path, data: bytes) -> None:
         os.fsync(fh.fileno())
 
 
-# -- the store ---------------------------------------------------------------------
+# -- 存储 --------------------------------------------------------------------------
 
 
 class EnumStore:
-    """The enums file, re-read when it changes on disk; see the module docstring."""
+    """枚举文件，磁盘上的文件变了就重新读取；见模块文档字符串。"""
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
-        self._lock = threading.Lock()  # serializes reloads and writes
-        self._catalog: EnumCatalog | None = None  # last version that passed the checks
-        self._stamp: object = _UNREAD  # (mtime_ns, size) of the version last read; None = unreadable
-        self._error: str | None = None  # why that version is not in use
+        self._lock = threading.Lock()  # 重新加载和写入串行进行
+        self._catalog: EnumCatalog | None = None  # 最后一个通过检查的版本
+        self._stamp: object = _UNREAD  # 最后一次读到的版本的 (mtime_ns, size)；None 表示读不了
+        self._error: str | None = None  # 那个版本为什么没有启用
 
     @property
     def where(self) -> str:
@@ -318,7 +318,7 @@ class EnumStore:
 
     @property
     def error(self) -> str | None:
-        """Why the file now on disk is not the version in use; None when it is."""
+        """磁盘上现在的文件为什么不是正在使用的版本；是的话为 None。"""
         self._refresh()
         return self._error
 
@@ -337,11 +337,11 @@ class EnumStore:
         return definition
 
     def add_value(self, name: str, value: Any, label: Any, description: Any = "") -> EnumDef:
-        """Append one value to an editable enum and rewrite the file; returns the updated enum."""
+        """给可编辑的枚举追加一个取值并重写文件；返回更新后的枚举。"""
         with self._lock:
             stamp = self._file_stamp()
             try:
-                current = read_catalog(self.path)  # what is on disk now, not the cached snapshot
+                current = read_catalog(self.path)  # 以磁盘上现在的内容为准，不用缓存的快照
             except EnumFileError as exc:
                 self._remember_error(stamp, str(exc))
                 raise errors.enum_file_invalid(f"{exc}; fix the file before adding values") from exc
@@ -383,7 +383,7 @@ class EnumStore:
         logger.info("枚举文件%s | file=%s | enums=%d", "已加载" if first else "已重载", self.where, len(catalog.enums))
 
     def _remember_error(self, stamp: object, message: str) -> None:
-        """Called under the lock; logs once per file version."""
+        """在持有锁时调用；同一个文件版本只记一次日志。"""
         if stamp == self._stamp and message == self._error:
             return
         self._stamp, self._error = stamp, message
@@ -419,14 +419,14 @@ def _new_value(value: Any, label: Any, description: Any) -> EnumValue:
     return EnumValue(value=value, label=label.strip(), description=(description or "").strip())
 
 
-# -- process-wide store ------------------------------------------------------------
+# -- 进程内唯一的存储 --------------------------------------------------------------
 
 _store: EnumStore | None = None
 _store_lock = threading.Lock()
 
 
 def get_enum_store() -> EnumStore:
-    """The store on settings.config.enums_path, created on first use."""
+    """settings.config.enums_path 上的存储，第一次使用时创建。"""
     global _store
     store = _store
     if store is None:
@@ -438,7 +438,7 @@ def get_enum_store() -> EnumStore:
 
 
 def set_enum_store(store: EnumStore | None) -> EnumStore | None:
-    """Replace the process-wide store (tests); None goes back to the default path. Returns the previous one."""
+    """替换进程内唯一的存储（测试用）；传 None 恢复默认路径。返回之前的那个。"""
     global _store
     with _store_lock:
         previous, _store = _store, store

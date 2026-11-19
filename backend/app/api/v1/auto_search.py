@@ -1,7 +1,7 @@
-"""Business search routes: the whole image in the self-built library, the regions GroundingDINO
-finds in it and the recipe detection started beside it, the global search as an optional fallback
-(app.api.services.auto_search). One route per input, like the global search routes: an uploaded
-file (multipart) or an image URL (JSON)."""
+"""业务搜图的路由：用整图查自建库，GroundingDINO 在图里找到的区域和菜谱识别同时启动，
+Global 搜图作为可选兜底（app.api.services.auto_search）。和 Global 搜图的路由一样，
+每种输入一个路由：上传文件（multipart）或图片 URL（JSON）。
+"""
 
 from __future__ import annotations
 import logging
@@ -68,7 +68,7 @@ def _log_search_timing(
 @router.post(
     "/file",
     response_model=AutoSearchResponse,
-    response_model_exclude_unset=True,  # fallback.error / detail and message only when set
+    response_model_exclude_unset=True,  # fallback.error / detail 和 message 只在设置了时输出
     summary="业务搜图（上传文件）：整图 + 区域搜索 + 菜谱识别，可选 Global 兜底",
     description=_DESCRIPTION,
 )
@@ -95,7 +95,7 @@ async def auto_search_by_file(
     timer = timer_tool()
     completed = False
     try:
-        require_retrieval(runtime)  # NOT_READY before reading the upload
+        require_retrieval(runtime)  # 在读取上传文件之前先确定 NOT_READY
         image_bytes = await read_upload(file, runtime.max_image_bytes)
         result = await run_auto_search(
             runtime,
@@ -130,7 +130,7 @@ async def auto_search_by_url(request: Request, body: AutoSearchUrlRequest) -> An
     timer = timer_tool()
     completed = False
     try:
-        require_retrieval(runtime)  # NOT_READY before downloading anything
+        require_retrieval(runtime)  # 在下载任何东西之前先确定 NOT_READY
         with timer.step("图像下载"):
             image_bytes = await read_url_bytes(
                 body.image_url,
@@ -140,7 +140,7 @@ async def auto_search_by_url(request: Request, body: AutoSearchUrlRequest) -> An
         result = await run_auto_search(
             runtime,
             image_bytes=image_bytes,
-            image_url=clean_url(body.image_url),  # as it was downloaded; the recipe service fetches it too
+            image_url=clean_url(body.image_url),  # 和下载时用的一样；菜谱识别服务也会去下载它
             scene=body.scene,
             top_k=body.top_k,
             score_threshold=body.score_threshold,

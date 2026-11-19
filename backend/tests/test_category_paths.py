@@ -1,4 +1,4 @@
-"""Plan complete category-subtree codes before any database writes."""
+"""在任何数据库写入之前规划好完整的类别子树 code。"""
 
 import unittest
 
@@ -8,7 +8,7 @@ from app.core.rules.category_paths import plan_subtree_codes
 
 class CategoryPathPlanTests(unittest.TestCase):
     def test_full_ancestry_is_rebuilt_from_parent_ids_with_case_preserved(self):
-        # Input ordering and the old textual prefixes must not decide ancestry.
+        # 输入的顺序和旧的文本前缀不能决定祖先关系。
         nodes = [
             {"id": 4, "parent_id": 3, "code": "ingredient.DJiang"},
             {"id": 2, "parent_id": 1, "code": "ingredient.YeTiLe"},
@@ -23,7 +23,7 @@ class CategoryPathPlanTests(unittest.TestCase):
             5: "beverage.YeTiLe.BaiSYe.SNaiLe",
             6: "beverage.YeTiLe.BaiSYe.SNaiLe.SuanNi",
         })
-        self.assertEqual(nodes[0]["code"], "ingredient.DJiang")  # plan does not mutate input
+        self.assertEqual(nodes[0]["code"], "ingredient.DJiang")  # 规划不修改输入
 
     def test_renaming_only_the_parent_code_rewrites_all_descendants(self):
         nodes = [

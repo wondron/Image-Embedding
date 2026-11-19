@@ -1,13 +1,13 @@
-"""index_tasks: one row per file of an index request (succeeded / failed), for the task center.
+"""index_tasks：入库请求中每个文件一行（succeeded / failed），给任务中心用。
 
 Revision ID: 20261111_0008
 Revises: 20261109_0007
 Create Date: 2026-11-11
 
-A new, empty table: no data moves and no existing table is locked. image_id has no foreign
-key on purpose: the record outlives the image when it is deleted.
+一张新的空表：没有数据迁移，也不锁任何已有的表。image_id 故意没有外键：
+图片删除后记录仍然保留。
 
-Downgrade drops the table: the task history is lost.
+降级会删除这张表：任务历史会丢失。
 """
 from __future__ import annotations
 

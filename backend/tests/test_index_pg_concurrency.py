@@ -1,7 +1,7 @@
-"""Index transactions against PostgreSQL; TEST_DATABASE_URL must be a throwaway DB.
+"""针对 PostgreSQL 的入库事务；TEST_DATABASE_URL 必须是可以随便丢弃的数据库。
 
-Each test drops and recreates the schema through Alembic. Vector writes are
-local callbacks; no Qdrant, object storage, Nacos, or model is used.
+每个测试都通过 Alembic 删除并重建表结构。向量写入是本地回调；不使用 Qdrant、
+对象存储、Nacos 或模型。
 """
 
 import hashlib
@@ -43,7 +43,7 @@ class IndexPgConcurrencyTests(unittest.TestCase):
     def setUp(self):
         _alembic("downgrade", "base")
         _alembic("upgrade", "head")
-        # Migrations create no rows; these are the two scenes the tests use
+        # 迁移不创建任何行；这是测试用到的两个场景
         self.sql(
             "INSERT INTO scenes (code, name, include_all, outputs_heating) VALUES "
             "('general', '通用', true, false), ('oven', '一体机', false, true)"
@@ -98,7 +98,7 @@ class IndexPgConcurrencyTests(unittest.TestCase):
         }
 
     def start_worker(self, pool, store, operation):
-        """Observe the real connection used by the worker before its first SQL."""
+        """在后台线程执行第一条 SQL 之前，观察它使用的真实连接。"""
         from sqlalchemy import event
 
         started = threading.Event()
@@ -115,7 +115,7 @@ class IndexPgConcurrencyTests(unittest.TestCase):
         return pool.submit(operation), started, backend_pid
 
     def assert_worker_is_blocked(self, future, started, backend_pid):
-        """Wait for a database-reported lock, without inferring it from elapsed time."""
+        """等待数据库报告的锁，而不是根据经过的时间推断。"""
         from sqlalchemy import text
 
         self.assertTrue(started.wait(8), "worker did not reach PostgreSQL")
@@ -131,9 +131,9 @@ class IndexPgConcurrencyTests(unittest.TestCase):
                     self.assertFalse(future.done())
                     return
                 if future.done():
-                    future.result()  # expose a worker error rather than a timeout
+                    future.result()  # 暴露后台线程的错误，而不是超时
                     self.fail("worker completed while the first transaction was held")
-                poll.wait(0.01)  # throttle observation; timing is not an assertion
+                poll.wait(0.01)  # 限制观察频率；时间不是断言条件
         self.fail("PostgreSQL did not report the expected lock wait")
 
     def ledger_version(self, image_id):
@@ -152,8 +152,8 @@ class IndexPgConcurrencyTests(unittest.TestCase):
             with follower.index_image(duplicate, model_id=self.model_id) as result:
                 return result
 
-        # Keep the executor outside the transaction: a failed assertion releases
-        # the database locks before executor shutdown waits for the worker.
+        # 执行器放在事务之外：断言失败时，在执行器关闭并等待后台线程之前
+        # 先释放数据库锁。
         with ThreadPoolExecutor(max_workers=1) as pool:
             with owner.index_image(first, model_id=self.model_id) as initial:
                 self.assertTrue(initial.created)
@@ -198,8 +198,8 @@ class IndexPgConcurrencyTests(unittest.TestCase):
         stored = owner.get_by_id(first["id"])
         self.assertIsNotNone(stored)
         self.assertEqual(stored["description"], "successful")
-        # A late uncertainty marker may conservatively leave the follower stale;
-        # it must preserve its row/ledger and never create a deletion job.
+        # 较晚出现的不确定标记可能会保守地让后来者保持 stale；
+        # 它必须保留自己的行 / 台账，并且从不创建删除任务。
         self.assertIn(self.ledger_version(first["id"]), (0, stored["payload_version"]))
         self.assertEqual(
             self.sql("SELECT count(*) FROM image_deletions").scalar_one(), 0
@@ -229,8 +229,8 @@ class IndexPgConcurrencyTests(unittest.TestCase):
         self.assertEqual(edited["scenes"], ["general"])
         self.assertGreater(edited["payload_version"], self.ledger_version(row["id"]))
 
-        # A changed rule must also advance an existing image's version on a
-        # re-upload; otherwise an older payload could be confirmed at that version.
+        # 规则变了时，重复上传也必须推进已有图片的版本；否则旧的 payload 可能
+        # 在那个版本上被确认。
         self.sql(
             "INSERT INTO scene_rules (scene_id, category_id) VALUES (:scene, :category)",
             {"scene": self.oven_id, "category": self.second_category},
@@ -278,8 +278,8 @@ class IndexPgConcurrencyTests(unittest.TestCase):
         committed_edits = []
 
         def edit_then_read_scenes(conn, image_ids):
-            # get_payload_rows has already read the image/version. Commit a
-            # change on another connection before its scene query starts.
+            # get_payload_rows 已经读过图片 / 版本了。在它的场景查询开始之前，在另一个连接上
+            # 提交一次修改。
             committed_edits.append(
                 editor.patch_image(row["id"], {"category_id": self.second_category})
             )

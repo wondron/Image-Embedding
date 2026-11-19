@@ -1,4 +1,4 @@
-"""Enum coercion at the service boundary (bad values -> VALIDATION_ERROR, not a DB 500)."""
+"""在服务边界上的枚举转换（不合法的值 -> VALIDATION_ERROR，而不是数据库 500）。"""
 
 import tempfile
 import unittest
@@ -35,7 +35,7 @@ class SystemEnumFieldTests(unittest.TestCase):
 
 
 class EditableEnumFieldTests(unittest.TestCase):
-    """Editable enums are checked against the enums file as it is now."""
+    """可编辑枚举按枚举文件当前的内容检查。"""
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()

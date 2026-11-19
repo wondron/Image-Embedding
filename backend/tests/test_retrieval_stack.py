@@ -1,4 +1,4 @@
-"""Composition root (bootstrap.retrieval_stack) with every adapter faked."""
+"""所有适配器都是假的组合根（bootstrap.retrieval_stack）测试。"""
 
 import asyncio
 import unittest
@@ -28,7 +28,7 @@ ROW = {
 
 SETTINGS = SimpleNamespace(paths=SimpleNamespace(save_images_dir="save_images"))
 
-# Effective config (Nacos over local YAML): the only source of connection parameters
+# 生效配置（Nacos 叠加在本地 YAML 上）：连接参数的唯一来源
 CONFIG = {
     "POSTGRES_CONFIG": {"host": "pg.internal", "user": "u", "password": "p@ss/w:rd", "database": "meta"},
     "QDRANT_CONFIG": {"url": "http://q:6333", "api_key": "k"},
@@ -87,21 +87,21 @@ class BuildStackTests(unittest.TestCase):
         self.vectors.ensure_collection.assert_called_once_with(recreate=False)
         self.assertIs(stack.index_uc._model, stack.model)
         self.assertIs(stack.search_uc._model, stack.model)
-        self.assertIs(stack.index_uc._vectors, self.vectors)  # no hidden decorator
+        self.assertIs(stack.index_uc._vectors, self.vectors)  # 没有隐藏的装饰器
         self.assertIs(stack.scene_sync_uc._vectors, self.vectors)
-        self.assertIs(stack.scene_sync_uc._model, stack.model)  # payloads go to the current collection
+        self.assertIs(stack.scene_sync_uc._model, stack.model)  # payload 写到当前 collection
         self.embedder.probe_dim.assert_called_once()
 
     def test_a_borrowed_store_is_used_but_neither_opened_nor_closed(self):
         borrowed = MagicMock()
         borrowed.get_current_embedding_model.return_value = dict(ROW)
         stack = rs.build_retrieval_stack(CONFIG, SETTINGS, metadata=borrowed)
-        rs.PgMetadataStore.assert_not_called()  # no second pool
+        rs.PgMetadataStore.assert_not_called()  # 没有第二个连接池
         self.assertIs(stack.recompute_scenes_uc._metadata, borrowed)
         stack.close()
         self.vectors.close.assert_called_once()
-        borrowed.close.assert_not_called()  # the catalog owns it
-        # ... also when building fails half way
+        borrowed.close.assert_not_called()  # 由目录持有
+        # ……构建中途失败时也是
         self.vectors.ensure_collection.side_effect = AppError("NOT_READY", "qdrant down", http_status=503)
         with self.assertRaises(AppError):
             rs.build_retrieval_infra(CONFIG, metadata=borrowed)
@@ -117,13 +117,13 @@ class BuildStackTests(unittest.TestCase):
     def test_connections_come_from_the_effective_config(self):
         rs.build_retrieval_infra(CONFIG)
         kwargs = rs.PgMetadataStore.call_args.kwargs
-        url = make_url(kwargs["url"].render_as_string(hide_password=False))  # survives a round trip
+        url = make_url(kwargs["url"].render_as_string(hide_password=False))  # 往返一次后保持不变
         self.assertEqual(
             (url.drivername, url.host, url.port, url.username, url.password, url.database),
             ("postgresql+psycopg", "pg.internal", 5432, "u", "p@ss/w:rd", "meta"),
         )
         self.assertEqual(kwargs["connect_timeout"], 5.0)
-        # No IMAGE_STORAGE_CONFIG: the mock driver with the constant defaults
+        # 没有 IMAGE_STORAGE_CONFIG：使用 mock 驱动和常量默认值
         rs.build_image_storage.assert_called_once_with(ImageStorageSettings())
 
     def test_missing_connection_config_fails_before_opening_anything(self):
@@ -253,7 +253,7 @@ class BuildStackTests(unittest.TestCase):
         self.storage.ping.return_value = {"ok": True}
         stack = rs.build_retrieval_stack(CONFIG, SETTINGS)
         self.assertEqual(set(stack.infra.ping()), {"postgres", "qdrant", "storage"})
-        self.vectors.close.side_effect = RuntimeError("boom")  # one failure must not skip PG
+        self.vectors.close.side_effect = RuntimeError("boom")  # 一个失败不能跳过 PG
         stack.close()
         self.metadata.close.assert_called_once()
 

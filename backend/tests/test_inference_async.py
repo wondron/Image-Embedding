@@ -1,7 +1,7 @@
-"""Synchronous model work must leave the request event loop available.
+"""同步的模型计算必须让请求的事件循环保持可用。
 
-The model stubs wait for the event loop to release them, so these checks verify
-progress without depending on inference speed or a short latency threshold.
+模型桩会等事件循环放行它们，所以这些检查验证的是进展，而不依赖推理速度或很短的
+延迟阈值。
 """
 
 import asyncio
@@ -35,7 +35,7 @@ class BlockingInference:
         self.args = args
         self.kwargs = kwargs
         self.loop.call_soon_threadsafe(self.entered.set)
-        # This deadline is only a deadlock guard for the broken implementation.
+        # 这个截止时间只是防止有问题的实现死锁。
         if not self.release.wait(timeout=3):
             raise RuntimeError("the event loop did not release the model stub")
         if self.error is not None:
@@ -65,7 +65,7 @@ class AsyncInferenceTests(unittest.IsolatedAsyncioTestCase):
         return upload
 
     async def while_model_is_blocked(self, model, operation):
-        """Run an unrelated coroutine before allowing inference to finish."""
+        """在让推理结束之前，先运行一个不相关的协程。"""
         request = asyncio.create_task(operation)
         try:
             await asyncio.wait_for(model.entered.wait(), timeout=4)
@@ -81,7 +81,7 @@ class AsyncInferenceTests(unittest.IsolatedAsyncioTestCase):
             model.release.set()
             return await asyncio.wait_for(request, timeout=4)
         finally:
-            # Release workers even if an assertion fails, and consume failures.
+            # 即使断言失败也要放行后台线程，并吸收失败。
             model.release.set()
             await asyncio.gather(request, return_exceptions=True)
 
@@ -107,7 +107,7 @@ class AsyncInferenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(model.args, (b"query-image",))
         self.assertEqual(
             model.kwargs,
-            # timer: the interface's timer (none here: run_predict is called on its own)
+            # timer：接口的计时器（这里没有：run_predict 是单独调用的）
             {"search_num": 7, "machine_info": "oven", "trace_id": "trace-async", "save_result": True, "timer": None},
         )
 

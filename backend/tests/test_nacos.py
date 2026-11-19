@@ -20,7 +20,7 @@ ENABLED = {
 
 
 def nacos_settings(**overrides) -> NacosSettings:
-    """Enabled, no credentials, one dataId, an address that is never contacted (sessions are mocks)."""
+    """开启、没有凭证、一个 dataId、一个永远不会被连接的地址（session 都是 mock）。"""
     options = {
         "enabled": True,
         "server_addr": "http://nacos.invalid:8848",
@@ -41,7 +41,7 @@ def _response(text="", status=200):
 
 
 class NacosEnvironmentTests(unittest.TestCase):
-    """NacosSettings.from_env: everything except the dataIds comes from NACOS_* variables."""
+    """NacosSettings.from_env：除了 dataId，其余都来自 NACOS_* 变量。"""
 
     def test_nothing_set_means_nacos_off_and_nothing_required(self):
         nacos = NacosSettings.from_env({})
@@ -60,7 +60,7 @@ class NacosEnvironmentTests(unittest.TestCase):
             "NACOS_REQUEST_TIMEOUT_SECONDS": "4.5",
         }
         with patch.dict(os.environ, env):
-            nacos = NacosSettings.from_env()  # no argument: os.environ, as Settings() uses it
+            nacos = NacosSettings.from_env()  # 不传参数：用 os.environ，和 Settings() 一样
         self.assertEqual(
             (nacos.enabled, nacos.server_addr, nacos.namespace, nacos.group, nacos.username, nacos.password),
             (True, "http://nacos.invalid:8848", "ns-test", "test-group", "env-user", "env-secret"),
@@ -69,7 +69,7 @@ class NacosEnvironmentTests(unittest.TestCase):
             (nacos.poll_enabled, nacos.poll_interval_seconds, nacos.request_timeout_seconds, nacos.connect_timeout_seconds),
             (False, 30.0, 4.5, 2.0),
         )
-        self.assertEqual(nacos.data_ids, tuple(NACOS_DATA_ID_LIST))  # dataIds stay in constant.py
+        self.assertEqual(nacos.data_ids, tuple(NACOS_DATA_ID_LIST))  # dataId 留在 constant.py 里
         self.assertNotIn("env-secret", repr(nacos))
 
     def test_enabled_without_connection_names_every_missing_variable(self):
@@ -133,7 +133,7 @@ class NacosLoadingTests(unittest.TestCase):
 
     def test_success_reads_the_configured_namespace_and_group(self):
         provider, factory, session = self.make_provider()
-        # Remote success must not depend on the local YAML file existing.
+        # 远程成功不能依赖本地 YAML 文件是否存在。
         config, source = provider.load(str(self.yaml_path.with_name("missing.yaml")))
         self.assertEqual(config, {"marker": "remote"})
         self.assertEqual(
@@ -159,7 +159,7 @@ class NacosLoadingTests(unittest.TestCase):
                 self.assertEqual(config, {"marker": "local"})
                 self.assertEqual((source["source"], source["nacos_status"]), ("yaml", "fallback"))
                 self.assertEqual(source["nacos_namespace"], "ns-test")
-                # polling keeps running after a fallback so Nacos is picked up once it recovers
+                # 退回 YAML 之后轮询继续运行，这样 Nacos 恢复后会被重新用上
                 self.assertTrue(source["nacos_polling"])
                 self.assert_requested_configured_location(session)
 
@@ -184,7 +184,7 @@ class NacosLoadingTests(unittest.TestCase):
         self.assertEqual(session.request.call_count, 2)
         factory.assert_called_once()
         self.assert_requested_configured_location(session)
-        on_update.assert_not_called()  # unchanged config is not offered again
+        on_update.assert_not_called()  # 没变的配置不会再次提交
 
     def test_credentials_log_in_and_the_token_goes_with_the_request(self):
         session = Mock(spec=requests.Session)
@@ -248,9 +248,9 @@ class NacosLayeringAndPollingTests(unittest.TestCase):
 
     def test_polling_survives_a_transient_failure_and_applies_the_next_change(self):
         provider, _ = self.provider(
-            _response("marker: remote\n"),          # startup
-            requests.ConnectionError("blip"),        # poll 1 fails
-            _response("marker: changed\n"),         # poll 2 (after the retry wait)
+            _response("marker: remote\n"),          # 启动时
+            requests.ConnectionError("blip"),        # 第 1 次轮询失败
+            _response("marker: changed\n"),         # 第 2 次轮询（重试等待之后）
         )
         provider.load(str(self.yaml_path))
         on_update = Mock(return_value=True)

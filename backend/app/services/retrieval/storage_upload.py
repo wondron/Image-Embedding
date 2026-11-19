@@ -1,6 +1,6 @@
-"""Thin helpers to put original + thumb and return DB URLs (for next index knife).
+"""存原图 + 缩略图并返回数据库 URL 的轻量辅助函数（给下一刀的入库用）。
 
-Not a full IndexImageUseCase rewrite — call from M4+/index when ready.
+不是对 IndexImageUseCase 的完整重写——准备好后从 M4+ / 入库流程调用。
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ logger = logging.getLogger("retrieval.storage_upload")
 
 
 def make_thumb_webp(image_bytes: bytes, *, long_edge: int = THUMB_LONG_EDGE) -> bytes:
-    """Resize so long edge == long_edge and encode WebP."""
+    """缩放到长边等于 long_edge，并编码成 WebP。"""
     try:
         from PIL import Image
     except ImportError as exc:
@@ -56,10 +56,10 @@ def put_original_and_thumb(
     ext: str | None = None,
     content_type: str | None = None,
 ) -> dict[str, Any]:
-    """Upload original + thumb; return {original_url, thumb_url, ext, thumb_bytes}.
+    """上传原图 + 缩略图；返回 {original_url, thumb_url, ext, thumb_bytes}。
 
-    Keys: original/{shard}/{id}.{ext}, thumb/{shard}/{id}.webp, shard = SHA-256[0:2] hex (the
-    id's first two characters) — no scene/category in key; an optional IMAGE_STORAGE_CONFIG.key_prefix is applied by the storage port via storage_keys.
+    key：original/{shard}/{id}.{ext}、thumb/{shard}/{id}.webp，shard = SHA-256[0:2] 的十六进制
+    （id 的前两个字符）——key 里没有场景或类别；可选的 IMAGE_STORAGE_CONFIG.key_prefix 由存储端口通过 storage_keys 加上。
     """
     if not image_bytes:
         raise err.index_bad_image("empty image bytes")
@@ -91,12 +91,11 @@ def drop_unused_upload(
     written: dict[str, Any],
     stored: dict[str, Any],
 ) -> None:
-    """After a re-upload kept the stored row: remove the files just written that the row does
-    not name, best effort (a failure is logged).
+    """重复上传保留了已存的行之后：删除刚写入、但那一行没有引用的文件，尽力而为（失败写日志）。
 
-    The row keeps its own URLs, so when they are under other keys (an image stored before the
-    shard directory or a key_prefix change) the new copies belong to no row. A file that may be
-    the row's own (same relative key, or a URL form without one) is always kept.
+    那一行保留它自己的 URL，所以当它们在其他 key 下时（在分片目录或 key_prefix 变更之前
+    存的图片），新的副本不属于任何行。可能属于那一行的文件（相对 key 相同，或者 URL 形式
+    没有相对 key）总是保留。
     """
     for field in ("original_url", "thumb_url"):
         url = str(written.get(field) or "")

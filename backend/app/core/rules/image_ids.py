@@ -1,7 +1,7 @@
-"""Image id policy (contract A7).
+"""图片 id 规则（契约 A7）。
 
-id = uuid_from_bytes(sha256(original)[0:16]); retain content-hash bytes;
-do NOT rewrite RFC 4122 version/variant nibbles.
+id = uuid_from_bytes(sha256(original)[0:16])；保留内容哈希的字节；
+**不要**改写 RFC 4122 的 version/variant 位。
 """
 
 from __future__ import annotations

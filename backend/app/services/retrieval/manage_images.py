@@ -1,14 +1,13 @@
-"""Gallery admin of one stored image: read, patch, delete (/api/images/{image_id}).
+"""图库对单张已存图片的管理：读取、修改、删除（/api/images/{image_id}）。
 
-Needs PostgreSQL only (built by app.bootstrap.catalog, like the scene admin), so edits and
-deletions work while the encoder or Qdrant are down. Field rules: core.rules.image_fields;
-the checks against the stored row and the write are one transaction in the catalog store
-(repositories.images.patch_image, repositories.deletions.enqueue_image_deletion).
+只需要 PostgreSQL（和场景管理一样由 app.bootstrap.catalog 构建），所以编码器或 Qdrant
+挂了时也能编辑和删除。字段规则：core.rules.image_fields；对照已存行的检查和写入，
+在 catalog 存储里是一个事务（repositories.images.patch_image、
+repositories.deletions.enqueue_image_deletion）。
 
-The vector side belongs to the HTTP layer (app.api.services.images), each part only when the
-retrieval stack is up: after a patch it pushes the image's payload to the current collection,
-after a delete it removes the point and the two files at once, and the detail gets the image's
-state in the current collection (services.retrieval.vector_status).
+向量这一侧归 HTTP 层（app.api.services.images），每一部分都只在检索服务就绪时进行：
+修改之后把图片的 payload 推送到当前 collection，删除之后立刻删除向量点和两个文件，
+详情里加上图片在当前 collection 里的状态（services.retrieval.vector_status）。
 """
 
 from __future__ import annotations
@@ -36,8 +35,9 @@ def _ledger_item(row: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def image_detail(row: Mapping[str, Any]) -> dict[str, Any]:
-    """The wire image of a detail row: the list item's fields (§6.1.2) plus what only the detail
-    shows. Food fields and heating_group are always present, whatever the scene."""
+    """详情行对应的 wire 图片：列表项的字段（§6.1.2），再加上只有详情才显示的字段。
+    食物字段和 heating_group 总是出现，不管是什么场景。
+    """
     return {
         "id": str(row["id"]),
         "sha256": row.get("sha256"),
@@ -74,8 +74,9 @@ class ManageImagesUseCase:
         return image_detail(row)
 
     def file_url(self, image_id: UUID | str, variant: str) -> str:
-        """Where the image's stored file is: the thumbnail (the original when it has none) or the
-        original. A deleted image's files stay readable until the cleanup removes them."""
+        """图片存下来的文件在哪里：缩略图（没有缩略图时为原图）或原图。已删除图片的文件
+        在清理删除它们之前仍然可以读取。
+        """
         row = self._catalog.get_image_file_urls(image_id)
         if row is None:
             raise err.image_not_found(f"image {image_id} does not exist")
@@ -87,11 +88,11 @@ class ManageImagesUseCase:
         return url
 
     def update(self, image_id: UUID | str, fields: Mapping[str, Any]) -> dict[str, Any]:
-        """Only the fields given change (image_fields); returns the image as committed."""
+        """只修改传来的字段（image_fields）；返回提交后的图片。"""
         return image_detail(self._catalog.patch_image(image_id, normalize_image_patch(fields)))
 
     def delete(self, image_id: UUID | str) -> dict[str, Any]:
-        """Delete from PostgreSQL and queue the vector / file cleanup; returns the queue row
-        {image_id, original_url, thumb_url, deleted_at}. Deleting again while it is queued
-        answers the same row."""
+        """从 PostgreSQL 删除，并把向量 / 文件的清理加入队列；返回队列行
+        {image_id, original_url, thumb_url, deleted_at}。排队期间再次删除，返回同一行。
+        """
         return dict(self._catalog.enqueue_image_deletion(image_id))

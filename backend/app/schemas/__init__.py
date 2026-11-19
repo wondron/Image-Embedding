@@ -1,1 +1,1 @@
-"""Pydantic request/response schemas."""
+"""Pydantic 请求 / 响应结构。"""

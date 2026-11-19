@@ -36,7 +36,7 @@ class IndexFolderTests(unittest.TestCase):
         self.image.write_bytes(b"\x89PNG\r\n\x1a\nexample-image-bytes")
         self.output = io.StringIO()
         self.enterContext(contextlib.redirect_stdout(self.output))
-        # Every test starts with the same configuration, regardless of local edits.
+        # 每个测试都从同样的配置开始，不管本地改了什么。
         self.enterContext(patch.multiple(
             importer, IMAGE_FILE="", IMAGE_DIR=str(self.root), BACKEND_DIR=self.root,
             BASE_URL="http://127.0.0.1:8320", RECURSIVE=True,

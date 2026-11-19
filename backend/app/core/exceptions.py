@@ -1,14 +1,13 @@
-"""Every failure leaves the API as one envelope:
+"""每个失败都以同一种结构离开 API：
 
     {"ok": false, "error": "<CODE>", "detail": "<message>", "trace_id": "<id>"}
 
-plus "errors" (field-level list) for request validation. Endpoints raise
-app.core.errors.AppError; nothing builds error JSON by hand.
+请求校验失败时另有 "errors"（字段级的列表）。接口抛出 app.core.errors.AppError；
+没有任何地方手工拼错误 JSON。
 
-What the client sees vs. what the log keeps (app.core.errors.client_detail):
-internal codes (database, vector store, models) and unexpected exceptions get a
-fixed public message; their detail and cause chain are logged once, here, with
-the trace id.
+客户端看到的和日志保留的（app.core.errors.client_detail）：
+内部错误码（数据库、向量库、模型）和意外异常给固定的公开信息；它们的 detail
+和异常链只在这里记一次日志，带上 trace id。
 """
 
 from __future__ import annotations
@@ -56,7 +55,7 @@ def app_error_response(request: Request, exc: AppError) -> JSONResponse:
     trace_id = get_trace_id(request)
     show = f" | show_text={exc.show_text}" if exc.show_text else ""
     if is_internal(exc):
-        # The client gets the public text: the detail and its cause chain live here only.
+        # 客户端拿到的是公开文字：detail 和它的异常链只留在这里。
         logger.error("%s %s -> %d %s: %s | trace_id=%s%s", request.method, request.url.path,
                      exc.http_status, exc.code, exc.detail, trace_id, show, exc_info=exc)
     else:
@@ -67,7 +66,7 @@ def app_error_response(request: Request, exc: AppError) -> JSONResponse:
 
 
 def unexpected_error_response(request: Request, exc: BaseException) -> JSONResponse:
-    # Details stay in the log (with the trace id); clients get a generic message.
+    # 细节留在日志里（带 trace id）；客户端拿到通用信息。
     logger.error("unhandled error %s %s | trace_id=%s", request.method, request.url.path,
                  get_trace_id(request), exc_info=exc)
     generic = internal_error("unhandled exception")
@@ -75,11 +74,11 @@ def unexpected_error_response(request: Request, exc: BaseException) -> JSONRespo
 
 
 class UnhandledErrorMiddleware:
-    """Unexpected exceptions -> the INTERNAL_ERROR envelope, from inside the CORS middleware.
+    """意外异常 -> INTERNAL_ERROR 结构，在 CORS 中间件内部处理。
 
-    Starlette runs the `Exception` handler in ServerErrorMiddleware, which wraps every other
-    middleware, so those 500s would reach browsers without CORS headers (shown as a CORS
-    failure instead of the error body). register_middlewares adds this one innermost.
+    Starlette 在 ServerErrorMiddleware 里执行 `Exception` 的处理器，而它包在所有其他
+    中间件外面，所以这些 500 到达浏览器时没有 CORS 响应头（显示成 CORS 失败，
+    而不是错误内容）。register_middlewares 把这个中间件加在最里层。
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -100,7 +99,7 @@ class UnhandledErrorMiddleware:
         try:
             await self.app(scope, receive, send_tracking)
         except Exception as exc:
-            if started:  # part of the response is already out; nothing can replace it
+            if started:  # 响应已经发出一部分了；无法再替换
                 raise
             await unexpected_error_response(Request(scope), exc)(scope, receive, send)
 
@@ -126,5 +125,5 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def handle_unexpected(request: Request, exc: Exception) -> JSONResponse:
-        # Last resort for failures outside UnhandledErrorMiddleware (or apps without it).
+        # UnhandledErrorMiddleware 之外的失败（或者没有它的应用）的最后一道处理。
         return unexpected_error_response(request, exc)

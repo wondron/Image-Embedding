@@ -1,1 +1,1 @@
-"""FastAPI composition root and application lifecycle."""
+"""FastAPI 组合根和应用生命周期。"""

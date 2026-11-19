@@ -1,7 +1,7 @@
-"""Where parameters come from: constant.py and the effective config (Nacos over the local YAML).
+"""参数来自哪里：constant.py 和生效配置（Nacos 叠加在本地 YAML 上）。
 
-No database, no Nacos: connection sections are parsed from plain dicts, and
-alembic/env.py is exercised in offline (--sql) mode.
+不需要数据库，也不需要 Nacos：连接配置段从普通 dict 解析，alembic/env.py 以离线
+（--sql）模式运行。
 """
 
 import importlib.util
@@ -231,20 +231,20 @@ class SwitchAndEnvironmentTests(unittest.TestCase):
         with patch.dict(os.environ):
             os.environ.pop("NACOS_ENV", None)
             self.assertEqual(ApplicationSettings().env, "prod")
-        # a typo must not slip past the prod-only guards (reset_data)
+        # 笔误不能绕过只在生产环境生效的保护（reset_data）
         with patch.dict(os.environ, {"NACOS_ENV": "prd"}), self.assertRaisesRegex(ValueError, "NACOS_ENV"):
             ApplicationSettings()
 
 
 class AlembicEnvTests(unittest.TestCase):
-    """alembic/env.py picks the database like the application does."""
+    """alembic/env.py 选择数据库的方式和应用相同。"""
 
     def render(self, **attributes) -> str:
         from alembic import command
         from alembic.config import Config
 
         buffer = io.StringIO()
-        cfg = Config(output_buffer=buffer)  # no ini file, so env.py leaves logging alone
+        cfg = Config(output_buffer=buffer)  # 没有 ini 文件，所以 env.py 不动日志配置
         cfg.set_main_option("script_location", str(BACKEND / "alembic"))
         cfg.set_main_option("path_separator", "os")
         cfg.attributes.update(attributes)

@@ -1,9 +1,9 @@
-"""Which scene a request means (contract §2.6 / A5).
+"""请求指的是哪个场景（契约 §2.6 / A5）。
 
-Scenes are rows of the scenes table, configured through /api/scenes, not a list in code. A
-request names one by code: blank means DEFAULT_SCENE, and the MVP codes normal / device still
-map to general / oven (app.core.scene_rules). The scene must exist and be active; otherwise the
-request is refused with the code of its surface (SEARCH_ / LIST_ / INDEX_UNKNOWN_SCENE).
+场景是 scenes 表里的行，通过 /api/scenes 配置，不是代码里的列表。请求用 code 指明场景：
+为空表示 DEFAULT_SCENE，MVP 的 code normal / device 仍然映射到 general / oven
+（app.core.scene_rules）。场景必须存在且启用；否则用请求所在接口的错误码拒绝
+（SEARCH_ / LIST_ / INDEX_UNKNOWN_SCENE）。
 """
 
 from __future__ import annotations
@@ -19,13 +19,13 @@ ErrorFactory = Callable[[str], err.AppError]
 
 
 def canonicalize_scene_code(raw: str) -> str:
-    """Strip and map an MVP code; does not check that the scene exists."""
+    """去掉首尾空白并映射 MVP code；不检查场景是否存在。"""
     code = raw.strip()
     return SCENE_ALIASES.get(code, code)
 
 
 def requested_scene_code(value: Any, *, field: str = "scene") -> str:
-    """The code a request asks for: omitted / blank -> DEFAULT_SCENE."""
+    """请求要的 code：没传 / 为空 -> DEFAULT_SCENE。"""
     if value is None or (isinstance(value, str) and not value.strip()):
         return DEFAULT_SCENE
     if not isinstance(value, str):
@@ -34,7 +34,7 @@ def requested_scene_code(value: Any, *, field: str = "scene") -> str:
 
 
 def _active_codes_text(metadata: MetadataStorePort) -> str:
-    """For error messages only: never turns a refusal into a database failure."""
+    """只用于错误信息：不会把一次拒绝变成数据库失败。"""
     try:
         return ", ".join(metadata.list_scene_codes(active_only=True)) or "none"
     except Exception:
@@ -48,10 +48,10 @@ def lookup_scene(
     unknown: ErrorFactory,
     failed: ErrorFactory,
 ) -> dict[str, Any]:
-    """The active scenes row with this code: {id, code, name, include_all, outputs_heating, ...}.
+    """有这个 code 的启用的 scenes 行：{id, code, name, include_all, outputs_heating, ...}。
 
-    unknown: the surface's *_UNKNOWN_SCENE constructor (missing or inactive scene);
-    failed: its *_POSTGRES_FAILED constructor (the lookup itself failed).
+    unknown：该接口的 *_UNKNOWN_SCENE 构造函数（场景不存在或停用）；
+    failed：它的 *_POSTGRES_FAILED 构造函数（查询本身失败）。
     """
     try:
         row = metadata.get_scene_by_code(code)
@@ -71,11 +71,11 @@ def resolve_index_scenes(
     scene: Optional[str] = None,
     scenes: Optional[Sequence[Any]] = None,
 ) -> list[str]:
-    """Check the scene hints an index request may carry; returns them canonical and deduplicated.
+    """检查入库请求可能带的场景提示；返回规范化、去重后的提示。
 
-    The hints do not decide membership: that is recomputed from the rules and image_scenes after
-    the insert. They are still checked, so a client learns about a code that does not exist.
-    No hint -> [DEFAULT_SCENE] without touching the database.
+    提示不决定归属：归属在插入后按规则和 image_scenes 重算。但仍然会检查它们，
+    让客户端知道传了不存在的 code。
+    没有提示 -> [DEFAULT_SCENE]，不访问数据库。
     """
     hints: list[str] = []
     if scenes is not None:

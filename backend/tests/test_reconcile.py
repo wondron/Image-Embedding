@@ -1,6 +1,7 @@
-"""Reconciliation rounds (app.services.retrieval.reconcile), the API's background thread
-(app.bootstrap.reconciler) and RECONCILE_CONFIG, over in-memory fakes. The SQL (the ledger query
-and the advisory lock) is checked in test_pg_live."""
+"""基于内存假对象测试对账轮次（app.services.retrieval.reconcile）、API 的后台线程
+（app.bootstrap.reconciler）和 RECONCILE_CONFIG。SQL（台账查询和 advisory lock）
+在 test_pg_live 里检查。
+"""
 
 import asyncio
 import threading
@@ -22,7 +23,7 @@ def ids(*numbers):
 
 
 class FakeMetadata:
-    """The ledger as a sorted list of ids that are behind, the deletion queue as a count."""
+    """台账用落后的 id 的有序列表表示，删除队列用一个计数表示。"""
 
     def __init__(self, behind=(), pending=0):
         self.behind = sorted(behind)
@@ -46,7 +47,7 @@ class FakeMetadata:
 
 
 class FakeSync:
-    """Pushes catch an image up, except `missing` ones (no point in the collection)."""
+    """推送让图片跟上，`missing` 的除外（collection 里没有向量点）。"""
 
     def __init__(self, metadata, missing=()):
         self.metadata = metadata
@@ -61,7 +62,7 @@ class FakeSync:
 
 
 class FakeDeletions:
-    """A queue, oldest first; `failing` rows stay."""
+    """一个队列，最早的在前；`failing` 的行留下。"""
 
     def __init__(self, metadata, queue=(), failing=()):
         self.metadata = metadata
@@ -92,7 +93,7 @@ class ReconcileRoundTests(unittest.TestCase):
         uc, sync, deletions = use_case(metadata, queue=ids(7, 8))
         with self.assertLogs("retrieval.reconcile", level="INFO") as logs:
             result = uc.run_once()
-        self.assertEqual((result.skipped, result.cursor), (None, None))  # a whole lap: start over next time
+        self.assertEqual((result.skipped, result.cursor), (None, None))  # 走完一整圈：下次从头开始
         self.assertEqual(vars(result.payloads), {"scanned": 3, "pushed": 3, "missing": 0, "unconfirmed": 0})
         self.assertEqual((result.deletions.processed, result.deletions.failed, result.deletions.remaining), (2, [], 0))
         self.assertEqual((metadata.behind, deletions.queue, metadata.locks), ([], [], [RECONCILE_LOCK_KEY]))
@@ -112,11 +113,11 @@ class ReconcileRoundTests(unittest.TestCase):
         second = uc.run_once(cursor=first.cursor)
         self.assertEqual((second.payloads.pushed, second.cursor), (2, ids(4)[0]))
         third = uc.run_once(cursor=second.cursor)
-        self.assertEqual((third.payloads.pushed, third.cursor), (1, None))  # the rest, then the lap ends
+        self.assertEqual((third.payloads.pushed, third.cursor), (1, None))  # 剩下的，然后这一圈结束
         self.assertEqual(sync.calls, [ids(1, 2), ids(3, 4), ids(5)])
 
     def test_images_that_keep_failing_never_starve_the_others(self):
-        # 1 and 2 have no point in the collection: every push of them comes back missing
+        # 1 和 2 在 collection 里没有向量点：每次推送它们都返回 missing
         metadata = FakeMetadata(behind=ids(1, 2, 3, 4, 5, 6))
         uc, sync, _ = use_case(metadata, missing=ids(1, 2), payload_batch=2, max_payloads=2)
         cursor = None
@@ -124,7 +125,7 @@ class ReconcileRoundTests(unittest.TestCase):
             for _ in range(3):
                 cursor = uc.run_once(cursor=cursor).cursor
         self.assertEqual(metadata.behind, ids(1, 2))
-        # The next lap wraps around to them once, up to where it started
+        # 下一圈绕回到它们一次，直到开始的位置
         with self.assertLogs("retrieval.reconcile", level="WARNING"):
             result = uc.run_once(cursor=cursor)
         self.assertEqual((result.payloads.scanned, result.payloads.missing), (2, 2))
@@ -150,14 +151,14 @@ class ReconcileRoundTests(unittest.TestCase):
         queue = ids(11, 12, 13, 14, 15)
         uc, _, deletions = use_case(metadata, queue=queue, failing=ids(11, 12), deletion_batch=2, max_deletions=100)
         result = uc.run_once()
-        # [11, 12] fail: nothing cleaned in the first batch, so the round does not retry them
+        # [11, 12] 失败：第一批什么都没清理掉，所以这一轮不重试它们
         self.assertEqual(deletions.calls, [2])
         self.assertEqual((result.deletions.processed, result.deletions.failed, result.deletions.remaining), (0, ids(11, 12), 5))
 
         uc, _, deletions = use_case(metadata, queue=queue, failing=ids(12), deletion_batch=2, max_deletions=100)
         result = uc.run_once()
         self.assertEqual((result.deletions.processed, result.deletions.failed, result.deletions.remaining), (4, ids(12), 1))
-        # [11, 12] [12, 13] [12, 14] [12, 15] each clean one; [12] alone cleans nothing: stop
+        # [11, 12] [12, 13] [12, 14] [12, 15] 每批清理掉一个；只剩 [12] 时什么都清理不掉：停止
         self.assertEqual(deletions.calls, [2, 2, 2, 2, 2])
 
 
@@ -204,7 +205,7 @@ class BackgroundReconcilerTests(unittest.TestCase):
         self.assertEqual(reconciler.last_round["payloads"]["pushed"], 2)
         runtime.retrieval = fake_stack(behind=ids(1, 2))
         reconciler.run_round()
-        self.assertEqual(runtime.retrieval.scene_sync_uc.calls, [ids(1, 2)])  # from the first image again
+        self.assertEqual(runtime.retrieval.scene_sync_uc.calls, [ids(1, 2)])  # 又从第一张图开始
 
     def test_a_switch_made_by_another_process_is_followed_before_the_round(self):
         old = fake_stack(behind=ids(1))
@@ -223,9 +224,9 @@ class BackgroundReconcilerTests(unittest.TestCase):
         with self.assertLogs("reconciler", level="WARNING"):
             reconciler.run_round()
         runtime.models.activate.assert_called_once_with(2, allow_missing=True)
-        self.assertEqual(new.scene_sync_uc.calls, [ids(1, 2)])  # the round ran on the followed stack
+        self.assertEqual(new.scene_sync_uc.calls, [ids(1, 2)])  # 这一轮在跟随后的检索服务上运行
         self.assertEqual(old.scene_sync_uc.calls, [])
-        # in step with PostgreSQL: nothing to follow
+        # 和 PostgreSQL 一致：没什么要跟随的
         new.infra.metadata.get_current_embedding_model = Mock(return_value={"id": 2})
         reconciler.run_round()
         runtime.models.activate.assert_called_once()
@@ -259,7 +260,7 @@ class BackgroundReconcilerTests(unittest.TestCase):
                 time.sleep(0.01)
             started = time.monotonic()
             reconciler.stop()
-        self.assertLess(time.monotonic() - started, 2)  # the hour-long wait is interrupted
+        self.assertLess(time.monotonic() - started, 2)  # 长达一小时的等待被打断
         self.assertEqual(stack.infra.metadata.behind, [])
         self.assertEqual(stack.deletion_worker.queue, [])
         self.assertFalse(any(t.name == "reconciler" and t.is_alive() for t in threading.enumerate()))

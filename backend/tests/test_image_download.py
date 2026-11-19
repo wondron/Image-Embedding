@@ -242,7 +242,7 @@ class ImageDownloadTests(unittest.TestCase):
         connection.sock = transport
         with patch.object(downloads.threading, "Timer") as watchdog, patch.object(downloads, "_connection", return_value=connection):
             def expire_headers():
-                # The real timer closes the socket while getresponse is blocked.
+                # 真实的计时器在 getresponse 阻塞时关闭 socket。
                 watchdog.call_args.args[1]()
                 raise http.client.RemoteDisconnected("closed by deadline")
 
@@ -261,7 +261,7 @@ class ImageDownloadTests(unittest.TestCase):
         connection.sock = transport
         with patch.object(downloads.threading, "Timer") as watchdog, patch.object(downloads, "_connection", return_value=connection):
             def expire_body(_size):
-                # HTTPResponse may already own the transport after detachment.
+                # 摘下之后 HTTPResponse 可能已经持有了传输层。
                 connection.sock = None
                 watchdog.call_args.args[1]()
                 return b""

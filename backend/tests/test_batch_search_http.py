@@ -1,7 +1,8 @@
-"""Batch-search routes with a fake retrieval stack: partial success and request failures.
+"""用假的检索服务测试多图搜索路由：部分成功和请求失败。
 
-The images of a request are read and searched at the same time, so the fakes answer by the image
-(its bytes, its URL), never by the order of the calls."""
+一个请求里的各张图同时读取和搜索，所以假对象按图片（它的字节、它的 URL）回答，
+从不按调用顺序。
+"""
 
 import threading
 import time
@@ -21,7 +22,7 @@ from app.core.middleware import TraceIdMiddleware
 
 
 def by_input(outcomes, key):
-    """A side effect answering outcomes[key(call)], raising it when it is an error."""
+    """按 outcomes[key(call)] 回答的 side effect；是错误时抛出它。"""
 
     def answer(*args, **kwargs):
         outcome = outcomes[key(*args, **kwargs)]
@@ -33,12 +34,12 @@ def by_input(outcomes, key):
 
 
 def searched(outcomes):
-    """search_uc.execute answering by the query image's bytes."""
+    """按查询图字节回答的 search_uc.execute。"""
     return by_input(outcomes, lambda **kwargs: kwargs["image_bytes"])
 
 
 def downloaded(outcomes):
-    """read_url_bytes answering by the URL."""
+    """按 URL 回答的 read_url_bytes。"""
     return by_input(outcomes, lambda url, **kwargs: url)
 
 
@@ -87,7 +88,7 @@ class BatchSearchHttpTests(unittest.TestCase):
         self.assertNotIn("error", body["results"][0])
         self.assertNotIn("items", body["results"][1])
         self.assertNotIn("source", body["results"][1])
-        # only the images that could be read are searched
+        # 只搜索能读取的图片
         searched_bytes = sorted(call.kwargs["image_bytes"] for call in self.search.execute.call_args_list)
         self.assertEqual(searched_bytes, [b"bad", b"valid"])
 
@@ -161,9 +162,8 @@ class BatchSearchHttpTests(unittest.TestCase):
 
     def test_the_images_of_a_request_are_searched_at_the_same_time_up_to_the_limit(self):
         limit = services.SEARCH_CONCURRENCY
-        # Passes once `limit` searches wait at it together, then holds them a moment: time enough
-        # for one more to start, were nothing keeping it out. The timeout guards a sequential
-        # implementation, whose first search would wait there for ever
+        # `limit` 个搜索同时在这里等待时放行，然后把它们拦住一会儿：如果没有东西阻止，
+        # 足够再启动一个。超时用来防住串行的实现，它的第一次搜索会在这里永远等下去
         together = threading.Barrier(limit, action=lambda: time.sleep(0.05), timeout=5)
         lock = threading.Lock()
         running = most = 0
@@ -186,7 +186,7 @@ class BatchSearchHttpTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["succeeded"], 2 * limit)
         self.assertEqual([row["input"] for row in response.json()["results"]], urls)
-        self.assertEqual(most, limit)  # never more than SEARCH_CONCURRENCY at once
+        self.assertEqual(most, limit)  # 同时从不超过 SEARCH_CONCURRENCY 个
 
     def test_unready_stack_is_rejected_before_downloading(self):
         self.runtime.retrieval = None

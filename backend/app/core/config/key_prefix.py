@@ -1,4 +1,4 @@
-"""Optional IMAGE_STORAGE_CONFIG.key_prefix normalization (OSS key-prefix contract §2)."""
+"""可选的 IMAGE_STORAGE_CONFIG.key_prefix 规范化（OSS key 前缀契约 §2）。"""
 
 from __future__ import annotations
 
@@ -15,12 +15,12 @@ def normalize_key_prefix(
     *,
     field: str = "IMAGE_STORAGE_CONFIG.key_prefix",
 ) -> str:
-    """Return the stored prefix; empty means current-production keys (no prefix).
+    """返回要保存的前缀；空字符串表示现在生产环境用的 key（没有前缀）。
 
-    Leading/trailing whitespace and slashes are stripped; ASCII backslashes and
-    fullwidth slashes become `/`; repeated slashes collapse. Case is preserved.
-    Illegal values raise ValueError and are not truncated or repaired.
-    ``ImageEmbedding`` is not a code default.
+    去掉首尾的空白和斜杠；ASCII 反斜杠和全角斜杠转成 `/`；连续的斜杠合并成一个。
+    保留大小写。
+    不合法的值抛出 ValueError，不做截断或修复。
+    ``ImageEmbedding`` 不是代码里的默认值。
     """
     if value is None:
         return ""

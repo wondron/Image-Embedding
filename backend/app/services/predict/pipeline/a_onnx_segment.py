@@ -170,7 +170,7 @@ class OnnxSegmentPy:
         if use_iob:
             x_ov = ort.OrtValue.ortvalue_from_numpy(x, "cuda", self.device_id)
 
-            # Cached bindings and their outputs belong to one inference at a time.
+            # 缓存的绑定及其输出同一时间只属于一次推理。
             with self._io_binding_lock:
                 need_rebind = True
                 if self._cached_io is not None and self._cached_shape == tuple(x.shape):

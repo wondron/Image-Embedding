@@ -1,5 +1,6 @@
-"""Re-embedding one stored image from its stored original (services.retrieval.reembed_image) and
-reading objects back from storage (clients.image_storage), over in-memory fakes."""
+"""基于内存假对象测试：用存下来的原图为一张已存图片重新计算 embedding
+（services.retrieval.reembed_image），以及从存储读回对象（clients.image_storage）。
+"""
 
 import tempfile
 import threading
@@ -32,10 +33,10 @@ class StorageReadTests(unittest.TestCase):
             storage = MockImageStorage(settings)
             url = storage.put_original(IMAGE, b"png-bytes", ext="png")
             self.assertEqual(storage.read_by_url_or_key(url), b"png-bytes")
-            # A restarted process keeps only the mirror
+            # 重启后的进程只保留镜像
             again = MockImageStorage(settings)
             self.assertEqual(again.read_by_url_or_key(url), b"png-bytes")
-            self.assertEqual(again.read_by_url_or_key(f"original/{IMAGE[:2]}/{IMAGE}.png"), b"png-bytes")  # a key works too
+            self.assertEqual(again.read_by_url_or_key(f"original/{IMAGE[:2]}/{IMAGE}.png"), b"png-bytes")  # 用 key 也行
             Path(mirror, "original", IMAGE[:2], f"{IMAGE}.png").unlink()
             with self.assertRaises(err.AppError) as ctx:
                 again.read_by_url_or_key(url)
@@ -50,7 +51,7 @@ class StorageReadTests(unittest.TestCase):
             self.assertEqual(ctx.exception.http_status, 502)
 
     def test_s3_reads_the_object_of_the_url_and_reports_any_failure_as_unavailable(self):
-        storage = S3ImageStorage.__new__(S3ImageStorage)  # no boto3 client: a fake one below
+        storage = S3ImageStorage.__new__(S3ImageStorage)  # 没有 boto3 客户端：下面用一个假的
         storage.public_base_url, storage.bucket = BASE, "image-embedding"
         body = Mock()
         body.read.return_value = b"original"
@@ -62,12 +63,13 @@ class StorageReadTests(unittest.TestCase):
         with self.assertRaises(err.AppError) as ctx:
             storage.read_by_url_or_key(f"{BASE}/original/{IMAGE}.png")
         self.assertEqual(ctx.exception.code, "IMAGE_FILE_UNAVAILABLE")
-        self.assertNotIn("NoSuchKey", err.client_detail(ctx.exception))  # the bucket and key stay in the log
+        self.assertNotIn("NoSuchKey", err.client_detail(ctx.exception))  # 存储桶和 key 留在日志里
 
 
 class FakeStore:
-    """The image row, its ledger rows, and the row lock that a deletion waits for (like
-    PgMetadataStore.lock_image_for_vector and enqueue_image_deletion)."""
+    """图片行、它的台账行，以及删除要等待的行锁（和
+    PgMetadataStore.lock_image_for_vector、enqueue_image_deletion 一样）。
+    """
 
     def __init__(self, row=None):
         self.row = dict(row or ROW)
@@ -81,12 +83,12 @@ class FakeStore:
     def lock_image_for_vector(self, image_id, *, model_id):
         with self.row_lock:
             current = self.get_by_id(image_id)
-            yield current  # an exception from the caller leaves the ledger as it was
+            yield current  # 调用方抛出的异常让台账保持原样
             if current is not None:
                 self.ledger.append((model_id, str(image_id), current["payload_version"]))
 
     def delete(self, image_id):
-        """DELETE /api/images/{id}: waits for the row, then the image goes with its ledger rows."""
+        """DELETE /api/images/{id}：等待这一行，然后图片连同它的台账行一起删除。"""
         with self.row_lock:
             self.row = None
             self.ledger = [entry for entry in self.ledger if entry[1] != str(image_id)]
@@ -112,7 +114,7 @@ class ReembedUseCaseTests(unittest.TestCase):
         (point, vector, payload), _ = self.vectors.upsert.call_args
         self.assertEqual((point, payload), (IMAGE, expected_payload(ROW)))
         self.assertEqual(len(vector), MODEL.dim)
-        self.assertEqual(self.store.ledger, [(MODEL.id, IMAGE, 7)])  # the current model's row, at this version
+        self.assertEqual(self.store.ledger, [(MODEL.id, IMAGE, 7)])  # 当前模型的行，在这个版本
 
     def test_nothing_is_written_when_a_step_before_the_upsert_fails(self):
         cases = [
@@ -138,7 +140,7 @@ class ReembedUseCaseTests(unittest.TestCase):
         self.assertEqual(self.store.ledger, [])
 
     def collection(self):
-        """The current collection as a dict the fake vector store writes to."""
+        """当前 collection，用一个 dict 表示，假的向量库往里面写。"""
         points = {}
 
         def upsert(point_id, vector, payload):
@@ -150,11 +152,11 @@ class ReembedUseCaseTests(unittest.TestCase):
 
     def test_an_image_deleted_while_it_is_embedded_gets_no_point_back(self):
         points = self.collection()
-        points[IMAGE] = expected_payload(ROW)  # the point the deletion's cleanup is about to remove
+        points[IMAGE] = expected_payload(ROW)  # 删除的清理即将删除的向量点
 
         def embed_while_deleted(data):
-            self.store.delete(IMAGE)  # the deletion commits ...
-            self.vectors.delete(IMAGE)  # ... and its cleanup runs, before the vector is ready
+            self.store.delete(IMAGE)  # 删除提交了……
+            self.vectors.delete(IMAGE)  # ……它的清理在向量准备好之前就运行了
             return [0.5, 0.5, 0.5, 0.5]
 
         self.embedding.embed_bytes.side_effect = embed_while_deleted
@@ -162,14 +164,14 @@ class ReembedUseCaseTests(unittest.TestCase):
             self.run_it()
         self.assertEqual(ctx.exception.code, "IMAGE_NOT_FOUND")
         self.vectors.upsert.assert_not_called()
-        self.assertEqual(points, {})  # nothing would ever remove a point written now
+        self.assertEqual(points, {})  # 现在写入的向量点再也不会有东西删除它
         self.assertEqual(self.store.ledger, [])
 
     def test_a_deletion_that_comes_while_the_point_is_written_waits_and_then_removes_it(self):
         points = self.collection()
         deleted = threading.Event()
 
-        def delete_image():  # DELETE /api/images/{id}: the queue row, then the cleanup of the point
+        def delete_image():  # DELETE /api/images/{id}：队列行，然后是向量点的清理
             self.store.delete(IMAGE)
             self.vectors.delete(IMAGE)
             deleted.set()
@@ -179,7 +181,7 @@ class ReembedUseCaseTests(unittest.TestCase):
 
         def upsert_while_deleting(point_id, vector, payload):
             deletion.start()
-            waited.append(not deleted.wait(0.3))  # the deletion is held at the image row
+            waited.append(not deleted.wait(0.3))  # 删除被挡在图片行上
             points[str(point_id)] = payload
 
         self.vectors.upsert.side_effect = upsert_while_deleting
@@ -187,15 +189,15 @@ class ReembedUseCaseTests(unittest.TestCase):
         self.assertTrue(deleted.wait(5), "the deletion never went on after the write")
         deletion.join(5)
         self.assertEqual(waited, [True])
-        self.assertEqual(points, {})  # its cleanup came after the write and took the point out
+        self.assertEqual(points, {})  # 它的清理在写入之后进行，并删除了向量点
         self.assertIsNone(self.store.row)
-        self.assertEqual(self.store.ledger, [])  # gone with the image
+        self.assertEqual(self.store.ledger, [])  # 随图片一起删除了
 
     def test_the_payload_and_version_are_the_image_as_it_is_when_the_point_is_written(self):
         edited = {**ROW, "category_id": 13, "scenes": ["general"], "label_status": "verified", "payload_version": 8}
 
         def embed_while_edited(data):
-            self.store.row = dict(edited)  # an edit committed while the original was embedded
+            self.store.row = dict(edited)  # 在计算原图 embedding 期间提交的一次编辑
             return [0.5, 0.5, 0.5, 0.5]
 
         self.embedding.embed_bytes.side_effect = embed_while_edited

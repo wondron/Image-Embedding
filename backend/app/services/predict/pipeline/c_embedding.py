@@ -14,9 +14,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger("embedding")
 
 class GlobalFilter:
-    """Keep search candidates whose embedding similarity to the query exceeds threshold.
+    """保留与查询图的 embedding 相似度超过阈值的搜索候选。
 
-    The encoder is injected (shared with retrieval); this class never loads a model.
+    编码器是注入进来的（和检索共用）；这个类从不加载模型。
     """
 
     def __init__(self, config: Dict[str, Any], embedding: "Embedder"):
@@ -59,7 +59,7 @@ class GlobalFilter:
                 if similarity > self.threshold:
                     result = {key: value for key, value in item.items() if key != "image_bgr"}
                     if downloaded:
-                        # the card shows the image that was actually compared
+                        # 结果卡显示实际参与比对的那张图
                         result["original_url"] = resolved_url
                     final_data.append(result)
             except (TypeError, ValueError) as exc:

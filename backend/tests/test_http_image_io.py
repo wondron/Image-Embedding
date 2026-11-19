@@ -40,7 +40,7 @@ class ImageInputTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(caught.exception.status_code, 415)
         self.assertEqual(stream.tell(), 0)
         self.assertEqual(await read_file_bytes(file, 10), b"image")
-        # Missing MIME declarations remain accepted by the tools API.
+        # 工具接口仍然接受没有声明 MIME 的请求。
         self.assertEqual(
             await read_file_bytes(UploadFile(BytesIO(b"image")), 10, allowed_content_types={"image/png"}),
             b"image",
@@ -78,7 +78,7 @@ class ImageInputTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((caught.exception.code, caught.exception.status_code), ("FORBIDDEN_HOST", 403))
 
     async def test_fake_ip_proxy_addresses_need_an_explicit_trust_entry(self):
-        fake_ip = "http://198.18.0.32/a.png"  # where a fake-IP proxy resolves every public name
+        fake_ip = "http://198.18.0.32/a.png"  # fake-IP 代理把所有公网域名都解析到这里
         with patch.object(public_image, "_connection", side_effect=AssertionError("must not connect")), \
                 self.assertRaises(AppError) as caught:
             await read_url_bytes(fake_ip, max_image_bytes=10, timeout_s=7)
@@ -89,8 +89,8 @@ class ImageInputTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(public_image, "_connection", side_effect=OSError("reached the connect step")), \
                 self.assertRaises(AppError) as caught:
             await read_url_bytes(fake_ip, max_image_bytes=10, timeout_s=7)
-        self.assertEqual(caught.exception.code, "DOWNLOAD_FAILED")  # allowed, then the fake connect fails
-        # ports stay restricted to 80 / 443 even for a trusted network
+        self.assertEqual(caught.exception.code, "DOWNLOAD_FAILED")  # 允许，然后假的连接失败
+        # 即使是受信任的网段，端口也仍然限制为 80 / 443
         with self.assertRaises(AppError) as caught:
             await read_url_bytes("http://198.18.0.32:6333/a.png", max_image_bytes=10, timeout_s=7)
         self.assertEqual(caught.exception.code, "INVALID_URL")
