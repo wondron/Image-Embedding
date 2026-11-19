@@ -19,7 +19,7 @@ class GdinoDetect:
     def __init__(self, config):
         self.sess: ort.InferenceSession | None = None
         self._cached_io = None
-        self._cached_shape = tuple[int, ...] | None = None
+        self._cached_shape: tuple[int, ...] | None = None
         self.load_config(config)
         self.load_model()
         logger.info("g-dino 模型初始化完成！")
@@ -86,7 +86,7 @@ class GdinoDetect:
 
     def detect(self, imgbgr, text_range=None, box_threshold=None, text_threshold=None):
         if self.sess is None:
-            err.not_ready("g-dino 模型尚未加载！")
+            raise err.not_ready("g-dino 模型尚未加载！")
         result, _ = self.predict_with_metadata(
             imgbgr, self._prepare_caption(text_range),
             self.box_threshold if box_threshold is None else box_threshold,

@@ -1,26 +1,37 @@
-"""Business search (POST /api/search/auto/file, /api/search/auto/url): the self-built library and
-the recipe detection side by side, the global search as an optional fallback, one answer.
+"""Business search (POST /api/search/auto/file, /api/search/auto/url): the whole image in the
+self-built library first, the regions found in it when that finds nothing, the recipe detection
+beside them, the global search as an optional fallback; one answer.
 
-    query image -> self-built search (scene, top_k, score_threshold)  ┐ in parallel; merged: the
-                -> recipe detection (RECIPE_DETECT_CONFIG.enabled)    ┘ hits, then the dish names
-        self-built hits                 -> their cards (a recipe card after them when dishes were recognised)
-        dish names only                 -> the recipe card
-        nothing, global_fallback=false  -> no card (fallback.status=disabled)
-        nothing, global_fallback=true   -> global search for top_k results
-            hits                        -> their cards (fallback.status=hit)
-            nothing, or it failed       -> no card (fallback.status says which)
+    query image -> whole-image search (scene, top_k, score_threshold)       ┐
+                -> region search (AUTO_SEARCH_REGION_CONFIG.enabled):         │ started together
+                   GroundingDINO's boxes, each searched, merged               │
+                -> recipe detection (RECIPE_DETECT_CONFIG.enabled)           ┘
+        whole-image hits                -> their cards, at once: the other two are dropped
+        no whole-image hit              -> wait for the other two, then
+            region hits                 -> their cards (a recipe card after them when dishes were recognised)
+            dish names only             -> the recipe card
+            nothing, global_fallback=false  -> no card (fallback.status=disabled)
+            nothing, global_fallback=true   -> global search for top_k results
+                hits                    -> their cards (fallback.status=hit)
+                nothing, or it failed   -> no card (fallback.status says which)
+
+The region search (app.api.services.region_search) searches every box with the request's scene,
+top_k and score_threshold, and keeps the best top_k hits of all boxes. With score_threshold=0 the
+whole image always has hits when the library has anything, so the region search is not started.
 
 Every channel answers with the same result card (app.schemas.search_hit), so items[] has one shape
 whatever the channel. What depends on the channel is on the card itself, not on the envelope: its
 source (self / recipe / global) comes first, and a self-built card's details say whether they
-carry the heating information (outputs_heating, from the scene). The recipe detection gives one
-card: the dish names as its tags, the other card fields empty.
+carry the heating information (outputs_heating, from the scene). A region hit is a self-built card
+whose details.region names the box that found it. The recipe detection gives one card: the dish
+names as its tags, the other card fields empty.
 
-A failure of the self-built search (unknown scene, an image that cannot be decoded, the retrieval
-stack down) fails the request, as on POST /api/search. A failure of the recipe detection or of the
-fallback does not. A failed recipe detection counts as having recognised nothing: it is logged and
-named in the request's timing line. For the fallback, fallback.status=failed carries the reason,
-so a caller can tell "nothing found" from "the fallback could not run".
+A failure of the whole-image search (unknown scene, an image that cannot be decoded, the retrieval
+stack down) fails the request, as on POST /api/search. A failure of the region search, the recipe
+detection or the fallback does not. A failed region search or recipe detection counts as having
+found nothing: it is logged and named in the request's timing line. For the fallback,
+fallback.status=failed carries the reason, so a caller can tell "nothing found" from "the fallback
+could not run".
 
 The query image is read once (upload or download) and given to every channel. The recipe service
 gets the image's link when the request came with one (it downloads the image itself), else the bytes.
@@ -39,10 +50,12 @@ from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import require_retrieval
 from app.api.services.predict import run_predict
+from app.api.services.region_search import SEARCH_STEP as REGION_STEP
+from app.api.services.region_search import RegionOutcome, run_region_search
 from app.bootstrap.state import ApplicationState
 from app.clients.recipe_detect import detect_recipes
 from app.core import errors as err
-from app.core.config.settings import RecipeDetectSettings
+from app.core.config.settings import AutoSearchRegionSettings, RecipeDetectSettings
 from app.core.observability.log_helper import show_text
 from app.core.rules.text_fields import tags_text
 from app.utils.timer import timer_tool
@@ -90,6 +103,42 @@ def _recipe_settings(runtime: ApplicationState, trace_id: str) -> RecipeDetectSe
     return settings if settings.enabled else None
 
 
+def _region_settings(
+    runtime: ApplicationState, score_threshold: float | None, trace_id: str
+) -> AutoSearchRegionSettings | None:
+    """AUTO_SEARCH_REGION_CONFIG as it is now; None when the step is off, the section cannot be
+    used, or there is no threshold (the whole image then always answers, when anything can)."""
+    if score_threshold == 0:
+        return None
+    try:
+        settings = AutoSearchRegionSettings.from_config(runtime.config)
+    except ValueError as exc:
+        _log(logging.WARNING, f"{REGION_STEP}已跳过：AUTO_SEARCH_REGION_CONFIG 配置有误 | {exc}", trace_id)
+        return None
+    return settings if settings.enabled else None
+
+
+def _log_regions(outcome: RegionOutcome, trace_id: str) -> None:
+    """What the region search came to, once its answer is used."""
+    if outcome.skipped is not None:
+        _log(logging.INFO, f"{REGION_STEP}已跳过：{outcome.skipped}", trace_id)
+        return
+    seconds = sum(cost for _, cost, _ in outcome.steps)
+    if outcome.error is not None:
+        _log(
+            logging.WARNING,
+            f"{REGION_STEP}失败 | {outcome.error} | 检测框={outcome.regions} | 耗时 {seconds:.3f}s",
+            trace_id,
+        )
+        return
+    failed = f" | 失败={outcome.failed}" if outcome.failed else ""
+    _log(
+        logging.WARNING if outcome.failed else logging.INFO,
+        f"{REGION_STEP}完成 | 检测框={outcome.regions} | 结果={len(outcome.hits)}{failed} | 耗时 {seconds:.3f}s",
+        trace_id,
+    )
+
+
 async def _detect_recipe(
     runtime: ApplicationState,
     settings: RecipeDetectSettings,
@@ -130,20 +179,40 @@ async def _detect_recipe(
     return _Recipe(names, seconds, error)
 
 
-async def _abandon(detection: asyncio.Task[_Recipe] | None) -> None:
-    """Stop the recipe detection of a request that failed: nobody would read its answer."""
+# Region searches dropped while still running: a task needs a reference until it ends
+_LEFT_RUNNING: set[asyncio.Task[Any]] = set()
+
+
+def _forget(task: asyncio.Task[Any]) -> None:
+    _LEFT_RUNNING.discard(task)
+    if not task.cancelled():
+        task.exception()  # retrieved, so that it is not reported as never retrieved
+
+
+async def _abandon(detection: asyncio.Task[_Recipe] | None, regions: asyncio.Task[RegionOutcome] | None) -> None:
+    """Stop the steps whose answer nobody will read (the whole image answered, or the request
+    failed). The recipe detection is a call on the event loop: it ends at once. The region search
+    may be inside a worker thread (GroundingDINO, the encoder), which cannot be interrupted, and a
+    cancellation may wait for that thread: it is cancelled and not waited for."""
+    if regions is not None:
+        if regions.done():
+            _forget(regions)
+        else:
+            regions.cancel()
+            _LEFT_RUNNING.add(regions)
+            regions.add_done_callback(_forget)
     if detection is not None and not detection.done():
         detection.cancel()
         await asyncio.gather(detection, return_exceptions=True)
 
 
-def _self_cards(local: dict[str, Any]) -> list[dict[str, Any]]:
-    """The self-built search's hits as cards of this answer: each says in its details whether
-    they carry the heating information (the scene's outputs_heating, the same for every hit)."""
-    heating = bool(local.get("outputs_heating"))
+def _self_cards(hits: list[dict[str, Any]], heating: bool) -> list[dict[str, Any]]:
+    """Self-built hits (the whole image's or the regions') as cards of this answer: each says in
+    its details whether they carry the heating information (the scene's outputs_heating, the same
+    for every hit)."""
     return [
-        {"source": "self", **hit, "details": {**hit["details"], "outputs_heating": heating}}
-        for hit in local["items"]
+        {"source": "self", **hit, "details": {**hit["details"], "outputs_heating": bool(heating)}}
+        for hit in hits
     ]
 
 
@@ -194,18 +263,31 @@ async def run_auto_search(
     recipe service is then sent the link instead of the bytes.
 
     timer: the route's timer. Every channel records its steps on it (embedding推理 / vector搜索 /
-    后处理, then 菜谱识别, then global搜索 / 后处理 for the fallback); the route writes the request's
-    timing line. 菜谱识别 runs beside the self-built steps, so the steps can add up to more than
-    the total.
+    后处理 for the whole image; then, when it found nothing, 目标检测 / 区域搜索 for the regions,
+    菜谱识别, and global搜索 / 后处理 for the fallback); the route writes the request's timing line.
+    The region search and 菜谱识别 run beside the whole-image steps, so the steps can add up to
+    more than the total.
     """
     timer = timer or timer_tool()
     stack = require_retrieval(runtime)
-    settings = _recipe_settings(runtime, trace_id)
+    recipe_settings = _recipe_settings(runtime, trace_id)
+    region_settings = _region_settings(runtime, score_threshold, trace_id)
     detection: asyncio.Task[_Recipe] | None = None
-    if settings is not None:
+    regions: asyncio.Task[RegionOutcome] | None = None
+    if recipe_settings is not None:
         detection = asyncio.create_task(
-            _detect_recipe(runtime, settings, image_bytes=image_bytes, image_url=image_url, trace_id=trace_id)
+            _detect_recipe(runtime, recipe_settings, image_bytes=image_bytes, image_url=image_url, trace_id=trace_id)
         )
+    if region_settings is not None:
+        regions = asyncio.create_task(
+            run_region_search(
+                runtime, stack, region_settings,
+                image_bytes=image_bytes, scene=scene, top_k=top_k, score_threshold=score_threshold,
+                trace_id=trace_id,
+            )
+        )
+    found: RegionOutcome | None = None
+    recipe: _Recipe | None = None
     try:
         local = await run_in_threadpool(
             stack.search_uc.execute,
@@ -216,17 +298,32 @@ async def run_auto_search(
             trace_id=trace_id,
             timer=timer,
         )
+        if not local["items"]:  # the whole image found nothing: the other two are the answer
+            found = await regions if regions is not None else None
+            recipe = await detection if detection is not None else None
     except BaseException:
-        await _abandon(detection)
+        await _abandon(detection, regions)
         raise
-    recipe = await detection if detection is not None else None
+
+    body: dict[str, Any] = {"ok": True, "trace_id": trace_id, "scene": local["scene"]}
+    heating = bool(local.get("outputs_heating"))
+    if local["items"]:
+        await _abandon(detection, regions)  # answered without them
+        body.update(items=_self_cards(local["items"], heating), fallback={"status": "not_needed"})
+        return body
+
+    # recorded here, not when they ended: after the whole-image steps, whichever ended first
+    if found is not None:
+        _log_regions(found, trace_id)
+        for step, seconds, failed in found.steps:
+            timer.record(step, seconds, failed=failed)
     if recipe is not None:
-        # recorded here, not when the call returned: after the self-built steps, whichever ended first
         timer.record(RECIPE_STEP, recipe.seconds, failed=recipe.error is not None)
 
-    cards = _self_cards(local) + ([_recipe_card(recipe.names)] if recipe is not None and recipe.names else [])
-    body: dict[str, Any] = {"ok": True, "trace_id": trace_id, "scene": local["scene"]}
-    if cards:  # self-built hits, the dish names, or both
+    cards = _self_cards(found.hits if found is not None else [], heating)
+    if recipe is not None and recipe.names:
+        cards.append(_recipe_card(recipe.names))
+    if cards:  # region hits, the dish names, or both
         body.update(items=cards, fallback={"status": "not_needed"})
     elif not global_fallback:
         body.update(items=[], fallback={"status": "disabled"}, message=_empty_message("disabled", recipe))

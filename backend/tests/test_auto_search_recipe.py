@@ -1,8 +1,10 @@
 """Business search with the recipe detection (RECIPE_DETECT_CONFIG).
 
-The detection runs beside the self-built search. The dish names it recognises are merged in as
-one result card (source=recipe) after the self-built hits, and the global fallback only runs when
-neither has anything. Its time and its result are logged, and its failure never fails the request.
+The detection starts beside the whole-image search. When the whole image has hits they are the
+answer at once and the detection is dropped; otherwise the dish names it recognises are one result
+card (source=recipe) after the region hits (tests/test_auto_search_regions.py), and the global
+fallback only runs when nothing has anything. Its time and its result are logged when its answer
+is used, and its failure never fails the request. The region search is off in these tests.
 
 Where a result came from is on each card (its source, the first field), not on the envelope; a
 self-built card's details say whether they carry the heating information (outputs_heating).
@@ -284,33 +286,62 @@ class BusinessSearchRecipeTests(unittest.TestCase):
 
     # -- the merged answer -----------------------------------------------------------------
 
-    def test_the_dish_names_are_one_card_after_the_self_built_hits(self):
-        body, _ = self.by_url(trace_id="t-9", global_fallback=True)
+    def test_whole_image_hits_are_the_answer_without_the_dish_names(self):
+        body, records = self.by_url(trace_id="t-9", global_fallback=True)
         self.assertEqual(body["fallback"], {"status": "not_needed"})
-        hit, recipe = body["items"]
+        (hit,) = body["items"]
         self.assertEqual((hit["source"], hit["tags"], hit["similarity"]), ("self", "牛排", 0.9))
         self.assertEqual(hit["details"]["id"], ROW_ID)
-        self.assertEqual(recipe, RECIPE_CARD)
-        self.assertEqual((list(hit), list(recipe)), (CARD_KEYS, CARD_KEYS))  # one card shape, the source first
+        self.assertNotIn("region", hit["details"])  # the whole image's, not a region's
+        self.assertEqual(list(hit), CARD_KEYS)  # the source first
         self.assertNotIn("message", body)
         self.food.searchTool.detect.assert_not_called()
+        # Not part of the answer, nor of the timing line (a detection that already ended has logged its result)
+        self.assertEqual(
+            steps(self.timing_line(records).getMessage()), ["图像下载", "embedding推理", "vector搜索", "后处理", "总耗时"]
+        )
 
-        # The recipe service was given the link the request came with, and its trace id
+    def test_whole_image_hits_do_not_wait_for_the_detection(self):
+        detecting = threading.Event()
+        calls = {"started": 0, "cancelled": 0}
+
+        async def answer(request):
+            calls["started"] += 1
+            detecting.set()
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                calls["cancelled"] += 1
+                raise
+
+        self.answer = answer
+        self.embedding.on_embed = lambda: detecting.wait(2)  # the hits come with the detection under way
+        with TestClient(self.app) as client, self.assertLogs(level="INFO") as logs:  # one event loop, as below
+            started = time.monotonic()
+            response = client.post("/api/search/auto/file", files={"file": ("q.png", PNG, "image/png")})
+            took = time.monotonic() - started
+            left = dict(calls)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual([item["source"] for item in response.json()["items"]], ["self"])
+        self.assertLess(took, 5)
+        self.assertEqual(left, {"started": 1, "cancelled": 1})
+        self.assertEqual(self.recipe_logs(logs.records), [])
+
+    def test_the_recipe_service_gets_the_link_and_the_trace_id(self):
+        self.vectors.hits = []
+        self.by_url(trace_id="t-9")
         (request,) = self.received
         self.assertEqual(str(request.url), RECIPE_URL)
         self.assertEqual(
             json.loads(request.content), {"image_url": "https://x.example/a.png", "traceId": "t-9"}
         )
 
-    def test_the_card_does_not_count_towards_top_k(self):
-        body, _ = self.by_url(top_k=1)
-        self.assertEqual([item["source"] for item in body["items"]], ["self", "recipe"])
-
     def test_an_upload_is_sent_to_the_recipe_service_as_a_file(self):
+        self.vectors.hits = []
         body, _ = self.post(
             "/api/search/auto/file", files={"file": ("q.png", PNG, "image/png")}, headers={"X-Trace-Id": "t-file"}
         )
-        self.assertEqual([item["source"] for item in body["items"]], ["self", "recipe"])
+        self.assertEqual(body["items"], [RECIPE_CARD])
         (request,) = self.received
         self.assertTrue(request.headers["content-type"].startswith("multipart/form-data"))
         self.assertIn(b'name="file"; filename="query.png"\r\nContent-Type: image/png\r\n\r\n' + PNG, request.content)
@@ -328,19 +359,21 @@ class BusinessSearchRecipeTests(unittest.TestCase):
         body, _ = self.by_url(trace_id="t-9")
         self.assertEqual(list(body), ["ok", "trace_id", "scene", "items", "fallback"])
         self.assertEqual((body["ok"], body["trace_id"], body["scene"]), (True, "t-9", "general"))
-        hit, recipe = body["items"]
+        (hit,) = body["items"]
         # A scene without heating output: the flag says so, and the heating fields stay out
         self.assertIs(hit["details"]["outputs_heating"], False)
         self.assertEqual(list(hit["details"])[-1], "outputs_heating")
         self.assertFalse({"food_state", "heating_group"} & set(hit["details"]))
-        self.assertEqual(recipe["details"], {})  # only self-built cards have the flag
 
         body, _ = self.by_url(scene="oven")
         self.assertEqual(body["scene"], "oven")
-        hit, recipe = body["items"]
+        (hit,) = body["items"]
         self.assertIs(hit["details"]["outputs_heating"], True)
         self.assertEqual((hit["details"]["food_state"], hit["details"]["heating_group"]), ("raw", None))
-        self.assertEqual(recipe, RECIPE_CARD)
+
+        self.vectors.hits = []
+        body, _ = self.by_url(scene="oven")
+        self.assertEqual(body["items"], [RECIPE_CARD])  # only self-built cards have the flag
 
         # The interface's documentation says the same
         schemas = self.app.openapi()["components"]["schemas"]
@@ -377,8 +410,9 @@ class BusinessSearchRecipeTests(unittest.TestCase):
     # -- its time and its result in the log ------------------------------------------------
 
     def test_the_time_and_the_result_are_logged(self):
+        self.vectors.hits = []
         body, records = self.by_url(trace_id="t-9")
-        self.assertEqual(len(body["items"]), 2)
+        self.assertEqual(body["items"], [RECIPE_CARD])
         ((level, text),) = self.recipe_logs(records)
         self.assertEqual(level, logging.INFO)
         self.assertRegex(
@@ -398,9 +432,10 @@ class BusinessSearchRecipeTests(unittest.TestCase):
     # -- a detection that fails, or is off ---------------------------------------------------
 
     def test_a_failed_detection_is_logged_and_does_not_fail_the_search(self):
+        self.vectors.hits = []
         self.answer = recipe_answer([], status=503, success=False, message="上游识别模型不可用")
         body, records = self.by_url(trace_id="t-9")
-        self.assertEqual([item["source"] for item in body["items"]], ["self"])
+        self.assertEqual((body["items"], body["fallback"]), ([], {"status": "disabled"}))
         ((level, text),) = self.recipe_logs(records)
         self.assertEqual(level, logging.WARNING)
         self.assertRegex(
@@ -412,7 +447,6 @@ class BusinessSearchRecipeTests(unittest.TestCase):
         self.assertEqual(steps(line.getMessage()), ["图像下载", "embedding推理", "vector搜索", "后处理", "菜谱识别失败", "总耗时"])
         self.assertEqual(line.levelno, logging.INFO)
 
-        self.vectors.hits = []
         self.answer = httpx.ReadTimeout("no data")
         body, records = self.by_url()
         self.assertEqual((body["items"], body["fallback"]), ([], {"status": "disabled"}))
@@ -440,13 +474,14 @@ class BusinessSearchRecipeTests(unittest.TestCase):
         self.assertEqual(body["message"], "自建库没有达到阈值的结果，未开启 Global 兜底")
 
     def test_the_section_is_read_on_every_request(self):
+        self.vectors.hits = []
         self.runtime.config = {}
-        self.by_url()
-        self.assertEqual(self.received, [])
+        body, _ = self.by_url()
+        self.assertEqual((self.received, body["items"]), ([], []))
         self.runtime.config = {"RECIPE_DETECT_CONFIG": {"enabled": True, "url": RECIPE_URL}}  # as a Nacos reload does
         body, _ = self.by_url()
         self.assertEqual(len(self.received), 1)
-        self.assertEqual(body["items"][-1], RECIPE_CARD)
+        self.assertEqual(body["items"], [RECIPE_CARD])
 
     def test_a_section_that_cannot_be_used_skips_the_step_with_a_warning(self):
         self.runtime.config = {"RECIPE_DETECT_CONFIG": {"enabled": True, "url": ""}}
@@ -459,11 +494,12 @@ class BusinessSearchRecipeTests(unittest.TestCase):
 
     # -- side by side ------------------------------------------------------------------------
 
-    def test_the_detection_runs_while_the_self_built_search_does(self):
+    def test_the_detection_runs_while_the_whole_image_search_does(self):
         searching, detecting = threading.Event(), threading.Event()
         seen = {}
+        self.vectors.hits = []  # so that the answer waits for the detection
 
-        def search():  # in the self-built search's worker thread
+        def search():  # in the whole-image search's worker thread
             searching.set()
             seen["detection started during the search"] = detecting.wait(2)
 
@@ -479,7 +515,7 @@ class BusinessSearchRecipeTests(unittest.TestCase):
         self.answer = answer
         body, _ = self.by_url()
         self.assertEqual(seen, {"detection started during the search": True, "search started during the detection": True})
-        self.assertEqual([item["source"] for item in body["items"]], ["self", "recipe"])
+        self.assertEqual(body["items"], [RECIPE_CARD])
 
     def test_a_failed_self_built_search_fails_the_request_and_drops_the_detection(self):
         detecting = threading.Event()

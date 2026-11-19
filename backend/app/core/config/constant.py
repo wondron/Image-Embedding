@@ -31,6 +31,10 @@ IMAGE_STORAGE_DEFAULT_REGION = "us-east-1"
 # 菜谱识别（业务搜图的并行步骤）：开关和地址在配置的 RECIPE_DETECT_CONFIG 里，没写 timeout 时用这个值
 RECIPE_DETECT_TIMEOUT_SECONDS = 5.0
 
+# GroundingDINO 的 onnxruntime 日志级别（app.clients.ground_dino）：0 verbose、1 info、2 warning、3 error、4 fatal。
+# 用 3：CUDA 上它的图会刷大量 Memcpy 节点之类的 warning
+ORT_LOG_SEVERITY_LEVEL = 3
+
 # Nacos 读哪些 dataId：按顺序逐个覆盖本地 YAML，后面的覆盖前面的。
 # 开关、地址、namespace、group、账号等都是环境变量 NACOS_*（app.core.config.settings.NacosSettings）
 NACOS_DATA_ID_LIST = ["roki-ai-image-search"]

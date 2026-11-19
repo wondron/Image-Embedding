@@ -469,6 +469,52 @@ class RecipeDetectSettings:
         return settings
 
 
+# Boxes of one query image the region search may search at most (AUTO_SEARCH_REGION_CONFIG.max_regions)
+AUTO_SEARCH_MAX_REGIONS = 20
+
+
+@dataclass(frozen=True, slots=True)
+class AutoSearchRegionSettings:
+    """Region search, the step the business search starts beside the whole-image search
+    (app.api.services.region_search), from AUTO_SEARCH_REGION_CONFIG: GroundingDINO finds what
+    caption names in the query image, and every box found is searched as a query image of its own.
+
+    Parsed on every request, so a change in Nacos applies without a restart (the model is
+    GROUNDINGDINO_CONFIG's, loaded at startup). Without the section the step is off. The other
+    values are checked only when it is on.
+    """
+
+    enabled: bool = False
+    caption: str = "food"  # what to detect; several classes as "food . dish"
+    box_threshold: float = 0.4
+    text_threshold: float = 0.4
+    max_regions: int = 5  # the boxes searched, highest detection score first
+
+    @classmethod
+    def from_config(cls, config: Mapping[str, Any]) -> AutoSearchRegionSettings:
+        name = "AUTO_SEARCH_REGION_CONFIG"
+        section = _section(config, name)
+        defaults = cls()
+        settings = cls(
+            enabled=_flag(section, name, "enabled", defaults.enabled),
+            caption=_text(section, "caption") or defaults.caption,
+            box_threshold=_number(section, name, "box_threshold", defaults.box_threshold, float),
+            text_threshold=_number(section, name, "text_threshold", defaults.text_threshold, float),
+            max_regions=_number(section, name, "max_regions", defaults.max_regions, int),
+        )
+        if not settings.enabled:
+            return settings
+        for key in ("box_threshold", "text_threshold"):
+            value = getattr(settings, key)
+            if not 0 <= value <= 1:  # NaN fails too
+                raise ValueError(f"{name}.{key} must be between 0 and 1, got {value!r}")
+        if not 1 <= settings.max_regions <= AUTO_SEARCH_MAX_REGIONS:
+            raise ValueError(
+                f"{name}.max_regions must be in 1..{AUTO_SEARCH_MAX_REGIONS}, got {settings.max_regions!r}"
+            )
+        return settings
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     application: ApplicationSettings = field(default_factory=ApplicationSettings)

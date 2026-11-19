@@ -1,7 +1,8 @@
 """Business search wire (POST /api/search/auto/file, POST /api/search/auto/url).
 
-The self-built library and, when RECIPE_DETECT_CONFIG turns it on, the recipe detection, in
-parallel and merged; when neither has anything, the global search as an optional fallback
+The whole image in the self-built library; when it finds nothing, the regions GroundingDINO found
+in it (AUTO_SEARCH_REGION_CONFIG) and the recipe detection (RECIPE_DETECT_CONFIG), started beside
+it and merged; when none has anything, the global search as an optional fallback
 (app.api.services.auto_search). items[] are the result cards every channel shares
 (app.schemas.search_hit), each with its source first: the channel it came from. What depends on
 the channel is on the card, not on the envelope: a self-built card's details say whether they
@@ -25,15 +26,16 @@ SCENE_DOC = (
     "只作用于自建库：按场景过滤、场景类别名和加热信息都按它；Global 不分场景"
 )
 TOP_K_DOC = (
-    f"最多返回多少条，1～{TOP_K_MAX}，默认 {TOP_K_DEFAULT}。自建库：相似度达到 score_threshold 的前 top_k 条；"
+    f"最多返回多少条，1～{TOP_K_MAX}，默认 {TOP_K_DEFAULT}。自建库：相似度达到 score_threshold 的前 top_k 条"
+    "（区域搜索时每个检测框各取 top_k 条，合并后再取 top_k 条）；"
     "Global 兜底：向上游要 top_k 条。菜谱识别的那一条结果卡不占这个数量"
 )
 SCORE_THRESHOLD_DOC = (
-    "自建库的相似度阈值：不传为 0.55；0 表示不设阈值（总是返回最相近的 top_k 条，也就不会走兜底）；"
-    "其余取值 0.30～1，超出范围返回 SEARCH_BAD_SCORE_THRESHOLD"
+    "自建库的相似度阈值，整图和区域搜索都用它：不传为 0.55；0 表示不设阈值（总是返回最相近的 top_k 条，"
+    "也就不做区域搜索、不会走兜底）；其余取值 0.30～1，超出范围返回 SEARCH_BAD_SCORE_THRESHOLD"
 )
 GLOBAL_FALLBACK_DOC = (
-    "自建库没有达到阈值的结果、菜谱识别（开启时）也没有识别到菜名时，是否用现网 Global 搜图兜底；"
+    "整图和区域搜索都没有达到阈值的结果、菜谱识别（开启时）也没有识别到菜名时，是否用现网 Global 搜图兜底；"
     "默认 false，直接返回空结果。Global 是外部付费服务，开启后没命中的请求会多花几秒"
 )
 TRACE_ID_DOC = (
@@ -83,6 +85,8 @@ class AutoSearchHit(SearchHitBase, _CardSource):
             "其余字段，内容按来源。source=self：同 POST /api/search 的 details——id、category_id、category、"
             "scenes、scene_label（场景有标签映射时）、label_status、images[]，另有 outputs_heating（布尔）："
             "这条结果是否带加热信息，按场景配置；为 true 时另有六个食物字段和 heating_group。"
+            "区域搜索的结果另有 region：{label 检测到的类别, score 检测置信度, box [x1, y1, x2, y2] 查询图上的像素坐标}，"
+            "整图搜索的结果没有 region。"
             "source=global：同 Global 搜图的 details——rank、page_url、site、images[]、document_info。"
             "source=recipe：{}"
         ),
@@ -95,7 +99,7 @@ class AutoSearchFallback(BaseModel):
     status: Literal["not_needed", "disabled", "hit", "empty", "failed"] = Field(
         ...,
         description=(
-            "not_needed：自建库或菜谱识别有结果，没有走兜底；disabled：两者都没有结果，global_fallback=false；"
+            "not_needed：整图、区域搜索或菜谱识别有结果，没有走兜底；disabled：都没有结果，global_fallback=false；"
             "hit：Global 有结果；empty：Global 也没有结果；failed：Global 搜图失败（原因见 error、detail），"
             "按没有结果返回。disabled、empty、failed 时 items 为 []"
         ),
@@ -113,8 +117,9 @@ class AutoSearchResponse(BaseModel):
     items: list[AutoSearchHit] = Field(
         default_factory=list,
         description=(
-            "结果卡，每条的 source 说明它来自哪里：自建库（self）按相似度从高到低，菜谱识别（recipe）的一条"
-            "排在自建库结果之后；自建库和菜谱识别都没有结果、走了兜底时是 Global（global）的结果，按上游排名。"
+            "结果卡，每条的 source 说明它来自哪里：整图有结果时只有整图的自建库结果（self），按相似度从高到低；"
+            "整图没有结果时是区域搜索的自建库结果（self，按相似度从高到低），菜谱识别（recipe）的一条排在后面；"
+            "都没有结果、走了兜底时是 Global（global）的结果，按上游排名。"
             "没有结果时为 []，原因见 fallback.status 和 message"
         ),
     )
