@@ -1,5 +1,10 @@
-"""Batch-search routes with a fake retrieval stack: partial success and request failures."""
+"""Batch-search routes with a fake retrieval stack: partial success and request failures.
 
+The images of a request are read and searched at the same time, so the fakes answer by the image
+(its bytes, its URL), never by the order of the calls."""
+
+import threading
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -7,11 +12,34 @@ from unittest.mock import AsyncMock, Mock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.api.services import batch_search as services
 from app.api.v1 import batch_search as routes
 from app.bootstrap.state import ApplicationState
 from app.core import errors as err
 from app.core.exceptions import register_exception_handlers
 from app.core.middleware import TraceIdMiddleware
+
+
+def by_input(outcomes, key):
+    """A side effect answering outcomes[key(call)], raising it when it is an error."""
+
+    def answer(*args, **kwargs):
+        outcome = outcomes[key(*args, **kwargs)]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    return answer
+
+
+def searched(outcomes):
+    """search_uc.execute answering by the query image's bytes."""
+    return by_input(outcomes, lambda **kwargs: kwargs["image_bytes"])
+
+
+def downloaded(outcomes):
+    """read_url_bytes answering by the URL."""
+    return by_input(outcomes, lambda url, **kwargs: url)
 
 
 class BatchSearchHttpTests(unittest.TestCase):
@@ -41,9 +69,9 @@ class BatchSearchHttpTests(unittest.TestCase):
         self.addCleanup(fetch.stop)
 
     def test_files_keep_input_order_and_isolate_empty_oversize_and_bad_images(self):
-        self.search.execute.side_effect = [
-            {"source": "empty", "items": []}, err.search_bad_image("cannot decode"),
-        ]
+        self.search.execute.side_effect = searched({
+            b"valid": {"source": "empty", "items": []}, b"bad": err.search_bad_image("cannot decode"),
+        })
         response = self.client.post("/api/search/batch/files", files=[
             ("files", ("valid.png", b"valid", "image/png")),
             ("files", ("empty.png", b"", "image/png")),
@@ -59,10 +87,14 @@ class BatchSearchHttpTests(unittest.TestCase):
         self.assertNotIn("error", body["results"][0])
         self.assertNotIn("items", body["results"][1])
         self.assertNotIn("source", body["results"][1])
-        self.assertEqual(self.search.execute.call_count, 2)
+        # only the images that could be read are searched
+        searched_bytes = sorted(call.kwargs["image_bytes"] for call in self.search.execute.call_args_list)
+        self.assertEqual(searched_bytes, [b"bad", b"valid"])
 
     def test_urls_keep_download_failure_per_image_and_preserve_trace_id(self):
-        self.fetch.side_effect = [err.invalid_url("private host"), b"image"]
+        self.fetch.side_effect = downloaded({
+            "http://localhost/a.png": err.invalid_url("private host"), "https://example.com/b.png": b"image",
+        })
         response = self.client.post("/api/search/batch/urls", json={
             "image_urls": ["http://localhost/a.png", "https://example.com/b.png"], "trace_id": "batch.test-1",
         })
@@ -81,10 +113,15 @@ class BatchSearchHttpTests(unittest.TestCase):
             "tags": "披萨", "description": "", "original_url": "https://example.com/pizza.png",
             "similarity": 0.95, "details": {"id": "pizza-image", "images": []},
         }
-        self.search.execute.side_effect = [
-            {"source": "self", "items": [card]}, {"source": "empty", "items": []},
-        ]
-        response = self.client.post("/api/search/batch/urls", json={"image_urls": ["https://example.com/a.png"] * 2})
+        self.fetch.side_effect = downloaded({
+            "https://example.com/pizza.png": b"pizza", "https://example.com/other.png": b"other",
+        })
+        self.search.execute.side_effect = searched({
+            b"pizza": {"source": "self", "items": [card]}, b"other": {"source": "empty", "items": []},
+        })
+        response = self.client.post("/api/search/batch/urls", json={
+            "image_urls": ["https://example.com/pizza.png", "https://example.com/other.png"],
+        })
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
         self.assertEqual((body["succeeded"], body["matched"], body["failed"]), (2, 1, 0))
@@ -111,11 +148,45 @@ class BatchSearchHttpTests(unittest.TestCase):
         self.assertNotIn("results", response.json())
 
     def test_a_service_failure_and_success_still_returns_the_batch(self):
-        self.search.execute.side_effect = [err.search_qdrant_failed("temporarily down"), {"source": "empty", "items": []}]
-        response = self.client.post("/api/search/batch/urls", json={"image_urls": ["https://example.com/a.png"] * 2})
+        self.fetch.side_effect = downloaded({"https://example.com/a.png": b"down", "https://example.com/b.png": b"up"})
+        self.search.execute.side_effect = searched({
+            b"down": err.search_qdrant_failed("temporarily down"), b"up": {"source": "empty", "items": []},
+        })
+        response = self.client.post("/api/search/batch/urls", json={
+            "image_urls": ["https://example.com/a.png", "https://example.com/b.png"],
+        })
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["failed"], 1)
         self.assertEqual(response.json()["results"][0]["detail"], "vector search failed")
+
+    def test_the_images_of_a_request_are_searched_at_the_same_time_up_to_the_limit(self):
+        limit = services.SEARCH_CONCURRENCY
+        # Passes once `limit` searches wait at it together, then holds them a moment: time enough
+        # for one more to start, were nothing keeping it out. The timeout guards a sequential
+        # implementation, whose first search would wait there for ever
+        together = threading.Barrier(limit, action=lambda: time.sleep(0.05), timeout=5)
+        lock = threading.Lock()
+        running = most = 0
+
+        def execute(**kwargs):
+            nonlocal running, most
+            with lock:
+                running += 1
+                most = max(most, running)
+            try:
+                together.wait()
+                return {"source": "empty", "items": []}
+            finally:
+                with lock:
+                    running -= 1
+
+        self.search.execute.side_effect = execute
+        urls = [f"https://example.com/{index}.png" for index in range(2 * limit)]
+        response = self.client.post("/api/search/batch/urls", json={"image_urls": urls})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["succeeded"], 2 * limit)
+        self.assertEqual([row["input"] for row in response.json()["results"]], urls)
+        self.assertEqual(most, limit)  # never more than SEARCH_CONCURRENCY at once
 
     def test_unready_stack_is_rejected_before_downloading(self):
         self.runtime.retrieval = None

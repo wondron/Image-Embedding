@@ -365,9 +365,7 @@ def build_retrieval_stack(
     return RetrievalStack(
         infra=infra,
         embedding=embedding,
-        index_uc=IndexImageUseCase(
-            embedding, vectors, metadata, model=model, storage=storage, indexed_dir=save_dir
-        ),
+        index_uc=IndexImageUseCase(embedding, vectors, metadata, model=model, storage=storage, indexed_dir=save_dir),
         reembed_uc=ReembedImageUseCase(embedding, vectors, metadata, model=model, storage=storage),
         search_uc=SearchImageUseCase(embedding, vectors, metadata, model=model),
         delete_uc=DeleteImageUseCase(metadata),

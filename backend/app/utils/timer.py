@@ -8,7 +8,6 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff"}
 def is_image(filename: str) -> bool:
     return any(filename.lower().endswith(ext) for ext in IMAGE_EXTS)
 
-
 def get_all_dirs(root_dir: str, skip_hidden: bool = False) -> List[str]:
     """返回 root_dir 以及其所有子目录的列表；默认不跟随符号链接。"""
     all_dirs = [root_dir]
@@ -101,6 +100,7 @@ class timer_tool:
     """
     接口计时工具：记录各步骤耗时，summary() 给出一行摘要
     一次接口调用共用一个实例：入口创建后逐层往下传，各层只记录步骤，由入口统一输出
+    不是线程安全的：并发执行的子任务（如批量搜图里的每张图）各用一个实例，全部结束后由入口 merge 进来
     """
 
     def __init__(self) -> None:
@@ -151,6 +151,16 @@ class timer_tool:
         :param failed: 该步骤失败，记为「{tag}失败」
         """
         self._add(f"{tag}失败" if failed else tag, cost)
+
+    def merge(self, other: "timer_tool") -> None:
+        """
+        把另一个计时器记下的各步骤耗时加到这里，同名步骤累加（总耗时仍从本计时器的起点算）
+        并发的子任务各自计时，全部结束后按固定顺序合并，步骤的先后就不受哪个子任务先完成影响
+        子任务的时间互相重叠，所以各步骤相加可能超过总耗时
+        :param other: 子任务的计时器
+        """
+        for tag, cost in list(other._steps.items()):
+            self._add(tag, cost)
 
     def summary(self) -> str:
         """

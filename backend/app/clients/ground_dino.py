@@ -1,0 +1,176 @@
+import logging
+import threading, time
+from pathlib import Path
+from time import perf_counter
+from typing import Any, Dict, Union
+from app.core import errors as err
+
+import numpy as np
+from app.clients.groundingdino.postprocess import postprocess
+from app.clients.groundingdino.preprocess import prepare_inputs
+from app.clients.groundingdino.tokenizer import BertTokenizer
+import onnxruntime as ort
+
+
+logger = logging.getLogger("g-dino")
+
+
+class GdinoDetect:
+    def __init__(self, config):
+        self.sess: ort.InferenceSession | None = None
+        self._cached_io = None
+        self._cached_shape = tuple[int, ...] | None = None
+        self.load_config(config)
+        self.load_model()
+        logger.info("g-dino 模型初始化完成！")
+    
+    
+    def load_config(self, config: Dict[str, Any]) -> None:
+        total_config = config.get('TOTAL_CONFIG', {})
+        cfg = config.get('GROUNDINGDINO_CONFIG', {}) 
+        
+        self.model_path = cfg["model_path"]
+        self.tokenizer_path = cfg["tokenizer_path"]
+        self.device_id = total_config.get("device_id", 0)
+        self.threads = cfg.get("threads", 4)
+        self.short_side = cfg.get("short_side", 800)
+        self.max_size = cfg.get("max_size", 1333)
+        self.max_text_len = cfg.get("max_text_len", 256)
+        self.mean = tuple(cfg.get("mean", (0.485, 0.456, 0.406)))
+        self.std = tuple(cfg.get("std", (0.229, 0.224, 0.225)))
+        self.caption = cfg.get("caption", "object .")
+        self.box_threshold = cfg.get("box_threshold", 0.35)
+        self.text_threshold = cfg.get("text_threshold", 0.25)
+        self.nms_threshold = cfg.get("nms_threshold", 0.5)
+        self.nms_agnostic = cfg.get("nms_agnostic", False)
+        self.lock = threading.Lock()
+
+
+    def load_model(self):
+        started = perf_counter()
+        self.tokenizer = BertTokenizer(self.tokenizer_path)
+        self.sess = create_session(self.model_path, "cuda", self.threads, device_id=self.device_id)
+        self.provider = "cuda" if self.sess.get_providers()[0] == "CUDAExecutionProvider" else "cpu"
+        self.input_shapes = {item.name: item.shape for item in self.sess.get_inputs()}
+        self.ini_flag = True
+        logger.info("模型加载完成 | path=%s | providers=%s | cost_ms=%.2f", self.model_path, self.sess.get_providers(), (perf_counter() - started) * 1000)
+
+
+    def warmup(self, runs=3) -> None:
+        logger.info("g-dino 模型预热 %d 次", max(1, runs))
+        started_at = time.time()
+        _, _, h, w = self.input_shapes["images"]
+        h = h if isinstance(h, int) and h > 0 else self.short_side
+        w = w if isinstance(w, int) and w > 0 else self.short_side
+        dummy = np.zeros((h, w, 3), dtype=np.uint8)
+        for _ in range(max(1, runs)):
+            self.detect(dummy)
+        logger.info("g-dino 模型预热完成，耗时 %.2fs", time.time() - started_at)
+
+
+    def _prepare_caption(self, text_range):
+        if text_range is None:
+            return self.caption
+        if isinstance(text_range, str):
+            return text_range.strip()
+        return " . ".join(t.strip().rstrip(".").strip() for t in text_range) + " ."
+
+    def preprocess(self, image, caption):
+        """Build graph feeds from a BGR array, RGB PIL image or image path."""
+        return prepare_inputs(
+            image, caption, self.tokenizer, self.input_shapes,
+            short_side=self.short_side, max_size=self.max_size, max_text_len=self.max_text_len,
+            mean=self.mean, std=self.std,
+        )
+
+    def detect(self, imgbgr, text_range=None, box_threshold=None, text_threshold=None):
+        if self.sess is None:
+            err.not_ready("g-dino 模型尚未加载！")
+        result, _ = self.predict_with_metadata(
+            imgbgr, self._prepare_caption(text_range),
+            self.box_threshold if box_threshold is None else box_threshold,
+            self.text_threshold if text_threshold is None else text_threshold,
+        )
+        boxes = np.asarray(result["boxes"], dtype=np.float32).reshape(-1, 4)
+        logits = np.asarray(result["logits"], dtype=np.float32)
+        phrases = result["phrases"]
+
+        iou = self.nms_threshold
+        if iou is not None and iou < 1 and len(boxes) > 1:
+            keep = nms(boxes, logits, iou, labels=None if self.nms_agnostic else phrases)
+            boxes, logits, phrases = boxes[keep], logits[keep], [phrases[i] for i in keep]
+        return boxes, logits, phrases
+
+    def predict(self, image_path, caption, box_threshold, text_threshold):
+        """HTTP entry point (keeps the original non-validating threshold policy, no NMS)."""
+        result, _ = self.predict_with_metadata(image_path, caption, box_threshold, text_threshold, validate_thresholds=False)
+        return result
+
+    def predict_with_metadata(self, image, caption, box_threshold, text_threshold,
+                              *, validate_thresholds=True):
+        """Return (detections, preprocessing metadata) for HTTP/CLI callers (no NMS)."""
+        t0 = perf_counter()
+        with self.lock:
+            t1 = perf_counter()
+            feeds, metadata = self.preprocess(image, caption)
+            t2 = perf_counter()
+            logits, boxes = self.sess.run(["pred_logits", "pred_boxes"], feeds)
+            t3 = perf_counter()
+            result = postprocess(logits, boxes, self.tokenizer, metadata, box_threshold,
+                                 text_threshold, validate_thresholds=validate_thresholds)
+        t4 = perf_counter()
+        logger.info("推理完成 | image=%s | detections=%d | queue=%.1fms pre=%.1fms infer=%.1fms post=%.1fms",
+                    feeds["images"].shape, len(result["boxes"]),
+                    (t1 - t0) * 1000, (t2 - t1) * 1000, (t3 - t2) * 1000, (t4 - t3) * 1000)
+        return result, metadata
+
+
+def nms(boxes, scores, iou_threshold, labels=None):
+    boxes = np.asarray(boxes, dtype=np.float64)
+    lt = boxes[:, :2] - boxes[:, 2:] / 2
+    rb = boxes[:, :2] + boxes[:, 2:] / 2
+    area = np.prod(np.clip(rb - lt, 0, None), axis=1)
+    labels = None if labels is None else np.asarray(labels, dtype=object)
+    order = np.argsort(-np.asarray(scores), kind="stable")
+    keep = []
+    while order.size:
+        i, order = order[0], order[1:]
+        keep.append(i)
+        wh = np.clip(np.minimum(rb[i], rb[order]) - np.maximum(lt[i], lt[order]), 0, None)
+        inter = wh[:, 0] * wh[:, 1]
+        suppress = inter / np.maximum(area[i] + area[order] - inter, 1e-12) > iou_threshold
+        if labels is not None:
+            suppress &= labels[order] == labels[i]
+        order = order[~suppress]
+    return np.sort(np.asarray(keep, dtype=np.int64))
+
+
+def create_session(model, provider="cpu", intra_op_num_threads=0, *, device_id=0, log_severity_level=None):
+    if log_severity_level is None:
+        from app.core.config.constant import ORT_LOG_SEVERITY_LEVEL
+        log_severity_level = ORT_LOG_SEVERITY_LEVEL
+    ort.set_default_logger_severity(log_severity_level)
+
+    options = ort.SessionOptions()
+    options.log_severity_level = log_severity_level
+    if intra_op_num_threads:
+        options.intra_op_num_threads = intra_op_num_threads
+
+    providers = ["CPUExecutionProvider"]
+    if provider == "cuda":
+        providers.insert(0, ("CUDAExecutionProvider", {"device_id": str(device_id), "use_tf32": "0"}))
+    session = ort.InferenceSession(str(model), sess_options=options, providers=providers)
+    if provider == "cuda" and session.get_providers()[0] != "CUDAExecutionProvider":
+        logger.warning("CUDA 不可用，已回退到 CPU 推理 | active=%s", session.get_providers())
+    return session
+
+
+if __name__ == "__main__":
+    from app.core.config.loader import load_config
+    from app.core.observability.logging import setup_logger
+
+    setup_logger()
+    config = load_config()
+    detector = GdinoDetect(config)
+    image = config["GROUNDINGDINO_CONFIG"].get("test_image_path", "config/images/test.jpg")
+    # logger.info("检测结果：%s", detector.detect(_project_path(image)))

@@ -42,7 +42,7 @@ class BatchSearchUrlsRequest(BaseModel):
         min_length=1,
         max_length=BATCH_MAX_IMAGES,
         description=(
-            f"查询图片的 http(s) 地址，1～{BATCH_MAX_IMAGES} 个，服务端逐个下载（只允许公网地址，每张最大 15 MB）。"
+            f"查询图片的 http(s) 地址，1～{BATCH_MAX_IMAGES} 个，由服务端下载（几张同时进行；只允许公网地址，每张最大 15 MB）。"
             "某个地址下载失败只影响它自己的结果"
         ),
     )

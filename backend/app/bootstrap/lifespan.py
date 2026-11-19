@@ -70,6 +70,8 @@ def warmup_embedder(embedder, app_settings: Settings = settings) -> None:
     logger.info("预热配置 | warmup=%s", app_settings.warmup)
 
 
+
+
 def initialize_embedder(runtime: ApplicationState):
     """Load and warm the encoder once; None (with initialization_error set) on failure."""
     try:
@@ -321,12 +323,12 @@ async def lifespan(app: FastAPI):
     logger.info("应用正在启动 | ENV=%s | cfg=%s", runtime.settings.application.env, runtime.config_info,)
     apply_download_policy(config)
     load_enum_file()
-    embedder = initialize_embedder(runtime)  # one ONNX session for predict + retrieval
+    embedder = initialize_embedder(runtime)
     initialize_food_service(runtime, embedder)
-    initialize_catalog(runtime)  # PostgreSQL only; retrieval below borrows its store
+    initialize_catalog(runtime)
     initialize_retrieval(runtime, embedder)
     initialize_models(runtime)
-    runtime.reconciler = start_reconciler(runtime)  # RECONCILE_CONFIG; stopped by runtime.close()
+    runtime.reconciler = start_reconciler(runtime)
     config_provider.start_polling(lambda snapshot: apply_nacos_config_update(runtime, config_provider, snapshot))
     try:
         yield

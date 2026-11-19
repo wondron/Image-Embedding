@@ -452,7 +452,7 @@ CREATE EXTENSION IF NOT EXISTS ltree;
 | **Index** `POST /api/index` | 本地 path 入库、scenes JSON、BIGINT id | 收字节或可拉 URL → 算 sha256/uuid → 写 S3 → 写 `images` → embed → upsert **current** collection；场景经规则/`image_scenes`；**无 path**。**2026-11-11**：multipart / JSON 另可传 `label_status`（`auto`/`verified`，要有类别）、`source_type`、`license`（取值见 `/api/enums`，不传为 `user_upload` / `unknown`）；`indexed[].created` 为 `false` 表示相同图片此前已入库、沿用首次的标注 |
 | **Search** `POST /api/search` | `scene` 默认 `normal`；拒识；仅 normal 空→FlyB | `scene` 改为默认 **`general`**（A5）；按 payload `scenes` 过滤；场景标签投票；`outputs_heating` 附加字段；**`score_threshold` 沿用 MVP（A6）**；自建空 → **`source=empty`**；**FlyB 编排 OUT OF SCOPE（A4 / M0）** |
 | **业务搜图** `POST /api/search/auto/file`、`POST /api/search/auto/url`（**2026-11-13 新增**） | 无 | 给业务方的统一入口：自建库优先，自建库没有达到阈值的结果且请求 `global_fallback=true` 时用现网 Global 兜底；`top_k`（1–20）对两个通道都生效；结果卡同 §6.1.1，`source` 为 `self` / `global` / `empty`，`fallback.status` 说明兜底情况；Global 失败不让请求失败。原 `/api/search`、`/api/search/global/*` 不变。**2026-11-16**：配置 `RECIPE_DETECT_CONFIG.enabled` 开启时并行调用菜谱识别，菜名作为一条 `source=recipe` 的结果卡并入 `items`，`source` 增加 `recipe`，每条结果卡带自己的 `source`。**同日响应格式调整**：顶层不再有 `source`、`outputs_heating`，来源只在每条结果卡的 `source`（`self` / `recipe` / `global`）上，自建库结果卡的 `details.outputs_heating` 说明是否带加热信息。见 §6.6 |
-| **多图搜索** `POST /api/search/batch/files`、`POST /api/search/batch/urls`（**2026-11-15 新增**） | 无 | 一次请求 1–30 张查询图，逐张查自建库，整批共用 `scene`、`top_k`（1–50）、`score_threshold`；`results[]` 每张图一项（顺序同请求）：`ok=true` 时是它的结果卡（同 `POST /api/search`），`ok=false` 时是这张图的错误码和说明，不影响其他图片；共用参数不合法、或所有图片都因同一个服务故障失败时整个请求失败。不调用 Global。见 §6.7 |
+| **多图搜索** `POST /api/search/batch/files`、`POST /api/search/batch/urls`（**2026-11-15 新增**） | 无 | 一次请求 1–30 张查询图，每张各自查自建库（服务端同时处理最多 5 张），整批共用 `scene`、`top_k`（1–50）、`score_threshold`；`results[]` 每张图一项（顺序同请求）：`ok=true` 时是它的结果卡（同 `POST /api/search`），`ok=false` 时是这张图的错误码和说明，不影响其他图片；共用参数不合法、或所有图片都因同一个服务故障失败时整个请求失败。不调用 Global。见 §6.7 |
 | **配置导入** `POST /api/categories/import`、`POST /api/scenes/import`（**2026-11-15 新增**） | 无 | 上传类别树 / 场景配置文件（页面下载的 JSON，或 `GET /api/categories`、`GET /api/scenes` 的响应体，可编辑、可只留要改的部分）：按编码 upsert，逐项走现有管理用例；`dry_run` 默认 `true` 只预览，`false` 才写入；类别不移动、不改编码、不删除；场景 `prune=true` 时删除文件里没列出的规则和场景类别，场景本身不删；响应是逐项报告（`summary` + `rows` + `not_in_file`）。见 §6.8 |
 | **List** `GET /api/images` | 分页、scene、title/category、仅 active | 无 soft-status：未删即在库；scene 成员过滤；返回 `original_url`/`thumb_url`、类别树字段、场景 codes；category 改 ID/code。**2026-11-11**：新增 `category_id`（正整数，这个类别及其所有下级类别，ltree 子树；未标注的图片不匹配）和 `label_status`（`unlabeled`/`auto`/`verified`，非法值 422）筛选；原 `category`（编码 / 名称 / ID，只匹配一个类别）保留 |
 | **单图** `/api/images/{image_id}`（**已落地 2026-11-11**） | 无 | `GET` 详情（全部字段 + 向量写入记录 + 当前 collection 里的向量状态 `synced`/`stale`/`missing`/`unavailable`）、`PATCH` 改类别 / 标注状态 / 描述 / 标签 / 食物标注（提交后推 payload）、`POST …/vector-sync` 重推这张图的 payload、`DELETE` 删除、`GET …/file` 读回存储里的缩略图或原图。见 §6.3。新错误码 `IMAGE_NOT_FOUND` 404 |
@@ -1091,9 +1091,9 @@ curl -X POST "http://<host>:8320/api/search/auto/file" \
 
 自动化验证命令及真实环境验收步骤见[本轮验收说明](image-search-batch-config-acceptance.md)，已执行结果见[验收记录](image-search-batch-config-verification-2026-11-15.md)。
 
-一次请求带多张查询图，逐张在自建库里检索，整批共用一个检测场景、`top_k` 和相似度阈值。不调用现网 Global。原有 `POST /api/search`（单张）不变；每张图的结果和单张接口一样。
+一次请求带多张查询图，每张图各自在自建库里检索（服务端同时处理几张，见 §6.7.2），整批共用一个检测场景、`top_k` 和相似度阈值。不调用现网 Global。原有 `POST /api/search`（单张）不变；每张图的结果和单张接口一样。
 
-代码：路由 `backend/app/api/v1/batch_search.py`，编排 `backend/app/api/services/batch_search.py`，wire `backend/app/schemas/batch_search.py`；检索用例 `SearchImageUseCase` 新增 `check`（先校验整批共用的参数），每张图仍走 `execute`。
+代码：路由 `backend/app/api/v1/batch_search.py`，编排 `backend/app/api/services/batch_search.py`，wire `backend/app/schemas/batch_search.py`；检索用例 `SearchImageUseCase` 新增 `check`（先校验整批共用的参数），每张图仍走 `execute`。编排里并发检索的部分是 `search_images`（同一文件），供其他要一次检索多张图的流程复用，如对一张图做目标检测后检索各个裁剪图（内存里的图片用 `QueryImage.from_bytes` 包装）。
 
 ### 6.7.1 请求
 
@@ -1113,9 +1113,15 @@ curl -X POST "http://<host>:8320/api/search/auto/file" \
 ### 6.7.2 流程
 
 1. 先校验整批共用的参数（`top_k`、场景、阈值）；不合法时整个请求按统一错误格式返回，不读任何图片。
-2. 按请求里的顺序逐张处理：读取上传（或下载链接）→ 自建库检索。一次只在内存里放一张图。
+2. 每张图：读取上传（或下载链接）→ 自建库检索。同时最多处理 5 张（`SEARCH_CONCURRENCY`），一张做完下一张接上；一张图轮到它时才读取，所以内存里最多同时放 5 张。`results` 仍按请求顺序，与完成先后无关。
 3. 某一张图读不出、下载失败或无法解码，只影响它自己：`results[i].ok=false` 并给出 `error`、`detail`，其余照常，请求仍返回 200。
 4. 整个请求失败的情况：检索服务未就绪（`NOT_READY` 503）、第 1 步的参数错误、图片数量超限，以及**所有图片都因为同一个服务故障而失败**（`SEARCH_QDRANT_FAILED` / `SEARCH_POSTGRES_FAILED` 502、`VECTOR_DIM_MISMATCH` / `EMBEDDING_MODEL_MISMATCH` 503 等）——这时直接返回该错误，而不是在每一项里重复一遍。
+
+日志：整个请求写一行耗时（logger `svc.batch_search`，同时写平台日志），各步骤是整批图片的累计，按请求顺序合并；图片同时处理，所以各步骤相加可能超过总耗时。有图片失败时这一行按 WARNING 输出：
+
+```text
+批量搜图(上传文件) | embedding推理 0.212s | vector搜索 0.041s | 后处理 0.016s | 总耗时 0.083s | 参数=scene=general, top_k=10, score_threshold=0.55, images=5, succeeded=5, matched=4, failed=0 | trace_id=9d1f…
+```
 
 ### 6.7.3 响应（`BatchSearchResponse`）
 
@@ -1136,7 +1142,7 @@ curl -X POST "http://<host>:8320/api/search/auto/file" \
 | `index` | 总是 | 这张图在请求里的序号，从 0 开始 |
 | `input` | 总是 | 上传时是文件名，链接时是图片地址 |
 | `ok` | 总是 | `true` 检索完成；`false` 这张图没能检索 |
-| `elapsed_ms` | 总是 | 这张图读取（或下载）加检索的耗时，毫秒 |
+| `elapsed_ms` | 总是 | 这张图读取（或下载）加检索的耗时，毫秒。从这张图开始处理算起（不含等空位）；几张图同时处理时会互相等 GPU，所以可能比单独搜这一张时长，整批仍更快 |
 | `source` | `ok=true` | `self` 有结果；`empty` 没有达到阈值的结果 |
 | `items` | `ok=true` | 结果卡，同 `POST /api/search` 的 `items`（§6.1.1），`empty` 时为 `[]` |
 | `message` | `ok=true` 且没有结果 | 给人看的说明 |
@@ -1387,6 +1393,7 @@ curl -X POST "http://<host>:8320/api/scenes/import?dry_run=false&prune=false" -H
 | 2026-11-15 | **入库与批量删除数量上限改为 500**（无表结构变化、无新迁移）：BE：`POST /api/index` multipart 一次最多 500 个文件（原 100），超出 422 `VALIDATION_ERROR`（`too many files (max 500)`），不入库任何一张；整批文件先全部读入内存再逐张入库，最坏约 500 × 15 MB，单个请求耗时随张数增长。FE：「上传与导入」待入库队列最多 500 张（原 100），仍逐张请求；队列缩略图改为懒加载。图库「批量删除」每批最多 500 张，选多了提示分批、不打开确认框（原来只受「选择全部」1000 张限制）；「选择全部」与「批量修改」仍为 1000。删除队列（`/api/image-deletions` 的 `limit` ≤ 200）不变 |
 | 2026-11-16 | **业务搜图并行调用菜谱识别**（无表结构变化、无新迁移）：`POST /api/search/auto/file`、`/url` 在查自建库的同时并行调用菜谱识别接口（新配置段 `RECIPE_DETECT_CONFIG`：`enabled` 开关、`url` 接口地址、`timeout`，每次请求都读），识别出的菜名作为一条结果卡并入 `items`（`source=recipe`，`tags` 为菜名用「、」连接，`description` 为空字符串，其余字段为空），排在自建库结果之后、不占 `top_k`；合并后没有结果才按 `global_fallback` 走 Global，之后的逻辑不变。响应：`source` 增加 `recipe`（只有菜谱识别的结果）；每条结果卡增加自己的 `source`（`self` / `recipe` / `global`）。菜谱识别失败不让请求失败，耗时和结果写日志（耗时行多一步「菜谱识别」）。FE：结果卡标「菜谱识别」，没有图片，不能勾选和下载。见 §6.6.2、§6.6.6 |
 | 2026-11-16 | **业务搜图响应格式调整（破坏性）**（无表结构变化、无新迁移）：`POST /api/search/auto/file`、`/url` 的响应顶层去掉 `source` 和 `outputs_heating`。来源只在每条结果卡上：`source`（`self` / `recipe` / `global`，必有）改为结果卡的第一个字段；是否带加热信息改到自建库结果卡的 `details.outputs_heating`（布尔，按场景配置，排在 `details` 最后；菜谱识别和 Global 的结果卡没有）。没有结果时 `items` 为 `[]`，原因看 `fallback.status`（`disabled` / `empty` / `failed`）和 `message`。其余字段、流程、错误不变；`POST /api/search`、`/api/search/batch/*`、`/api/search/global/*` 不变。调用方要把读顶层 `source` / `outputs_heating` 改成读结果卡。FE：按结果卡读取，页面显示不变（仍兼容旧格式的响应）。见 §6.6、§6.6.3 |
+| 2026-11-18 | **多图搜索改为并发检索**（无表结构变化、无新迁移，请求和响应格式不变）：`POST /api/search/batch/files`、`/urls` 不再一张接一张处理，同时最多 5 张（`SEARCH_CONCURRENCY`）读取或下载并检索，一张做完下一张接上；内存里最多同时放 5 张图（原来 1 张）。`results` 仍按请求顺序；单张失败、整个请求失败的规则不变。耗时行各步骤仍是整批的累计、按请求顺序合并，因为图片同时处理，相加可能超过总耗时。并发检索抽成 `search_images`（`backend/app/api/services/batch_search.py`），供之后「目标检测 → 检索各个裁剪图」这类流程复用。FE 不用改：每次请求 5 张，正好一轮处理完。见 §6.7.2 |
 
 ---
 

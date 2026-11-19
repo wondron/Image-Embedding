@@ -11,7 +11,8 @@ scene_label string|null; outputs_heating on envelope.
 
 A request with several query images (POST /api/search/batch/*) first checks what they share
 (check: top_k, the scene, the threshold), so a bad one fails the request before any image is read,
-then calls execute image by image.
+then calls execute for every image, several at a time from the thread pool: the use case keeps no
+state between calls.
 """
 
 from __future__ import annotations

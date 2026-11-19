@@ -138,6 +138,24 @@ class TimerToolTests(unittest.TestCase):
         timer.record("global搜索", 0.25, failed=True)
         self.assertEqual(timer.summary(), "后处理 0.500s | 菜谱识别 1.750s | global搜索失败 0.250s | 总耗时 2.000s")
 
+    def test_merged_timers_add_their_steps_in_the_order_merged_not_the_order_they_ran(self):
+        # the request's timer and two of its images' (batch search); their steps; the summary
+        self.clock(0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.75, 0.75, 1.0, 1.5)
+        request, first, second = timer_tool(), timer_tool(), timer_tool()
+        with self.assertRaises(ValueError):
+            with second.step("embedding推理"):  # ran first, merged last
+                raise ValueError("cannot decode")
+        with first.step("embedding推理"):
+            pass
+        with first.step("vector搜索"):
+            pass
+        request.merge(first)
+        request.merge(second)
+        # the total is the request's own: the images ran side by side
+        self.assertEqual(
+            request.summary(), "embedding推理 0.250s | vector搜索 0.250s | embedding推理失败 0.500s | 总耗时 1.500s"
+        )
+
 
 class RecordedStepsTests(unittest.TestCase):
     """What each layer records on the timer it is given; none of them writes a timing line."""

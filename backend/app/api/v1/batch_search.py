@@ -30,8 +30,8 @@ from app.schemas.batch_search import (
 router = APIRouter(prefix="/api/search/batch", tags=["retrieval"])
 
 _DESCRIPTION = (
-    f"多图搜索：一次请求带多张查询图（最多 {BATCH_MAX_IMAGES} 张），逐张在自建库里检索，整批共用一个检测场景、"
-    "top_k 和相似度阈值；不调用现网 Global。results 每张查询图一项，顺序同请求：ok=true 时是它的结果卡"
+    f"多图搜索：一次请求带多张查询图（最多 {BATCH_MAX_IMAGES} 张），每张图各自在自建库里检索（服务端同时处理几张），"
+    "整批共用一个检测场景、top_k 和相似度阈值；不调用现网 Global。results 每张查询图一项，顺序同请求：ok=true 时是它的结果卡"
     "（同 POST /api/search 的 items，没有达到阈值的结果时 source=empty、items 为空），ok=false 时是这张图"
     "没能检索的原因（读不出、下载失败、无法解码等），不影响其他图片，请求仍返回 200。"
     "整个请求失败的情况：场景不存在（SEARCH_UNKNOWN_SCENE）、阈值非法（SEARCH_BAD_SCORE_THRESHOLD）、"
