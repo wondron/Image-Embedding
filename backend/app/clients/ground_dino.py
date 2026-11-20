@@ -4,7 +4,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Dict, Union
 from app.core import errors as err
-
+from app.utils.timer import timer_tool
 import numpy as np
 from app.clients.groundingdino.postprocess import postprocess
 from app.clients.groundingdino.preprocess import prepare_inputs
@@ -107,22 +107,18 @@ class GdinoDetect:
         result, _ = self.predict_with_metadata(image_path, caption, box_threshold, text_threshold, validate_thresholds=False)
         return result
 
-    def predict_with_metadata(self, image, caption, box_threshold, text_threshold,
-                              *, validate_thresholds=True):
+    def predict_with_metadata(self, image, caption, box_threshold, text_threshold, *, validate_thresholds=True):
         """为 HTTP / 命令行调用方返回（检测结果, 预处理元数据）（不做 NMS）。"""
-        t0 = perf_counter()
+        timer = timer_tool()
         with self.lock:
-            t1 = perf_counter()
             feeds, metadata = self.preprocess(image, caption)
-            t2 = perf_counter()
+            timer.mark("pres")
             logits, boxes = self.sess.run(["pred_logits", "pred_boxes"], feeds)
-            t3 = perf_counter()
-            result = postprocess(logits, boxes, self.tokenizer, metadata, box_threshold,
-                                 text_threshold, validate_thresholds=validate_thresholds)
-        t4 = perf_counter()
-        logger.info("推理完成 | image=%s | detections=%d | queue=%.1fms pre=%.1fms infer=%.1fms post=%.1fms",
-                    feeds["images"].shape, len(result["boxes"]),
-                    (t1 - t0) * 1000, (t2 - t1) * 1000, (t3 - t2) * 1000, (t4 - t3) * 1000)
+            timer.mark("infer")
+            result = postprocess(logits, boxes, self.tokenizer, metadata, box_threshold, text_threshold, validate_thresholds=validate_thresholds)
+            timer.mark("post")
+        time_string = timer.summary()
+        logger.info("推理完成 | image=%s | detections=%d | %s", feeds["images"].shape, len(result["boxes"]), time_string)
         return result, metadata
 
 

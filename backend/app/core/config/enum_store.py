@@ -107,8 +107,6 @@ class EnumCatalog:
 
 
 # -- 文件和 API 共用的规则 -----------------------------------------------------------
-
-
 def value_problem(value: Any) -> str | None:
     """value 为什么不能作为枚举值；可以时为 None。"""
     if not isinstance(value, str):
@@ -134,8 +132,6 @@ def _text_problem(value: Any, *, required: bool, max_len: int) -> str | None:
 
 
 # -- 解析 / 输出 -------------------------------------------------------------------
-
-
 def parse_catalog(data: Any, source: str) -> EnumCatalog:
     """按文件规则和代码（app.core.enums）检查加载出来的 YAML 文档。"""
     if not isinstance(data, Mapping) or not data:
@@ -143,9 +139,7 @@ def parse_catalog(data: Any, source: str) -> EnumCatalog:
     enums = []
     for name, body in data.items():
         if name not in _KNOWN_ENUMS:
-            raise EnumFileError(
-                f"{source}: unknown enum {name!r}; enums are declared in app/core/enums.py: {list(_KNOWN_ENUMS)}"
-            )
+            raise EnumFileError(f"{source}: unknown enum {name!r}; enums are declared in app/core/enums.py: {list(_KNOWN_ENUMS)}")
         enums.append(_parse_enum(name, body, f"{source}: {name}"))
     missing = [name for name in _KNOWN_ENUMS if name not in data]
     if missing:
@@ -275,7 +269,6 @@ def _value_doc(value: EnumValue) -> dict[str, str]:
 
 def _write_text(path: Path, text: str) -> None:
     """先写到同目录下的临时文件，再 os.replace，这样读的一方永远不会看到写了一半的文件。
-
     无法替换时退回到原地覆盖：文件被单独 bind mount 进容器（rename 到挂载点上会报 EBUSY），
     或者目录是只读的。
     """
@@ -300,11 +293,8 @@ def _write_bytes(path: Path, data: bytes) -> None:
 
 
 # -- 存储 --------------------------------------------------------------------------
-
-
 class EnumStore:
     """枚举文件，磁盘上的文件变了就重新读取；见模块文档字符串。"""
-
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self._lock = threading.Lock()  # 重新加载和写入串行进行

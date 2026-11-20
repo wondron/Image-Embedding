@@ -187,8 +187,8 @@ class timer_tool:
         :param total_label: 最后一项（从起点到终点的耗时）的名称
         :return: 各步骤耗时和总耗时，如「图像下载 0.120s | embedding推理 0.045s | 总耗时 0.180s」
         """
-        steps = [f"{tag} {cost:.3f}s" for tag, cost in self.items()]
-        return " | ".join([*steps, f"{total_label} {self.elapsed:.3f}s"])
+        steps = [f"{tag}_{cost:.3f}s" for tag, cost in self.items()]
+        return " ".join([f"{total_label} {self.elapsed:.3f}s", *steps])
 
 
 def show_text(trace_id: str, message: str, image_name:str="", time_spend: str = ""):
