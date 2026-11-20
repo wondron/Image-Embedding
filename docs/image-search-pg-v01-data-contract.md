@@ -1106,7 +1106,7 @@ curl -X POST "http://<host>:8320/api/search/auto/file" \
 
 步骤：
 
-1. 解码查询图（和 embedding 模型一样用 OpenCV），按上面的参数检测一次（同类别的框按 `GROUNDINGDINO_CONFIG.nms_threshold` 去重）。
+1. 解码查询图（和 embedding 模型一样用 OpenCV），按上面的参数检测一次（同类别的框按 `GROUNDINGDINO_CONFIG.nms_threshold` 去重），再去掉容器框：装着至少 `container_min_children`（默认 2）个更小的框、这些小框又盖住它至少 `container_min_coverage`（默认 0.5）的大框，即把一堆、一盘目标框在一起的框，留下里面的小框（2026-11-20）。
 2. 检测框换成查询图上的像素坐标并裁到图内；任一边不到 16 像素的丢掉；按置信度从高到低取前 `max_regions` 个，裁出来编码成 JPEG。
 3. 每个区域按请求的 `scene`、`top_k`、`score_threshold` 查自建库，并发方式同多图搜索（§6.7，同时最多 5 个）。一个区域查询失败不影响其他区域。
 4. 合并：同一张库图只留相似度最高的那条，按相似度从高到低取前 `top_k` 条；每条的 `details.region` 写明是哪个检测框找到的。

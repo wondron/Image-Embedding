@@ -44,6 +44,17 @@ class GdinoDetect:
         self.text_threshold = cfg.get("text_threshold", 0.25)
         self.nms_threshold = cfg.get("nms_threshold", 0.5)
         self.nms_agnostic = cfg.get("nms_agnostic", False)
+        # NMS 之后去掉「容器框」：装着至少 container_min_children 个更小的框、这些小框又盖住它至少
+        # container_min_coverage 的大框（见 drop_containers）；container_min_children 为 0 关闭
+        self.container_min_children = int(cfg.get("container_min_children", 2))
+        self.container_contain_ratio = float(cfg.get("container_contain_ratio", 0.9))
+        self.container_min_coverage = float(cfg.get("container_min_coverage", 0.5))
+        if self.container_min_children < 0:
+            raise ValueError("GROUNDINGDINO_CONFIG.container_min_children 不能小于 0（0 表示不去掉大框）")
+        if not 0 < self.container_contain_ratio <= 1:
+            raise ValueError("GROUNDINGDINO_CONFIG.container_contain_ratio 要在 0～1 之间（不含 0）")
+        if not 0 <= self.container_min_coverage <= 1:
+            raise ValueError("GROUNDINGDINO_CONFIG.container_min_coverage 要在 0～1 之间")
         self.lock = threading.Lock()
 
 
@@ -103,6 +114,13 @@ class GdinoDetect:
         if iou is not None and iou < 1 and len(boxes) > 1:
             keep = nms(boxes, logits, iou, labels=None if self.nms_agnostic else phrases)
             boxes, logits, phrases = boxes[keep], logits[keep], [phrases[i] for i in keep]
+        if self.container_min_children and len(boxes) > self.container_min_children:
+            keep = drop_containers(boxes, self.container_min_children, self.container_contain_ratio, self.container_min_coverage)
+            if len(keep) < len(boxes):
+                logger.info("去掉容器框 | dropped=%d | kept=%d | min_children=%d | contain_ratio=%.2f | min_coverage=%.2f",
+                            len(boxes) - len(keep), len(keep), self.container_min_children,
+                            self.container_contain_ratio, self.container_min_coverage)
+                boxes, logits, phrases = boxes[keep], logits[keep], [phrases[i] for i in keep]
         return boxes, logits, phrases
 
     def predict(self, image_path, caption, box_threshold, text_threshold):
@@ -143,6 +161,60 @@ def nms(boxes, scores, iou_threshold, labels=None):
             suppress &= labels[order] == labels[i]
         order = order[~suppress]
     return np.sort(np.asarray(keep, dtype=np.int64))
+
+
+def _union_area(rects):
+    """几个矩形（x1, y1, x2, y2）合起来的面积，重叠的部分只算一次（坐标压缩，精确）。"""
+    xs = np.unique(rects[:, [0, 2]])
+    ys = np.unique(rects[:, [1, 3]])
+    if len(xs) < 2 or len(ys) < 2:
+        return 0.0
+    cx = (xs[:-1] + xs[1:]) / 2  # 格子中心
+    cy = (ys[:-1] + ys[1:]) / 2
+    in_x = (rects[:, 0:1] <= cx) & (cx < rects[:, 2:3])
+    in_y = (rects[:, 1:2] <= cy) & (cy < rects[:, 3:4])
+    covered = (in_x[:, :, None] & in_y[:, None, :]).any(axis=0)
+    return float((covered * np.diff(xs)[:, None] * np.diff(ys)[None, :]).sum())
+
+
+def container_stats(boxes, contain_ratio=0.9):
+    """每个框里装着几个更小的框，以及这些小框（裁到框内的部分）合起来盖住它的比例。
+
+    小框有 ≥ contain_ratio 的面积落在框里，才算装在里面。boxes：归一化的 cx, cy, w, h
+    （比例和像素坐标下一样）。返回（个数, 覆盖比例）两个数组。
+    """
+    boxes = np.asarray(boxes, dtype=np.float64).reshape(-1, 4)
+    lt = boxes[:, :2] - boxes[:, 2:] / 2
+    rb = boxes[:, :2] + boxes[:, 2:] / 2
+    area = np.prod(np.clip(rb - lt, 0, None), axis=1)
+    wh = np.clip(np.minimum(rb[:, None], rb[None]) - np.maximum(lt[:, None], lt[None]), 0, None)
+    inter = wh[..., 0] * wh[..., 1]  # inter[i, j]：框 i 和框 j 重叠的面积
+    child = area[None, :]
+    # inside[i, j]：框 j 比框 i 小，且 ≥ contain_ratio 的面积在框 i 里（对角线上 area 不比自己小，自然是 False）
+    inside = (child > 0) & (child < area[:, None]) & (inter >= contain_ratio * child)
+    counts = inside.sum(axis=1)
+    coverage = np.zeros(len(boxes))
+    for i in np.flatnonzero(counts):
+        rects = np.concatenate([np.maximum(lt[inside[i]], lt[i]), np.minimum(rb[inside[i]], rb[i])], axis=1)
+        coverage[i] = _union_area(rects) / area[i]
+    return counts, coverage
+
+
+def drop_containers(boxes, min_children=2, contain_ratio=0.9, min_coverage=0.5):
+    """去掉「容器框」之后留下的框的下标（从小到大）。
+
+    容器框：装着至少 min_children 个更小的框（见 container_stats），而且这些小框合起来盖住它
+    至少 min_coverage 的框。它多半是把一组目标框在了一起（一整堆、一整盘），裁出来和整张图差不多，
+    留下里面的小框。小框只盖住一小部分的大框留着：那是一个大目标，小框是它上面的配菜、点缀之类。
+    所有容器框按原来的框一起判定、一起去掉，套在一起的几层大框都会去掉。min_children 为 0 时
+    什么都不去掉。
+    """
+    boxes = np.asarray(boxes, dtype=np.float64).reshape(-1, 4)
+    if min_children < 1 or len(boxes) <= min_children:
+        return np.arange(len(boxes))
+    counts, coverage = container_stats(boxes, contain_ratio)
+    containers = (counts >= min_children) & (coverage >= min_coverage)
+    return np.flatnonzero(~containers)
 
 
 def create_session(model, provider="cpu", intra_op_num_threads=0, *, device_id=0, log_severity_level=None):
