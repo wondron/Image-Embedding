@@ -32,7 +32,7 @@ async def _read_tool_image(file: UploadFile, runtime: ApplicationState) -> bytes
 
 
 def _segment_response(
-    segmentor: Any,
+    segment: Any,
     image_bytes: bytes,
     filename: str,
     *,
@@ -40,10 +40,10 @@ def _segment_response(
     started: float,
 ) -> SegmentResponse:
     """在一个工作线程里同时完成推理和图像编码。"""
-    mask, visual, original = segmentor.detect(image_bytes, output_vis=output_vis)
+    mask, visual, original = segment.detect(image_bytes, output_vis=output_vis)
     original = None
     if original is None or getattr(original, "ndim", 0) < 2:
-        raise ValueError("segmentor returned an invalid original image")
+        raise ValueError("segment returned an invalid original image")
 
     height, width = original.shape[:2]
     return SegmentResponse(
@@ -91,15 +91,15 @@ async def segment(
     image_bytes = await _read_tool_image(file, runtime)
     service = require_food_service(runtime)
 
-    segmentor = getattr(service, "segmentor", None)
-    if segmentor is None:
-        raise errors.not_ready("segmentor is not initialized")
+    segment = getattr(service, "segment", None)
+    if segment is None:
+        raise errors.not_ready("segment is not initialized")
 
     started = time.perf_counter()
     try:
         response = await run_in_threadpool(
             _segment_response,
-            segmentor,
+            segment,
             image_bytes,
             file.filename or "upload",
             output_vis=output_vis,
