@@ -6,10 +6,12 @@ scene、top_k 和 score_threshold 搜索；所有框的结果合并（每张已�
 
 检测器和编码器都是假的：编码器按像素尺寸区分整图和裁剪图，向量库按向量回答。
 
-    业务搜图(图片链接) | 图像下载 … | embedding推理 … | vector搜索 … | 后处理 … | 目标检测 … | 区域搜索 … | 总耗时 …
+    区域搜索完成 | 排队 … | 图像解码 … | 目标检测 … | 区域裁剪 … | 区域检索 … | 耗时 … | 检测框=2 | 结果=3 | 区域检索明细（各框累计）=embedding推理 …, vector搜索 …, 后处理 …
+    业务搜图(图片链接) | 接收请求 … | 图像下载 … | 整图搜索 … | 等待区域搜索 … | 总耗时 … | 参数=…
 """
 
 import asyncio
+import gc
 import logging
 import re
 import threading
@@ -31,6 +33,7 @@ from app.api.services import auto_search as auto_search_service
 from app.api.services.region_search import MIN_REGION_SIDE, Region, merge, regions_of
 from app.api.v1 import auto_search
 from app.bootstrap.state import ApplicationState
+from app.core import errors as err
 from app.core.config.settings import AutoSearchRegionSettings
 from app.core.exceptions import register_exception_handlers
 from app.core.middleware import TraceIdMiddleware
@@ -77,8 +80,21 @@ QUERY = encoded()
 
 
 def steps(line):
-    """The step names of a timing line in order, 总耗时 last."""
-    return re.findall(r"(?:^|\| )([^|]+?) \d+\.\d{3}s", line)
+    """The step names of a timing line in order, 总耗时 (or 耗时) last. Only the fields before the
+    other details: the box breakdown of the region line is a detail (see breakdown).
+    """
+    return re.findall(r"(?:^|\| )([^|=]+?) \d+\.\d{3}s", line)
+
+
+def seconds(line):
+    """{step: seconds} of a timing line (the same fields as steps)."""
+    return {step: float(value) for step, value in re.findall(r"(?:^|\| )([^|=]+?) (\d+\.\d{3})s", line)}
+
+
+def breakdown(line):
+    """The steps of 区域检索明细（各框累计）in the region line, in order; [] without it."""
+    found = re.search(r"\| 区域检索明细（各框累计）=([^|]+?)(?: \||$)", line)
+    return re.findall(r"(?:^|, )(.+?) \d+\.\d{3}s", found.group(1)) if found else []
 
 
 class FakeDetector:
@@ -285,9 +301,16 @@ class BusinessSearchRegionTests(unittest.TestCase):
         return steps(record.getMessage())
 
     def region_logs(self, records):
+        """服务关于区域搜索的日志行（以「区域搜索」开头）：每行一个（级别, 文本）。"""
         return [
-            (r.levelno, r.getMessage()) for r in records if r.name == "svc.auto_search" and "区域搜索" in r.getMessage()
+            (r.levelno, r.getMessage()) for r in records
+            if r.name == "svc.auto_search" and r.getMessage().startswith("区域搜索")
         ]
+
+    def service_line(self, records, title):
+        """服务写的、以 title 开头的那一行（只有一行）：它的文本。"""
+        (record,) = [r for r in records if r.name == "svc.auto_search" and r.getMessage().startswith(title)]
+        return record.getMessage()
 
     def ids(self, body):
         return [item["details"].get("id") for item in body["items"]]
@@ -318,12 +341,17 @@ class BusinessSearchRegionTests(unittest.TestCase):
         self.assertEqual(self.embedding.sizes[0], WHOLE)
         self.assertEqual(sorted(self.embedding.sizes[1:]), sorted([LEFT_CROP, RIGHT_CROP]))
 
-        self.assertEqual(
-            self.timing_steps(records), ["图像下载", "embedding推理", "vector搜索", "后处理", "目标检测", "区域搜索", "总耗时"]
-        )
+        self.assertEqual(self.timing_steps(records), ["接收请求", "图像下载", "整图搜索", "等待区域搜索", "总耗时"])
         ((level, text),) = self.region_logs(records)
         self.assertEqual(level, logging.INFO)
-        self.assertRegex(text, r"^区域搜索完成 \| 检测框=2 \| 结果=3 \| 耗时 \d+\.\d{3}s \| trace_id=t-9$")
+        self.assertRegex(text, r"^区域搜索完成 \| .* \| 耗时 \d+\.\d{3}s \| 检测框=2 \| 结果=3 \| 区域检索明细（各框累计）=.* \| trace_id=t-9$")
+        self.assertEqual(steps(text), ["排队", "图像解码", "目标检测", "区域裁剪", "区域检索", "耗时"])
+        # 两个框的检索，各步骤加在一起
+        self.assertEqual(breakdown(text), ["embedding推理", "vector搜索", "后处理"])
+        # 整图那一行在前，区域那一行在后
+        lines = [r.getMessage() for r in records if r.name == "svc.auto_search"]
+        self.assertEqual([line.split(" | ")[0] for line in lines], ["整图搜索完成", "区域搜索完成"])
+        self.assertIn(" | 结果=0 | trace_id=t-9", lines[0])
 
     def test_top_k_bounds_every_box_and_the_merged_list(self):
         body, _ = self.by_url(top_k=1)
@@ -340,9 +368,10 @@ class BusinessSearchRegionTests(unittest.TestCase):
         self.assertEqual([item["source"] for item in body["items"]], ["self", "recipe"])
         self.assertEqual(body["items"][1]["tags"], "清蒸鲈鱼")
         self.assertEqual(
-            self.timing_steps(records),
-            ["图像下载", "embedding推理", "vector搜索", "后处理", "目标检测", "区域搜索", "菜谱识别", "总耗时"],
+            self.timing_steps(records), ["接收请求", "图像下载", "整图搜索", "等待区域搜索", "等待菜谱识别", "总耗时"]
         )
+        lines = [r.getMessage() for r in records if r.name == "svc.auto_search"]
+        self.assertEqual([line.split(" | ")[0] for line in lines], ["整图搜索完成", "区域搜索完成", "菜谱识别完成"])
 
     def test_max_regions_keeps_the_highest_scores(self):
         self.runtime.config["AUTO_SEARCH_REGION_CONFIG"]["max_regions"] = 1
@@ -386,7 +415,40 @@ class BusinessSearchRegionTests(unittest.TestCase):
         self.assertEqual(left_running, 0)  # 被丢弃的搜索结束了……
         self.assertEqual(self.embedding.sizes, [WHOLE])  # ……没有搜索它的检测框
         self.assertEqual(self.region_logs(logs.records), [])  # 没人读它的结果
-        self.assertNotIn("目标检测", self.timing_steps(logs.records))
+        self.assertEqual(self.timing_steps(logs.records), ["接收请求", "读取上传", "整图搜索", "总耗时"])
+        self.assertRegex(
+            self.service_line(logs.records, "整图搜索完成"), r" \| 结果=1 \| 已取消=区域搜索 \| trace_id="
+        )
+
+    def test_a_detection_that_fails_after_its_search_was_dropped_is_not_reported_as_unretrieved(self):
+        """请求失败、区域搜索被丢弃之后，还在跑的检测才失败：没人再等这次运行，它的异常也要
+        被取出，否则 asyncio 会报告 "Task exception was never retrieved"。
+        """
+        detecting, dropped, finished = threading.Event(), threading.Event(), threading.Event()
+
+        def detect():  # 在区域搜索的工作线程里：请求失败之后才失败
+            detecting.set()
+            try:
+                dropped.wait(5)
+                raise RuntimeError("gpu fell over")
+            finally:
+                finished.set()
+
+        def embed(size):  # 整图：在检测进行期间失败
+            if size == WHOLE:
+                detecting.wait(2)
+                raise err.search_bad_image("cannot read it")
+
+        self.detector.on_detect = detect
+        self.embedding.on_embed = embed
+        with TestClient(self.app) as client, self.assertLogs(level="INFO") as logs:  # 一个事件循环：运行在上面结束
+            response = client.post("/api/search/auto/file", files={"file": ("q.png", QUERY, "image/png")})
+            dropped.set()
+            self.assertTrue(finished.wait(5))
+            time.sleep(0.1)  # 让事件循环处理这次运行的结束
+            gc.collect()
+        self.assertEqual((response.status_code, response.json()["error"]), (422, "SEARCH_BAD_IMAGE"))
+        self.assertEqual([r.getMessage() for r in logs.records if "never retrieved" in r.getMessage()], [])
 
     def test_searches_dropped_while_waiting_for_the_model_never_run_it(self):
         """每个业务搜图都会启动区域搜索，而 GroundingDINO 一次只处理一张图：
@@ -429,6 +491,37 @@ class BusinessSearchRegionTests(unittest.TestCase):
         self.assertEqual(detector.runs, 2)  # 命中返回时正在进行的那一次，以及没命中的那个自己的一次
         self.assertLess(waited, 1.2)  # 那一次加上它自己的；如果排在每个命中请求的检测后面，要多 5 x 0.3 秒
 
+    def test_waiting_for_another_search_to_finish_detecting_is_queueing(self):
+        """两个整图都没有结果的请求同时来：后一个先等前一个的检测，这段时间记为排队，
+        不算进它的目标检测。
+        """
+
+        class SlowDetector(FakeDetector):
+            def detect(self, image, **kwargs):
+                time.sleep(0.2)
+                return super().detect(image, **kwargs)
+
+        self.runtime.detector = SlowDetector()
+
+        async def both():
+            transport = httpx.ASGITransport(app=self.app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                return await asyncio.gather(*(
+                    client.post("/api/search/auto/file", files={"file": ("q.png", QUERY, "image/png")}) for _ in range(2)
+                ))
+
+        with self.assertLogs(level="INFO") as logs:
+            responses = asyncio.run(both())
+        self.assertEqual([response.status_code for response in responses], [200, 200])
+        lines = [seconds(text) for _, text in self.region_logs(logs.records)]
+        self.assertEqual(len(lines), 2)
+        first, second = sorted(lines, key=lambda line: line["排队"])
+        self.assertLess(first["排队"], 0.1)
+        self.assertGreater(second["排队"], 0.15)  # 等了前一个的检测
+        for line in (first, second):
+            self.assertGreaterEqual(line["目标检测"], 0.19)
+            self.assertLess(line["目标检测"], 0.35)
+
     def test_a_failed_whole_image_search_fails_the_request(self):
         body, records = self.by_file(data=b"broken", status=422)
         self.assertEqual(body["error"], "SEARCH_BAD_IMAGE")
@@ -443,8 +536,10 @@ class BusinessSearchRegionTests(unittest.TestCase):
         self.assertEqual(body["message"], "自建库没有达到阈值的结果，未开启 Global 兜底")
         ((level, text),) = self.region_logs(records)
         self.assertEqual(level, logging.INFO)
-        self.assertRegex(text, r"^区域搜索完成 \| 检测框=0 \| 结果=0 \| 耗时 ")
-        self.assertEqual(self.timing_steps(records), ["图像下载", "embedding推理", "vector搜索", "后处理", "目标检测", "总耗时"])
+        self.assertRegex(text, r"^区域搜索完成 \| .* \| 耗时 \d+\.\d{3}s \| 检测框=0 \| 结果=0 \| trace_id=")
+        self.assertEqual(steps(text), ["排队", "图像解码", "目标检测", "区域裁剪", "耗时"])  # 没有可检索的框
+        self.assertEqual(breakdown(text), [])
+        self.assertEqual(self.timing_steps(records), ["接收请求", "图像下载", "整图搜索", "等待区域搜索", "总耗时"])
 
     def test_without_region_hits_the_fallback_runs(self):
         self.vectors.hits[LEFT_CROP] = self.vectors.hits[RIGHT_CROP] = [{"id": ROW_D, "score": 0.5}]
@@ -460,7 +555,7 @@ class BusinessSearchRegionTests(unittest.TestCase):
         ((level, text),) = self.region_logs(records)
         self.assertEqual(level, logging.INFO)
         self.assertIn("区域搜索已跳过：GroundingDINO 未就绪：RuntimeError: no CUDA device", text)
-        self.assertEqual(self.timing_steps(records), ["图像下载", "embedding推理", "vector搜索", "后处理", "总耗时"])
+        self.assertEqual(self.timing_steps(records), ["接收请求", "图像下载", "整图搜索", "等待区域搜索", "总耗时"])
 
     def test_a_failed_detection_is_logged_and_does_not_fail_the_request(self):
         self.detector.error = RuntimeError("gpu fell over")
@@ -468,8 +563,9 @@ class BusinessSearchRegionTests(unittest.TestCase):
         self.assertEqual((body["items"], body["fallback"]), ([], {"status": "disabled"}))
         ((level, text),) = self.region_logs(records)
         self.assertEqual(level, logging.WARNING)
-        self.assertRegex(text, r"^区域搜索失败 \| RuntimeError: gpu fell over \| 检测框=0 \| 耗时 ")
-        self.assertIn("目标检测失败", self.timing_steps(records))
+        self.assertRegex(text, r"^区域搜索失败 \| .* \| 耗时 \d+\.\d{3}s \| 错误=RuntimeError: gpu fell over \| trace_id=")
+        self.assertEqual(steps(text), ["排队", "图像解码", "目标检测失败", "耗时"])
+        self.assertEqual(self.timing_steps(records), ["接收请求", "图像下载", "整图搜索", "等待区域搜索", "总耗时"])
 
     def test_a_box_that_cannot_be_searched_leaves_the_others(self):
         def embed(size):
@@ -481,7 +577,9 @@ class BusinessSearchRegionTests(unittest.TestCase):
         self.assertEqual(self.ids(body), [ROW_A, ROW_B])  # 只有 LEFT 的结果
         ((level, text),) = self.region_logs(records)
         self.assertEqual(level, logging.WARNING)
-        self.assertRegex(text, r"^区域搜索完成 \| 检测框=2 \| 结果=2 \| 失败=1 \| 耗时 ")
+        self.assertRegex(text, r"^区域搜索完成 \| .* \| 耗时 \d+\.\d{3}s \| 检测框=2 \| 结果=2 \| 失败=1 \| 区域检索明细")
+        self.assertEqual(steps(text), ["排队", "图像解码", "目标检测", "区域裁剪", "区域检索", "耗时"])  # 有框成功
+        self.assertEqual(breakdown(text), ["embedding推理", "vector搜索", "后处理", "embedding推理失败"])
 
     # -- 关闭 ------------------------------------------------------------------------------
 

@@ -1,7 +1,7 @@
 import random, os, time
 import uuid
 from contextlib import contextmanager
-from typing import Any, Dict, List, Sequence, Set, Iterator
+from typing import Dict, List, Optional, Set, Iterator, Tuple
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff"}
 
@@ -103,13 +103,15 @@ class timer_tool:
     不是线程安全的：并发执行的子任务（如批量搜图里的每张图）各用一个实例，全部结束后由入口 merge 进来
     """
 
-    def __init__(self) -> None:
+    def __init__(self, start: Optional[float] = None) -> None:
         """
         初始化计时器工具
         设置计时起点和上一个记录点，并初始化一个空字典用于存储各步骤耗时
+        :param start: 计时起点（time.perf_counter() 的值），如请求到达的时间；默认为现在
         """
-        self._start = time.perf_counter()   # 整个周期的起点
+        self._start = time.perf_counter() if start is None else start  # 整个周期的起点
         self._last = self._start            # 上一个记录点（mark 或 step 结束）
+        self._end: Optional[float] = None   # stop() 记下的终点；None 表示还在计时
         self._steps: Dict[str, float] = {}  # 步骤名 -> 累计耗时（秒）
 
     def _add(self, tag: str, cost: float) -> None:
@@ -159,17 +161,34 @@ class timer_tool:
         子任务的时间互相重叠，所以各步骤相加可能超过总耗时
         :param other: 子任务的计时器
         """
-        for tag, cost in list(other._steps.items()):
+        for tag, cost in other.items():
             self._add(tag, cost)
 
-    def summary(self) -> str:
+    def stop(self) -> None:
+        """
+        记下终点：之后的 elapsed 和 summary() 都算到这里，不再算到输出的那一刻（只有第一次调用有效）
+        给结束后过一会儿才输出的计时器用，如和其他步骤同时进行、由调用方按固定顺序输出的步骤
+        """
+        if self._end is None:
+            self._end = time.perf_counter()
+
+    @property
+    def elapsed(self) -> float:
+        """从起点到终点（还没有 stop() 时到现在）的秒数"""
+        return (time.perf_counter() if self._end is None else self._end) - self._start
+
+    def items(self) -> List[Tuple[str, float]]:
+        """各步骤的（名称, 累计秒数），按输出的顺序"""
+        return list(self._steps.items())
+
+    def summary(self, total_label: str = "总耗时") -> str:
         """
         生成计时摘要
+        :param total_label: 最后一项（从起点到终点的耗时）的名称
         :return: 各步骤耗时和总耗时，如「图像下载 0.120s | embedding推理 0.045s | 总耗时 0.180s」
         """
-        total = time.perf_counter() - self._start  # 计算总耗时
-        steps = [f"{tag} {cost:.3f}s" for tag, cost in list(self._steps.items())]
-        return " | ".join([*steps, f"总耗时 {total:.3f}s"])
+        steps = [f"{tag} {cost:.3f}s" for tag, cost in self.items()]
+        return " | ".join([*steps, f"{total_label} {self.elapsed:.3f}s"])
 
 
 def show_text(trace_id: str, message: str, image_name:str="", time_spend: str = ""):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 import uuid
 from typing import Any
 
@@ -33,6 +34,15 @@ def get_trace_id(request: Request) -> str:
     return trace_id
 
 
+def request_received_at(request: Request) -> float | None:
+    """请求到达的时间（time.perf_counter() 的值，TraceIdMiddleware 记下）；没有经过它时为 None。
+
+    接口的耗时从这里算起时，包括接收请求体（上传的文件）的时间：表单和 JSON 请求体
+    在进入接口函数之前就已经读完了。
+    """
+    return getattr(request.state, "received_at", None)
+
+
 def bind_trace_id(request: Request, explicit: Any = None) -> str:
     """采用请求体 / 查询参数里传来的 id（合规时）作为这个请求的 trace id。"""
     trace_id = _clean_trace_id(explicit)
@@ -46,7 +56,8 @@ class TraceIdMiddleware:
     """每个请求一个 trace id：X-Trace-Id 请求头合规时用它，否则生成一个。
 
     存在 request.state.trace_id 里（错误结构、日志用），并回写到 X-Trace-Id 响应头
-    （如果接口重新绑定过，用最终的值）。
+    （如果接口重新绑定过，用最终的值）。它是最外层的中间件，所以也在这里记下请求到达的时间
+    （request.state.received_at，见 request_received_at）。
     """
 
     def __init__(self, app: Any) -> None:
@@ -58,6 +69,7 @@ class TraceIdMiddleware:
             return
         incoming = dict(scope.get("headers") or []).get(_TRACE_HEADER_KEY, b"").decode("latin-1")
         state = scope.setdefault("state", {})
+        state["received_at"] = time.perf_counter()
         state["trace_id"] = _clean_trace_id(incoming) or _new_trace_id()
 
         async def send_with_trace_id(message: dict) -> None:

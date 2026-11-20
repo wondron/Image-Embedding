@@ -2,13 +2,18 @@
 
 识别和整图搜索同时启动。整图有结果时立即作为答案返回，识别被丢弃；否则识别出的菜名
 作为一张结果卡（source=recipe）排在区域结果之后（tests/test_auto_search_regions.py），
-都没有结果时才走 Global 兜底。识别的结果被用到时记录它的耗时和结果，识别失败从不让
-请求失败。这些测试里区域搜索是关闭的。
+都没有结果时才走 Global 兜底。识别的结果被用到时写它那一行（调用的各阶段、耗时和结果），
+识别失败从不让请求失败。这些测试里区域搜索是关闭的。
 
 结果来自哪里写在每张结果卡上（它的 source，第一个字段），不在外层；自建库结果卡的
 details 说明是否带加热信息（outputs_heating）。
 
-    业务搜图(图片链接) | 图像下载 0.120s | embedding推理 0.045s | vector搜索 0.012s | 后处理 0.003s | 菜谱识别 1.684s | 总耗时 1.810s
+    整图搜索完成 | embedding推理 0.045s | vector搜索 0.012s | 后处理 0.003s | 耗时 0.061s | 结果=0
+    菜谱识别完成 | 发送请求 0.001s | 等待响应 1.682s | 接收响应 0.000s | 耗时 1.684s | 结果=["荷塘小炒"] | 输入=图片链接
+    业务搜图(图片链接) | 接收请求 0.001s | 图像下载 0.120s | 整图搜索 0.061s | 等待菜谱识别 1.623s | 总耗时 1.810s | 参数=…
+
+调用的各阶段来自 httpcore 的 trace 事件，只有真实的网络传输才有：用 httpx.MockTransport 的
+测试里那一行只有耗时，各阶段在本机起一个服务来测（recipe_service_on_the_network）。
 """
 
 import asyncio
@@ -18,6 +23,8 @@ import re
 import threading
 import time
 import unittest
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -35,6 +42,7 @@ from app.core.middleware import TraceIdMiddleware
 from app.services.predict.food_service import FoodService
 from app.services.retrieval.active_model import ActiveModel
 from app.services.retrieval.search_image import SearchImageUseCase
+from app.utils.timer import timer_tool
 
 ROW_ID = "11111111-1111-1111-1111-111111111111"
 RECIPE_URL = "http://recipe.test:8866/detect_recipe_onnx"
@@ -65,8 +73,49 @@ def recipe_answer(data, *, status=200, success=True, message="识别成功"):
 
 
 def steps(line):
-    """The step names of a timing line in order, 总耗时 last."""
+    """The step names of a timing line in order, 总耗时 (or 耗时) last."""
     return re.findall(r"(?:^|\| )([^|]+?) \d+\.\d{3}s", line)
+
+
+@contextmanager
+def recipe_service_on_the_network(names, *, hold=None):
+    """本机上真的监听一个端口的菜谱识别服务：httpx 走真实的网络传输，才有 trace 事件。
+    它回答 names；给了 hold（threading.Event）时，读完请求后先等它再回答。产出服务的地址。
+    支持 keep-alive：同一个客户端的下一次调用复用连接。
+    """
+
+    class Recipes(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            if hold is not None:
+                hold.wait(5)
+            body = json.dumps({"code": "200", "success": True, "message": "识别成功", "data": names}).encode()
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except ConnectionError:  # 客户端已经超时走了
+                self.close_connection = True
+
+        def log_message(self, *args):  # 不写访问日志
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Recipes)
+    # 关闭时 shutdown() 最多等一个 poll_interval（默认 0.5 秒），而它常在事件循环上调用
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}/detect_recipe_onnx"
+    finally:
+        if hold is not None:
+            hold.set()
+        server.shutdown()
+        server.server_close()
+        thread.join(5)
 
 
 class RecipeDetectSettingsTests(unittest.TestCase):
@@ -181,6 +230,56 @@ class RecipeClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.code, "UPSTREAM_ERROR")
         self.assertEqual(raised.exception.received, [])
 
+    async def test_a_transport_without_network_events_records_no_stage(self):
+        timer = timer_tool()
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: recipe_answer(DISHES))) as client:
+            await detect_recipes(client, RECIPE_URL, image_url="https://x.example/a.jpg", timeout=2, timer=timer)
+        self.assertEqual(timer.items(), [])
+
+
+class RecipeCallStageTests(unittest.IsolatedAsyncioTestCase):
+    """真实的网络传输上（本机的服务），一次调用的各阶段：建立连接 / 发送请求 / 等待响应 / 接收响应。"""
+
+    async def asyncSetUp(self):
+        self.client = httpx.AsyncClient(trust_env=False)  # 不走环境里配置的代理
+
+    async def asyncTearDown(self):
+        await self.client.aclose()
+
+    async def stages(self, url, *, timeout=5.0, **image):
+        timer = timer_tool()
+        try:
+            await detect_recipes(self.client, url, trace_id="t-1", timeout=timeout, timer=timer, **image)
+        finally:
+            self.timer = timer
+        return [step for step, _ in timer.items()]
+
+    async def test_a_call_is_split_into_its_stages_and_a_reused_connection_has_no_connecting(self):
+        with recipe_service_on_the_network(DISHES) as url:
+            self.assertEqual(
+                await self.stages(url, image_url="https://x.example/a.jpg"), ["建立连接", "发送请求", "等待响应", "接收响应"]
+            )
+            # 同一个连接上的下一次调用（这次上传图片）
+            self.assertEqual(await self.stages(url, image_bytes=PNG), ["发送请求", "等待响应", "接收响应"])
+
+    async def test_the_stage_cut_off_by_the_timeout_is_marked_failed(self):
+        with recipe_service_on_the_network(DISHES, hold=threading.Event()) as url:
+            with self.assertRaises(err.AppError) as raised:
+                await self.stages(url, timeout=0.5, image_bytes=PNG)
+        self.assertEqual(raised.exception.code, "UPSTREAM_TIMEOUT")
+        recorded = dict(self.timer.items())
+        self.assertEqual(list(recorded), ["建立连接", "发送请求", "等待响应失败"])  # 请求发完了，服务没有回答
+        # 时限里剩下的时间都在等：客户端第一次调用前的准备（不属于任何阶段）在 debug 模式下约 0.1 秒
+        self.assertGreater(recorded["等待响应失败"], 0.25)
+
+    async def test_a_service_that_cannot_be_reached_fails_while_connecting(self):
+        with recipe_service_on_the_network(DISHES) as url:
+            pass  # 服务已经关了，端口没人监听
+        with self.assertRaises(err.AppError) as raised:
+            await self.stages(url, image_url="https://x.example/a.jpg")
+        self.assertEqual(raised.exception.code, "UPSTREAM_ERROR")
+        self.assertEqual([step for step, _ in self.timer.items()], ["建立连接失败"])
+
 
 class FakeEmbedding:
     def __init__(self):
@@ -278,11 +377,16 @@ class BusinessSearchRecipeTests(unittest.TestCase):
         return record
 
     def recipe_logs(self, records):
-        """服务自己关于识别的日志行：每行一个（级别, 文本）。"""
+        """服务自己关于识别的日志行（以「菜谱识别」开头）：每行一个（级别, 文本）。"""
         return [
             (record.levelno, record.getMessage()) for record in records
-            if record.name == "svc.auto_search" and "菜谱识别" in record.getMessage()
+            if record.name == "svc.auto_search" and record.getMessage().startswith("菜谱识别")
         ]
+
+    def service_line(self, records, title):
+        """服务写的、以 title 开头的那一行（只有一行）：它的日志记录。"""
+        (record,) = [r for r in records if r.name == "svc.auto_search" and r.getMessage().startswith(title)]
+        return record
 
     # -- 合并后的答案 -----------------------------------------------------------------
 
@@ -296,10 +400,12 @@ class BusinessSearchRecipeTests(unittest.TestCase):
         self.assertEqual(list(hit), CARD_KEYS)  # source 在最前面
         self.assertNotIn("message", body)
         self.food.searchTool.detect.assert_not_called()
-        # 不属于答案，也不在耗时行里（已经结束的识别已经写过结果日志）
-        self.assertEqual(
-            steps(self.timing_line(records).getMessage()), ["图像下载", "embedding推理", "vector搜索", "后处理", "总耗时"]
-        )
+        # 识别不属于答案：没有它那一行，请求那一行也不等它
+        self.assertEqual(self.recipe_logs(records), [])
+        self.assertEqual(steps(self.timing_line(records).getMessage()), ["接收请求", "图像下载", "整图搜索", "总耗时"])
+        whole = self.service_line(records, "整图搜索完成").getMessage()
+        self.assertEqual(steps(whole), ["embedding推理", "vector搜索", "后处理", "耗时"])
+        self.assertIn(" | 结果=1", whole)
 
     def test_whole_image_hits_do_not_wait_for_the_detection(self):
         detecting = threading.Event()
@@ -326,6 +432,9 @@ class BusinessSearchRecipeTests(unittest.TestCase):
         self.assertLess(took, 5)
         self.assertEqual(left, {"started": 1, "cancelled": 1})
         self.assertEqual(self.recipe_logs(logs.records), [])
+        # 整图那一行说明识别还在进行、被取消了
+        whole = self.service_line(logs.records, "整图搜索完成").getMessage()
+        self.assertRegex(whole, r" \| 结果=1 \| 已取消=菜谱识别 \| trace_id=")
 
     def test_the_recipe_service_gets_the_link_and_the_trace_id(self):
         self.vectors.hits = []
@@ -398,8 +507,12 @@ class BusinessSearchRecipeTests(unittest.TestCase):
         self.assertEqual(list(body["items"][0]), CARD_KEYS)
         self.assertEqual(
             steps(self.timing_line(records).getMessage()),
-            ["图像下载", "embedding推理", "vector搜索", "菜谱识别", "global搜索", "后处理", "总耗时"],
+            ["接收请求", "图像下载", "整图搜索", "等待菜谱识别", "Global兜底", "总耗时"],
         )
+        # 每一步一行，按固定的顺序：整图、识别、兜底
+        lines = [r.getMessage() for r in records if r.name == "svc.auto_search"]
+        self.assertEqual([line.split(" | ")[0] for line in lines], ["整图搜索完成", "菜谱识别完成", "Global兜底完成"])
+        self.assertEqual(steps(lines[2]), ["global搜索", "后处理", "耗时"])
 
         self.food.searchTool.detect.return_value = []
         self.food.searchFilter.detect.return_value = []
@@ -415,19 +528,33 @@ class BusinessSearchRecipeTests(unittest.TestCase):
         self.assertEqual(body["items"], [RECIPE_CARD])
         ((level, text),) = self.recipe_logs(records)
         self.assertEqual(level, logging.INFO)
+        # MockTransport 没有网络事件：只有耗时（各阶段见 RecipeCallStageTests）
         self.assertRegex(
             text,
-            r'^菜谱识别完成 \| 结果=\["荷塘小炒", "凉拌猪耳", "清蒸鲈鱼"\] \| 耗时 \d+\.\d{3}s \| 输入=图片链接 \| trace_id=t-9$',
+            r'^菜谱识别完成 \| 耗时 \d+\.\d{3}s \| 结果=\["荷塘小炒", "凉拌猪耳", "清蒸鲈鱼"\] \| 输入=图片链接 \| trace_id=t-9$',
         )
-        # ……它的耗时也是请求耗时行里的一步，排在自建库的几步之后
+        # ……请求那一行在整图搜索之后等它
         line = self.timing_line(records)
-        self.assertEqual(steps(line.getMessage()), ["图像下载", "embedding推理", "vector搜索", "后处理", "菜谱识别", "总耗时"])
+        self.assertEqual(steps(line.getMessage()), ["接收请求", "图像下载", "整图搜索", "等待菜谱识别", "总耗时"])
         self.assertEqual(line.levelno, logging.INFO)
 
         self.answer = recipe_answer([])
         _, records = self.post("/api/search/auto/file", files={"file": ("q.png", PNG, "image/png")})
         ((level, text),) = self.recipe_logs(records)
-        self.assertRegex(text, r"^菜谱识别完成 \| 结果=\[\] \| 耗时 \d+\.\d{3}s \| 输入=图片内容 \| trace_id=")
+        self.assertRegex(text, r"^菜谱识别完成 \| 耗时 \d+\.\d{3}s \| 结果=\[\] \| 输入=图片内容 \| trace_id=")
+
+    def test_the_line_has_the_stages_of_a_call_over_the_network(self):
+        self.vectors.hits = []
+        client = httpx.AsyncClient(trust_env=False, limits=httpx.Limits(max_keepalive_connections=0))
+        self.addCleanup(asyncio.run, client.aclose())
+        self.runtime.http_client = client
+        with recipe_service_on_the_network(DISHES) as url:
+            self.runtime.config = {"RECIPE_DETECT_CONFIG": {"enabled": True, "url": url, "timeout": 5}}
+            body, records = self.by_url(trace_id="t-9")
+        self.assertEqual(body["items"], [RECIPE_CARD])
+        line = self.service_line(records, "菜谱识别完成").getMessage()
+        self.assertEqual(steps(line), ["建立连接", "发送请求", "等待响应", "接收响应", "耗时"])
+        self.assertTrue(line.endswith(' | 结果=["荷塘小炒", "凉拌猪耳", "清蒸鲈鱼"] | 输入=图片链接 | trace_id=t-9'), line)
 
     # -- 失败或关闭的识别 ---------------------------------------------------------------
 
@@ -440,11 +567,11 @@ class BusinessSearchRecipeTests(unittest.TestCase):
         self.assertEqual(level, logging.WARNING)
         self.assertRegex(
             text,
-            r"^菜谱识别失败 \| UPSTREAM_ERROR: 菜谱识别服务报错（HTTP 503，code=503）：上游识别模型不可用"
-            r" \| 耗时 \d+\.\d{3}s \| 输入=图片链接 \| trace_id=t-9$",
+            r"^菜谱识别失败 \| 耗时 \d+\.\d{3}s \| 错误=UPSTREAM_ERROR: 菜谱识别服务报错（HTTP 503，code=503）：上游识别模型不可用"
+            r" \| 输入=图片链接 \| trace_id=t-9$",
         )
-        line = self.timing_line(records)  # 请求本身成功了
-        self.assertEqual(steps(line.getMessage()), ["图像下载", "embedding推理", "vector搜索", "后处理", "菜谱识别失败", "总耗时"])
+        line = self.timing_line(records)  # 请求本身成功了：它只是等了识别
+        self.assertEqual(steps(line.getMessage()), ["接收请求", "图像下载", "整图搜索", "等待菜谱识别", "总耗时"])
         self.assertEqual(line.levelno, logging.INFO)
 
         self.answer = httpx.ReadTimeout("no data")
@@ -452,7 +579,7 @@ class BusinessSearchRecipeTests(unittest.TestCase):
         self.assertEqual((body["items"], body["fallback"]), ([], {"status": "disabled"}))
         self.assertEqual(body["message"], "自建库没有达到阈值的结果，菜谱识别失败，未开启 Global 兜底")
         ((level, text),) = self.recipe_logs(records)
-        self.assertIn("菜谱识别失败 | UPSTREAM_TIMEOUT: 菜谱识别服务 2 秒内没有返回", text)
+        self.assertIn(" | 错误=UPSTREAM_TIMEOUT: 菜谱识别服务 2 秒内没有返回 | ", text)
 
         body, _ = self.by_url(global_fallback=True)  # ……兜底照样执行
         self.assertEqual(([item["source"] for item in body["items"]], body["fallback"]), (["global"], {"status": "hit"}))
@@ -466,9 +593,10 @@ class BusinessSearchRecipeTests(unittest.TestCase):
                 self.assertEqual(self.received, [])
                 self.assertEqual(self.recipe_logs(records), [])
                 self.assertEqual(
-                    steps(self.timing_line(records).getMessage()),
-                    ["图像下载", "embedding推理", "vector搜索", "后处理", "总耗时"],
+                    steps(self.timing_line(records).getMessage()), ["接收请求", "图像下载", "整图搜索", "总耗时"]
                 )
+                # 没有启动识别：整图那一行没有「已取消」
+                self.assertNotIn("已取消", self.service_line(records, "整图搜索完成").getMessage())
         self.vectors.hits = []
         body, _ = self.by_url()  # 没有这一步的搜索，信息还是原来的那些
         self.assertEqual(body["message"], "自建库没有达到阈值的结果，未开启 Global 兜底")
@@ -544,8 +672,13 @@ class BusinessSearchRecipeTests(unittest.TestCase):
         self.assertEqual(left, {"started": 1, "cancelled": 1})
         self.assertEqual(self.recipe_logs(logs.records), [])  # 没什么要报告的：没人读它的结果
         line = self.timing_line(logs.records)
-        self.assertEqual(steps(line.getMessage()), ["embedding推理失败", "总耗时"])
+        self.assertEqual(steps(line.getMessage()), ["接收请求", "读取上传", "整图搜索失败", "总耗时"])
         self.assertEqual(line.levelno, logging.WARNING)
+        # 整图那一行说明是哪个阶段失败的
+        whole = self.service_line(logs.records, "整图搜索失败")
+        self.assertEqual(steps(whole.getMessage()), ["embedding推理失败", "耗时"])
+        self.assertIn(" | 错误=SEARCH_BAD_IMAGE: embed failed: cannot decode | trace_id=", whole.getMessage())
+        self.assertEqual(whole.levelno, logging.WARNING)
 
 
 if __name__ == "__main__":

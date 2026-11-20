@@ -1,6 +1,13 @@
 """业务搜图的路由：用整图查自建库，GroundingDINO 在图里找到的区域和菜谱识别同时启动，
 Global 搜图作为可选兜底（app.api.services.auto_search）。和 Global 搜图的路由一样，
 每种输入一个路由：上传文件（multipart）或图片 URL（JSON）。
+
+每个请求最后写一行耗时（logger autosearch，同时写平台日志），从请求到达到返回结果：
+
+    业务搜图(上传文件) | 接收请求 0.310s | 读取上传 0.001s | 整图搜索 0.061s | 总耗时 0.373s | 参数=top_k=10, global_fallback=False
+
+接收请求是从请求到达（TraceIdMiddleware）到进入接口函数，主要是接收上传的文件；然后是
+读取上传或图像下载，以及业务搜图记的几步。各步骤自己的阶段在它们各自的那一行里。
 """
 
 from __future__ import annotations
@@ -12,7 +19,7 @@ from app.api.services.auto_search import run_auto_search
 from app.api.uploads import read_upload
 from app.bootstrap.state import get_application_state
 from app.clients.image_fetch import clean_url, read_url_bytes
-from app.core.middleware import bind_trace_id
+from app.core.middleware import bind_trace_id, request_received_at
 from app.core.observability.log_helper import log_timing
 from app.schemas.auto_search import (
     GLOBAL_FALLBACK_DOC,
@@ -32,6 +39,9 @@ from app.utils.timer import timer_tool
 logger = logging.getLogger("autosearch")
 router = APIRouter(prefix="/api/search/auto", tags=["business-search"])
 
+RECEIVE_STEP = "接收请求"
+READ_STEP = "读取上传"
+
 _DESCRIPTION = (
     "给业务方用的搜图接口：先用整图查自建库（按检测场景过滤，取相似度达到阈值的前 top_k 条），有结果就直接返回。"
     "同时启动两步：区域搜索（AUTO_SEARCH_REGION_CONFIG.enabled 开启时）用 GroundingDINO 在查询图里检测目标，"
@@ -47,6 +57,18 @@ _DESCRIPTION = (
     "整图搜索出错（未知场景 SEARCH_UNKNOWN_SCENE、图片无法解码 SEARCH_BAD_IMAGE、检索服务未就绪 NOT_READY 等）"
     "按统一错误格式返回，不走兜底。详见契约 §6.6。"
 )
+
+
+def _request_timer(request: Request) -> timer_tool:
+    """这个请求的计时器，从请求到达算起：第一步是接收请求。没有经过 TraceIdMiddleware 时
+    （服务里总是经过）从现在算起，没有这一步。
+    """
+    received = request_received_at(request)
+    if received is None:
+        return timer_tool()
+    timer = timer_tool(start=received)
+    timer.mark(RECEIVE_STEP)
+    return timer
 
 
 def _log_search_timing(
@@ -83,6 +105,7 @@ async def auto_search_by_file(
     machine_info: str | None = Form(default=None, max_length=MACHINE_INFO_MAX_LENGTH, description=MACHINE_INFO_DOC),
 ) -> Any:
     """multipart/form-data：file 加上其余表单字段。"""
+    timer = _request_timer(request)
     runtime = get_application_state(request)
     trace_id = bind_trace_id(request, trace_id)
     params = {
@@ -92,11 +115,11 @@ async def auto_search_by_file(
         "global_fallback": global_fallback,
         "machine_info": machine_info,
     }
-    timer = timer_tool()
     completed = False
     try:
         require_retrieval(runtime)  # 在读取上传文件之前先确定 NOT_READY
-        image_bytes = await read_upload(file, runtime.max_image_bytes)
+        with timer.step(READ_STEP):
+            image_bytes = await read_upload(file, runtime.max_image_bytes)
         result = await run_auto_search(
             runtime,
             image_bytes=image_bytes,
@@ -124,10 +147,10 @@ async def auto_search_by_file(
 )
 async def auto_search_by_url(request: Request, body: AutoSearchUrlRequest) -> Any:
     """application/json：{image_url, scene, top_k, score_threshold, global_fallback, trace_id, machine_info}。"""
+    timer = _request_timer(request)
     runtime = get_application_state(request)
     trace_id = bind_trace_id(request, body.trace_id)
     params = body.model_dump(mode="json", exclude={"trace_id"})
-    timer = timer_tool()
     completed = False
     try:
         require_retrieval(runtime)  # 在下载任何东西之前先确定 NOT_READY
