@@ -61,66 +61,107 @@ def create_detector(config: dict):
     return GdinoDetect(config)
 
 
+def create_segmentor(config: dict):
+    """创建进程内共享的分割模型（/api/tools/segment 使用），仅在配置启用时加载。"""
+    from app.services.predict.pipeline.a_onnx_segment import OnnxSegmentPy
+    return OnnxSegmentPy(config)
+
+
 def create_food_service(config: dict, embedder):
     from app.services.predict.food_service import FoodService
     return FoodService(config, embedder)
 
 
-def warmup_embedder(embedder, app_settings: Settings = settings) -> None:
-    logger.info("预热开关：%s", app_settings.warmup.enabled)
-    if not app_settings.warmup.enabled:
-        return
-    times = app_settings.warmup.embedding_runs
-    logger.info("预热中 | embedding=%d 次", times)
-    embedder.warmup(times)
-    logger.info("预热配置 | warmup=%s", app_settings.warmup)
+# ---- 模型的加载和预热 ---------------------------------------------------------------
+# 启动和 Nacos 重新加载都在这里创建模型，创建后马上按 Settings.warmup 预热，每个实例被用上之前
+# 都预热过。create_* 只负责创建（测试替换的是它们）。
+
+def _warm_up(model, runs: int, app_settings: Settings) -> None:
+    """预热刚创建的模型，Settings.warmup.enabled 为 false 时跳过；次数和耗时由模型自己记日志。"""
+    if app_settings.warmup.enabled:
+        model.warmup(runs)
 
 
-def warmup_detector(detector, app_settings: Settings = settings) -> None:
-    if not app_settings.warmup.enabled:
-        return
-    times = app_settings.warmup.groundingdino_runs
-    detector.warmup(times)
+def _load_and_warm_up(create, config: dict, runs: int, app_settings: Settings):
+    """创建并预热一个模型。预热失败和创建失败一样抛出，没预热成功的实例不会被用上。"""
+    model = create(config)
+    _warm_up(model, runs, app_settings)
+    return model
 
 
-def _detector_config(config: dict) -> dict | None:
-    section = config.get("GROUNDINGDINO_CONFIG")
-    if not config_flag(config, "GROUNDINGDINO_CONFIG", "enabled", bool(section)):
+def _optional_model_config(config: dict, name: str) -> dict | None:
+    """可选模型的加载配置：配置节 name 加上 TOTAL_CONFIG.device_id。配置节缺失、为空或
+    enabled 为 false 时为 None（不加载）。两次结果相等时可以继续用已加载的实例。
+    """
+    section = config.get(name)
+    if not config_flag(config, name, "enabled", bool(section)):
         return None
     return {
-        "GROUNDINGDINO_CONFIG": dict(section),
+        name: dict(section),
         "TOTAL_CONFIG": {"device_id": (config.get("TOTAL_CONFIG") or {}).get("device_id", 0)},
     }
 
 
+def _detector_config(config: dict) -> dict | None:
+    return _optional_model_config(config, "GROUNDINGDINO_CONFIG")
+
+
+def _segmentor_config(config: dict) -> dict | None:
+    return _optional_model_config(config, "SEGMENT_CONFIG")
+
+
 def _detector_for(runtime: ApplicationState, config: dict):
-    """准备可用的检测器，保留正在处理请求的旧实例。"""
+    """config 下用哪个检测器：没有启用时为 None；配置和设备没变时继续用已加载的实例（不重新加载、
+    不重新预热），否则加载并预热一个新实例。被替换的旧实例由正在处理的请求持有，跑完后释放。
+    """
     detector_config = _detector_config(config)
     if detector_config is None:
         return None
     if runtime.detector is not None and _detector_config(runtime.config) == detector_config:
         return runtime.detector
-    detector = create_detector(detector_config)
-    warmup_detector(detector, runtime.settings)
-    return detector
+    runs = runtime.settings.warmup.groundingdino_runs
+    return _load_and_warm_up(create_detector, detector_config, runs, runtime.settings)
+
+
+def _segmentor_for(runtime: ApplicationState, config: dict):
+    """config 下用哪个分割模型，规则和 _detector_for 一样。"""
+    segmentor_config = _segmentor_config(config)
+    if segmentor_config is None:
+        return None
+    if runtime.segmentor is not None and _segmentor_config(runtime.config) == segmentor_config:
+        return runtime.segmentor
+    runs = runtime.settings.warmup.segment_runs
+    return _load_and_warm_up(create_segmentor, segmentor_config, runs, runtime.settings)
+
+
+def _load_optional_model(runtime: ApplicationState, model_for, name: str):
+    """启动时加载并预热一个可选模型，返回（实例, 失败原因）；失败只记下原因，其他服务继续运行。"""
+    try:
+        return model_for(runtime, runtime.config), None
+    except Exception as exc:
+        logger.exception("%s 初始化或预热失败：%s", name, exc)
+        return None, f"{type(exc).__name__}: {exc}"
 
 
 def initialize_detector(runtime: ApplicationState):
-    """加载可选的检测器；失败时记录错误，特征提取服务继续运行。"""
+    """加载并预热可选的 GroundingDINO；失败时记录 detector_error，特征提取服务继续运行。"""
     runtime.detector = None
-    runtime.detector_error = None
-    try:
-        runtime.detector = _detector_for(runtime, runtime.config)
-    except Exception as exc:
-        runtime.detector_error = f"{type(exc).__name__}: {exc}"
-        logger.exception("GroundingDINO 初始化或预热失败：%s", exc)
+    runtime.detector, runtime.detector_error = _load_optional_model(runtime, _detector_for, "GroundingDINO")
     return runtime.detector
 
 
+def initialize_segmentor(runtime: ApplicationState):
+    """加载并预热可选的分割模型；失败时记录 segmentor_error，其他服务继续运行。"""
+    runtime.segmentor = None
+    runtime.segmentor, runtime.segmentor_error = _load_optional_model(runtime, _segmentor_for, "分割模型")
+    return runtime.segmentor
 
 
 def initialize_embedder(runtime: ApplicationState):
-    """加载并预热特征编码器；加载失败时记录 initialization_error 并返回 None。"""
+    """加载并预热特征编码器。加载失败记录 initialization_error 并返回 None；预热失败记录
+    warmup_error（/api/readyz 报未就绪），模型照常交给预测和检索。两种失败处理不同，
+    所以这里分两步，不用 _load_and_warm_up。
+    """
     try:
         embedder = create_embedder(runtime.config)
     except Exception as exc:
@@ -128,7 +169,7 @@ def initialize_embedder(runtime: ApplicationState):
         logger.exception("Embedding 模型初始化失败：%s", exc)
         return None
     try:
-        warmup_embedder(embedder, runtime.settings)
+        _warm_up(embedder, runtime.settings.warmup.embedding_runs, runtime.settings)
     except Exception as exc:
         runtime.warmup_error = f"{type(exc).__name__}: {exc}"
         logger.exception("预热失败：%s", exc)
@@ -325,20 +366,22 @@ def apply_nacos_config_update(runtime: ApplicationState, provider: NacosConfigPr
     EMBEDDING_CONFIG 与已加载的编码器匹配时复用实例，普通配置变化不会重新加载 ONNX。
     更换模型时，预测服务使用新编码器，检索服务继续使用与其 Qdrant 集合配对的编码器；
     新模型可通过 /api/embedding-models 登记版本并生成向量。
-    GroundingDINO 的配置和设备未变时复用实例；需要替换时，先加载并预热新实例，
-    全部准备成功后再发布新配置和服务实例。
+    GroundingDINO 和分割模型的配置和设备未变时复用实例；需要替换时，先加载并预热新实例，
+    全部准备成功后再发布新配置和服务实例。任何一步失败，这次更新整体不生效，原来的配置、
+    服务和模型继续使用。
     """
     if runtime.stopping:
         return False
     try:
         embedder = _loaded_embedder_for(runtime, snapshot.config)
         if embedder is None:
-            embedder = create_embedder(snapshot.config)
-            warmup_embedder(embedder, runtime.settings)
+            runs = runtime.settings.warmup.embedding_runs
+            embedder = _load_and_warm_up(create_embedder, snapshot.config, runs, runtime.settings)
             if runtime.retrieval is not None:
                 logger.warning("EMBEDDING_CONFIG 换了模型：predict 改用 %s；检索仍用 %s（collection %s），到「模型版本」登记新版本、生成向量后再切换",
                     embedder.model_path, runtime.retrieval.model.space_id, runtime.retrieval.model.collection)
         detector = _detector_for(runtime, snapshot.config)
+        segmentor = _segmentor_for(runtime, snapshot.config)
         service = create_food_service(snapshot.config, embedder)
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
@@ -352,7 +395,9 @@ def apply_nacos_config_update(runtime: ApplicationState, provider: NacosConfigPr
         "loaded": True,
         **provider.source_info(snapshot),
     }
-    runtime.replace_configuration(snapshot.config, config_info, service, embedder, detector=detector)
+    runtime.replace_configuration(
+        snapshot.config, config_info, service, embedder, detector=detector, segmentor=segmentor
+    )
     logger.info("Nacos配置重读成功 | data_ids=%s", list(snapshot.data_ids))
     return True
 
@@ -373,8 +418,10 @@ async def lifespan(app: FastAPI):
     logger.info("应用正在启动 | ENV=%s | cfg=%s", runtime.settings.application.env, runtime.config_info,)
     apply_download_policy(config)
     load_enum_file()
+    logger.info("预热配置 | %s", runtime.settings.warmup)
     embedder = initialize_embedder(runtime)
     initialize_detector(runtime)
+    initialize_segmentor(runtime)
     initialize_food_service(runtime, embedder)
     initialize_catalog(runtime)
     initialize_retrieval(runtime, embedder)

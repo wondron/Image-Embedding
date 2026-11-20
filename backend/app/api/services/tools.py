@@ -32,20 +32,23 @@ async def _read_tool_image(file: UploadFile, runtime: ApplicationState) -> bytes
 
 
 def _segment_response(
-    segment: Any,
+    segmentor: Any,
     image_bytes: bytes,
     filename: str,
     *,
     output_vis: bool,
     started: float,
 ) -> SegmentResponse:
-    """在一个工作线程里同时完成推理和图像编码。"""
-    mask, visual, original = segment.detect(image_bytes, output_vis=output_vis)
-    original = None
-    if original is None or getattr(original, "ndim", 0) < 2:
-        raise ValueError("segment returned an invalid original image")
+    """在一个工作线程里同时完成解码、推理和图像编码。
 
-    height, width = original.shape[:2]
+    mask 和原图同尺寸，所以返回的宽高取自 mask。图片无效时 detect 抛出 ValueError（422），
+    模型输出不对是服务端的问题（500）。
+    """
+    mask, visual = segmentor.detect(image_bytes, output_vis=output_vis)
+    if getattr(mask, "ndim", 0) != 2:
+        raise RuntimeError(f"segment model returned an invalid mask: {getattr(mask, 'shape', None)}")
+
+    height, width = mask.shape
     return SegmentResponse(
         ok=True,
         filename=filename,
@@ -89,17 +92,13 @@ async def segment(
     output_vis: bool = False,
 ) -> SegmentResponse:
     image_bytes = await _read_tool_image(file, runtime)
-    service = require_food_service(runtime)
-
-    segment = getattr(service, "segment", None)
-    if segment is None:
-        raise errors.not_ready("segment is not initialized")
+    segmentor = runtime.require_segmentor()
 
     started = time.perf_counter()
     try:
         response = await run_in_threadpool(
             _segment_response,
-            segment,
+            segmentor,
             image_bytes,
             file.filename or "upload",
             output_vis=output_vis,

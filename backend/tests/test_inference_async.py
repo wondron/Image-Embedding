@@ -158,7 +158,7 @@ class AsyncInferenceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_segment_invalid_image_is_nonblocking_and_keeps_error_mapping(self):
         model = BlockingInference(error=ValueError("invalid image bytes"))
-        self.service.segmentor = SimpleNamespace(detect=model)
+        self.runtime.require_segmentor = Mock(return_value=SimpleNamespace(detect=model))
 
         with self.assertRaises(AppError) as raised:
             await self.while_model_is_blocked(

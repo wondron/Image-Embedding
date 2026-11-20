@@ -96,6 +96,8 @@ python backend/scripts/index_folder.py
 
 GroundingDINO 在启动时按 `GROUNDINGDINO_CONFIG` 加载，`model_path` 指向 ONNX，`tokenizer_path` 指向包含 `tokenizer.json` 的目录，`use_gpu` 控制是否请求 CUDA。缺少或为空的配置段会跳过加载；已有配置段默认启用，也可设 `enabled: false` 关闭。预热使用 `Settings.warmup.enabled` 和 `groundingdino_runs`（默认 3 次）。实例保存在 `ApplicationState.detector`，业务入口可通过 `runtime.require_detector()` 获取；加载或预热失败记录在 `detector_error`，原有 embedding 服务继续运行。Nacos 更新时，检测配置及 `TOTAL_CONFIG.device_id` 未变则复用实例，变化时先加载、预热成功再替换，失败保留旧配置和旧实例。当前只接入模型生命周期，检索仍按整图提取特征。
 
+分割模型（`/api/tools/segment`）按同样的规则管理：启动时按 `SEGMENT_CONFIG` 加载（`model_path` 必填；缺少或为空的配置段跳过加载，`enabled: false` 关闭），预热次数为 `Settings.warmup.segment_runs`（默认 3 次）。实例保存在 `ApplicationState.segmentor`，接口通过 `runtime.require_segmentor()` 获取；加载或预热失败记录在 `segmentor_error`，该接口返回 503（detail 为失败原因），其他服务继续运行。Nacos 更新时，`SEGMENT_CONFIG` 及 `TOTAL_CONFIG.device_id` 未变则复用实例（不重新读 1.2 GB 权重、不重新预热），变化时先加载、预热成功再替换，失败保留旧配置和旧实例。路径不变、权重文件被原地替换时需要重启。
+
 ### 换 embedding 模型
 
 模型权重随镜像发布（不挂载目录），所以换模型时镜像里要同时带新旧两个版本：

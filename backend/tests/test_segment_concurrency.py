@@ -79,7 +79,7 @@ class FakeBindingSession:
 class SegmentConcurrencyTests(unittest.TestCase):
     def model(self, session, *, use_iobinding):
         with patch.object(OnnxSegmentPy, "load_model"):
-            model = OnnxSegmentPy({"SEGMENT_CONFIG": {"use_iobinding": use_iobinding}})
+            model = OnnxSegmentPy({"SEGMENT_CONFIG": {"model_path": "segment.onnx", "use_iobinding": use_iobinding}})
         model.sess = session
         model.input_name = "image"
         model.output_name = "mask"

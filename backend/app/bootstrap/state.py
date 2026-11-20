@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from app.clients.ground_dino import GdinoDetect
     from app.core.config.nacos import NacosConfigProvider
     from app.services.predict.food_service import FoodService
+    from app.services.predict.pipeline.a_onnx_segment import OnnxSegmentPy
     from app.bootstrap.catalog import CatalogServices
     from app.bootstrap.model_registry import ModelRegistry
     from app.bootstrap.reconciler import BackgroundReconciler
@@ -46,6 +47,10 @@ class ApplicationState:
     # 业务搜图的区域搜索轮流使用 GroundingDINO（app.api.services.region_search）：在事件循环上排队，
     # 排队时被取消的请求不会再占用模型；正在推理的那次跑完才轮到下一个
     detector_turn: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
+    # SEGMENT_CONFIG 的分割模型，供 /api/tools/segment 使用；没有这一节或 enabled 为 false 时不加载。
+    # 加载、预热失败只记在 segmentor_error，不影响就绪状态和其他接口
+    segmentor: OnnxSegmentPy | None = None
+    segmentor_error: str | None = None
     initialization_error: str | None = None
     warmup_error: str | None = None
     retrieval: Optional["RetrievalStack"] = None
@@ -106,6 +111,13 @@ class ApplicationState:
                 raise err.not_ready(detail)
             return self.detector
 
+    def require_segmentor(self) -> OnnxSegmentPy:
+        with self.configuration_lock:
+            if self.stopping or self.segmentor is None:
+                detail = self.segmentor_error or "segment model is disabled or not initialized"
+                raise err.not_ready(detail)
+            return self.segmentor
+
     def require_catalog(self) -> "CatalogServices":
         with self.configuration_lock:
             if self.catalog is None:
@@ -121,6 +133,7 @@ class ApplicationState:
         embedder: Any = None,
         *,
         detector: GdinoDetect | None = None,
+        segmentor: OnnxSegmentPy | None = None,
     ) -> None:
         """原子更新已准备好的配置、服务和共享模型实例。"""
         with self.configuration_lock:
@@ -131,6 +144,8 @@ class ApplicationState:
                 self.embedder = embedder
             self.detector = detector
             self.detector_error = None
+            self.segmentor = segmentor
+            self.segmentor_error = None
             self.initialization_error = None
             self.warmup_error = None
 
@@ -200,6 +215,7 @@ class ApplicationState:
                         await self.http_client.aclose()
                     finally:
                         self.detector = None
+                        self.segmentor = None
 
 
 def get_application_state(request: Request) -> ApplicationState:

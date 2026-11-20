@@ -30,7 +30,11 @@ def is_uuid(value: str) -> bool:
 
 class FoodService:
     def __init__(self, cfg, embedding):
-        """embedding：进程内共用的 Embedder（由 bootstrap.lifespan 构建）。"""
+        """embedding：进程内共用的 Embedder（由 bootstrap.lifespan 构建）。
+
+        每次重新加载配置都会新建 FoodService，所以这里不加载模型：分割模型由 lifespan 单独
+        管理（ApplicationState.segmentor），配置没变时重新加载也不会再读一遍权重。
+        """
         self.searchTool = GetGlobalData(cfg)
         self.searchFilter = GlobalFilter(cfg, embedding)
         self.embeddingTool = embedding
