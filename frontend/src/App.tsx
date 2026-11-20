@@ -3,10 +3,11 @@ import {
   Layers3, ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUpRight, Check, ChefHat,
   CircleHelp, Cpu, Database, FolderOpen, ImageIcon, Images, LayoutGrid, List, Link2, PanelLeftClose, PanelLeftOpen,
   ListFilter, ListTree, LoaderCircle, Menu, ScanLine, Search, Settings2, SlidersHorizontal,
-  Tags, Upload, UploadCloud, Workflow, X,
+  Tags, Upload, UploadCloud, Workflow, Wrench, X,
 } from 'lucide-react'
 import { ManagementViews, type ManagementView } from './components/ManagementViews'
 import { EnumConfigPage } from './pages/enums'
+import { ToolsPage } from './pages/tools'
 import { CategoryConfigPage } from './pages/categories'
 import { ModelVersionsPage } from './pages/models'
 import { Dialog } from './components/Dialog'
@@ -37,7 +38,8 @@ import {
 import { HeatingFields, ResultMetadata, ResultSceneLabel, ResultTags, SearchNeverEmpty, SearchNoMatch, SearchFilteredEmpty, isLibraryHit } from './features/search'
 import { SearchNumControl, SEARCH_NUM_DEFAULT, type CountRange } from './features/search-num'
 
-type View = 'search' | ManagementView
+/** 'tools': 模型工具, the backend's diagnostic model tools (POST /api/tools/gdino, /api/tools/segment). */
+type View = 'search' | 'tools' | ManagementView
 /** 自建库 (POST /api/search), 现网 Global (POST /api/search/global/*), 业务搜图 (POST /api/search/auto/*: 自建库 + 菜谱识别, Global 兜底). */
 type SearchTarget = 'local' | 'global' | 'auto'
 const SEARCH_TARGETS: ReadonlyArray<{ key: SearchTarget; label: string; title: string }> = [
@@ -66,6 +68,8 @@ function channelText(source?: SearchChannel): string {
 }
 const navigation = [
   { key: 'search' as const, name: '图搜图', icon: ScanLine, description: '全网发现，相似检索' },
+  // GroundingDINO detection and segmentation on one image (?view=tools&tool=gdino|segment)
+  { key: 'tools' as const, name: '模型工具', icon: Wrench, description: '调用 GroundingDINO 检测和分割模型' },
   { key: 'library' as const, name: '图片数据', icon: Images, description: '管理你的食材图库' },
   { key: 'import' as const, name: '上传与导入', icon: UploadCloud, description: '整理图片，准备入库' },
   { key: 'tasks' as const, name: '入库任务', icon: Workflow, description: '任务进度与失败记录' },
@@ -77,7 +81,7 @@ const navigation = [
   { key: 'models' as const, name: '模型版本', icon: Cpu, description: '换模型：生成向量、切换与回滚' },
 ]
 /** Views that are wired to the API and can be opened by URL (?view=<key>) → the parameter that selects an item in them. */
-const linkedViews: Readonly<Record<string, string>> = { enums: 'enum', categories: 'category', scenes: 'scene', models: 'model' }
+const linkedViews: Readonly<Record<string, string>> = { tools: 'tool', enums: 'enum', categories: 'category', scenes: 'scene', models: 'model' }
 const pageSize = 12
 const maxBytes = 15 * 1024 * 1024
 
@@ -167,7 +171,7 @@ function ResultTable({ items, onDetail, onDownload, downloading, selected, onTog
 function initialView(): View {
   try {
     const requested = new URLSearchParams(window.location.search).get('view')
-    if (requested === 'enums' || requested === 'categories' || requested === 'scenes' || requested === 'models') return requested // the keys of linkedViews
+    if (requested === 'tools' || requested === 'enums' || requested === 'categories' || requested === 'scenes' || requested === 'models') return requested // the keys of linkedViews
   } catch { /* keep the default view */ }
   return 'search'
 }
@@ -424,8 +428,8 @@ export default function App() {
     <aside className={`sidebar ${mobileNav ? 'sidebar-open' : ''}`}>
       <div className="sidebar-heading"><span>导航</span><button className="icon-button collapse-navigation" aria-label={navCollapsed ? '展开侧栏' : '收起侧栏'} title={navCollapsed ? '展开侧栏' : '收起侧栏'} aria-expanded={!navCollapsed} onClick={() => setNavCollapsed(value => !value)}>{navCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}</button></div>
       <nav aria-label="主导航"><span className="nav-group-label">图像检索</span>
-        {navigation.map(({ key, icon: Icon, name }, index) => <div key={key}>
-          {index === 1 && <span className="nav-group-label nav-group-second">数据管理</span>}
+        {navigation.map(({ key, icon: Icon, name }) => <div key={key}>
+          {key === 'library' && <span className="nav-group-label nav-group-second">数据管理</span>}
           <button className={`nav-item ${view === key ? 'active' : ''}`} onClick={() => navigate(key)} aria-label={name} title={name} aria-current={view === key ? 'page' : undefined}>
             <span className="nav-icon"><Icon size={16} strokeWidth={1.6} /></span><span className="nav-label">{name}</span>
           </button>
@@ -439,7 +443,8 @@ export default function App() {
 
     <div className="main-shell"><header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" aria-label="展开导航" onClick={() => setMobileNav(true)}><Menu size={20} /></button><div className="topbar-title"><h1>{pageInfo.name}</h1><span>食材图像管理 / {pageInfo.description}</span></div></div><div className="topbar-actions"><button className="icon-button" title="使用说明" aria-label="使用说明" onClick={() => setHelpOpen(true)}><CircleHelp size={17} /></button><button className="icon-button" title="连接设置" aria-label="连接设置" disabled={batchRunning} onClick={() => { setApiDraft(apiBase); setSettingsOpen(true) }}><Settings2 size={17} /></button></div></header>
     <main className={view === 'search' ? 'search-page' : view === 'library' ? 'management-page library-page' : view === 'import' ? 'management-page import-page' : 'management-page'}>
-      {view !== 'search' && view !== 'enums' && view !== 'categories' && view !== 'scenes' && view !== 'models' && <ManagementViews view={view} onNavigate={navigate} apiBase={apiBase} />}
+      {view !== 'search' && view !== 'tools' && view !== 'enums' && view !== 'categories' && view !== 'scenes' && view !== 'models' && <ManagementViews view={view} onNavigate={navigate} apiBase={apiBase} />}
+      {view === 'tools' && <ToolsPage apiBase={apiBase} />}
       {view === 'enums' && <EnumConfigPage apiBase={apiBase} />}
       {view === 'models' && <ModelVersionsPage apiBase={apiBase} />}
       {view === 'categories' && <CategoryConfigPage apiBase={apiBase} />}

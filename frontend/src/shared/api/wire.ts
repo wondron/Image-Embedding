@@ -895,6 +895,49 @@ export interface EmbeddingBuildResponseWire {
   build: EmbeddingBuildWire | null
 }
 
+// -- model tools: POST /api/tools/* (schemas/tools.py; 诊断用的底层模型工具) -------------------
+
+/**
+ * POST /api/tools/segment (multipart `file`; query `output_vis`). `mask_png_base64` is a grayscale PNG
+ * the size of the image: each pixel's class id (0 = background) for a multi-class model, a 0–255
+ * probability for a single-channel one. `visual_png_base64` only with output_vis=true.
+ */
+export interface SegmentResponseWire {
+  ok: true
+  filename: string
+  width: number
+  height: number
+  latency_ms: number
+  mask_png_base64: string
+  visual_png_base64: string | null
+}
+
+/** schemas/tools.py GdinoDetection. */
+export interface GdinoDetectionWire {
+  /** The caption's word(s) matched to the box; '' when no word passed text_threshold. */
+  label: string
+  score: number
+  /** [x1, y1, x2, y2] in pixels of the image as the server decoded it, clipped to it. */
+  box: number[]
+}
+
+/**
+ * POST /api/tools/gdino (multipart `file`; query `text_range` (repeatable), `box_threshold`,
+ * `text_threshold`). caption and the thresholds are the ones used: GROUNDINGDINO_CONFIG fills in
+ * what the request left out. detections: highest score first, after NMS.
+ */
+export interface GdinoResponseWire {
+  ok: true
+  filename: string
+  width: number
+  height: number
+  caption: string
+  box_threshold: number
+  text_threshold: number
+  latency_ms: number
+  detections: GdinoDetectionWire[]
+}
+
 // -- GET /api/ping ------------------------------------------------------------------------
 
 /** schemas/predict.py PingResponse. */
