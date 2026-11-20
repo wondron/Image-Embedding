@@ -37,7 +37,7 @@ from app.core.enums import (
     SYSTEM_ENUMS,
 )
 
-logger = logging.getLogger("config.enums")
+logger = logging.getLogger("enums")
 
 FILE_HEADER = """\
 # 枚举取值：数据库、接口和 Qdrant payload 共用这里的 value。后端读写见 app/core/config/enum_store.py；
