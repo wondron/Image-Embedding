@@ -69,7 +69,10 @@ class GdinoDetect:
         logger.info("g-dino 模型预热完成，耗时 %.2fs", time.time() - started_at)
 
 
-    def _prepare_caption(self, text_range):
+    def prepare_caption(self, text_range):
+        """detect 用的 caption：None 时取 GROUNDINGDINO_CONFIG.caption；字符串原样使用（去掉首尾空白）；
+        类别列表用「 . 」连起来，末尾加「 .」。
+        """
         if text_range is None:
             return self.caption
         if isinstance(text_range, str):
@@ -88,7 +91,7 @@ class GdinoDetect:
         if self.sess is None:
             raise err.not_ready("g-dino 模型尚未加载！")
         result, _ = self.predict_with_metadata(
-            imgbgr, self._prepare_caption(text_range),
+            imgbgr, self.prepare_caption(text_range),
             self.box_threshold if box_threshold is None else box_threshold,
             self.text_threshold if text_threshold is None else text_threshold,
         )

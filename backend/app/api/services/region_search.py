@@ -91,6 +91,19 @@ def decode(image_bytes: bytes) -> np.ndarray:
     return image
 
 
+def pixel_box(box: Sequence[float], *, width: int, height: int) -> tuple[int, int, int, int]:
+    """GroundingDINO 的一个检测框（归一化的 cx, cy, w, h）换成 width x height 图片上的像素坐标
+    x1, y1, x2, y2，并裁到图内（/api/tools/gdino 也用它，返回的框和这里裁剪的框一致）。
+    """
+    cx, cy, w, h = box
+    return (
+        max(0, math.floor((cx - w / 2) * width)),
+        max(0, math.floor((cy - h / 2) * height)),
+        min(width, math.ceil((cx + w / 2) * width)),
+        min(height, math.ceil((cy + h / 2) * height)),
+    )
+
+
 def regions_of(
     boxes: Sequence[Sequence[float]],
     scores: Sequence[float],
@@ -100,15 +113,12 @@ def regions_of(
     height: int,
     limit: int,
 ) -> list[Region]:
-    """GroundingDINO 的检测框（归一化的 cx, cy, w, h）换成 width x height 图片上的像素坐标，
-    并裁到图内；丢掉小的；按置信度从高到低，最多 limit 个。
+    """GroundingDINO 的检测框换成 width x height 图片上的像素坐标（pixel_box）；丢掉小的；
+    按置信度从高到低，最多 limit 个。
     """
     found = []
-    for (cx, cy, w, h), score, label in zip(boxes, scores, labels):
-        x1 = max(0, math.floor((cx - w / 2) * width))
-        y1 = max(0, math.floor((cy - h / 2) * height))
-        x2 = min(width, math.ceil((cx + w / 2) * width))
-        y2 = min(height, math.ceil((cy + h / 2) * height))
+    for box, score, label in zip(boxes, scores, labels):
+        x1, y1, x2, y2 = pixel_box(box, width=width, height=height)
         if x2 - x1 < MIN_REGION_SIDE or y2 - y1 < MIN_REGION_SIDE:
             continue
         found.append(Region(str(label).strip(), float(score), (x1, y1, x2, y2)))
