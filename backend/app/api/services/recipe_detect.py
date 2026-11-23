@@ -50,13 +50,18 @@ class RecipeOutcome:
     skipped: str | None = None  # 完全没有运行的原因
 
 
+def recognised(match: RecipeMatch, threshold: float) -> bool:
+    """一个框最相近的菜品算不算识别出来了：有菜名，相似度高于 threshold（不含等于）。"""
+    return bool(match.label) and match.score > threshold
+
+
 def dish_names(matches: Sequence[RecipeMatch], threshold: float) -> list[str]:
-    """相似度高于 threshold 的菜名：同名只留一个（按它最高的相似度），按相似度从高到低，
-    相同时保持框的顺序。
+    """识别出来的（recognised）菜名：同名只留一个（按它最高的相似度），按相似度从高到低，
+    相同时保持框的顺序。/api/tools/recipe 也用它，给出业务搜图会返回的菜名。
     """
     best: dict[str, float] = {}
     for match in matches:
-        if match.label and match.score > threshold and match.score > best.get(match.label, -math.inf):
+        if recognised(match, threshold) and match.score > best.get(match.label, -math.inf):
             best[match.label] = match.score
     return sorted(best, key=best.__getitem__, reverse=True)
 

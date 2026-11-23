@@ -199,6 +199,22 @@ class RecipeClassifierTests(unittest.TestCase):
         self.assertEqual(create.call_args.args[1:], ("cpu",))
         self.assertEqual(create.call_args.kwargs, {"device_id": 0})
 
+    def test_rank_lists_distinct_dishes_best_first_starting_with_the_match(self):
+        feature = [0, 1, 1, 0.5]  # 归一化后清蒸鲈鱼的第二条特征最近（0.933），第一条 0.667 是同一道菜
+        session = FakeSession([feature] * 4)
+        classifier, _ = classifier_with(self, session)
+        image = np.zeros((30, 50, 3), dtype=np.uint8)
+
+        ranked = classifier.rank(image, 3)
+        self.assertEqual([match.label for match in ranked], ["清蒸鲈鱼", "凉拌猪耳", "红烧肉"])
+        self.assertAlmostEqual(ranked[0].score, 1.4 / 1.5, places=6)
+        self.assertAlmostEqual(ranked[1].score, 0.5 / 1.5, places=6)
+        self.assertAlmostEqual(ranked[2].score, 0.0, places=6)
+        # 底库只有三道菜；第一个就是 match 给出的（业务搜图用的）
+        self.assertEqual(classifier.rank(image, 10), ranked)
+        self.assertEqual(classifier.rank(image, 1), [classifier.match(image)])
+        self.assertEqual(len(session.runs), 4)  # 每次一张图、一次推理
+
     def test_use_gpu_and_the_device_come_from_the_configuration(self):
         files = ModelFiles(self)
         config = {**files.config(use_gpu="true"), "TOTAL_CONFIG": {"device_id": 1}}

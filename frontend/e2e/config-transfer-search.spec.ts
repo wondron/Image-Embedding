@@ -276,3 +276,57 @@ test('业务搜图把菜谱识别的菜名显示成一张没有图片的结果�
   await expect(page.locator('.search-bottom-note')).toContainText('检索通道：自建库没有结果，菜谱识别出了菜名')
   await expect(page.locator('.selection-count')).toHaveText('已选择 0 张')
 })
+
+test('业务搜图标出区域搜索的结果和查询图上的那个区域；菜谱识别的卡把查询图带到模型工具', async ({ page }) => {
+  // The whole image had nothing: a hit of the region search (its box in details.region), then the recipe card
+  const regionHit = { source: 'self', ...hit, details: { ...hit.details, outputs_heating: false, region: { label: 'food', score: 0.6213, box: [0, 0, 1, 1] } } }
+  const recipe = { source: 'recipe', tags: '荷塘小炒', description: '', original_url: null, similarity: null, details: {} }
+  await page.route('**/api/search/auto/file', route => route.fulfill({ json: {
+    ok: true, trace_id: 'region-1', scene: 'general', items: [regionHit, recipe], fallback: { status: 'not_needed' },
+  } }))
+  const recipeCalls: string[] = []
+  await page.route(url => url.pathname === '/api/tools/recipe', route => {
+    recipeCalls.push(route.request().postDataBuffer()?.toString('latin1').includes('filename="query.png"') ? 'query.png' : 'other')
+    return route.fulfill({ json: {
+      ok: true, filename: 'query.png', width: 1, height: 1, caption: 'food', box_threshold: 0.4, text_threshold: 0.4, max_regions: 5,
+      threshold: 0.95, top_k: 5, detected: 0, regions: [], names: [], whole_image: [{ label: '荷塘小炒', score: 0.7 }], latency_ms: 300, classify_ms: 20,
+    } })
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: '业务搜图', exact: true }).click()
+  await page.getByLabel('选择查询图片', { exact: true }).setInputFiles(upload('query.png'))
+  await page.getByRole('button', { name: '开始搜索', exact: true }).click()
+
+  const cards = page.locator('.result-card')
+  await expect(cards).toHaveCount(2)
+  await expect(cards.nth(0).locator('.source-badge')).toHaveText('自建 · 区域')
+  await expect(cards.nth(1).locator('.source-badge')).toHaveText('菜谱识别')
+  await expect(page.locator('.search-bottom-note')).toContainText('检索通道：整图没有达到阈值的结果，区域搜索 + 菜谱识别')
+
+  // The hit's detail says which region of the query image found it, and draws it there
+  await cards.nth(0).getByRole('button', { name: /^查看图片详情/ }).click()
+  const detail = page.getByRole('dialog', { name: '图片详情', exact: true })
+  await expect(detail).toContainText('自建 · 区域搜索（整图没有达到阈值的结果）')
+  await expect(detail).toContainText('查询图里检测到的「food」区域搜到的（检测置信度 0.62，位置 0, 0, 1, 1，1 × 1 像素）')
+  await expect(detail.getByRole('img', { name: '查询图上搜到这张图的区域' }).locator('rect')).toHaveAttribute('width', '1')
+  await detail.getByRole('button', { name: '关闭', exact: true }).last().click()
+
+  // The recipe card's detail says how the names came about and opens 模型工具 · 菜谱识别 with the query image
+  await cards.nth(1).getByRole('button', { name: /^查看图片详情/ }).click()
+  const recipeDetail = page.getByRole('dialog', { name: '菜谱识别结果', exact: true })
+  await expect(recipeDetail).toContainText('RECIPE_DETECT_CONFIG.threshold')
+  await recipeDetail.getByRole('button', { name: '在模型工具里看这张图的检测框和菜谱识别' }).click()
+  await expect(page).toHaveURL(/[?&]view=tools(&|$)/)
+  await expect(page).toHaveURL(/[?&]tool=recipe(&|$)/)
+  const controls = page.getByRole('region', { name: '模型工具' }).getByRole('region', { name: '调用参数' })
+  await expect(controls.getByRole('button', { name: '菜谱识别' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(controls).toContainText('query.png')
+  await controls.getByRole('button', { name: '开始识别', exact: true }).click()
+  await expect(page.getByRole('region', { name: '识别结果' }).locator('.rt-outcome')).toContainText('没有可识别的检测框')
+  expect(recipeCalls).toEqual(['query.png'])
+
+  // Opened from the navigation, 模型工具 starts without an image
+  await page.getByRole('navigation', { name: '主导航' }).getByRole('button', { name: '图搜图' }).click()
+  await page.getByRole('navigation', { name: '主导航' }).getByRole('button', { name: '模型工具' }).click()
+  await expect(controls).toContainText('点击上传，或拖拽图片至此')
+})

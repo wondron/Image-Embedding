@@ -1,9 +1,15 @@
 import { ApiError, requestJsonResult, type ApiLabels } from '../../shared/api'
-import { toDetectionResult, toSegmentResult, type DetectionResult, type SegmentResult } from './model'
+import {
+  toDetectionResult, toRecipeResult, toSegmentResult, type DetectionResult, type RecipeResult, type SegmentResult,
+} from './model'
 
 const label = (action: string): ApiLabels => ({ service: '模型工具服务', endpoint: '模型工具接口', action })
 const DETECT = label('目标检测')
 const SEGMENT = label('图像分割')
+const RECIPE = label('菜谱识别')
+
+/** How many close dishes the page lists per box (the server allows 1–10). */
+export const RECIPE_TOP_K = 5
 
 export interface ToolRequestOptions {
   baseUrl?: string
@@ -43,6 +49,38 @@ export async function detectObjects(
   const detection = toDetectionResult(result.body)
   if (!detection) throw unreadable(result.status, result.traceId)
   return detection
+}
+
+export interface RecipeParams {
+  /** text_range: one caption; null: AUTO_SEARCH_REGION_CONFIG.caption (what 业务搜图 detects). */
+  caption?: string | null
+  /** null: AUTO_SEARCH_REGION_CONFIG.box_threshold. */
+  boxThreshold?: number | null
+  /** null: AUTO_SEARCH_REGION_CONFIG.text_threshold. */
+  textThreshold?: number | null
+  /** null: AUTO_SEARCH_REGION_CONFIG.max_regions. */
+  maxRegions?: number | null
+}
+
+/**
+ * POST /api/tools/recipe: 业务搜图's 菜谱识别 on the image, step by step — its boxes, each crop's closest
+ * dishes and the whole image's. The threshold is not sent: the response says the configured one
+ * (RECIPE_DETECT_CONFIG.threshold) and the page tries others on the scores it has.
+ */
+export async function recognizeRecipes(
+  file: File,
+  { caption = null, boxThreshold = null, textThreshold = null, maxRegions = null }: RecipeParams = {},
+  { baseUrl, signal }: ToolRequestOptions = {},
+): Promise<RecipeResult> {
+  const query = new URLSearchParams({ top_k: String(RECIPE_TOP_K) })
+  if (caption) query.set('text_range', caption)
+  if (boxThreshold !== null) query.set('box_threshold', String(boxThreshold))
+  if (textThreshold !== null) query.set('text_threshold', String(textThreshold))
+  if (maxRegions !== null) query.set('max_regions', String(maxRegions))
+  const result = await requestJsonResult('/api/tools/recipe', { baseUrl, signal, method: 'POST', query, form: imageForm(file), labels: RECIPE })
+  const recipe = toRecipeResult(result.body)
+  if (!recipe) throw unreadable(result.status, result.traceId)
+  return recipe
 }
 
 /**

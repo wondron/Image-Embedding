@@ -3,21 +3,38 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import json
 import logging
 import time
-from typing import Any, Sequence
+from typing import TYPE_CHECKING, Any, Sequence
 
+import numpy as np
 from fastapi import UploadFile
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import require_food_service
-from app.api.services.region_search import decode, pixel_box
-from app.schemas.tools import EmbeddingResponse, GdinoDetection, GdinoResponse, SegmentResponse
+from app.api.services.recipe_detect import dish_names, recognised
+from app.api.services.region_search import Region, crop, decode, find_regions, pixel_box
+from app.core.config.settings import AutoSearchRegionSettings, RecipeDetectSettings
+from app.schemas.tools import (
+    RECIPE_TOP_K_DEFAULT,
+    EmbeddingResponse,
+    GdinoDetection,
+    GdinoResponse,
+    RecipeCandidate,
+    RecipeRegion,
+    RecipeToolResponse,
+    SegmentResponse,
+)
 from app.api.uploads import read_upload
 from app.core import errors
 from app.core.errors import AppError
 from app.utils.image import encode_png_base64
 from app.bootstrap.state import ApplicationState
+
+if TYPE_CHECKING:
+    from app.clients.recipe_classifier import RecipeClassifier, RecipeMatch
 
 
 logger = logging.getLogger("svc.tools")
@@ -251,6 +268,164 @@ async def gdino(
         response.text_threshold,
         len(response.detections),
         response.latency_ms,
+    )
+    return response
+
+
+def _recipe_parameters(
+    runtime: ApplicationState,
+    detector: Any,
+    *,
+    text_range: str | list[str] | None,
+    box_threshold: float | None,
+    text_threshold: float | None,
+    max_regions: int | None,
+    threshold: float | None,
+) -> tuple[AutoSearchRegionSettings, float]:
+    """业务搜图的菜谱识别用的参数：检测按 AUTO_SEARCH_REGION_CONFIG（区域搜索关着也按它），阈值按
+    RECIPE_DETECT_CONFIG.threshold；请求里给了的换成请求的。请求的取值路由已经检查过，所以这里
+    出问题的只能是配置：NOT_READY（503），detail 说明是哪一项。
+    """
+    try:
+        settings = AutoSearchRegionSettings.from_config(runtime.config)
+        recipe = RecipeDetectSettings.from_config(runtime.config)
+    except ValueError as exc:
+        raise errors.not_ready(f"配置有误：{exc}") from exc
+    overrides = {
+        "caption": None if text_range is None else detector.prepare_caption(text_range),
+        "box_threshold": box_threshold,
+        "text_threshold": text_threshold,
+        "max_regions": max_regions,
+    }
+    settings = dataclasses.replace(settings, **{key: value for key, value in overrides.items() if value is not None})
+    try:
+        settings.check()
+    except ValueError as exc:
+        raise errors.not_ready(f"配置有误：{exc}") from exc
+    return settings, recipe.threshold if threshold is None else threshold
+
+
+def _recipe_detection(
+    detector: Any, image_bytes: bytes, settings: AutoSearchRegionSettings
+) -> tuple[np.ndarray, list[Region], int]:
+    """在工作线程里（轮到 GroundingDINO 时）解码、检测，和业务搜图一样（region_search.find_regions）。
+    返回解码后的图、用到的检测框和 GroundingDINO 给出的框数。解不开是 ValueError（422）；
+    图解码之后的错误都是模型或配置的问题（500）。
+    """
+    image = decode(image_bytes)
+    try:
+        regions, detected = find_regions(detector, image, settings)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+    return image, regions, detected
+
+
+def _recipe_candidates(
+    classifier: RecipeClassifier, image: np.ndarray, regions: Sequence[Region], top_k: int
+) -> tuple[list[list[RecipeMatch]], list[RecipeMatch]]:
+    """在工作线程里：每个检测框的裁剪图（业务搜图识别的就是它）和整张图最相近的 top_k 道菜。"""
+    return [classifier.rank(crop(image, region), top_k) for region in regions], classifier.rank(image, top_k)
+
+
+def _candidates(matches: Sequence[RecipeMatch]) -> list[RecipeCandidate]:
+    return [RecipeCandidate(label=match.label, score=match.score) for match in matches]
+
+
+async def recipe(
+    runtime: ApplicationState,
+    file: UploadFile,
+    *,
+    text_range: str | Sequence[str] | None = None,
+    box_threshold: float | None = None,
+    text_threshold: float | None = None,
+    max_regions: int | None = None,
+    threshold: float | None = None,
+    top_k: int = RECIPE_TOP_K_DEFAULT,
+) -> RecipeToolResponse:
+    """业务搜图的菜谱识别，每一步都摊开：检测框、每个框最相近的几道菜、哪些框过了阈值、
+    业务搜图会给出的菜名，另附整张图的识别结果作对比。
+
+    检测和业务搜图用同一个 GroundingDINO 实例、同样的解码、取框和裁剪，和业务搜图、/api/tools/gdino
+    轮流使用模型；识别在交出轮次之后进行，不占着 GroundingDINO。
+    """
+    image_bytes = await _read_tool_image(file, runtime)
+    # 两个模型都要加载了：没有时是 NOT_READY（503），detail 是原因（菜谱识别没开启、模型加载失败……）
+    classifier = runtime.require_recipe_classifier()
+    detector = runtime.require_detector()
+    settings, threshold = _recipe_parameters(
+        runtime, detector,
+        text_range=_text_range(text_range),
+        box_threshold=box_threshold,
+        text_threshold=text_threshold,
+        max_regions=max_regions,
+        threshold=threshold,
+    )
+
+    started = time.perf_counter()
+    try:
+        image, regions, detected = await _in_detector_turn(
+            runtime, _recipe_detection, detector, image_bytes, settings
+        )
+    except ValueError as exc:
+        raise AppError("INVALID_IMAGE", str(exc), http_status=422) from exc
+    except AppError:
+        raise
+    except Exception as exc:
+        logger.exception("recipe tool detection failed | filename=%s | err=%s", file.filename, exc)
+        raise AppError("TOOL_FAILED", f"recipe detection failed: {exc}", http_status=500) from exc
+    classify_started = time.perf_counter()
+    try:
+        per_region, whole = await run_in_threadpool(_recipe_candidates, classifier, image, regions, top_k)
+    except Exception as exc:
+        logger.exception("recipe tool classification failed | filename=%s | err=%s", file.filename, exc)
+        raise AppError("TOOL_FAILED", f"recipe classification failed: {exc}", http_status=500) from exc
+    finished = time.perf_counter()
+
+    closest = [ranked[0] for ranked in per_region if ranked]  # 每个框最相近的那道菜：业务搜图用的就是它
+    response = RecipeToolResponse(
+        ok=True,
+        filename=file.filename or "upload",
+        width=int(image.shape[1]),
+        height=int(image.shape[0]),
+        caption=settings.caption,
+        box_threshold=float(settings.box_threshold),
+        text_threshold=float(settings.text_threshold),
+        max_regions=settings.max_regions,
+        threshold=float(threshold),
+        top_k=top_k,
+        detected=detected,
+        regions=[
+            RecipeRegion(
+                label=region.label,
+                score=round(region.score, 4),
+                box=list(region.box),
+                candidates=_candidates(ranked),
+                accepted=bool(ranked) and recognised(ranked[0], threshold),
+            )
+            for region, ranked in zip(regions, per_region)
+        ],
+        names=dish_names(closest, threshold),
+        whole_image=_candidates(whole),
+        latency_ms=round((finished - started) * 1000.0, 2),
+        classify_ms=round((finished - classify_started) * 1000.0, 2),
+    )
+    logger.info(
+        "recipe tool ok | filename=%s | bytes=%d | size=%dx%d | caption=%r | box_threshold=%s | text_threshold=%s | "
+        "max_regions=%d | detected=%d | regions=%d | threshold=%s | names=%s | latency_ms=%.2f | classify_ms=%.2f",
+        response.filename,
+        len(image_bytes),
+        response.width,
+        response.height,
+        response.caption,
+        response.box_threshold,
+        response.text_threshold,
+        response.max_regions,
+        response.detected,
+        len(response.regions),
+        response.threshold,
+        json.dumps(response.names, ensure_ascii=False),
+        response.latency_ms,
+        response.classify_ms,
     )
     return response
 

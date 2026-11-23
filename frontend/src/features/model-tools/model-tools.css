@@ -70,6 +70,58 @@ canvas.mt-layer { image-rendering: pixelated; }
 .mt-legend b { margin-left: 6px; }
 .mt-legend-note, .mt-empty-note { color: var(--muted); font-size: 13px; line-height: 1.7; }
 
+/* 菜谱识别: boxes by verdict (green: 业务搜图 returns its dish; gray, dashed: it does not) */
+.mt-summary .rt-detected { margin-left: 2px; color: var(--muted); font-size: 12px; font-weight: 400; }
+.rt-threshold { gap: 8px 12px; }
+.rt-threshold-slider { width: min(240px, 100%); accent-color: var(--primary); }
+/* .input comes from styles.css, which loads after this file (width: 100%): two classes win */
+.input.rt-threshold-number { width: 92px; height: 32px; padding: 3px 8px; font-variant-numeric: tabular-nums; }
+.input.rt-threshold-number[aria-invalid='true'] { border-color: #e9a59c; background: #fdf3f1; }
+.rt-threshold-note { color: var(--muted); font-size: 12px; }
+.rt-reset { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
+.rt-threshold-hint { margin-top: -6px; }
+
+.rt-outcome { display: flex; align-items: flex-start; gap: 9px; margin: 0; padding: 9px 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; color: #334155; font-size: 13px; line-height: 1.75; }
+.rt-outcome > svg { flex-shrink: 0; margin-top: 4px; color: #64748b; }
+.rt-outcome b { font-weight: 700; }
+.rt-outcome small { color: var(--muted); font-size: 12px; }
+.rt-outcome.is-accepted { border-color: #bfe5cf; background: #f0faf4; color: #14532d; }
+.rt-outcome.is-accepted > svg { color: #16a34a; }
+.rt-outcome.is-empty { border-color: #f2dcae; background: #fffbeb; color: #78350f; }
+.rt-outcome.is-empty > svg { color: #d97706; }
+.rt-names { display: inline-flex; flex-wrap: wrap; gap: 4px 6px; margin-right: 4px; vertical-align: 1px; }
+.rt-name { padding: 0 9px; border-radius: 999px; background: #dcfce7; color: #166534; font-weight: 700; line-height: 22px; }
+
+.rt-boxes rect.is-rejected { fill: rgb(var(--c) / .05); stroke-dasharray: 6 4; }
+
+.rt-table-scroll { min-width: 0; overflow-x: auto; }
+.rt-table td { vertical-align: middle; }
+.rt-input { display: block; flex-shrink: 0; width: 56px; height: 56px; border-radius: 6px; }
+.rt-detection { display: flex; align-items: center; gap: 2px; white-space: nowrap; }
+.rt-detection small { margin-left: 4px; color: var(--muted); }
+.rt-box { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.rt-dish { font-weight: 700; color: var(--text); white-space: nowrap; }
+.rt-score { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rt-meter { position: relative; flex-shrink: 0; width: 72px; height: 6px; border-radius: 999px; background: #e9edf3; }
+.rt-meter-fill { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: #94a3b8; }
+.rt-meter-fill.is-above { background: #16a34a; }
+.rt-meter-mark { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; background: #1f2937; }
+.rt-delta { font-size: 12px; }
+.rt-delta.is-above { color: #15803d; }
+.rt-delta.is-below { color: #b45309; }
+.rt-others { display: flex; flex-wrap: wrap; gap: 2px 10px; min-width: 150px; color: #475569; font-size: 12px; }
+.rt-others > span { white-space: nowrap; }
+.rt-result { display: inline-flex; align-items: center; gap: 4px; color: #64748b; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.rt-result.is-accepted { color: #15803d; }
+
+.rt-whole { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid #eef1f5; }
+.rt-whole > h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 13px; font-weight: 700; color: #475569; }
+.rt-whole > h3 small { margin-left: 4px; color: var(--muted); font-size: 12px; font-weight: 400; }
+.rt-whole-body { display: flex; align-items: flex-start; gap: 14px; min-width: 0; }
+.rt-candidates { display: flex; flex-direction: column; gap: 4px; min-width: 0; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.rt-candidates li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.rt-rank { min-width: 1.2em; color: var(--muted); font-variant-numeric: tabular-nums; }
+
 @media (max-width: 960px) {
   .model-tools { grid-template-columns: minmax(0, 1fr); }
   .mt-side { grid-template-columns: minmax(0, 1fr); }

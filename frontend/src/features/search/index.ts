@@ -6,3 +6,4 @@ export {
   SearchFilteredEmpty,
   type SearchNoMatchProps,
 } from './SearchEmptyStates'
+export { QueryRegionPreview } from './QueryRegionPreview'

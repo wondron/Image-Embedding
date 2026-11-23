@@ -67,6 +67,27 @@ describe('toAutoSearchResponse (§6.6)', () => {
     expect(response.outputsHeating).toBeUndefined()
   })
 
+  it('keeps which box of the query image found a region-search hit; a whole-image hit has none', () => {
+    const regionHit = (region: unknown) => ({ ...selfHit, details: { ...selfHit.details, region } })
+    const response = toAutoSearchResponse(envelope([
+      regionHit({ label: 'food', score: 0.6213, box: [25, 40, 300, 280] }),
+      selfHit,
+      recipeCard,
+    ]))
+    expect(response.source).toBe('self')
+    expect(response.items.map(item => item.region)).toEqual([{ label: 'food', score: 0.6213, box: [25, 40, 300, 280] }, undefined, undefined])
+    // the rest of the card is read as before
+    expect(response.items[0]).toMatchObject({ category: '牛排', similarity: 0.83, outputsHeating: true })
+    // anything that is not a box is left out, not guessed
+    for (const broken of [
+      null, 'food', { label: 'food', score: 1.5, box: [0, 0, 10, 10] }, { label: 'food', score: 0.6, box: [0, 0, 10] },
+      { label: 'food', score: 0.6, box: [10, 0, 10, 10] }, { label: 'food', score: 0.6, box: [-1, 0, 10, 10] },
+    ]) expect(toAutoSearchResponse(envelope([regionHit(broken)])).items[0].region).toBeUndefined()
+    // a box without a word still says where it was
+    expect(toAutoSearchResponse(envelope([regionHit({ score: 0.5, box: [0, 0, 10, 10] })])).items[0].region)
+      .toEqual({ label: '', score: 0.5, box: [0, 0, 10, 10] })
+  })
+
   it('reads the recipe card alone (the self-built library had nothing) and never gives it an image', () => {
     const response = toAutoSearchResponse(envelope([
       { ...recipeCard, original_url: 'https://img.example/not-a-recipe-image.jpg', similarity: 0.5 },

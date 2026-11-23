@@ -1,23 +1,26 @@
 /**
- * 业务搜图 — POST /api/search/auto/file | /url (contract §6.6): the self-built library and, when the
- * server has it on, 菜谱识别 side by side; 现网 Global as an optional fallback. `{ ok, trace_id, scene,
- * items, fallback, message? }`. Every item is the shared card with its own `source` first: a
- * self-built hit (read like POST /api/search; its `details.outputs_heating` says whether it carries
- * heating information), a Global result (read like POST /api/search/global/*), or 菜谱识别's one
- * card (the dish names as its tags, nothing else). The envelope says neither: what the UI shows
- * for the answer as a whole is worked out from the cards.
+ * 业务搜图 — POST /api/search/auto/file | /url (contract §6.6): the self-built library with the whole
+ * image; when that finds nothing over the threshold, the regions GroundingDINO finds in it (region
+ * search) and, when the server has it on, 菜谱识别 of those regions; 现网 Global as an optional
+ * fallback. `{ ok, trace_id, scene, items, fallback, message? }`. Every item is the shared card with
+ * its own `source` first: a self-built hit (read like POST /api/search; its `details.outputs_heating`
+ * says whether it carries heating information, `details.region` which box of the query image found
+ * it), a Global result (read like POST /api/search/global/*), or 菜谱识别's one card (the dish names
+ * as its tags, nothing else). The envelope says neither: what the UI shows for the answer as a
+ * whole is worked out from the cards.
  */
-import { asBoolean, asText, untrusted, untrustedList, type Untrusted } from '../../shared/lib/parse'
+import { asBoolean, asFiniteNumber, asText, untrusted, untrustedList, type Untrusted } from '../../shared/lib/parse'
 import type {
   AutoSearchFallbackWire,
   AutoSearchHitWire,
+  AutoSearchRegionWire,
   AutoSearchResponseWire,
   AutoSearchSelfDetailsWire,
 } from '../../shared/api'
 import { toApiSceneCode } from '../scene'
 import { toPredictImage } from './legacy-predict'
 import { readCardFields, toSearchImage } from './mapper'
-import type { SearchChannel, SearchFallback, SearchFallbackStatus, SearchImage, SearchResponse } from './model'
+import type { SearchChannel, SearchFallback, SearchFallbackStatus, SearchImage, SearchRegion, SearchResponse } from './model'
 
 const FALLBACK_STATUSES: readonly SearchFallbackStatus[] = ['not_needed', 'disabled', 'hit', 'empty', 'failed']
 
@@ -88,6 +91,22 @@ function toRecipeImage(hit: Untrusted<AutoSearchHitWire>, index: number): Search
   }
 }
 
+/**
+ * `details.region` of a self-built card: the box of the query image whose crop found it (region
+ * search). undefined when absent (a whole-image hit) or not a box: score in 0–1, x2 > x1 ≥ 0,
+ * y2 > y1 ≥ 0.
+ */
+function parseRegion(value: unknown): SearchRegion | undefined {
+  const region = untrusted<AutoSearchRegionWire>(value)
+  if (!region) return undefined
+  const score = asFiniteNumber(region.score)
+  const box = Array.isArray(region.box) ? region.box.map(asFiniteNumber) : []
+  if (score === null || score < 0 || score > 1 || box.length !== 4 || box.some(edge => edge === null)) return undefined
+  const [x1, y1, x2, y2] = box as number[]
+  if (x1 < 0 || y1 < 0 || x2 <= x1 || y2 <= y1) return undefined
+  return { label: asText(region.label) ?? '', score, box: [x1, y1, x2, y2] }
+}
+
 /** 业务搜图 body → SearchResponse. `items` must be an array (as for POST /api/search). */
 export function toAutoSearchResponse(payload: unknown): SearchResponse {
   const body = untrusted<AutoSearchResponseWire>(payload)
@@ -104,8 +123,11 @@ export function toAutoSearchResponse(payload: unknown): SearchResponse {
     if (channel === 'recipe') return toRecipeImage(hit, index)
     // Global results carry no category or heating information
     if (channel === 'global') return { ...toPredictImage(hit, index), source: 'global' as const, outputsHeating: false }
-    const outputsHeating = asBoolean(untrusted<AutoSearchSelfDetailsWire>(hit.details)?.outputs_heating) ?? envelopeHeating
-    return toSearchImage(hit, index, { source: channel, outputsHeating })
+    const details = untrusted<AutoSearchSelfDetailsWire>(hit.details)
+    const outputsHeating = asBoolean(details?.outputs_heating) ?? envelopeHeating
+    const image = toSearchImage(hit, index, { source: channel, outputsHeating })
+    const region = parseRegion(details?.region)
+    return region ? { ...image, region } : image
   })
   const source = answerSource(items)
   const message = source === 'empty' ? emptyMessage(asText(body.message), fallback) : asText(body.message)

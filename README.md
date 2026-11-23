@@ -100,6 +100,8 @@ GroundingDINO 在启动时按 `GROUNDINGDINO_CONFIG` 加载，`model_path` 指�
 
 分割模型（`/api/tools/segment`）按同样的规则管理：启动时按 `SEGMENT_CONFIG` 加载（`model_path` 必填；缺少或为空的配置段跳过加载，`enabled: false` 关闭），预热次数为 `Settings.warmup.segment_runs`（默认 3 次）。实例保存在 `ApplicationState.segmentor`，接口通过 `runtime.require_segmentor()` 获取；加载或预热失败记录在 `segmentor_error`，该接口返回 503（detail 为失败原因），其他服务继续运行。Nacos 更新时，`SEGMENT_CONFIG` 及 `TOTAL_CONFIG.device_id` 未变则复用实例（不重新读 1.2 GB 权重、不重新预热），变化时先加载、预热成功再替换，失败保留旧配置和旧实例。路径不变、权重文件被原地替换时需要重启。
 
+菜谱识别工具（`POST /api/tools/recipe`，前端「模型工具 · 菜谱识别」）把业务搜图的菜谱识别一步步摊开：和业务搜图用同一个 GroundingDINO 实例、同样的检测参数（`AUTO_SEARCH_REGION_CONFIG`，请求可以换 `text_range`、两个阈值和 `max_regions`）和同样的取框、裁剪，返回每个框的裁剪图在底库里最相近的几道菜（`top_k`，默认 5）和相似度、按 `RECIPE_DETECT_CONFIG.threshold`（请求可以换 `threshold`）哪些框过了阈值、业务搜图会给出的菜名，另附整张图的识别结果作对比（业务搜图只识别检测框）。前端拿到相似度后在浏览器里拖动阈值重新判断，不用重新调用；调好后改 `RECIPE_DETECT_CONFIG.threshold`。菜谱识别模型或 GroundingDINO 没有加载、`AUTO_SEARCH_REGION_CONFIG` 用不了时返回 503。业务搜图结果里，区域搜索的结果卡标「自建 · 区域」，详情里在查询图上画出搜到它的那个框；菜谱识别的结果卡能把查询图带到这个工具。
+
 ### 换 embedding 模型
 
 模型权重随镜像发布（不挂载目录），所以换模型时镜像里要同时带新旧两个版本：

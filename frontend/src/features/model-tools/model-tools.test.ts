@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   MAX_CLASSES, PALETTE, classColor, hexToRgb, maskValues, outlineRadius, paintCutout, paintMask, paintOutline, summarize,
 } from './mask'
-import { captionFrom, thresholdFrom, toDetectionResult, toSegmentResult } from './model'
+import {
+  captionFrom, dishNames, formatThreshold, isRecognised, isToolKey, maxRegionsFrom, thresholdFrom, toDetectionResult,
+  toRecipeResult, toSegmentResult, type RecipeRegion,
+} from './model'
 
 /** A width × height mask from rows of class ids. */
 function mask(rows: number[][]): Uint8Array {
@@ -31,6 +34,86 @@ describe('model tools input', () => {
     expect(thresholdFrom('0')).toBe(0)
     expect(thresholdFrom('1')).toBe(1)
     for (const text of ['1.2', '-0.1', 'abc', 'NaN']) expect(thresholdFrom(text)).toBeUndefined()
+  })
+
+  it('reads max_regions as a whole number in 1–20; blank is the configured value', () => {
+    expect(maxRegionsFrom(' ')).toBeNull()
+    expect(maxRegionsFrom('1')).toBe(1)
+    expect(maxRegionsFrom(' 20 ')).toBe(20)
+    for (const text of ['0', '21', '2.5', '-3', 'five']) expect(maxRegionsFrom(text)).toBeUndefined()
+  })
+
+  it('knows the three tools and writes thresholds with three decimals at most', () => {
+    expect(['gdino', 'segment', 'recipe'].every(isToolKey)).toBe(true)
+    expect(isToolKey('embedding')).toBe(false)
+    expect([0.95, 0.9, 0.9256, 1, 0].map(formatThreshold)).toEqual(['0.95', '0.9', '0.926', '1', '0'])
+  })
+})
+
+describe('菜谱识别', () => {
+  const region = (box: [number, number, number, number], ...candidates: Array<[string, number]>): RecipeRegion => ({
+    label: 'food', score: 0.8, box, candidates: candidates.map(([label, score]) => ({ label, score })),
+  })
+  const recipe = {
+    ok: true, filename: 'dish.png', width: 200, height: 100, caption: 'food', box_threshold: 0.4, text_threshold: 0.4,
+    max_regions: 5, threshold: 0.9, top_k: 5, detected: 3, latency_ms: 512.3, classify_ms: 31.2,
+    regions: [
+      { label: 'food', score: 0.9, box: [25, 25, 75, 75], accepted: true, candidates: [{ label: '清蒸鲈鱼', score: 0.93 }, { label: ' 红烧肉 ', score: 0.5 }] },
+      { label: '', score: 0.5, box: [112, 18, 188, 82], accepted: false, candidates: [{ label: '凉拌猪耳', score: 0.9 }] },
+    ],
+    names: ['清蒸鲈鱼', ' '],
+    whole_image: [{ label: '红烧肉', score: 1.0000004 }],
+  }
+
+  it('reads a recognition: the parameters used, each box with its closest dishes, and the whole image', () => {
+    expect(toRecipeResult(recipe)).toEqual({
+      width: 200, height: 100, caption: 'food', boxThreshold: 0.4, textThreshold: 0.4, maxRegions: 5, threshold: 0.9,
+      detected: 3, latencyMs: 512.3, classifyMs: 31.2,
+      regions: [
+        { label: 'food', score: 0.9, box: [25, 25, 75, 75], candidates: [{ label: '清蒸鲈鱼', score: 0.93 }, { label: '红烧肉', score: 0.5 }] },
+        { label: '', score: 0.5, box: [112, 18, 188, 82], candidates: [{ label: '凉拌猪耳', score: 0.9 }] },
+      ],
+      names: ['清蒸鲈鱼'],
+      // FP32 roundoff past 1 is kept as 1
+      wholeImage: [{ label: '红烧肉', score: 1 }],
+    })
+  })
+
+  it('refuses a recognition body that is not one', () => {
+    const broken = [
+      { ...recipe, ok: false },
+      { ...recipe, threshold: 1.5 },
+      { ...recipe, max_regions: 0 },
+      { ...recipe, detected: -1 },
+      { ...recipe, classify_ms: 'fast' },
+      { ...recipe, whole_image: null },
+      { ...recipe, whole_image: [{ label: '红烧肉', score: 1.2 }] },
+      { ...recipe, regions: [{ ...recipe.regions[0], box: [25, 25, 75, 175] }] }, // outside the image
+      { ...recipe, regions: [{ ...recipe.regions[0], candidates: null }] },
+      { ...recipe, regions: [{ ...recipe.regions[0], candidates: [{ label: 3, score: 0.9 }] }] },
+      { ...recipe, names: '清蒸鲈鱼' },
+    ]
+    for (const body of broken) expect(toRecipeResult(body)).toBeNull()
+  })
+
+  it('takes the names 业务搜图 takes: above the threshold (not equal), once each at its best, best first', () => {
+    const regions = [
+      region([0, 0, 20, 20], ['清蒸鲈鱼', 0.93], ['红烧肉', 0.92]),
+      region([20, 0, 40, 20], ['红烧肉', 0.97]),
+      region([40, 0, 60, 20], ['凉拌猪耳', 0.9]),   // equal to the threshold: not taken
+      region([60, 0, 80, 20], ['清蒸鲈鱼', 0.95]),  // the same dish, a better box
+      region([80, 0, 99, 20], ['', 0.99]),         // no name
+      region([0, 20, 20, 40]),                      // no candidate
+    ]
+    expect(dishNames(regions, 0.9)).toEqual(['红烧肉', '清蒸鲈鱼'])
+    expect(dishNames(regions, 0.96)).toEqual(['红烧肉'])
+    expect(dishNames(regions, 0.89)).toEqual(['红烧肉', '清蒸鲈鱼', '凉拌猪耳'])
+    expect(dishNames(regions, 1)).toEqual([])
+    // only the closest dish of a box counts, never the runner-up
+    expect(dishNames([region([0, 0, 20, 20], ['清蒸鲈鱼', 0.5], ['红烧肉', 0.99])], 0.9)).toEqual([])
+    // a tie keeps the boxes' order
+    expect(dishNames([region([0, 0, 20, 20], ['甲', 0.95]), region([20, 0, 40, 20], ['乙', 0.95])], 0.9)).toEqual(['甲', '乙'])
+    expect([isRecognised(undefined, 0), isRecognised({ label: '', score: 1 }, 0), isRecognised({ label: '甲', score: 0.5 }, 0.49)]).toEqual([false, false, true])
   })
 })
 

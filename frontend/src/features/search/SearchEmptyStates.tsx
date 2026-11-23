@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { ArrowRight, Images, Search } from 'lucide-react'
 import { EMPTY_COPY } from '../../shared/config'
 
@@ -22,9 +23,11 @@ export type SearchNoMatchProps = {
   libraryLikelyEmpty?: boolean
   onGoImport?: () => void
   message?: string | null
+  /** A further action next to the import CTA (业务搜图: look at the query in 模型工具). */
+  action?: ReactNode
 }
 
-export function SearchNoMatch({ libraryLikelyEmpty, onGoImport, message }: SearchNoMatchProps) {
+export function SearchNoMatch({ libraryLikelyEmpty, onGoImport, message, action }: SearchNoMatchProps) {
   const copy = EMPTY_COPY.searchNoMatch
   return (
     <div className="no-results">
@@ -37,6 +40,7 @@ export function SearchNoMatch({ libraryLikelyEmpty, onGoImport, message }: Searc
             {copy.ctaImport}
           </button>
         )}
+        {action}
       </div>
     </div>
   )

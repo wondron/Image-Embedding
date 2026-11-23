@@ -370,7 +370,7 @@ export interface PredictHitDetailsWire {
 /** schemas/predict.py PredictHit — the same card as a self-built hit (SearchHitWire). */
 export type PredictHitWire = SearchHitBaseWire<PredictHitDetailsWire>
 
-// -- POST /api/search/auto/* (业务搜图: 自建库 + 菜谱识别, 现网 Global 兜底; contract §6.6) ---
+// -- POST /api/search/auto/* (业务搜图: 自建库整图 → 区域搜索 + 菜谱识别, 现网 Global 兜底; contract §6.6) ---
 
 /**
  * schemas/auto_search.py AutoSearchUrlRequest — the JSON body of POST /api/search/auto/url; the
@@ -383,7 +383,7 @@ export interface AutoSearchUrlRequestWire {
   top_k?: number
   /** 自建库 only. Omit/null = 0.55; 0 = no threshold (never falls back); else [0.30, 1]. */
   score_threshold?: number | null
-  /** Ask 现网 Global when the self-built library and 菜谱识别 (if on) both have nothing; default false. */
+  /** Ask 现网 Global when the whole image, region search and 菜谱识别 (those on) all have nothing; default false. */
   global_fallback?: boolean
   trace_id?: string | null
   /** The caller's device, for the logs; at most 128 characters. */
@@ -405,6 +405,21 @@ export interface AutoSearchSelfDetailsWire extends SearchHitDetailsWire {
    * from older servers, which said it on the envelope.
    */
   outputs_heating?: boolean
+  /**
+   * Region search only (the whole image had nothing): the GroundingDINO box of the query image
+   * whose crop found this hit. Absent for whole-image hits.
+   */
+  region?: AutoSearchRegionWire
+}
+
+/** `details.region` of a region-search hit: the box in pixels of the query image as the server decoded it. */
+export interface AutoSearchRegionWire {
+  /** GroundingDINO's word for the box (AUTO_SEARCH_REGION_CONFIG.caption). */
+  label: string
+  /** Detection confidence, 0–1. */
+  score: number
+  /** [x1, y1, x2, y2]. */
+  box: number[]
 }
 
 /**
@@ -936,6 +951,57 @@ export interface GdinoResponseWire {
   text_threshold: number
   latency_ms: number
   detections: GdinoDetectionWire[]
+}
+
+/** schemas/tools.py RecipeCandidate — one dish of the recipe model's gallery close to an image. */
+export interface RecipeCandidateWire {
+  label: string
+  /** Cosine similarity, -1–1: the dish's closest gallery feature. */
+  score: number
+}
+
+/** schemas/tools.py RecipeRegion — a box 业务搜图's 菜谱识别 classifies, in the order it does. */
+export interface RecipeRegionWire {
+  /** GroundingDINO's word for the box. */
+  label: string
+  /** Detection confidence, 0–1. */
+  score: number
+  /** [x1, y1, x2, y2] in pixels of the image as the server decoded it: the crop that was classified. */
+  box: number[]
+  /** The crop's closest dishes (distinct names), best first; the first is the one 业务搜图 uses. */
+  candidates: RecipeCandidateWire[]
+  /** The first candidate is above `threshold` (strictly): 业务搜图 returns its name. */
+  accepted: boolean
+}
+
+/**
+ * POST /api/tools/recipe (multipart `file`; query `text_range` (repeatable), `box_threshold`,
+ * `text_threshold`, `max_regions`, `threshold`, `top_k`). 业务搜图's 菜谱识别 laid open: the detection
+ * parameters are AUTO_SEARCH_REGION_CONFIG's and the threshold RECIPE_DETECT_CONFIG's where the
+ * request left them out.
+ */
+export interface RecipeToolResponseWire {
+  ok: true
+  filename: string
+  width: number
+  height: number
+  caption: string
+  box_threshold: number
+  text_threshold: number
+  max_regions: number
+  threshold: number
+  top_k: number
+  /** Boxes GroundingDINO gave, before the small ones were dropped and max_regions applied. */
+  detected: number
+  /** Highest detection score first, at most max_regions. */
+  regions: RecipeRegionWire[]
+  /** What 业务搜图 returns at `threshold`: accepted names, each once, best first. */
+  names: string[]
+  /** The whole image's closest dishes, for comparison only: 业务搜图 classifies the boxes alone. */
+  whole_image: RecipeCandidateWire[]
+  latency_ms: number
+  /** Of latency_ms, the recipe model's part. */
+  classify_ms: number
 }
 
 // -- GET /api/ping ------------------------------------------------------------------------

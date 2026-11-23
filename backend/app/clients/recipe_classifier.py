@@ -5,7 +5,8 @@
 
     BGR 图 -> 保持比例缩放到 224×224 以内（INTER_AREA，长边 224），居中，其余部分补黑
            -> RGB，(x - 127.5) / 57.375，CHW -> ONNX 推理：256 维特征 -> L2 归一化
-           -> 和底库的每条特征算余弦相似度，取最高的一条：它的菜名和相似度
+           -> 和底库的每条特征算余弦相似度，取最高的一条：它的菜名和相似度（match；业务搜图用它）。
+              rank 给出最相近的几道不同的菜（模型工具 /api/tools/recipe 用它列出候选）
 
 底库（labels_path）是一个 pickle：robam_base_featrures（N × 256 的特征，键名就是这么拼的）和
 robam_base_labels（每条特征的菜名，一个菜名可以有几条特征）。读取时只还原 numpy 数组，别的对象
@@ -172,16 +173,38 @@ class RecipeClassifier:
         rgb = letterbox(image, self.input_size)[:, :, ::-1].astype(np.float32)
         return np.ascontiguousarray(((rgb - MEAN) / STD).transpose(2, 0, 1)[None])
 
-    def match(self, image: np.ndarray) -> RecipeMatch:
-        """一张 BGR 图在底库里最相近的菜品。"""
+    def scores(self, image: np.ndarray) -> np.ndarray:
+        """一张 BGR 图和底库每条特征的余弦相似度（N 个，顺序同 labels）。"""
         output = self.sess.run([self.output_name], {self.input_name: self.preprocess(image)})[0]
         feature = np.asarray(output, dtype=np.float32)
         if feature.shape != (1, self.features.shape[1]):
             raise RuntimeError(f"菜谱识别模型输出的形状不对：{feature.shape}，应为 (1, {self.features.shape[1]})")
         feature = feature / max(float(np.linalg.norm(feature)), float(np.finfo(np.float32).eps))
-        scores = np.dot(feature, self.features.T)[0]
+        return np.dot(feature, self.features.T)[0]
+
+    def match(self, image: np.ndarray) -> RecipeMatch:
+        """一张 BGR 图在底库里最相近的菜品。"""
+        scores = self.scores(image)
         best = int(np.argmax(scores))
         return RecipeMatch(self.labels[best], float(scores[best]))
+
+    def rank(self, image: np.ndarray, k: int) -> list[RecipeMatch]:
+        """一张 BGR 图在底库里最相近的 k 道菜，从高到低：菜名不重复，每道菜按它最相近的那条特征算
+        （一个菜名可以有几条特征）。第一个就是 match 给出的那个（相似度相同时取底库里靠前的，
+        和 argmax 一样）；底库里的菜名不到 k 个时少于 k 个。/api/tools/recipe 用它列出候选。
+        """
+        scores = self.scores(image)
+        ranked: list[RecipeMatch] = []
+        seen: set[str] = set()
+        for index in np.argsort(-scores, kind="stable"):
+            label = self.labels[index]
+            if label in seen:
+                continue
+            seen.add(label)
+            ranked.append(RecipeMatch(label, float(scores[index])))
+            if len(ranked) >= k:
+                break
+        return ranked
 
     def classify(self, images: Sequence[np.ndarray]) -> list[RecipeMatch]:
         """每张图最相近的菜品，顺序和传入的一样；逐张推理（见模块说明）。"""

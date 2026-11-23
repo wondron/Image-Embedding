@@ -154,6 +154,21 @@ def regions_of(
     return found[:limit]
 
 
+def find_regions(detector: Any, image: np.ndarray, settings: AutoSearchRegionSettings) -> tuple[list[Region], int]:
+    """查询图（BGR）上用到的检测框：按 settings 的 caption 和两个阈值跑 GroundingDINO，再经过
+    regions_of（像素坐标、丢掉小的、按置信度最多 max_regions 个）。另返回 GroundingDINO 给出的框数
+    （丢掉之前）。业务搜图的目标检测和 /api/tools/recipe 都用它：工具里看到的框就是业务搜图用的框。
+    """
+    boxes, scores, labels = detector.detect(
+        image,
+        text_range=settings.caption,
+        box_threshold=settings.box_threshold,
+        text_threshold=settings.text_threshold,
+    )
+    height, width = image.shape[:2]
+    return regions_of(boxes, scores, labels, width=width, height=height, limit=settings.max_regions), len(boxes)
+
+
 def crop(image: np.ndarray, region: Region) -> np.ndarray:
     """BGR 图像中的一块区域（视图，不复制）。"""
     x1, y1, x2, y2 = region.box
@@ -200,15 +215,8 @@ def _detect_and_crop(
     with timer.step(DECODE_STEP):
         image = decode(image_bytes)
     with timer.step(DETECT_STEP):
-        boxes, scores, labels = detector.detect(
-            image,
-            text_range=settings.caption,
-            box_threshold=settings.box_threshold,
-            text_threshold=settings.text_threshold,
-        )
+        regions, _ = find_regions(detector, image, settings)
     with timer.step(CROP_STEP):
-        height, width = image.shape[:2]
-        regions = regions_of(boxes, scores, labels, width=width, height=height, limit=settings.max_regions)
         crops = [crop(image, region) for region in regions]
         jpegs = [encode(piece) for piece in crops] if jpeg else []
     return regions, crops, jpegs

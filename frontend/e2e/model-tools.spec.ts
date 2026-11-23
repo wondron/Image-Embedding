@@ -42,26 +42,44 @@ const DETECTIONS = {
   ],
 }
 const SEGMENTATION = { ok: true, filename: 'dish.png', width: 160, height: 90, latency_ms: 356.2, mask_png_base64: MASK, visual_png_base64: null }
+// 业务搜图's 菜谱识别: two of the three boxes kept; the dish passes 0.95, the plate's closest dish does not
+const RECIPE = {
+  ok: true, filename: 'dish.png', width: 160, height: 90, caption: 'food . dish', box_threshold: 0.4, text_threshold: 0.4,
+  max_regions: 3, threshold: 0.95, top_k: 5, detected: 3, latency_ms: 640.2, classify_ms: 48.6,
+  regions: [
+    { label: 'food', score: 0.88, box: [40, 20, 120, 70], accepted: true, candidates: [{ label: '荷塘小炒', score: 0.9712 }, { label: '清蒸鲈鱼', score: 0.9031 }] },
+    { label: 'dish', score: 0.52, box: [10, 5, 150, 85], accepted: false, candidates: [{ label: '玉米面', score: 0.924 }, { label: '荷塘小炒', score: 0.91 }] },
+  ],
+  names: ['荷塘小炒'],
+  whole_image: [{ label: '玉米面', score: 0.9 }, { label: '荷塘小炒', score: 0.88 }],
+}
 
 interface ToolCall { url: URL; multipart: boolean; filename: boolean }
+type Answer = { status: number; json: unknown }
 
-async function mockApi(page: Page, gdino: { status: number; json: unknown } = { status: 200, json: DETECTIONS }) {
+/** recipe: one answer for every call, or one per call in turn (the last one repeats). */
+async function mockApi(page: Page, gdino: Answer = { status: 200, json: DETECTIONS }, recipe: Answer | Answer[] = { status: 200, json: RECIPE }) {
   const calls: ToolCall[] = []
+  const recipeAnswers = Array.isArray(recipe) ? [...recipe] : [recipe]
+  const answers: Record<string, () => Answer> = {
+    '/api/tools/gdino': () => gdino,
+    '/api/tools/segment': () => ({ status: 200, json: SEGMENTATION }),
+    '/api/tools/recipe': () => (recipeAnswers.length > 1 ? recipeAnswers.shift()! : recipeAnswers[0]),
+  }
   await page.route(url => url.pathname.startsWith('/api/'), async route => {
     const request = route.request()
     const url = new URL(request.url())
     if (url.pathname === '/api/ping') return route.fulfill({ json: { ok: true, max_image_bytes: 15 * 1024 * 1024 } })
     if (url.pathname === '/api/enums') return route.fulfill({ json: { ok: true, enums: [] } })
     if (url.pathname === '/api/scenes') return route.fulfill({ json: { ok: true, scenes: [], default_scene: 'general' } })
-    if (url.pathname !== '/api/tools/gdino' && url.pathname !== '/api/tools/segment') return route.abort('blockedbyclient')
+    const answer = answers[url.pathname]?.()
+    if (!answer) return route.abort('blockedbyclient')
     calls.push({
       url,
       multipart: (request.headers()['content-type'] ?? '').startsWith('multipart/form-data'),
       filename: (request.postDataBuffer()?.toString('latin1') ?? '').includes('name="file"; filename="dish.png"'),
     })
-    return url.pathname === '/api/tools/gdino'
-      ? route.fulfill({ status: gdino.status, json: gdino.json })
-      : route.fulfill({ json: SEGMENTATION })
+    return route.fulfill({ status: answer.status, json: answer.json })
   })
   return calls
 }
@@ -181,6 +199,106 @@ test('图像分割：只要 mask（output_vis=false），在浏览器里叠加�
 
   // the views are drawn here: the server was called once
   expect(calls).toHaveLength(1)
+})
+
+test('菜谱识别：按业务搜图的做法识别每个检测框，标出业务搜图会返回的菜名；阈值在浏览器里试', async ({ page }) => {
+  const calls = await mockApi(page)
+  await page.goto('/?view=tools&tool=recipe')
+  const tools = page.getByRole('region', { name: '模型工具' })
+  const controls = tools.getByRole('region', { name: '调用参数' })
+  await expect(controls.getByRole('button', { name: '菜谱识别' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(controls).toContainText('AUTO_SEARCH_REGION_CONFIG.caption')
+  await controls.getByLabel('选择图片', { exact: true }).setInputFiles(query)
+  await controls.getByLabel('检测什么').fill('food, dish')
+  await controls.getByLabel('max_regions').fill('25')
+  await expect(controls.getByRole('alert')).toHaveText('max_regions 要是 1～20 的整数。')
+  await expect(controls.getByRole('button', { name: '开始识别' })).toBeDisabled()
+  await controls.getByLabel('max_regions').fill('3')
+  await controls.getByRole('button', { name: '开始识别' }).click()
+
+  const result = tools.getByRole('region', { name: '识别结果' })
+  await expect(result.getByRole('table', { name: '每个检测框的识别结果' }).getByRole('row')).toHaveCount(3)
+  // the parameters typed, the rest left to AUTO_SEARCH_REGION_CONFIG; the threshold is not sent
+  expect(calls).toHaveLength(1)
+  expect(calls[0].url.pathname).toBe('/api/tools/recipe')
+  expect(calls[0]).toMatchObject({ multipart: true, filename: true })
+  expect(calls[0].url.searchParams.getAll('text_range')).toEqual(['food . dish'])
+  expect(calls[0].url.searchParams.get('max_regions')).toBe('3')
+  expect(calls[0].url.searchParams.get('top_k')).toBe('5')
+  for (const name of ['box_threshold', 'text_threshold', 'threshold']) expect(calls[0].url.searchParams.has(name)).toBe(false)
+
+  // at the configured threshold: the dish is returned, the plate is not
+  const summary = result.locator('.mt-summary')
+  await expect(summary).toContainText('荷塘小炒')
+  await expect(summary).toContainText('2（检测到 3 个）')
+  const outcome = result.locator('.rt-outcome')
+  await expect(outcome).toHaveClass(/is-accepted/)
+  await expect(outcome.locator('.rt-name')).toHaveText(['荷塘小炒'])
+  const rects = result.locator('svg.rt-boxes rect')
+  await expect(rects).toHaveCount(2)
+  await expect(rects.nth(0)).not.toHaveClass(/is-rejected/)
+  await expect(rects.nth(1)).toHaveClass(/is-rejected/)
+  await expect(result.locator('.mt-box-label')).toHaveText(['#1 荷塘小炒 0.971', '#2 玉米面 0.924'])
+  const rows = result.getByRole('table', { name: '每个检测框的识别结果' }).locator('tbody tr')
+  await expect(rows.nth(0)).toContainText('会返回')
+  await expect(rows.nth(0)).toContainText('清蒸鲈鱼 0.903')
+  await expect(rows.nth(1)).toContainText('低于阈值')
+  await expect(rows.nth(1)).toContainText('−0.0260')
+  // what the model was given: the box's crop, letterboxed
+  await expect(result.getByRole('img', { name: '#1 检测框的裁剪图（模型的输入）' }).locator('svg')).toHaveAttribute('viewBox', '40 20 80 50')
+  // a row highlights its box
+  await rows.nth(1).hover()
+  await expect(rects.nth(1)).toHaveClass(/is-active/)
+  await expect(rects.nth(0)).toHaveClass(/is-dim/)
+  // the whole image, for comparison
+  const whole = result.getByRole('region', { name: '整张图的识别结果' })
+  await expect(whole).toContainText('玉米面')
+  await expect(whole).toContainText('0.9000')
+
+  // a lower threshold takes the plate's dish too; a higher one takes nothing — without calling again
+  const threshold = result.getByLabel('菜谱阈值的数值')
+  await expect(threshold).toHaveValue('0.95')
+  await threshold.fill('0.92')
+  await expect(outcome.locator('.rt-name')).toHaveText(['荷塘小炒', '玉米面'])
+  await expect(rects.nth(1)).not.toHaveClass(/is-rejected/)
+  await expect(summary).toContainText('荷塘小炒、玉米面')
+  await threshold.fill('0.98')
+  await expect(outcome).not.toHaveClass(/is-accepted/)
+  await expect(outcome).toContainText('没有框过阈值 0.98，业务搜图不会给出菜谱卡。')
+  await expect(outcome).toContainText('最接近的是 #1 的「荷塘小炒」0.9712，还差 0.0088。')
+  await expect(rects.nth(0)).toHaveClass(/is-rejected/)
+  // the slider moves the same threshold
+  const slider = result.getByLabel('菜谱阈值', { exact: true })
+  await slider.focus()
+  await page.keyboard.press('ArrowLeft')
+  await expect(threshold).toHaveValue('0.979')
+  await result.getByRole('button', { name: '恢复配置值 0.95' }).click()
+  await expect(threshold).toHaveValue('0.95')
+  await expect(outcome.locator('.rt-name')).toHaveText(['荷塘小炒'])
+  await expect(result.getByRole('button', { name: /恢复配置值/ })).toHaveCount(0)
+  expect(calls).toHaveLength(1)
+})
+
+test('菜谱识别没有开启时说明原因；没有可识别的框时说业务搜图不会给出菜谱卡', async ({ page }) => {
+  await mockApi(page, undefined, [
+    { status: 503, json: { ok: false, error: 'NOT_READY', detail: 'recipe model is disabled or not initialized', trace_id: 'e2e-recipe' } },
+    { status: 200, json: { ...RECIPE, detected: 2, regions: [], names: [] } },
+  ])
+  await page.goto('/?view=tools&tool=recipe')
+  const tools = page.getByRole('region', { name: '模型工具' })
+  const controls = tools.getByRole('region', { name: '调用参数' })
+  await controls.getByLabel('选择图片', { exact: true }).setInputFiles(query)
+  await controls.getByRole('button', { name: '开始识别' }).click()
+  await acknowledgeNotice(page, 'recipe model is disabled or not initialized', 'error')
+  await expect(tools.getByRole('region', { name: '识别结果' })).toContainText('还没有菜谱识别结果')
+
+  // GroundingDINO found boxes, all too small to use: no recipe card, whatever the whole image looks like
+  await controls.getByRole('button', { name: '开始识别' }).click()
+  const result = tools.getByRole('region', { name: '识别结果' })
+  await expect(result.locator('.rt-outcome')).toContainText('没有可识别的检测框，业务搜图不会给出菜谱卡')
+  await expect(result.locator('.rt-outcome')).toContainText('GroundingDINO 给了 2 个框，都因边长小于 16 像素被丢掉。')
+  await expect(result.getByRole('table')).toHaveCount(0)
+  await expect(result.getByRole('region', { name: '整张图的识别结果' })).toContainText('玉米面')
 })
 
 test('阈值超出 0～1 时不能调用；模型没有加载时说明原因', async ({ page }) => {

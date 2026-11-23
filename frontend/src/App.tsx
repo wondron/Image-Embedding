@@ -24,7 +24,7 @@ import { SceneMembershipPanel } from './features/scene-memberships/SceneMembersh
 import {
   AUTO_TOP_K_DEFAULT, AUTO_TOP_K_MAX, AUTO_TOP_K_MIN,
   SourceBadge, getThumbnailSources, hasImage, searchAutoImages, searchGlobalImages, searchLocalImages,
-  type SearchChannel, type SearchImage, type SearchResponse,
+  type SearchChannel, type SearchImage, type SearchRegion, type SearchResponse,
 } from './entities/search-result'
 import { pingApi, useApiBase } from './shared/api'
 import { safeHttpUrl } from './shared/lib'
@@ -35,30 +35,33 @@ import {
   SCORE_DEFAULT,
   clampScoreThreshold,
 } from './features/score-threshold'
-import { HeatingFields, ResultMetadata, ResultSceneLabel, ResultTags, SearchNeverEmpty, SearchNoMatch, SearchFilteredEmpty, isLibraryHit } from './features/search'
+import { HeatingFields, QueryRegionPreview, ResultMetadata, ResultSceneLabel, ResultTags, SearchNeverEmpty, SearchNoMatch, SearchFilteredEmpty, isLibraryHit } from './features/search'
 import { SearchNumControl, SEARCH_NUM_DEFAULT, type CountRange } from './features/search-num'
 
-/** 'tools': 模型工具, the backend's diagnostic model tools (POST /api/tools/gdino, /api/tools/segment). */
+/** 'tools': 模型工具, the backend's diagnostic model tools (POST /api/tools/gdino, /api/tools/segment, /api/tools/recipe). */
 type View = 'search' | 'tools' | ManagementView
-/** 自建库 (POST /api/search), 现网 Global (POST /api/search/global/*), 业务搜图 (POST /api/search/auto/*: 自建库 + 菜谱识别, Global 兜底). */
+/**
+ * 自建库 (POST /api/search), 现网 Global (POST /api/search/global/*), 业务搜图 (POST /api/search/auto/*:
+ * 自建库 with the whole image, then with its GroundingDINO regions + 菜谱识别 of them, Global 兜底).
+ */
 type SearchTarget = 'local' | 'global' | 'auto'
 const SEARCH_TARGETS: ReadonlyArray<{ key: SearchTarget; label: string; title: string }> = [
   { key: 'local', label: '自建库', title: '只查自建库' },
   { key: 'global', label: '现网 Global', title: '只查现网 Global' },
-  { key: 'auto', label: '业务搜图', title: '业务方用的接口：查自建库，服务端开启时同时做菜谱识别；都没有结果时可用现网 Global 兜底' },
+  { key: 'auto', label: '业务搜图', title: '业务方用的接口：先用整图查自建库；整图没有结果时，用在图里检测到的区域查自建库、识别菜名（服务端开启时）；都没有结果时可用现网 Global 兜底' },
 ]
 const AUTO_TOP_K_RANGE: CountRange = { min: AUTO_TOP_K_MIN, max: AUTO_TOP_K_MAX, fallback: AUTO_TOP_K_DEFAULT }
 /** 批量搜索: what a run does with each image of the queue, by target. */
 const BATCH_TARGET_NOTES: Readonly<Record<SearchTarget, string>> = {
   local: '批量 · 自建库：走多图搜索接口（POST /api/search/batch/files），每次请求 5 张，整批共用下面的场景和阈值。',
   global: '批量 · 现网 Global：逐张请求，每张按下面的返回数量取结果。',
-  auto: '批量 · 业务搜图：逐张请求，查自建库（服务端开启时同时做菜谱识别），都没有结果时按下面的开关用现网 Global 兜底。',
+  auto: '批量 · 业务搜图：逐张请求，先用整图查自建库；整图没有结果时用检测到的区域查、识别菜名（服务端开启时），都没有结果时按下面的开关用现网 Global 兜底。',
 }
 
 /** What the detail view calls a result's channel. */
-function channelText(source?: SearchChannel): string {
+function channelText(source?: SearchChannel, region?: SearchRegion): string {
   switch (source) {
-    case 'self': return '自建'
+    case 'self': return region ? '自建 · 区域搜索（整图没有达到阈值的结果）' : '自建'
     case 'recipe': return '菜谱识别（查询图里识别出的菜名）'
     case 'global': return '现网 Global（业务搜图兜底）'
     case 'empty': return '无结果'
@@ -68,8 +71,8 @@ function channelText(source?: SearchChannel): string {
 }
 const navigation = [
   { key: 'search' as const, name: '图搜图', icon: ScanLine, description: '全网发现，相似检索' },
-  // GroundingDINO detection and segmentation on one image (?view=tools&tool=gdino|segment)
-  { key: 'tools' as const, name: '模型工具', icon: Wrench, description: '调用 GroundingDINO 检测和分割模型' },
+  // GroundingDINO detection, segmentation and 业务搜图's 菜谱识别 on one image (?view=tools&tool=gdino|segment|recipe)
+  { key: 'tools' as const, name: '模型工具', icon: Wrench, description: '目标检测、图像分割与菜谱识别' },
   { key: 'library' as const, name: '图片数据', icon: Images, description: '管理你的食材图库' },
   { key: 'import' as const, name: '上传与导入', icon: UploadCloud, description: '整理图片，准备入库' },
   { key: 'tasks' as const, name: '入库任务', icon: Workflow, description: '任务进度与失败记录' },
@@ -161,7 +164,7 @@ function ResultTable({ items, onDetail, onDownload, downloading, selected, onTog
         <th scope="row"><button className="table-title" title={heading} onClick={() => onDetail(item)}>{heading}</button></th>
         <td>{library ? <ResultSceneLabel value={item.sceneLabel} /> : <span className="result-field-empty">—</span>}{image && (item.outputsHeating || outputsHeating) && <div className="result-table-heating"><HeatingFields show compact heatingGroup={item.heatingGroup} foodState={item.foodState} /></div>}</td>
         <td className="result-table-tags">{library ? <ResultTags value={item.tags} /> : <span className="result-field-empty">—</span>}</td>
-        <td>{image ? <Score value={item.similarity} /> : <span className="result-field-empty">—</span>}</td><td>{item.siteName ?? '—'}</td><td><SourceBadge source={item.source} /></td>
+        <td>{image ? <Score value={item.similarity} /> : <span className="result-field-empty">—</span>}</td><td>{item.siteName ?? '—'}</td><td><SourceBadge source={item.source} region={item.region} /></td>
         <td><div className="table-actions"><button className="btn btn-secondary" onClick={() => onDetail(item)}>详情</button>{image && <button className="btn btn-secondary" disabled={Boolean(downloading)} aria-label={`下载图片：${item.title}`} onClick={() => onDownload(item)}>{downloading === item.id ? <LoaderCircle size={13} className="spin" /> : <ArrowDownToLine size={13} />}下载</button>}</div></td>
       </tr>
     })}</tbody>
@@ -194,6 +197,10 @@ export default function App() {
   const [scene, setScene] = useState<string>(DEFAULT_SCENE)
   const [batchRunning, setBatchRunning] = useState(false)
   const [activeQueryName, setActiveQueryName] = useState('')
+  /** The query of the results shown: the file searched with, or the link (业务搜图's region boxes are drawn on it). */
+  const [activeQueryImage, setActiveQueryImage] = useState<File | string | null>(null)
+  /** The image 模型工具 opens with, when a result sent its query there. */
+  const [toolsFile, setToolsFile] = useState<File | null>(null)
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState('')
   const [url, setUrl] = useState('')
@@ -239,7 +246,7 @@ export default function App() {
     activeRequest.current = null
     setBusy(false); setResponse(null); setSearched(false)
     setPage(1); setCategory('all'); setKeyword(''); setElapsed(null)
-    setSelected(new Set()); setActiveQueryName(''); setDetail(null)
+    setSelected(new Set()); setActiveQueryName(''); setActiveQueryImage(null); setDetail(null)
   }, [])
   // Another scene makes a single search's results stale. A batch keeps what each image already
   // got (its queue says where from) until the images are searched again (「全部重新搜索」).
@@ -251,7 +258,7 @@ export default function App() {
     if (running) resetResults()
   }, [resetResults])
   const handleBatchResult = useCallback(({ response: result, file: queryFile, elapsed: seconds }: BatchSearchResult) => {
-    setResponse(result); setSearched(true); setElapsed(seconds); setActiveQueryName(queryFile.name)
+    setResponse(result); setSearched(true); setElapsed(seconds); setActiveQueryName(queryFile.name); setActiveQueryImage(queryFile)
     setSelected(new Set()); setPage(1); setCategory('all'); setKeyword(''); setSort('default')
     setDetail(null)
     if (result.message) notify.info(result.message, { title: '搜索提示' })
@@ -282,6 +289,7 @@ export default function App() {
     setBusy(true); setResponse(null); setSearched(false)
     setCategory('all'); setKeyword(''); setPage(1); setElapsed(null)
     setSelected(new Set()); setActiveQueryName(mode === 'file' ? file!.name : url.trim())
+    setActiveQueryImage(mode === 'file' ? file! : url.trim())
     const started = performance.now()
     const timer = window.setTimeout(() => controller.abort('timeout'), 120000)
     try {
@@ -323,6 +331,7 @@ export default function App() {
   function navigate(next: View) {
     setView(next)
     setMobileNav(false)
+    setToolsFile(null)
     try {
       const url = new URL(window.location.href)
       if (linkedViews[next]) url.searchParams.set('view', next)
@@ -332,6 +341,20 @@ export default function App() {
       for (const [key, param] of Object.entries(linkedViews)) if (key !== next) url.searchParams.delete(param)
       window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
     } catch { /* the in-app view still changes when the URL cannot be updated */ }
+  }
+  /**
+   * 模型工具 · 菜谱识别 with the query of these results (业务搜图): GroundingDINO's boxes, each box's
+   * closest dishes and the threshold. A link query cannot be handed over: the tool opens empty.
+   */
+  function openRecipeTool() {
+    setDetail(null)
+    navigate('tools')
+    setToolsFile(activeQueryImage instanceof File ? activeQueryImage : null)
+    try {
+      const next = new URL(window.location.href)
+      next.searchParams.set('tool', 'recipe')
+      window.history.replaceState(null, '', `${next.pathname}${next.search}${next.hash}`)
+    } catch { /* the tools open on their default tool */ }
   }
   function saveSettings() {
     const next = apiDraft.trim().replace(/\/+$/, '')
@@ -356,6 +379,12 @@ export default function App() {
   // 业务搜图: 菜谱识别's card is dish names, not an image — it is listed, but never selected or counted as one
   const imageCount = items.filter(hasImage).length
   const recipeCount = items.length - imageCount
+  // 业务搜图: hits of its region search (the whole image had nothing over the threshold)
+  const regionCount = items.filter(item => item.region).length
+  /** 业务搜图's query, to look at in 模型工具 · 菜谱识别 (its boxes and their dishes). */
+  const recipeToolButton = <button type="button" className="btn btn-secondary" onClick={openRecipeTool}>
+    <ChefHat size={14} />{activeQueryImage instanceof File ? '在模型工具里看这张图的检测框和菜谱识别' : '打开模型工具 · 菜谱识别'}
+  </button>
   const selectable = visible.filter(hasImage)
   const allPageSelected = selectable.length > 0 && selectable.every(item => selected.has(item.id))
   const somePageSelected = selectable.some(item => selected.has(item.id))
@@ -398,7 +427,7 @@ export default function App() {
         hint={`自建库取达到阈值的前 N 条；兜底时向 Global 要 N 条 · 默认 ${AUTO_TOP_K_DEFAULT} · 范围 ${AUTO_TOP_K_MIN}–${AUTO_TOP_K_MAX}`}
         title="接口参数 top_k：两个通道共用一个数量"
       />
-      <label className="global-fallback-toggle" title="接口参数 global_fallback。服务端开启菜谱识别时，自建库没有结果、也没有识别到菜名才会兜底。Global 是外部付费服务，没命中时会多花几秒">
+      <label className="global-fallback-toggle" title="接口参数 global_fallback。整图和区域搜索都没有达到阈值的结果、菜谱识别（服务端开启时）也没有识别到菜名，才会兜底。Global 是外部付费服务，没命中时会多花几秒">
         <input type="checkbox" checked={globalFallback} disabled={controlsLocked} onChange={event => setGlobalFallback(event.target.checked)} />
         自建库没有结果时，用现网 Global 兜底
       </label>
@@ -444,7 +473,7 @@ export default function App() {
     <div className="main-shell"><header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" aria-label="展开导航" onClick={() => setMobileNav(true)}><Menu size={20} /></button><div className="topbar-title"><h1>{pageInfo.name}</h1><span>食材图像管理 / {pageInfo.description}</span></div></div><div className="topbar-actions"><button className="icon-button" title="使用说明" aria-label="使用说明" onClick={() => setHelpOpen(true)}><CircleHelp size={17} /></button><button className="icon-button" title="连接设置" aria-label="连接设置" disabled={batchRunning} onClick={() => { setApiDraft(apiBase); setSettingsOpen(true) }}><Settings2 size={17} /></button></div></header>
     <main className={view === 'search' ? 'search-page' : view === 'library' ? 'management-page library-page' : view === 'import' ? 'management-page import-page' : 'management-page'}>
       {view !== 'search' && view !== 'tools' && view !== 'enums' && view !== 'categories' && view !== 'scenes' && view !== 'models' && <ManagementViews view={view} onNavigate={navigate} apiBase={apiBase} />}
-      {view === 'tools' && <ToolsPage apiBase={apiBase} />}
+      {view === 'tools' && <ToolsPage apiBase={apiBase} initialFile={toolsFile} />}
       {view === 'enums' && <EnumConfigPage apiBase={apiBase} />}
       {view === 'models' && <ModelVersionsPage apiBase={apiBase} />}
       {view === 'categories' && <CategoryConfigPage apiBase={apiBase} />}
@@ -518,7 +547,7 @@ export default function App() {
               <button className="btn btn-primary bulk-download-button" disabled={!selectedItems.length} onClick={() => setDownloadItems(selectedItems)}><ArrowDownToLine size={15} />批量下载{selectedItems.length > 0 ? `（${selectedItems.length}）` : ''}</button>
             </div>}
             <div className={`results-content ${resultLayout === 'list' ? 'content-list' : ''}`}>
-            {waitingForResults ? <div className="loading-state" role="status"><div className="loading-orbit"><ScanLine size={37} strokeWidth={1.3} /></div><h3>正在寻找图片之间的联系</h3><p>{queryKind === 'batch' ? '批量搜索正在进行，查询图片完成后会显示对应结果。' : searchTarget === 'local' ? '正在自建库中检索…' : searchTarget === 'auto' ? (globalFallback ? '查自建库（服务端开启时同时识别菜谱），都没有结果再用现网 Global 兜底，请稍候…' : '正在自建库中检索（服务端开启时同时识别菜谱）…') : '搜索、获取图片并计算相似度，请稍候…'}</p><div className="skeleton-row">{[1, 2, 3].map(n => <div className="skeleton-card" key={n} />)}</div></div>
+            {waitingForResults ? <div className="loading-state" role="status"><div className="loading-orbit"><ScanLine size={37} strokeWidth={1.3} /></div><h3>正在寻找图片之间的联系</h3><p>{queryKind === 'batch' ? '批量搜索正在进行，查询图片完成后会显示对应结果。' : searchTarget === 'local' ? '正在自建库中检索…' : searchTarget === 'auto' ? (globalFallback ? '先用整图查自建库，没有结果再用图里检测到的区域查、识别菜名，都没有结果再用现网 Global 兜底，请稍候…' : '先用整图查自建库，没有结果再用图里检测到的区域查、识别菜名，请稍候…') : '搜索、获取图片并计算相似度，请稍候…'}</p><div className="skeleton-row">{[1, 2, 3].map(n => <div className="skeleton-card" key={n} />)}</div></div>
               : !searched ? <SearchNeverEmpty />
               : !visible.length ? (items.length
                 ? <SearchFilteredEmpty onClear={() => { setKeyword(''); setCategory('all') }} />
@@ -526,13 +555,15 @@ export default function App() {
                     message={response?.message}
                     libraryLikelyEmpty={response?.source === 'empty'}
                     onGoImport={() => navigate('import')}
+                    // only 业务搜图 answers carry `fallback`: it detected regions and dishes that came to nothing
+                    action={response?.fallback ? recipeToolButton : undefined}
                   />)
               : resultLayout === 'list' ? <ResultTable items={visible} outputsHeating={response?.outputsHeating} onDetail={setDetail} onDownload={item => void saveImage(item)} downloading={downloading} selected={selected} onToggle={toggleSelected} />
               : <div className="result-grid">{visible.map(item => <article className={`result-card ${selected.has(item.id) ? 'result-selected' : ''}`} key={item.id}>
                   {/* 菜谱识别's card has no image: nothing to select, score or download */}
                   {hasImage(item) && <label className="image-select"><input className="result-checkbox" type="checkbox" aria-label={`选择图片：${item.title}`} checked={selected.has(item.id)} onChange={() => toggleSelected(item.id)} /></label>}
                   <button className="result-image-button" onClick={() => setDetail(item)} aria-label={`查看图片详情：${item.title}`}>
-                    <ResultThumbnail item={item} />{hasImage(item) && <Score value={item.similarity} />}<SourceBadge source={item.source} /><span className="image-hover-hint"><Search size={15} />查看详情</span>
+                    <ResultThumbnail item={item} />{hasImage(item) && <Score value={item.similarity} />}<SourceBadge source={item.source} region={item.region} /><span className="image-hover-hint"><Search size={15} />查看详情</span>
                   </button>
                   <div className="result-card-body">
                     <ResultMetadata
@@ -547,7 +578,7 @@ export default function App() {
             <div className="results-footer"><span>{searched ? `共 ${imageCount} 张图片${recipeCount ? ` · 另有 ${recipeCount} 条菜谱识别结果` : ''}${filtered.length !== items.length ? ` · 筛选后 ${filtered.length} ${recipeCount ? '条' : '张'}` : ''}` : '搜索结果将在这里展示'}{items.length > 0 && !categories.length && <small> · 暂无类别数据</small>}</span><div className="pagination"><button className="icon-button" aria-label="上一页" disabled={currentPage <= 1 || !items.length} onClick={() => setPage(currentPage - 1)}><ArrowLeft size={15} /></button><span>{currentPage} <small>/ {pages}</small></span><button className="icon-button" aria-label="下一页" disabled={currentPage >= pages || !items.length} onClick={() => setPage(currentPage + 1)}><ArrowRight size={15} /></button></div></div>
           </section>
         </div>
-        <div className="search-bottom-note">{response?.traceId && <span className="trace-id" title={response.traceId}>请求 ID：{response.traceId}</span>}{response?.source === 'self' && <span className="source-mode-note">检索通道：自建{recipeCount > 0 ? ' + 菜谱识别' : ''}</span>}{response?.source === 'recipe' && <span className="source-mode-note">检索通道：自建库没有结果，菜谱识别出了菜名</span>}{/* M6: FlyB not a product-success path for self-built acceptance */}{response?.source === 'global' && <span className="source-mode-note">检索通道：自建库没有结果，现网 Global 兜底</span>}{response?.source === 'empty' && <span className="source-mode-note">检索通道：无结果{response.fallback?.status === 'failed' ? '（Global 兜底失败）' : response.fallback?.status === 'empty' ? '（Global 也没有结果）' : ''}</span>}<span className="local-filter-note">类别筛选与分页仅作用于本次搜索结果</span></div>
+        <div className="search-bottom-note">{response?.traceId && <span className="trace-id" title={response.traceId}>请求 ID：{response.traceId}</span>}{response?.source === 'self' && <span className="source-mode-note">{regionCount > 0 ? `检索通道：整图没有达到阈值的结果，区域搜索${recipeCount > 0 ? ' + 菜谱识别' : ''}` : `检索通道：自建${recipeCount > 0 ? ' + 菜谱识别' : ''}`}</span>}{response?.source === 'recipe' && <span className="source-mode-note">检索通道：自建库没有结果，菜谱识别出了菜名</span>}{/* M6: FlyB not a product-success path for self-built acceptance */}{response?.source === 'global' && <span className="source-mode-note">检索通道：自建库没有结果，现网 Global 兜底</span>}{response?.source === 'empty' && <span className="source-mode-note">检索通道：无结果{response.fallback?.status === 'failed' ? '（Global 兜底失败）' : response.fallback?.status === 'empty' ? '（Global 也没有结果）' : ''}</span>}<span className="local-filter-note">类别筛选与分页仅作用于本次搜索结果</span></div>
       </div>
     </main></div>
 
@@ -558,9 +589,19 @@ export default function App() {
           <dl className="detail-fields">{hasImage(detail) && <><div><dt>类别</dt><dd>{detail.category ?? '未分类'}</dd></div><div><dt>场景标签</dt><dd><ResultSceneLabel value={detail.sceneLabel} /></dd></div></>}<div><dt>{hasImage(detail) ? '标签' : '菜名'}</dt><dd>{detail.tags || '无标签'}</dd></div>
           {hasImage(detail) && (detail.outputsHeating || response?.outputsHeating) && (
             <div className="detail-heating"><dt>加热信息</dt><dd><HeatingFields show heatingGroup={detail.heatingGroup} foodState={detail.foodState} /></dd></div>
-          )}{hasImage(detail) && <><div><dt>图片尺寸</dt><dd>{detail.width && detail.height ? `${detail.width} × ${detail.height} px` : '未提供'}</dd></div><div><dt>图片来源</dt><dd>{detail.siteName ?? '未提供'}</dd></div></>}<div><dt>检索通道</dt><dd>{channelText(detail.source)}</dd></div><div><dt>结果编号</dt><dd className="monospace">{detail.id}</dd></div></dl>
+          )}{hasImage(detail) && <><div><dt>图片尺寸</dt><dd>{detail.width && detail.height ? `${detail.width} × ${detail.height} px` : '未提供'}</dd></div><div><dt>图片来源</dt><dd>{detail.siteName ?? '未提供'}</dd></div></>}<div><dt>检索通道</dt><dd>{channelText(detail.source, detail.region)}</dd></div><div><dt>结果编号</dt><dd className="monospace">{detail.id}</dd></div></dl>
           {detail.description.trim() && <div className="detail-description"><span>描述</span><div><p>{detail.description}</p></div></div>}
         </section>
+        {/* 业务搜图's region search: which box of the query image found this hit */}
+        {detail.region && <section className="detail-section"><h3>命中区域</h3>
+          <p className="detail-note">整图没有达到阈值的结果，这张图是用查询图里检测到的「{detail.region.label || '目标'}」区域搜到的（检测置信度 {detail.region.score.toFixed(2)}，位置 {detail.region.box.join(', ')}，{detail.region.box[2] - detail.region.box[0]} × {detail.region.box[3] - detail.region.box[1]} 像素）。</p>
+          {activeQueryImage && <QueryRegionPreview source={activeQueryImage} region={detail.region} />}
+        </section>}
+        {/* 菜谱识别's card: how the names came about, and where to see it box by box */}
+        {detail.source === 'recipe' && <section className="detail-section"><h3>识别方式</h3>
+          <p className="detail-note">GroundingDINO 在查询图里找到的每个框裁出来交给菜谱识别模型，和底库最相近的菜相似度高于 RECIPE_DETECT_CONFIG.threshold 才算识别出来；每个框最多一个菜名，同名只留一个，按相似度从高到低。整图搜索有结果时不会有这张卡。</p>
+          <div className="detail-tool-link">{recipeToolButton}</div>
+        </section>}
         {/* 菜谱识别's card has no image: no preview, no links */}
         {hasImage(detail) && <section className="detail-section"><h3>图片预览</h3><div className="detail-image"><ResultPreview key={detail.id} item={detail} /></div></section>}
         {hasImage(detail) && <section className="detail-section"><h3>来源信息</h3><dl className="detail-links"><div><dt>来源网页</dt><dd>{detail.pageUrl ? <a href={detail.pageUrl} target="_blank" rel="noreferrer">{detail.pageUrl}<ArrowUpRight size={12} /></a> : '—'}</dd></div><div><dt>图片地址</dt><dd>{(detail.imageUrl || detail.thumbnailUrl) ? <a className="original-link" href={detail.imageUrl ?? detail.thumbnailUrl!} target="_blank" rel="noreferrer">打开原图 / 另存为 <ArrowUpRight size={12} /></a> : '—'}</dd></div></dl>
@@ -571,7 +612,7 @@ export default function App() {
     </Dialog>}
     {downloadItems && <DownloadDialog items={downloadItems} apiBase={apiBase} onClose={() => setDownloadItems(null)} />}
     {settingsOpen && <Dialog title="搜索服务连接" onClose={() => setSettingsOpen(false)}><div className="settings-content"><p>连接现有的图像搜索服务。留空时使用当前站点的接口。</p><label htmlFor="api-base">服务地址</label><input className="input" id="api-base" type="url" placeholder="默认使用站点 /api" value={apiDraft} onChange={event => setApiDraft(event.target.value)} /><small>例如 http://127.0.0.1:8320，不包含 /api 路径。跨域连接需服务端允许访问。</small>{apiDraft.trim() && !safeHttpUrl(apiDraft.trim()) && <p className="inline-error">请输入 HTTP 或 HTTPS 地址。</p>}<div className="connection-info"><span className={`status-dot ${connection}`} />{connection === 'online' ? '接口可连接' : connection === 'checking' ? '正在检查连接…' : '当前未连接，请检查服务地址与后端运行状态'}<button className="text-button" onClick={() => void checkConnection()}>重新检查</button></div><div className="dialog-actions"><button className="btn btn-secondary" onClick={() => setSettingsOpen(false)}>取消</button><button className="btn btn-primary" disabled={Boolean(apiDraft.trim() && !safeHttpUrl(apiDraft.trim()))} onClick={saveSettings}><Check size={16} />保存连接</button></div></div></Dialog>}
-    {helpOpen && <Dialog title="开始使用食图" onClose={() => setHelpOpen(false)}><div className="help-content"><div><Search size={21} /><section><h3>以图搜图</h3><p>上传图片或输入可公开访问的图片直链，在自建库中检索。默认场景为「通用」（general）；可切换场景与拒识阈值后点「开始搜索」。切到「现网 Global」时可设置返回数量（1–20 条）。「批量搜索」对队列里的每张图使用所选的搜索目标：自建库走多图搜索接口（一次请求多张，共用场景和阈值），改了目标、场景或阈值后可「全部重新搜索」。「业务搜图」走给业务方的接口：先查自建库，服务端开启菜谱识别时同时识别查询图里的菜名（作为一条标「菜谱识别」的结果卡排在自建库结果之后，没有图片）；两者都没有结果时可用现网 Global 兜底（结果卡标「Global」），返回数量对自建库和 Global 都生效。空库时请先去「上传与导入」入库（PG + S3），不以 FlyB 外搜兜底为完成标准。</p></section></div><div><ArrowDownToLine size={21} /><section><h3>查看与下载</h3><p>点击结果打开详情，勾选图片后可「批量下载」。一体机场景下结果会展示加热组与食物状态（缺字段显示「—」）。</p></section></div><div><FolderOpen size={21} /><section><h3>图库与入库</h3><p>图库按场景筛选（默认 general），缩略图使用 S3 https 地址。入库时可设置类别（取自「食材管理」的类别树）、标签、描述、食物标注、来源与许可；场景按所选类别的规则预览，和规则不同的勾选入库后写成人工纳入 / 排除。单张图片可单独标注。</p></section></div><div className="help-note">相似度仅在服务返回分数时展示；结果分别显示原始类别、场景标签和图片标签。场景标签未配置时显示「未映射」。</div></div></Dialog>}
+    {helpOpen && <Dialog title="开始使用食图" onClose={() => setHelpOpen(false)}><div className="help-content"><div><Search size={21} /><section><h3>以图搜图</h3><p>上传图片或输入可公开访问的图片直链，在自建库中检索。默认场景为「通用」（general）；可切换场景与拒识阈值后点「开始搜索」。切到「现网 Global」时可设置返回数量（1–20 条）。「批量搜索」对队列里的每张图使用所选的搜索目标：自建库走多图搜索接口（一次请求多张，共用场景和阈值），改了目标、场景或阈值后可「全部重新搜索」。「业务搜图」走给业务方的接口：先用整图查自建库；整图没有达到阈值的结果时，用 GroundingDINO 在查询图里检测到的区域分别查自建库（结果卡标「自建 · 区域」，详情里能看到是哪个区域），服务端开启菜谱识别时同时识别这些区域里的菜名（作为一条标「菜谱识别」的结果卡排在后面，没有图片）；都没有结果时可用现网 Global 兜底（结果卡标「Global」），返回数量对自建库和 Global 都生效。想看一张图的每个检测框识别成了什么、阈值该设多少，用「模型工具 · 菜谱识别」。空库时请先去「上传与导入」入库（PG + S3），不以 FlyB 外搜兜底为完成标准。</p></section></div><div><ArrowDownToLine size={21} /><section><h3>查看与下载</h3><p>点击结果打开详情，勾选图片后可「批量下载」。一体机场景下结果会展示加热组与食物状态（缺字段显示「—」）。</p></section></div><div><FolderOpen size={21} /><section><h3>图库与入库</h3><p>图库按场景筛选（默认 general），缩略图使用 S3 https 地址。入库时可设置类别（取自「食材管理」的类别树）、标签、描述、食物标注、来源与许可；场景按所选类别的规则预览，和规则不同的勾选入库后写成人工纳入 / 排除。单张图片可单独标注。</p></section></div><div className="help-note">相似度仅在服务返回分数时展示；结果分别显示原始类别、场景标签和图片标签。场景标签未配置时显示「未映射」。</div></div></Dialog>}
     {/* The one popup every page signals through notify() */}
     <StatusOverlay />
   </div></EnumCatalogProvider></SceneApiContext.Provider>

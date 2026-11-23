@@ -65,6 +65,22 @@ export interface SearchImage {
   /** FlyB only: source page / site (`details.page_url` / `details.site`); null for self-built hits. */
   pageUrl: string | null
   siteName: string | null
+  /**
+   * 业务搜图 only, a self-built hit of its region search (the whole image had nothing over the
+   * threshold): the box of the query image whose crop found it (`details.region`). Absent for a
+   * whole-image hit and for the other channels.
+   */
+  region?: SearchRegion
+}
+
+/** A GroundingDINO box of the query image, in pixels of the image as the server decoded it. */
+export interface SearchRegion {
+  /** GroundingDINO's word for the box (AUTO_SEARCH_REGION_CONFIG.caption); '' when none was sent. */
+  label: string
+  /** Detection confidence, 0–1. */
+  score: number
+  /** x1, y1, x2, y2. */
+  box: [number, number, number, number]
 }
 
 export interface SearchResponse {

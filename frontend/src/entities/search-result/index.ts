@@ -3,6 +3,7 @@ export {
   type SearchFallback,
   type SearchFallbackStatus,
   type SearchImage,
+  type SearchRegion,
   type SearchResponse,
   displayCategoryLabel,
   getImageSources,
