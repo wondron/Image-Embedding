@@ -1,13 +1,13 @@
 """业务搜图（POST /api/search/auto/file、/api/search/auto/url）：先用整图查自建库，
-整图没有结果时用从图里找到的区域，菜谱识别和它们同时进行，Global 搜图作为可选兜底；
-最后给出一个结果。
+整图没有结果时用从图里找到的区域和识别出的菜名，Global 搜图作为可选兜底；最后给出一个结果。
 
-    查询图 -> 整图搜索（scene、top_k、score_threshold）                    ┐
-           -> 区域搜索（AUTO_SEARCH_REGION_CONFIG.enabled）：             │ 同时启动
-              GroundingDINO 的检测框，逐个搜索后合并                      │
-           -> 菜谱识别（RECIPE_DETECT_CONFIG.enabled）                    ┘
-        整图有结果                   -> 返回它们的结果卡，立即返回：另外两步被丢弃
-        整图没有结果                 -> 等另外两步结束，然后
+    查询图 -> 整图搜索（scene、top_k、score_threshold）                                ┐
+           -> 目标检测：GroundingDINO 的检测框（AUTO_SEARCH_REGION_CONFIG 的参数），     │
+              区域搜索或菜谱识别要用时才做，两步共用这一次检测                              │ 同时启动
+                -> 区域搜索（AUTO_SEARCH_REGION_CONFIG.enabled）：逐个框搜索后合并        │
+                -> 菜谱识别（RECIPE_DETECT_CONFIG.enabled）：逐个框识别菜名              ┘
+        整图有结果                   -> 返回它们的结果卡，立即返回：另外几步被丢弃
+        整图没有结果                 -> 等区域搜索和菜谱识别结束，然后
             区域有结果               -> 返回它们的结果卡（识别出菜名时后面跟一张菜谱卡）
             只有菜名                 -> 返回菜谱卡
             都没有，global_fallback=false  -> 没有结果卡（fallback.status=disabled）
@@ -19,6 +19,11 @@
 搜索每个检测框，从所有框的结果里取最好的 top_k 条。score_threshold=0 时，只要库里有图，
 整图就一定有结果，所以不启动区域搜索。
 
+菜谱识别（app.api.services.recipe_detect）把每个检测框的裁剪图交给菜谱识别模型
+（ApplicationState.recipe_classifier），相似度高于 RECIPE_DETECT_CONFIG.threshold 的菜名
+（同名只留一个，按相似度从高到低）作为一张菜谱卡；每个框最多一个菜名，所以菜名数不超过
+检测框数。区域搜索关闭时，菜谱识别照样按 AUTO_SEARCH_REGION_CONFIG 的参数检测。
+
 每个通道返回的都是同一种结果卡（app.schemas.search_hit），所以不管来自哪个通道，
 items[] 的形状都一样。和通道有关的信息写在结果卡上，不在外层：结果卡的第一个字段
 source（self / recipe / global），以及自建库结果卡的 details 里说明是否带加热信息
@@ -26,22 +31,22 @@ source（self / recipe / global），以及自建库结果卡的 details 里说�
 哪个检测框找到的。菜谱识别给出一张结果卡：菜名作为 tags，其余字段为空。
 
 整图搜索失败（场景不存在、图片无法解码、检索服务未就绪）会让请求失败，和
-POST /api/search 一样。区域搜索、菜谱识别和兜底失败不会让请求失败。区域搜索或菜谱识别
-失败按没有结果处理，写在它那一行耗时日志里。兜底失败时 fallback.status=failed
-带上原因，调用方能区分"没找到"和"兜底没跑成"。
+POST /api/search 一样。目标检测、区域搜索、菜谱识别和兜底失败不会让请求失败。区域搜索或
+菜谱识别失败（检测失败时两步都失败）按没有结果处理，写在它那一行耗时日志里。兜底失败时
+fallback.status=failed 带上原因，调用方能区分"没找到"和"兜底没跑成"。
 
-查询图只读取一次（上传或下载），交给每个通道使用。请求带图片链接时，菜谱识别服务
-拿到的是链接（它自己下载图片），否则拿到图片内容。
+查询图只读取一次（上传或下载），交给每个通道使用。
 
 耗时日志（logger svc.auto_search，同时写平台日志）：每一步一行，「标题 | 各阶段 | 耗时 | 其他信息」，
 按固定的顺序，不管哪一步先结束：整图搜索；整图没有结果时，再写区域搜索、菜谱识别，
-以及跑了的 Global 兜底。路由最后为请求写一行（app.api.v1.auto_search），从请求到达到返回
-结果的各步骤，相加约等于总耗时：
+以及跑了的 Global 兜底。区域搜索和菜谱识别那两行都有它们共用的那次检测的几步（排队 /
+图像解码 / 目标检测 / 区域裁剪）。路由最后为请求写一行（app.api.v1.auto_search），从请求到达
+到返回结果的各步骤，相加约等于总耗时：
 
     整图搜索完成 | embedding推理 0.045s | vector搜索 0.012s | 后处理 0.003s | 耗时 0.061s | 结果=0
     区域搜索完成 | 排队 0.000s | 图像解码 0.005s | 目标检测 0.440s | 区域裁剪 0.003s | 区域检索 0.073s | 耗时 0.521s | 检测框=2 | 结果=3 | 区域检索明细（各框累计）=embedding推理 0.061s, vector搜索 0.010s, 后处理 0.002s
-    菜谱识别完成 | 发送请求 0.001s | 等待响应 1.365s | 接收响应 0.000s | 耗时 1.368s | 结果=["荷塘小炒"] | 输入=图片链接
-    业务搜图(图片链接) | 接收请求 0.001s | 图像下载 0.120s | 整图搜索 0.061s | 等待区域搜索 0.460s | 等待菜谱识别 0.847s | 总耗时 1.490s | 参数=…
+    菜谱识别完成 | 排队 0.000s | 图像解码 0.005s | 目标检测 0.440s | 区域裁剪 0.003s | 菜谱推理 0.031s | 耗时 0.479s | 检测框=2 | 结果=["荷塘小炒"] | 阈值=0.95 | 各框最相近=荷塘小炒 0.9712、清蒸鲈鱼 0.9031
+    业务搜图(图片链接) | 接收请求 0.001s | 图像下载 0.120s | 整图搜索 0.061s | 等待区域搜索 0.460s | 等待菜谱识别 0.000s | 总耗时 0.642s | 参数=…
 
 「等待…」是整图搜索结束之后还要等它的时间。整图有结果时只有整图那一行和请求那一行：
 还在进行的步骤被取消，整图那一行用「已取消=」列出它们。
@@ -54,16 +59,15 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Generator
 from contextlib import contextmanager
-from dataclasses import dataclass
 from typing import Any, TypeVar
 
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import require_retrieval
 from app.api.services.predict import run_predict
-from app.api.services.region_search import RegionOutcome, run_region_search
+from app.api.services.recipe_detect import RecipeOutcome, run_recipe_detect
+from app.api.services.region_search import Detection, RegionOutcome, detect_regions, run_region_search
 from app.bootstrap.state import ApplicationState
-from app.clients.recipe_detect import detect_recipes
 from app.core import errors as err
 from app.core.config.settings import AutoSearchRegionSettings, RecipeDetectSettings
 from app.core.observability.log_helper import show_text
@@ -92,14 +96,6 @@ _MESSAGES_WITH_RECIPE = {
     "empty": "自建库没有达到阈值的结果，{recipe}，Global 也没有找到结果",
     "failed": "自建库没有达到阈值的结果，{recipe}，Global 兜底失败",
 }
-
-
-@dataclass(frozen=True, slots=True)
-class _Recipe:
-    """一次菜谱识别的结果。"""
-
-    names: list[str]  # 菜名；没有识别出菜名或调用失败时为 []
-    error: err.AppError | None = None
 
 
 def _log(level: int, message: str, trace_id: str) -> None:
@@ -157,20 +153,31 @@ def _recipe_settings(runtime: ApplicationState, trace_id: str) -> RecipeDetectSe
     return settings if settings.enabled else None
 
 
-def _region_settings(
-    runtime: ApplicationState, score_threshold: float | None, trace_id: str
+def _detect_settings(
+    runtime: ApplicationState, *, regions: bool, recipe: bool, trace_id: str
 ) -> AutoSearchRegionSettings | None:
-    """当前的 AUTO_SEARCH_REGION_CONFIG；这一步关闭、配置段用不了，或者没有阈值时为 None
-    （没有阈值时，只要能找到，整图就一定有结果）。
+    """当前的 AUTO_SEARCH_REGION_CONFIG：区域搜索的开关，以及检测的参数（菜谱识别用同一次检测，
+    也用这些参数）。regions：这次可以做区域搜索（有阈值：没有阈值时，只要能找到，整图就一定有
+    结果）；recipe：要做菜谱识别。两步都不做，或者配置段用不了时为 None；用不了时为会用到它的
+    每一步记一条警告。
     """
-    if score_threshold == 0:
+    if not (regions or recipe):
         return None
+    name = "AUTO_SEARCH_REGION_CONFIG"
     try:
         settings = AutoSearchRegionSettings.from_config(runtime.config)
     except ValueError as exc:
-        _log(logging.WARNING, f"{REGION_STEP}已跳过：AUTO_SEARCH_REGION_CONFIG 配置有误 | {exc}", trace_id)
+        for step, uses in ((REGION_STEP, regions), (RECIPE_STEP, recipe)):
+            if uses:
+                _log(logging.WARNING, f"{step}已跳过：{name} 配置有误 | {exc}", trace_id)
         return None
-    return settings if settings.enabled else None
+    if recipe and not settings.enabled:  # 区域搜索关着，from_config 没有检查检测参数
+        try:
+            settings.check()
+        except ValueError as exc:
+            _log(logging.WARNING, f"{RECIPE_STEP}已跳过：{name} 配置有误 | {exc}", trace_id)
+            return None
+    return settings
 
 
 def _log_regions(outcome: RegionOutcome, timer: timer_tool, trace_id: str) -> None:
@@ -193,48 +200,27 @@ def _log_regions(outcome: RegionOutcome, timer: timer_tool, trace_id: str) -> No
     )
 
 
-def _log_recipe(recipe: _Recipe, timer: timer_tool, *, by_link: bool, trace_id: str) -> None:
-    """菜谱识别那一行，在用到它的答案时记录。"""
-    sent = "输入=图片链接" if by_link else "输入=图片内容"
-    if recipe.error is None:
-        found = json.dumps(recipe.names, ensure_ascii=False)
-        _log_timing(logging.INFO, f"{RECIPE_STEP}完成", timer, f"结果={found}", sent, trace_id=trace_id)
-    else:
-        _log_timing(
-            logging.WARNING, f"{RECIPE_STEP}失败", timer, f"错误={_reason(recipe.error)}", sent, trace_id=trace_id
-        )
-
-
-async def _detect_recipe(
-    runtime: ApplicationState,
-    settings: RecipeDetectSettings,
-    *,
-    image_bytes: bytes,
-    image_url: str | None,
-    trace_id: str,
-    timer: timer_tool,
-) -> _Recipe:
-    """执行菜谱识别，调用的各阶段记在 timer 上。失败是结果的一部分，不是异常：这一步的
-    任何问题都不能让搜索失败。
+def _log_recipe(recipe: RecipeOutcome, timer: timer_tool, threshold: float, trace_id: str) -> None:
+    """菜谱识别那一行，在用到它的答案时记录。各框最相近：每个检测框在底库里最相近的菜品和
+    相似度（没过阈值的也列出来，调阈值时看它）。
     """
-    try:
-        names = await detect_recipes(
-            runtime.http_client,
-            settings.url,
-            image_url=image_url,
-            image_bytes=image_bytes,
-            trace_id=trace_id,
-            timeout=settings.timeout,
-            timer=timer,
-        )
-    except err.AppError as exc:
-        return _Recipe([], exc)
-    except Exception as exc:
-        return _Recipe([], err.upstream_error(f"{type(exc).__name__}: {exc}"))
-    return _Recipe(names)
+    if recipe.skipped is not None:
+        _log(logging.INFO, f"{RECIPE_STEP}已跳过：{recipe.skipped}", trace_id)
+        return
+    boxes = (f"检测框={recipe.regions}",) if recipe.regions else ()  # 检测失败时还没有检测框
+    if recipe.error is not None:
+        _log_timing(logging.WARNING, f"{RECIPE_STEP}失败", timer, *boxes, f"错误={recipe.error}", trace_id=trace_id)
+        return
+    closest = "、".join(f"{match.label} {match.score:.4f}" for match in recipe.matches)
+    _log_timing(
+        logging.INFO, f"{RECIPE_STEP}完成", timer, f"检测框={recipe.regions}",
+        f"结果={json.dumps(recipe.names, ensure_ascii=False)}", f"阈值={threshold:g}",
+        *((f"各框最相近={closest}",) if closest else ()),
+        trace_id=trace_id,
+    )
 
 
-# 还在运行时被丢弃的区域搜索：任务结束之前需要有引用指向它
+# 还在运行时被丢弃的步骤：任务结束之前需要有引用指向它
 _LEFT_RUNNING: set[asyncio.Task[Any]] = set()
 
 
@@ -244,26 +230,23 @@ def _forget(task: asyncio.Task[Any]) -> None:
         task.exception()  # 取出异常，这样不会被报告为"异常从未被获取"
 
 
-async def _abandon(
-    detection: asyncio.Task[_Recipe] | None, regions: asyncio.Task[RegionOutcome] | None
-) -> list[str]:
-    """停止没人会读结果的步骤（整图已经有结果，或者请求失败了），返回其中还在进行、
-    被取消的那些步骤名。菜谱识别是事件循环上的调用：立刻结束。区域搜索可能正在工作线程里
-    （GroundingDINO、编码器），线程无法中断，取消时可能要等那个线程：所以只取消，不等待。
+def _abandon(*steps: tuple[str | None, asyncio.Task[Any] | None]) -> list[str]:
+    """停止没人会读结果的步骤（整图已经有结果，或者请求失败了），返回其中还在进行、被取消的那些
+    步骤名。steps：（步骤名，任务）；目标检测不是单独的一步，名字为 None。它们都可能正在工作线程里
+    （GroundingDINO、编码器、菜谱识别模型），线程无法中断，取消时可能要等那个线程：所以只取消，不等待。
     """
     cancelled = []
-    if regions is not None:
-        if regions.done():
-            _forget(regions)
-        else:
-            cancelled.append(REGION_STEP)
-            regions.cancel()
-            _LEFT_RUNNING.add(regions)
-            regions.add_done_callback(_forget)
-    if detection is not None and not detection.done():
-        cancelled.append(RECIPE_STEP)
-        detection.cancel()
-        await asyncio.gather(detection, return_exceptions=True)
+    for name, task in steps:
+        if task is None:
+            continue
+        if task.done():
+            _forget(task)
+            continue
+        if name is not None:
+            cancelled.append(name)
+        task.cancel()
+        _LEFT_RUNNING.add(task)
+        task.add_done_callback(_forget)
     return cancelled
 
 
@@ -298,11 +281,16 @@ def _global_cards(result: Any, top_k: int) -> list[dict[str, Any]]:
     return [{"source": "global", **card} for card in result if isinstance(card, dict)][:top_k]
 
 
-def _empty_message(status: str, recipe: _Recipe | None) -> str:
-    """items 为空的原因：status 是 fallback.status；recipe 是菜谱识别的结果（如果跑过）。"""
+def _empty_message(status: str, recipe: RecipeOutcome | None) -> str:
+    """items 为空的原因：status 是 fallback.status；recipe 是菜谱识别的结果（开启了这一步时）。"""
     if recipe is None:
         return _MESSAGES[status]
-    came_to = f"{RECIPE_STEP}失败" if recipe.error is not None else f"{RECIPE_STEP}没有识别到菜名"
+    if recipe.skipped is not None:
+        came_to = f"{RECIPE_STEP}没有运行"
+    elif recipe.error is not None:
+        came_to = f"{RECIPE_STEP}失败"
+    else:
+        came_to = f"{RECIPE_STEP}没有识别到菜名"
     return _MESSAGES_WITH_RECIPE[status].format(recipe=came_to)
 
 
@@ -310,7 +298,6 @@ async def run_auto_search(
     runtime: ApplicationState,
     *,
     image_bytes: bytes,
-    image_url: str | None = None,
     scene: str | None,
     top_k: int,
     score_threshold: float | None,
@@ -320,8 +307,7 @@ async def run_auto_search(
     input_label: str,
     timer: timer_tool | None = None,
 ) -> dict[str, Any]:
-    """image_url：请求带图片链接时（URL 路由）的查询图链接；这时发给菜谱识别服务的是链接
-    而不是图片内容。
+    """image_bytes：查询图（上传的或下载好的），各通道共用。
 
     timer：路由的计时器，这里在上面记录请求的几步：整图搜索；整图没有结果时，等待区域搜索 /
     等待菜谱识别（整图搜索结束后还要等它的时间）和 Global兜底。各步骤自己的阶段写在它们
@@ -330,22 +316,36 @@ async def run_auto_search(
     timer = timer or timer_tool()
     stack = require_retrieval(runtime)
     recipe_settings = _recipe_settings(runtime, trace_id)
-    region_settings = _region_settings(runtime, score_threshold, trace_id)
-    recipe_timer, region_timer = timer_tool(), timer_tool()
-    detection: asyncio.Task[_Recipe] | None = None
+    detect_settings = _detect_settings(
+        runtime, regions=score_threshold != 0, recipe=recipe_settings is not None, trace_id=trace_id
+    )
+    searching_regions = detect_settings is not None and detect_settings.enabled and score_threshold != 0
+    # 菜谱识别：开着、检测参数能用时才做；模型没有就绪时这一步的答案就是「已跳过」
+    classifier = None
+    recipe: RecipeOutcome | None = None
+    if recipe_settings is not None and detect_settings is not None:
+        try:
+            classifier = runtime.require_recipe_classifier()
+        except err.NotReadyError as exc:
+            recipe = RecipeOutcome(skipped=f"菜谱识别模型未就绪：{exc.detail}")
+
+    region_timer, recipe_timer = timer_tool(), timer_tool()
+    detection: asyncio.Task[Detection] | None = None
     regions: asyncio.Task[RegionOutcome] | None = None
-    if recipe_settings is not None:
-        detection = asyncio.create_task(_run_timed(
-            recipe_timer, _detect_recipe, runtime, recipe_settings,
-            image_bytes=image_bytes, image_url=image_url, trace_id=trace_id,
-        ))
-    if region_settings is not None:
+    recognition: asyncio.Task[RecipeOutcome] | None = None
+    if searching_regions or classifier is not None:  # 两步共用这一次检测：区域搜索要 JPEG 的裁剪图
+        detection = asyncio.create_task(detect_regions(runtime, image_bytes, detect_settings, jpeg=searching_regions))
+    if searching_regions:
         regions = asyncio.create_task(_run_timed(
-            region_timer, run_region_search, runtime, stack, region_settings,
-            image_bytes=image_bytes, scene=scene, top_k=top_k, score_threshold=score_threshold, trace_id=trace_id,
+            region_timer, run_region_search, stack, detection,
+            scene=scene, top_k=top_k, score_threshold=score_threshold, trace_id=trace_id,
         ))
+    if classifier is not None:
+        recognition = asyncio.create_task(_run_timed(
+            recipe_timer, run_recipe_detect, classifier, detection, threshold=recipe_settings.threshold,
+        ))
+    steps = ((REGION_STEP, regions), (RECIPE_STEP, recognition), (None, detection))
     found: RegionOutcome | None = None
-    recipe: _Recipe | None = None
     try:
         try:
             with _timed_step(timer, WHOLE_STEP) as whole:
@@ -361,8 +361,8 @@ async def run_auto_search(
         except Exception as exc:
             _log_timing(logging.WARNING, f"{WHOLE_STEP}失败", whole, f"错误={_reason(exc)}", trace_id=trace_id)
             raise
-        # 整图有结果就是答案：另外两步不用等
-        cancelled = await _abandon(detection, regions) if local["items"] else []
+        # 整图有结果就是答案：另外几步不用等
+        cancelled = _abandon(*steps) if local["items"] else []
         _log_timing(
             logging.INFO, f"{WHOLE_STEP}完成", whole, f"结果={len(local['items'])}",
             *((f"已取消={'、'.join(cancelled)}",) if cancelled else ()),
@@ -373,12 +373,13 @@ async def run_auto_search(
             with timer.step(f"等待{REGION_STEP}"):
                 found = await regions
             _log_regions(found, region_timer, trace_id)
-        if not local["items"] and detection is not None:
+        if not local["items"] and recognition is not None:
             with timer.step(f"等待{RECIPE_STEP}"):
-                recipe = await detection
-            _log_recipe(recipe, recipe_timer, by_link=bool(image_url), trace_id=trace_id)
+                recipe = await recognition
+        if not local["items"] and recipe is not None:
+            _log_recipe(recipe, recipe_timer, recipe_settings.threshold, trace_id)
     except BaseException:
-        await _abandon(detection, regions)
+        _abandon(*steps)
         raise
 
     body: dict[str, Any] = {"ok": True, "trace_id": trace_id, "scene": local["scene"]}

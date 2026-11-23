@@ -30,9 +30,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.services import auto_search as auto_search_service
+from app.api.services import region_search
 from app.api.services.region_search import MIN_REGION_SIDE, Region, merge, regions_of
 from app.api.v1 import auto_search
 from app.bootstrap.state import ApplicationState
+from app.clients.recipe_classifier import RecipeMatch
 from app.core import errors as err
 from app.core.config.settings import AutoSearchRegionSettings
 from app.core.exceptions import register_exception_handlers
@@ -59,7 +61,6 @@ WHOLE, LEFT_CROP, RIGHT_CROP = (HEIGHT, WIDTH), (100, 100), (50, 50)
 VECTORS = {WHOLE: [1.0, 0.0, 0.0, 0.0], LEFT_CROP: [0.0, 1.0, 0.0, 0.0], RIGHT_CROP: [0.0, 0.0, 1.0, 0.0]}
 
 REGION_CONFIG = {"enabled": True, "caption": "food", "box_threshold": 0.4, "text_threshold": 0.4, "max_regions": 5}
-RECIPE_URL = "http://recipe.test:8866/detect_recipe_onnx"
 FOOD_CONFIG = {
     "FLAB_CONFIG": {
         "API_URL": "https://search.invalid/global_search", "API_KEY": "test-only-key", "DOC_COUNT": 5,
@@ -79,16 +80,34 @@ def encoded(width=WIDTH, height=HEIGHT, ext=".png"):
 QUERY = encoded()
 
 
-def steps(line):
-    """The step names of a timing line in order, 总耗时 (or 耗时) last. Only the fields before the
-    other details: the box breakdown of the region line is a detail (see breakdown).
+# timer_tool.summary 的两种写法：「a 0.100s | b 0.200s | 耗时 0.300s」和「耗时 0.300s a_0.100s b_0.200s」
+_TOTAL_FIRST = re.compile(r"(?:^|\| )((?:总)?耗时) (\d+\.\d{3})s((?: [^ |=]+?_\d+\.\d{3}s)*)(?= \||$)")
+_TOTAL_LAST = re.compile(r"(?:^|\| )([^|=]+?) (\d+\.\d{3})s")
+
+
+def _timed(line):
+    """[(step, seconds)] of a timing line in order, 总耗时 (or 耗时) last, in either way of writing it.
+    Only the timing fields: the box breakdown of the region line is a detail (see breakdown).
     """
-    return re.findall(r"(?:^|\| )([^|=]+?) \d+\.\d{3}s", line)
+    total_first = _TOTAL_FIRST.search(line)
+    if total_first and total_first.group(3):
+        found = re.findall(r" ([^ |=]+?)_(\d+\.\d{3})s", total_first.group(3))
+        return [*found, (total_first.group(1), total_first.group(2))]
+    return _TOTAL_LAST.findall(line)
+
+
+# 一行耗时里的计时部分，两种写法都认（见 _timed）：后面紧跟其余字段（检测框=…）
+TIMING = r"[^=]*耗时 \d+\.\d{3}s[^|=]*"
+
+
+def steps(line):
+    """The step names of a timing line in order, 总耗时 (or 耗时) last."""
+    return [step for step, _ in _timed(line)]
 
 
 def seconds(line):
     """{step: seconds} of a timing line (the same fields as steps)."""
-    return {step: float(value) for step, value in re.findall(r"(?:^|\| )([^|=]+?) (\d+\.\d{3})s", line)}
+    return {step: float(value) for step, value in _timed(line)}
 
 
 def breakdown(line):
@@ -115,6 +134,18 @@ class FakeDetector:
         boxes = np.asarray([box for box, _, _ in self.boxes], dtype=np.float32).reshape(-1, 4)
         scores = np.asarray([score for _, score, _ in self.boxes], dtype=np.float32)
         return boxes, scores, [label for _, _, label in self.boxes]
+
+
+class FakeClassifier:
+    """菜谱识别模型：按裁剪图的尺寸（高, 宽）回答。"""
+
+    def __init__(self):
+        self.calls = []  # 每次调用传进来的裁剪图的（高, 宽）
+
+    def classify(self, images):
+        self.calls.append([image.shape[:2] for image in images])
+        answers = {LEFT_CROP: RecipeMatch("清蒸鲈鱼", 0.97), RIGHT_CROP: RecipeMatch("清蒸鲈鱼", 0.99)}
+        return [answers.get(image.shape[:2], RecipeMatch("没见过的菜", 0.1)) for image in images]
 
 
 class FakeEmbedding:
@@ -197,6 +228,16 @@ class AutoSearchRegionSettingsTests(unittest.TestCase):
                 AutoSearchRegionSettings.from_config({"AUTO_SEARCH_REGION_CONFIG": section})
             self.assertIn(f"AUTO_SEARCH_REGION_CONFIG.{key}", str(raised.exception))
 
+    def test_check_tests_the_detection_values_of_a_section_that_is_off(self):
+        """区域搜索关着时菜谱识别也用这些值检测：它在用之前调 check。"""
+        off = AutoSearchRegionSettings.from_config({"AUTO_SEARCH_REGION_CONFIG": {"enabled": False, "max_regions": 3}})
+        self.assertIs(off.check(), off)
+        for values, key in (({"box_threshold": 7}, "box_threshold"), ({"max_regions": 0}, "max_regions")):
+            settings = AutoSearchRegionSettings.from_config({"AUTO_SEARCH_REGION_CONFIG": {"enabled": False, **values}})
+            with self.subTest(values=values), self.assertRaises(ValueError) as raised:
+                settings.check()
+            self.assertIn(f"AUTO_SEARCH_REGION_CONFIG.{key}", str(raised.exception))
+
     def test_the_shipped_config_has_the_section(self):
         path = Path(__file__).resolve().parents[1] / "config" / "param" / "config.yaml"
         settings = AutoSearchRegionSettings.from_config(yaml.safe_load(path.read_text(encoding="utf-8")))
@@ -260,13 +301,15 @@ class BusinessSearchRegionTests(unittest.TestCase):
         self.food.searchTool.detect.return_value = [dict(GLOBAL_CARD)]
         self.food.searchFilter = Mock()
         self.food.searchFilter.detect.return_value = [dict(GLOBAL_CARD)]
+        self.classifier = FakeClassifier()
         self.runtime = ApplicationState(
             config={"AUTO_SEARCH_REGION_CONFIG": dict(REGION_CONFIG)}, config_info={},
-            http_client=httpx.AsyncClient(transport=httpx.MockTransport(self.recipe_service)),
+            http_client=Mock(),
             settings=SimpleNamespace(predict=SimpleNamespace(max_image_bytes=1 << 20, http_timeout=3.0)),
             retrieval=SimpleNamespace(search_uc=search),
             food_service=self.food,
             detector=self.detector,
+            recipe_classifier=self.classifier,  # 菜谱识别默认关着（没有 RECIPE_DETECT_CONFIG）
         )
         self.app = FastAPI()
         register_exception_handlers(self.app)
@@ -280,9 +323,6 @@ class BusinessSearchRegionTests(unittest.TestCase):
         fetch = patch("app.clients.image_fetch.public_image.fetch_image", return_value=(QUERY, "image/png"))
         fetch.start()
         self.addCleanup(fetch.stop)
-
-    async def recipe_service(self, request):
-        return httpx.Response(200, json={"code": "200", "success": True, "message": "", "data": ["清蒸鲈鱼"]})
 
     def post(self, path, *, status=200, **request):
         with self.assertLogs(level="INFO") as logs:
@@ -344,7 +384,7 @@ class BusinessSearchRegionTests(unittest.TestCase):
         self.assertEqual(self.timing_steps(records), ["接收请求", "图像下载", "整图搜索", "等待区域搜索", "总耗时"])
         ((level, text),) = self.region_logs(records)
         self.assertEqual(level, logging.INFO)
-        self.assertRegex(text, r"^区域搜索完成 \| .* \| 耗时 \d+\.\d{3}s \| 检测框=2 \| 结果=3 \| 区域检索明细（各框累计）=.* \| trace_id=t-9$")
+        self.assertRegex(text, rf"^区域搜索完成 \| {TIMING} \| 检测框=2 \| 结果=3 \| 区域检索明细（各框累计）=.* \| trace_id=t-9$")
         self.assertEqual(steps(text), ["排队", "图像解码", "目标检测", "区域裁剪", "区域检索", "耗时"])
         # 两个框的检索，各步骤加在一起
         self.assertEqual(breakdown(text), ["embedding推理", "vector搜索", "后处理"])
@@ -363,15 +403,57 @@ class BusinessSearchRegionTests(unittest.TestCase):
         self.assertTrue(all(item["details"]["outputs_heating"] is True for item in body["items"]))
 
     def test_the_dish_names_follow_the_regions_hits_and_do_not_count_towards_top_k(self):
-        self.runtime.config["RECIPE_DETECT_CONFIG"] = {"enabled": True, "url": RECIPE_URL, "timeout": 2}
+        self.runtime.config["RECIPE_DETECT_CONFIG"] = {"enabled": True, "threshold": 0.95}
         body, records = self.by_url(top_k=1)
         self.assertEqual([item["source"] for item in body["items"]], ["self", "recipe"])
-        self.assertEqual(body["items"][1]["tags"], "清蒸鲈鱼")
+        self.assertEqual(body["items"][1]["tags"], "清蒸鲈鱼")  # 两个框是同一道菜
         self.assertEqual(
             self.timing_steps(records), ["接收请求", "图像下载", "整图搜索", "等待区域搜索", "等待菜谱识别", "总耗时"]
         )
         lines = [r.getMessage() for r in records if r.name == "svc.auto_search"]
         self.assertEqual([line.split(" | ")[0] for line in lines], ["整图搜索完成", "区域搜索完成", "菜谱识别完成"])
+
+    def test_one_detection_serves_the_regions_and_the_dish_names(self):
+        self.runtime.config["RECIPE_DETECT_CONFIG"] = {"enabled": True, "threshold": 0.95}
+        with patch.object(region_search, "encode", wraps=region_search.encode) as encode:
+            body, records = self.by_url(trace_id="t-9")
+        self.assertEqual(len(self.detector.calls), 1)  # GroundingDINO 只跑了一次
+        self.assertEqual(encode.call_count, 2)  # 区域搜索要 JPEG：每个框编码一次
+        self.assertEqual(self.classifier.calls, [[LEFT_CROP, RIGHT_CROP]])  # 和区域搜索同样的框
+        self.assertEqual(sorted(self.embedding.sizes[1:]), sorted([LEFT_CROP, RIGHT_CROP]))
+        self.assertEqual([item["source"] for item in body["items"]], ["self", "self", "self", "recipe"])
+        # 两行都有这次检测的几步，各自的一步在后面
+        region = self.service_line(records, "区域搜索完成")
+        recipe = self.service_line(records, "菜谱识别完成")
+        self.assertEqual(steps(region), ["排队", "图像解码", "目标检测", "区域裁剪", "区域检索", "耗时"])
+        self.assertEqual(steps(recipe), ["排队", "图像解码", "目标检测", "区域裁剪", "菜谱推理", "耗时"])
+        self.assertEqual(seconds(region)["目标检测"], seconds(recipe)["目标检测"])
+        self.assertIn(" | 检测框=2 | 结果=[\"清蒸鲈鱼\"] | 阈值=0.95 | 各框最相近=清蒸鲈鱼 0.9700、清蒸鲈鱼 0.9900 | ", recipe)
+
+    def test_a_whole_image_hit_drops_both_steps_and_the_detection(self):
+        self.runtime.config["RECIPE_DETECT_CONFIG"] = {"enabled": True, "threshold": 0.95}
+        self.vectors.hits[WHOLE] = [{"id": ROW_D, "score": 0.9}]
+        detecting, release = threading.Event(), threading.Event()
+
+        def detect():
+            detecting.set()
+            release.wait(5)
+
+        self.detector.on_detect = detect
+        self.embedding.on_embed = lambda size: size == WHOLE and detecting.wait(2)
+        with TestClient(self.app) as client, self.assertLogs(level="INFO") as logs:
+            response = client.post("/api/search/auto/file", files={"file": ("q.png", QUERY, "image/png")})
+            release.set()
+            deadline = time.monotonic() + 5
+            while auto_search_service._LEFT_RUNNING and time.monotonic() < deadline:
+                time.sleep(0.01)
+            time.sleep(0.1)  # 让检测线程跑完、事件循环处理它的结束
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.ids(response.json()), [ROW_D])
+        self.assertEqual((self.embedding.sizes, self.classifier.calls), ([WHOLE], []))
+        self.assertRegex(
+            self.service_line(logs.records, "整图搜索完成"), r" \| 结果=1 \| 已取消=区域搜索、菜谱识别 \| trace_id="
+        )
 
     def test_max_regions_keeps_the_highest_scores(self):
         self.runtime.config["AUTO_SEARCH_REGION_CONFIG"]["max_regions"] = 1
@@ -536,7 +618,7 @@ class BusinessSearchRegionTests(unittest.TestCase):
         self.assertEqual(body["message"], "自建库没有达到阈值的结果，未开启 Global 兜底")
         ((level, text),) = self.region_logs(records)
         self.assertEqual(level, logging.INFO)
-        self.assertRegex(text, r"^区域搜索完成 \| .* \| 耗时 \d+\.\d{3}s \| 检测框=0 \| 结果=0 \| trace_id=")
+        self.assertRegex(text, rf"^区域搜索完成 \| {TIMING} \| 检测框=0 \| 结果=0 \| trace_id=")
         self.assertEqual(steps(text), ["排队", "图像解码", "目标检测", "区域裁剪", "耗时"])  # 没有可检索的框
         self.assertEqual(breakdown(text), [])
         self.assertEqual(self.timing_steps(records), ["接收请求", "图像下载", "整图搜索", "等待区域搜索", "总耗时"])
@@ -563,7 +645,7 @@ class BusinessSearchRegionTests(unittest.TestCase):
         self.assertEqual((body["items"], body["fallback"]), ([], {"status": "disabled"}))
         ((level, text),) = self.region_logs(records)
         self.assertEqual(level, logging.WARNING)
-        self.assertRegex(text, r"^区域搜索失败 \| .* \| 耗时 \d+\.\d{3}s \| 错误=RuntimeError: gpu fell over \| trace_id=")
+        self.assertRegex(text, rf"^区域搜索失败 \| {TIMING} \| 错误=RuntimeError: gpu fell over \| trace_id=")
         self.assertEqual(steps(text), ["排队", "图像解码", "目标检测失败", "耗时"])
         self.assertEqual(self.timing_steps(records), ["接收请求", "图像下载", "整图搜索", "等待区域搜索", "总耗时"])
 
@@ -577,7 +659,7 @@ class BusinessSearchRegionTests(unittest.TestCase):
         self.assertEqual(self.ids(body), [ROW_A, ROW_B])  # 只有 LEFT 的结果
         ((level, text),) = self.region_logs(records)
         self.assertEqual(level, logging.WARNING)
-        self.assertRegex(text, r"^区域搜索完成 \| .* \| 耗时 \d+\.\d{3}s \| 检测框=2 \| 结果=2 \| 失败=1 \| 区域检索明细")
+        self.assertRegex(text, rf"^区域搜索完成 \| {TIMING} \| 检测框=2 \| 结果=2 \| 失败=1 \| 区域检索明细")
         self.assertEqual(steps(text), ["排队", "图像解码", "目标检测", "区域裁剪", "区域检索", "耗时"])  # 有框成功
         self.assertEqual(breakdown(text), ["embedding推理", "vector搜索", "后处理", "embedding推理失败"])
 

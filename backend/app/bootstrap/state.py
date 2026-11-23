@@ -19,6 +19,7 @@ from app.core.config.settings import Settings
 
 if TYPE_CHECKING:
     from app.clients.ground_dino import GdinoDetect
+    from app.clients.recipe_classifier import RecipeClassifier
     from app.core.config.nacos import NacosConfigProvider
     from app.services.predict.food_service import FoodService
     from app.services.predict.pipeline.a_onnx_segment import OnnxSegmentPy
@@ -44,9 +45,13 @@ class ApplicationState:
     embedder: Any = None
     detector: GdinoDetect | None = None
     detector_error: str | None = None
-    # 业务搜图的区域搜索轮流使用 GroundingDINO（app.api.services.region_search）：在事件循环上排队，
-    # 排队时被取消的请求不会再占用模型；正在推理的那次跑完才轮到下一个
+    # 业务搜图的目标检测（区域搜索和菜谱识别共用，app.api.services.region_search）轮流使用 GroundingDINO：
+    # 在事件循环上排队，排队时被取消的请求不会再占用模型；正在推理的那次跑完才轮到下一个
     detector_turn: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
+    # RECIPE_DETECT_CONFIG 的菜谱识别模型，供业务搜图使用；没有这一节或 enabled 为 false 时不加载。
+    # 加载、预热失败只记在 recipe_classifier_error，不影响就绪状态和其他接口
+    recipe_classifier: RecipeClassifier | None = None
+    recipe_classifier_error: str | None = None
     # SEGMENT_CONFIG 的分割模型，供 /api/tools/segment 使用；没有这一节或 enabled 为 false 时不加载。
     # 加载、预热失败只记在 segmentor_error，不影响就绪状态和其他接口
     segmentor: OnnxSegmentPy | None = None
@@ -118,6 +123,13 @@ class ApplicationState:
                 raise err.not_ready(detail)
             return self.segmentor
 
+    def require_recipe_classifier(self) -> RecipeClassifier:
+        with self.configuration_lock:
+            if self.stopping or self.recipe_classifier is None:
+                detail = self.recipe_classifier_error or "recipe model is disabled or not initialized"
+                raise err.not_ready(detail)
+            return self.recipe_classifier
+
     def require_catalog(self) -> "CatalogServices":
         with self.configuration_lock:
             if self.catalog is None:
@@ -134,6 +146,7 @@ class ApplicationState:
         *,
         detector: GdinoDetect | None = None,
         segmentor: OnnxSegmentPy | None = None,
+        recipe_classifier: RecipeClassifier | None = None,
     ) -> None:
         """原子更新已准备好的配置、服务和共享模型实例。"""
         with self.configuration_lock:
@@ -146,6 +159,8 @@ class ApplicationState:
             self.detector_error = None
             self.segmentor = segmentor
             self.segmentor_error = None
+            self.recipe_classifier = recipe_classifier
+            self.recipe_classifier_error = None
             self.initialization_error = None
             self.warmup_error = None
 
@@ -216,6 +231,7 @@ class ApplicationState:
                     finally:
                         self.detector = None
                         self.segmentor = None
+                        self.recipe_classifier = None
 
 
 def get_application_state(request: Request) -> ApplicationState:

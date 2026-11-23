@@ -1,6 +1,6 @@
-"""业务搜图的路由：用整图查自建库，GroundingDINO 在图里找到的区域和菜谱识别同时启动，
-Global 搜图作为可选兜底（app.api.services.auto_search）。和 Global 搜图的路由一样，
-每种输入一个路由：上传文件（multipart）或图片 URL（JSON）。
+"""业务搜图的路由：用整图查自建库，同时用 GroundingDINO 在图里找目标（区域搜索和菜谱识别共用
+这次检测：找到的区域搜自建库、识别菜名），Global 搜图作为可选兜底（app.api.services.auto_search）。
+和 Global 搜图的路由一样，每种输入一个路由：上传文件（multipart）或图片 URL（JSON）。
 
 每个请求最后写一行耗时（logger autosearch，同时写平台日志），从请求到达到返回结果：
 
@@ -18,7 +18,7 @@ from app.api.deps import require_retrieval
 from app.api.services.auto_search import run_auto_search
 from app.api.uploads import read_upload
 from app.bootstrap.state import get_application_state
-from app.clients.image_fetch import clean_url, read_url_bytes
+from app.clients.image_fetch import read_url_bytes
 from app.core.middleware import bind_trace_id, request_received_at
 from app.core.observability.log_helper import log_timing
 from app.schemas.auto_search import (
@@ -44,10 +44,13 @@ READ_STEP = "读取上传"
 
 _DESCRIPTION = (
     "给业务方用的搜图接口：先用整图查自建库（按检测场景过滤，取相似度达到阈值的前 top_k 条），有结果就直接返回。"
-    "同时启动两步：区域搜索（AUTO_SEARCH_REGION_CONFIG.enabled 开启时）用 GroundingDINO 在查询图里检测目标，"
-    "按检测框裁出区域，每个区域按同样的 scene / top_k / score_threshold 查自建库，合并后同一张图只留最高分，"
+    "同时用 GroundingDINO 在查询图里检测目标（参数见 AUTO_SEARCH_REGION_CONFIG，只检测一次），检测框给两步用："
+    "区域搜索（AUTO_SEARCH_REGION_CONFIG.enabled 开启时）按检测框裁出区域，每个区域按同样的 "
+    "scene / top_k / score_threshold 查自建库，合并后同一张图只留最高分，"
     "取相似度最高的 top_k 条（details.region 标明来自哪个检测框）；菜谱识别（RECIPE_DETECT_CONFIG.enabled 开启时）"
-    "识别出的菜名作为一条结果卡（source=recipe，菜名在 tags 里）。整图没有结果时，返回区域搜索的结果，"
+    "把每个检测框的裁剪图交给菜谱识别模型，和底库菜品的相似度高于 RECIPE_DETECT_CONFIG.threshold 的菜名"
+    "（每个框最多一个，同名只留一个，按相似度从高到低）作为一条结果卡（source=recipe，菜名在 tags 里）。"
+    "整图没有结果时，返回区域搜索的结果，"
     "菜谱识别的那条排在后面；都没有结果且 global_fallback=true 时，再用现网 Global 搜图兜底（取 top_k 条）。"
     "整图有结果时不等这两步，也不返回菜谱识别的结果卡。score_threshold=0 时整图总有结果，不做区域搜索。"
     "各通道的结果是同一种结果卡，每条结果卡的 source 说明它来自哪里（self / recipe / global）；"
@@ -163,7 +166,6 @@ async def auto_search_by_url(request: Request, body: AutoSearchUrlRequest) -> An
         result = await run_auto_search(
             runtime,
             image_bytes=image_bytes,
-            image_url=clean_url(body.image_url),  # 和下载时用的一样；菜谱识别服务也会去下载它
             scene=body.scene,
             top_k=body.top_k,
             score_threshold=body.score_threshold,

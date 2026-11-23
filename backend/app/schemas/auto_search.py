@@ -1,8 +1,8 @@
 """业务搜图的 wire（POST /api/search/auto/file、POST /api/search/auto/url）。
 
-用整图查自建库；整图没有结果时，用 GroundingDINO 在图里找到的区域
-（AUTO_SEARCH_REGION_CONFIG）和菜谱识别（RECIPE_DETECT_CONFIG），它们和整图搜索同时
-启动，最后合并；都没有结果时，用 Global 搜图作为可选兜底（app.api.services.auto_search）。
+用整图查自建库；整图没有结果时，用 GroundingDINO 在图里找到的区域（AUTO_SEARCH_REGION_CONFIG）
+和在这些区域里识别出的菜名（RECIPE_DETECT_CONFIG），它们和整图搜索同时启动，最后合并；都没有
+结果时，用 Global 搜图作为可选兜底（app.api.services.auto_search）。
 items[] 是各通道共用的结果卡（app.schemas.search_hit），每张卡的第一个字段是 source：
 它来自哪个通道。和通道有关的信息在结果卡上，不在外层：自建库结果卡的 details 说明是否
 带加热信息（outputs_heating）。fallback 说明 Global 搜图的情况，也就说明了 items 为空时

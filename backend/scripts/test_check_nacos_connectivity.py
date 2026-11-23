@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import contextlib
-import copy
 import io
 import json
 import os
+import subprocess
+import sys
 import threading
 import unittest
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -16,101 +18,82 @@ from urllib.parse import parse_qs, urlsplit
 
 import check_nacos_connectivity as probe
 
-PROFILE = {
-    "profile": "test", "server_addresses": "http://nacos.invalid:8848", "namespace": "test-namespace",
-    "username": "test-user", "password": "private-password", "group": "test-group", "data_id_list": ["first", "second"],
-}
+if str(probe.BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(probe.BACKEND_ROOT))
 
-
-def settings(profile=PROFILE, **overrides):
-    return SimpleNamespace(profile="test", profiles=(profile,), enabled=True, poll_enabled=True,
-                           connect_timeout_seconds=1, request_timeout_seconds=1, **overrides)
+from app.core.config.constant import NACOS_DATA_ID_LIST
+from app.core.config.nacos import NacosConfigError
+from app.core.config.settings import NacosSettings
 
 
 class NacosConnectivityTests(unittest.TestCase):
     def setUp(self):
-        self.addCleanup(os.chdir, os.getcwd())
-        self.profile = copy.deepcopy(PROFILE)
-        self.settings = settings(self.profile)
+        self.settings = NacosSettings(
+            enabled=True,
+            server_addr="http://nacos.invalid:8848",
+            namespace="test-namespace",
+            username="test-user",
+            password="private-password",
+            group="test-group",
+            data_ids=("first", "second"),
+        )
         self.client = Mock()
-        self.client._access_token = "private-token"
         self.client.get_config.return_value = "PASSWORD: remote-config-secret\nmarker: remote\n"
 
     def check(self):
         output = io.StringIO()
-        with contextlib.redirect_stdout(output), patch("app.core.config.nacos.NacosConfigClient", return_value=self.client):
-            result = probe.check_connection(self.settings, self.profile)
+        with contextlib.redirect_stdout(output), patch("app.core.config.nacos.NacosConfigClient", return_value=self.client) as constructor:
+            result = probe.check_connection(self.settings)
+        constructor.assert_called_once_with(self.settings)
         return result, output.getvalue()
 
-    def test_settings_take_profiles_and_selected_environment_from_the_script(self):
-        with patch.dict(os.environ, {"NACOS_ENV": "test", "NACOS_SERVER_ADDR": "http://ignored:8848", "NACOS_PASSWORD": "ignored", "NACOS_ENABLED": "true"}):
-            loaded = probe.load_nacos_settings()
-        self.assertEqual(loaded.profile, probe.NACOS_PROFILE)
-        self.assertIs(loaded.profiles, probe.NACOS_CONFIG_PROFILES)
-
-    def test_offline_validates_without_constructing_the_client(self):
+    def offline(self, nacos):
         output = io.StringIO()
-        with patch.object(probe, "load_nacos_settings", return_value=self.settings), contextlib.redirect_stdout(output):
+        settings = SimpleNamespace(nacos=nacos, application=SimpleNamespace(env="test"))
+        with patch("app.core.config.settings.settings", settings), contextlib.redirect_stdout(output):
             with patch("app.core.config.nacos.NacosConfigClient") as constructor:
                 result = probe.main(["--offline"])
-        self.assertEqual(result, probe.EXIT_OK)
-        self.assertIn("OFFLINE", output.getvalue())
-        self.assertNotIn("PASS", output.getvalue())
         constructor.assert_not_called()
+        return result, output.getvalue()
 
-    def test_missing_disabled_or_invalid_profiles_fail_prerequisites(self):
-        self.assertIn("NACOS_PROFILE", " ".join(probe.prerequisite_failures(self.settings, None)))
-        self.settings.enabled = False
-        self.assertIn("NACOS_ENABLED=false", " ".join(probe.prerequisite_failures(self.settings, self.profile)))
-        self.settings.enabled = True
-        for key, value in (("server_addresses", "http://bad:70000"), ("group", ""), ("data_id_list", []), ("password", "")):
-            profile = {**self.profile, key: value}
-            with self.subTest(key=key):
-                self.assertTrue(probe.prerequisite_failures(self.settings, profile))
-        self.settings.connect_timeout_seconds = float("inf")
-        self.assertIn("connect_timeout_seconds", " ".join(probe.prerequisite_failures(self.settings, self.profile)))
-
-    def test_anonymous_access_and_public_namespace_are_valid(self):
-        self.profile.update(username="", password="", namespace="")
-        self.assertEqual(probe.prerequisite_failures(self.settings, self.profile), [])
-        result, _ = self.check()
+    def test_offline_validates_and_prints_summary_without_constructing_client(self):
+        nacos = replace(self.settings, server_addr="[http://user:url-password@nacos.invalid:8848/nacos](http://ignored)")
+        result, output = self.offline(nacos)
         self.assertEqual(result, probe.EXIT_OK)
-        self.client._authenticate.assert_not_called()
-
-    def test_summary_shows_selected_connection_and_masks_password(self):
-        output = "\n".join(probe.summarize_effective(self.settings, self.profile))
-        for value in ("NACOS_CONFIG_PROFILES", "test-namespace", "test-group", "test-user", "first", "second"):
+        self.assertIn("OFFLINE", output)
+        self.assertNotIn("PASS", output)
+        for value in ("backend/.env", "test-namespace", "test-group", "first", "second"):
             self.assertIn(value, output)
-        self.assertNotIn("private-password", output)
-        self.assertEqual(json.loads(output.split("NACOS_CONFIG=", 1)[1])["password"], "***")
-
-    def test_production_address_normalization_is_used(self):
-        self.profile["server_addresses"] = "[http://nacos.invalid:8848/nacos](http://ignored)"
-        self.assertEqual(probe.server_address(self.profile), "http://nacos.invalid:8848/nacos")
-
-    def test_password_token_bearer_and_url_credentials_are_masked(self):
-        text = 'password=private-password accessToken=private-token&x=1 {"accessToken":"other-token"} Bearer bearer-token https://u:url-password@nacos.invalid'
-        output = probe.sanitize_error_text(text, self.profile, "private-token")
-        for secret in ("private-password", "private-token", "other-token", "bearer-token", "url-password"):
+        for secret in ("private-password", "url-password", "test-user"):
             self.assertNotIn(secret, output)
+        summary = next(line.removeprefix("NACOS_CONFIG=") for line in output.splitlines() if line.startswith("NACOS_CONFIG="))
+        self.assertEqual(json.loads(summary)["server_address"], "http://nacos.invalid:8848/nacos")
 
-    def test_success_authenticates_reads_all_documents_and_closes(self):
+    def test_disabled_or_invalid_address_fails_preflight(self):
+        result, output = self.offline(replace(self.settings, enabled=False))
+        self.assertEqual(result, probe.EXIT_CONFIG)
+        self.assertIn("NACOS_ENABLED=false", output)
+        result, output = self.offline(replace(self.settings, server_addr="http://bad:70000"))
+        self.assertEqual(result, probe.EXIT_CONFIG)
+        self.assertIn("NACOS_SERVER_ADDR", output)
+
+    def test_success_reads_all_documents_and_closes(self):
         result, output = self.check()
         self.assertEqual(result, probe.EXIT_OK)
         self.assertIn("PASS", output)
         self.assertNotIn("remote-config-secret", output)
-        self.client._authenticate.assert_called_once_with()
         self.assertEqual([call.args[0] for call in self.client.get_config.call_args_list], ["first", "second"])
         self.client.close.assert_called_once_with()
 
-    def test_authentication_failure_reports_message_without_tokens(self):
-        self.client._authenticate.side_effect = RuntimeError('HTTP 403 password=private-password {"accessToken":"other-token"}')
+    def test_authentication_failure_reports_http_status_without_response_body(self):
+        self.client.get_config.side_effect = NacosConfigError(
+            "Nacos authentication failed with HTTP 403 | response=private-password other-token"
+        )
         result, output = self.check()
         self.assertEqual(result, probe.EXIT_CONNECT)
         self.assertIn("HTTP 403", output)
         self.assertNotIn("private-password", output)
         self.assertNotIn("other-token", output)
-        self.client.get_config.assert_not_called()
         self.client.close.assert_called_once_with()
 
     def test_failed_read_does_not_stop_later_data_ids_or_fall_back_to_yaml(self):
@@ -142,10 +125,10 @@ class NacosConnectivityTests(unittest.TestCase):
         self.client.get_config.side_effect = KeyboardInterrupt()
         with patch("app.core.config.nacos.NacosConfigClient", return_value=self.client), contextlib.redirect_stdout(io.StringIO()):
             with self.assertRaises(KeyboardInterrupt):
-                probe.check_connection(self.settings, self.profile)
+                probe.check_connection(self.settings)
         self.client.close.assert_called_once_with()
 
-    def test_real_client_authenticates_and_reads_a_local_http_server(self):
+    def test_cli_uses_process_environment_and_project_data_ids_with_real_client(self):
         calls = []
 
         class Handler(BaseHTTPRequestHandler):
@@ -174,20 +157,33 @@ class NacosConnectivityTests(unittest.TestCase):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            self.profile["server_addresses"] = f"http://127.0.0.1:{server.server_port}"
-            output = io.StringIO()
-            with contextlib.redirect_stdout(output):
-                result = probe.check_connection(self.settings, self.profile)
-            self.assertEqual(result, probe.EXIT_OK, output.getvalue())
-            self.assertEqual([call[0] for call in calls], ["POST", "GET", "GET"])
+            result = subprocess.run(
+                [sys.executable, str(probe.BACKEND_ROOT / "scripts/check_nacos_connectivity.py")],
+                cwd=probe.BACKEND_ROOT.parent,
+                env={
+                    **os.environ,
+                    "NACOS_ENV": "test",
+                    "NACOS_ENABLED": "true",
+                    "NACOS_SERVER_ADDR": f"http://127.0.0.1:{server.server_port}",
+                    "NACOS_NAMESPACE": self.settings.namespace,
+                    "NACOS_GROUP": self.settings.group,
+                    "NACOS_USERNAME": self.settings.username,
+                    "NACOS_PASSWORD": self.settings.password,
+                },
+                capture_output=True,
+                encoding="utf-8",
+                timeout=15,
+            )
+            self.assertEqual(result.returncode, probe.EXIT_OK, result.stdout + result.stderr)
+            self.assertEqual([call[0] for call in calls], ["POST"] + ["GET"] * len(NACOS_DATA_ID_LIST))
             self.assertEqual(calls[0][1], "/nacos/v1/auth/login")
             self.assertEqual(calls[0][2], {"username": ["test-user"], "password": ["private-password"]})
-            for call, data_id in zip(calls[1:], self.profile["data_id_list"]):
+            for call, data_id in zip(calls[1:], NACOS_DATA_ID_LIST):
                 self.assertEqual(call[1], "/nacos/v1/cs/configs")
                 self.assertEqual(call[2], {"dataId": [data_id], "group": ["test-group"], "tenant": ["test-namespace"], "accessToken": ["local-test-token"]})
                 self.assertEqual(call[3], "Bearer local-test-token")
-            self.assertNotIn("should-not-be-printed", output.getvalue())
-            self.assertNotIn("local-test-token", output.getvalue())
+            self.assertNotIn("should-not-be-printed", result.stdout)
+            self.assertNotIn("local-test-token", result.stdout)
         finally:
             server.shutdown()
             server.server_close()

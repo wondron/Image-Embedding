@@ -67,6 +67,12 @@ def create_segmentor(config: dict):
     return OnnxSegmentPy(config)
 
 
+def create_recipe_classifier(config: dict):
+    """创建进程内共享的菜谱识别模型（业务搜图使用），仅在 RECIPE_DETECT_CONFIG.enabled 开启时加载。"""
+    from app.clients.recipe_classifier import RecipeClassifier
+    return RecipeClassifier(config)
+
+
 def create_food_service(config: dict, embedder):
     from app.services.predict.food_service import FoodService
     return FoodService(config, embedder)
@@ -110,6 +116,25 @@ def _segmentor_config(config: dict) -> dict | None:
     return _optional_model_config(config, "SEGMENT_CONFIG")
 
 
+# RECIPE_DETECT_CONFIG 里加载模型用的几项。enabled、threshold 每次请求都读，改它们不用换模型
+_RECIPE_MODEL_KEYS = ("model_path", "labels_path", "use_gpu")
+
+
+def _recipe_classifier_config(config: dict) -> dict | None:
+    """菜谱识别模型的加载配置：RECIPE_DETECT_CONFIG 里模型的几项加上 TOTAL_CONFIG.device_id。
+    这一步没有开启时为 None（不加载）：enabled 和 RecipeDetectSettings 一样默认 false。
+    两次结果相等时可以继续用已加载的实例。
+    """
+    name = "RECIPE_DETECT_CONFIG"
+    if not config_flag(config, name, "enabled", False):
+        return None
+    section = config.get(name) or {}
+    return {
+        name: {key: section[key] for key in _RECIPE_MODEL_KEYS if key in section},
+        "TOTAL_CONFIG": {"device_id": (config.get("TOTAL_CONFIG") or {}).get("device_id", 0)},
+    }
+
+
 def _detector_for(runtime: ApplicationState, config: dict):
     """config 下用哪个检测器：没有启用时为 None；配置和设备没变时继续用已加载的实例（不重新加载、
     不重新预热），否则加载并预热一个新实例。被替换的旧实例由正在处理的请求持有，跑完后释放。
@@ -134,6 +159,17 @@ def _segmentor_for(runtime: ApplicationState, config: dict):
     return _load_and_warm_up(create_segmentor, segmentor_config, runs, runtime.settings)
 
 
+def _recipe_classifier_for(runtime: ApplicationState, config: dict):
+    """config 下用哪个菜谱识别模型，规则和 _detector_for 一样（只比较加载模型用的几项）。"""
+    model_config = _recipe_classifier_config(config)
+    if model_config is None:
+        return None
+    if runtime.recipe_classifier is not None and _recipe_classifier_config(runtime.config) == model_config:
+        return runtime.recipe_classifier
+    runs = runtime.settings.warmup.recipe_runs
+    return _load_and_warm_up(create_recipe_classifier, model_config, runs, runtime.settings)
+
+
 def _load_optional_model(runtime: ApplicationState, model_for, name: str):
     """启动时加载并预热一个可选模型，返回（实例, 失败原因）；失败只记下原因，其他服务继续运行。"""
     try:
@@ -155,6 +191,17 @@ def initialize_segmentor(runtime: ApplicationState):
     runtime.segmentor = None
     runtime.segmentor, runtime.segmentor_error = _load_optional_model(runtime, _segmentor_for, "分割模型")
     return runtime.segmentor
+
+
+def initialize_recipe_classifier(runtime: ApplicationState):
+    """加载并预热可选的菜谱识别模型；失败时记录 recipe_classifier_error，业务搜图跳过菜谱识别，
+    其他服务继续运行。
+    """
+    runtime.recipe_classifier = None
+    runtime.recipe_classifier, runtime.recipe_classifier_error = _load_optional_model(
+        runtime, _recipe_classifier_for, "菜谱识别模型"
+    )
+    return runtime.recipe_classifier
 
 
 def initialize_embedder(runtime: ApplicationState):
@@ -366,8 +413,8 @@ def apply_nacos_config_update(runtime: ApplicationState, provider: NacosConfigPr
     EMBEDDING_CONFIG 与已加载的编码器匹配时复用实例，普通配置变化不会重新加载 ONNX。
     更换模型时，预测服务使用新编码器，检索服务继续使用与其 Qdrant 集合配对的编码器；
     新模型可通过 /api/embedding-models 登记版本并生成向量。
-    GroundingDINO 和分割模型的配置和设备未变时复用实例；需要替换时，先加载并预热新实例，
-    全部准备成功后再发布新配置和服务实例。任何一步失败，这次更新整体不生效，原来的配置、
+    GroundingDINO、分割模型和菜谱识别模型的配置和设备未变时复用实例；需要替换时，先加载并预热
+    新实例，全部准备成功后再发布新配置和服务实例。任何一步失败，这次更新整体不生效，原来的配置、
     服务和模型继续使用。
     """
     if runtime.stopping:
@@ -382,6 +429,7 @@ def apply_nacos_config_update(runtime: ApplicationState, provider: NacosConfigPr
                     embedder.model_path, runtime.retrieval.model.space_id, runtime.retrieval.model.collection)
         detector = _detector_for(runtime, snapshot.config)
         segmentor = _segmentor_for(runtime, snapshot.config)
+        recipe_classifier = _recipe_classifier_for(runtime, snapshot.config)
         service = create_food_service(snapshot.config, embedder)
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
@@ -396,7 +444,8 @@ def apply_nacos_config_update(runtime: ApplicationState, provider: NacosConfigPr
         **provider.source_info(snapshot),
     }
     runtime.replace_configuration(
-        snapshot.config, config_info, service, embedder, detector=detector, segmentor=segmentor
+        snapshot.config, config_info, service, embedder,
+        detector=detector, segmentor=segmentor, recipe_classifier=recipe_classifier,
     )
     logger.info("Nacos配置重读成功 | data_ids=%s", list(snapshot.data_ids))
     return True
@@ -422,6 +471,7 @@ async def lifespan(app: FastAPI):
     embedder = initialize_embedder(runtime)
     initialize_detector(runtime)
     initialize_segmentor(runtime)
+    initialize_recipe_classifier(runtime)
     initialize_food_service(runtime, embedder)
     initialize_catalog(runtime)
     initialize_retrieval(runtime, embedder)

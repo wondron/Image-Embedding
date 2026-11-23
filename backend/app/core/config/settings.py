@@ -22,7 +22,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, TypeVar
-from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 from sqlalchemy.engine import URL
@@ -40,7 +39,6 @@ from app.core.config.constant import (
     PG_CONNECT_TIMEOUT_SECONDS,
     PG_DEFAULT_PORT,
     PG_DRIVER,
-    RECIPE_DETECT_TIMEOUT_SECONDS,
     SERVICE_NAME,
     VERSION,
 )
@@ -132,6 +130,7 @@ class WarmupSettings:
     embedding_runs: int = 3
     groundingdino_runs: int = 3
     segment_runs: int = 3
+    recipe_runs: int = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -439,16 +438,18 @@ class ReconcileSettings:
 
 @dataclass(frozen=True, slots=True)
 class RecipeDetectSettings:
-    """菜谱识别：业务搜图和自建库搜索同时进行的一步
-    （app.api.services.auto_search），取自 RECIPE_DETECT_CONFIG。
+    """菜谱识别：业务搜图的一步（app.api.services.recipe_detect），取自 RECIPE_DETECT_CONFIG。
+    GroundingDINO 在查询图里找到的检测框（和区域搜索同一次检测，参数在 AUTO_SEARCH_REGION_CONFIG）
+    逐个裁出来交给菜谱识别模型，和底库最相近的菜品的相似度高于 threshold 才算识别出这道菜。
 
-    每次请求都解析，所以 Nacos 里的修改（开关、地址）不用重启就生效。没有这一节时
-    这一步关闭。url 和 timeout 只在开启时检查。
+    这里是每次请求都解析的两项，Nacos 里的修改不用重启就生效。模型的几项（model_path、
+    labels_path、use_gpu）在加载模型时读（app.clients.recipe_classifier），改了会在 Nacos 重读配置时
+    换模型。没有这一节时这一步关闭（也不加载模型）。threshold 只在开启时检查。
     """
 
     enabled: bool = False
-    url: str = ""  # 识别接口本身的地址，如 http://host:8866/detect_recipe_onnx
-    timeout: float = RECIPE_DETECT_TIMEOUT_SECONDS  # 一次调用的总秒数
+    # 余弦相似度高于它（不含等于）才算识别出这道菜，0～1；默认是模型自带脚本的阈值
+    threshold: float = 0.95
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> RecipeDetectSettings:
@@ -457,16 +458,10 @@ class RecipeDetectSettings:
         defaults = cls()
         settings = cls(
             enabled=_flag(section, name, "enabled", defaults.enabled),
-            url=_text(section, "url"),
-            timeout=_number(section, name, "timeout", defaults.timeout, float),
+            threshold=_number(section, name, "threshold", defaults.threshold, float),
         )
-        if not settings.enabled:
-            return settings
-        address = urlsplit(settings.url)
-        if address.scheme not in ("http", "https") or not address.netloc:
-            raise ValueError(f"{name}.url must be an http(s) address when {name}.enabled is true, got {settings.url!r}")
-        if not (settings.timeout > 0 and math.isfinite(settings.timeout)):
-            raise ValueError(f"{name}.timeout must be a positive number of seconds, got {settings.timeout!r}")
+        if settings.enabled and not 0 <= settings.threshold <= 1:  # NaN 也不通过
+            raise ValueError(f"{name}.threshold must be between 0 and 1, got {settings.threshold!r}")
         return settings
 
 
@@ -480,15 +475,19 @@ class AutoSearchRegionSettings:
     取自 AUTO_SEARCH_REGION_CONFIG：GroundingDINO 在查询图里找 caption 说的目标，
     找到的每个框都单独作为一张查询图去搜索。
 
+    检测的参数（caption、两个阈值、max_regions）也是菜谱识别的：两步共用同一次检测，区域搜索
+    关闭（enabled 为 false）时菜谱识别照样按这些参数检测。
+
     每次请求都解析，所以 Nacos 里的修改不用重启就生效（模型按 GROUNDINGDINO_CONFIG，
-    启动时加载）。没有这一节时这一步关闭。其余的值只在开启时检查。
+    启动时加载）。没有这一节时这一步关闭。其余的值只在用到时检查：开启时 from_config 检查，
+    关闭时由要用它们检测的菜谱识别调用 check。
     """
 
     enabled: bool = False
     caption: str = "food"  # 检测什么；多个类别写成 "food . dish"
     box_threshold: float = 0.4
     text_threshold: float = 0.4
-    max_regions: int = 5  # 搜索的检测框数，按检测置信度从高到低
+    max_regions: int = 5  # 用到的检测框数，按检测置信度从高到低
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> AutoSearchRegionSettings:
@@ -502,17 +501,18 @@ class AutoSearchRegionSettings:
             text_threshold=_number(section, name, "text_threshold", defaults.text_threshold, float),
             max_regions=_number(section, name, "max_regions", defaults.max_regions, int),
         )
-        if not settings.enabled:
-            return settings
+        return settings.check() if settings.enabled else settings
+
+    def check(self) -> AutoSearchRegionSettings:
+        """检查检测参数的取值，不对时抛出 ValueError（指出是哪一项）；对的话返回自己。"""
+        name = "AUTO_SEARCH_REGION_CONFIG"
         for key in ("box_threshold", "text_threshold"):
-            value = getattr(settings, key)
+            value = getattr(self, key)
             if not 0 <= value <= 1:  # NaN 也不通过
                 raise ValueError(f"{name}.{key} must be between 0 and 1, got {value!r}")
-        if not 1 <= settings.max_regions <= AUTO_SEARCH_MAX_REGIONS:
-            raise ValueError(
-                f"{name}.max_regions must be in 1..{AUTO_SEARCH_MAX_REGIONS}, got {settings.max_regions!r}"
-            )
-        return settings
+        if not 1 <= self.max_regions <= AUTO_SEARCH_MAX_REGIONS:
+            raise ValueError(f"{name}.max_regions must be in 1..{AUTO_SEARCH_MAX_REGIONS}, got {self.max_regions!r}")
+        return self
 
 
 @dataclass(frozen=True, slots=True)
