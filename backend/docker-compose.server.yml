@@ -20,25 +20,25 @@ x-logging: &logging
 # 本文件在 git 里，这些密码也就在 git 里；值里有 $ 要写成 $$（compose 会做变量替换）。
 x-nacos-prod: &nacos-prod
   NACOS_ENV: prod
-  NACOS_NAMESPACE: 239acdd2-c154-4d07-ba96-6d52ebc0dccb
-  NACOS_USERNAME: roki-ai-prod
-  NACOS_PASSWORD: IsAbprjbEGj2ME77jxiOR
+  NACOS_NAMESPACE: roki-ai-agent-test
+  NACOS_USERNAME: roki-ai-agent-test
+  NACOS_PASSWORD: 3@JhLk5s#dF9m
 
 x-nacos-test: &nacos-test
   NACOS_ENV: test
-  NACOS_NAMESPACE: adfc3ec2-a1ea-4b31-9b1a-fafb4228c8ca
-  NACOS_USERNAME: roki-ai-test
-  NACOS_PASSWORD: Q65ILEBfsAmqnPbJqcSig
+  NACOS_NAMESPACE: roki-ai-agent-test
+  NACOS_USERNAME: roki-ai-agent-test
+  NACOS_PASSWORD: 3@JhLk5s#dF9m
 
 services:
   api:
     image: ${IMAGE:-roki-ai-image-embedding:local}
     container_name: roki-imageembedding
     environment:
-      <<: *nacos-prod  # 测试机改成 *nacos-test
+      <<: *nacos-test  # 测试机改成 *nacos-test
       # 远程地址都在 Nacos 里，必须开着。改用下面挂载的 config.yaml 时设为 "false"
       NACOS_ENABLED: "true"
-      NACOS_SERVER_ADDR: http://nacos.myroki.com:8848
+      NACOS_SERVER_ADDR: http://ai-nacos-internal.myroki.com:8848
       NACOS_GROUP: ROKI_AI_GROUP
       # 可选：NACOS_POLL_INTERVAL_SECONDS 等轮询、超时参数，见 backend/.env.example
     volumes:
