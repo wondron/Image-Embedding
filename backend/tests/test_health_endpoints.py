@@ -147,6 +147,15 @@ class HealthEndpointTests(unittest.TestCase):
             self.assertEqual(response.json(), {
                 "ok": True, "source": "test", **self.info
             })
+
+            response = self.client.get("/api/config")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json(), {
+                "ok": True,
+                "config_info": {"source": "test"},
+                "config": {"EMBEDDING_CONFIG": {"model_path": "embedding.onnx"}},
+                **self.info,
+            })
             require_service.assert_not_called()
         self.service.embeddingTool.sess.get_providers.assert_not_called()
 
@@ -161,6 +170,45 @@ class HealthEndpointTests(unittest.TestCase):
         self.assertEqual(readiness.status_code, 200)
         self.assertIsNone(readiness.json()["components"]["embedding"]["model_path"])
 
+    def test_config_masks_secret_keys_and_url_credentials_but_keeps_other_values(self):
+        self.runtime.config = {
+            "POSTGRES_CONFIG": {
+                "host": "pg.internal", "port": 5432, "user": "image_emb",
+                "password": "image_emb", "database": "image_embedding",
+            },
+            "QDRANT_CONFIG": {
+                "url": "https://admin:url-pass@q.internal:6333/?api_key=url-key&mode=test",
+                "api_key": "", "prefer_grpc": True,
+            },
+            "FLAB_CONFIG": {"API_URL": "https://open.example/search", "API_KEY": "flab-key", "Timeout": 5},
+            "IMAGE_STORAGE_CONFIG": {
+                "access_key_id": "oss-key-id", "secret_access_key": "oss-secret", "key_prefix": "food/",
+            },
+            "GROUNDINGDINO_CONFIG": {"tokenizer_path": "config/bert", "mean": [0.485, 0.456], "threads": 4},
+            "LLM": {"apiKey": 12345, "max_tokens": 2048, "credentials": {"user": "llm-user"}, "x": float("inf")},
+        }
+
+        response = self.client.get("/api/config")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["config"], {
+            # 密码碰巧和用户名一样时，用户名、库名照常显示：只按键名遮盖，不做子串替换
+            "POSTGRES_CONFIG": {
+                "host": "pg.internal", "port": 5432, "user": "image_emb",
+                "password": "***", "database": "image_embedding",
+            },
+            "QDRANT_CONFIG": {
+                "url": "https://***@q.internal:6333/?api_key=***&mode=test",
+                "api_key": "", "prefer_grpc": True,  # 没填的密钥显示为空
+            },
+            "FLAB_CONFIG": {"API_URL": "https://open.example/search", "API_KEY": "***", "Timeout": 5},
+            "IMAGE_STORAGE_CONFIG": {"access_key_id": "***", "secret_access_key": "***", "key_prefix": "food/"},
+            "GROUNDINGDINO_CONFIG": {"tokenizer_path": "config/bert", "mean": [0.485, 0.456], "threads": 4},
+            "LLM": {"apiKey": "***", "max_tokens": 2048, "credentials": {"user": "***"}, "x": "inf"},
+        })
+        for secret in ("url-pass", "url-key", "flab-key", "oss-key-id", "oss-secret", "12345", "llm-user"):
+            self.assertNotIn(secret, response.text)
+
     def test_runtime_fields_keep_precedence_in_diagnostic_responses(self):
         self.runtime.config_info = {"ok": "config", "source": "test"}
         self.info.update({
@@ -171,7 +219,7 @@ class HealthEndpointTests(unittest.TestCase):
 
         for path in (
             "/api/healthz", "/api/livez", "/api/readyz",
-            "/api/version", "/api/config_info",
+            "/api/version", "/api/config_info", "/api/config",
         ):
             with self.subTest(path=path):
                 response = self.client.get(path)

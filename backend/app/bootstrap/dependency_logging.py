@@ -21,10 +21,15 @@ _URL_AUTH = re.compile(r"([a-zA-Z][a-zA-Z0-9+.-]*://)[^\s/]*@")
 _URL_SECRET = re.compile(r"(?i)([?&](?:api[_-]?key|token|access_token|password|secret)=)[^&\s\"'<>]*")
 
 
+def redact_url_credentials(text: str) -> str:
+    """遮盖 URL 里的账号密码（scheme://user:pass@）和 token、api_key 这类查询参数。"""
+    text = _URL_AUTH.sub(r"\1***@", text)
+    return _URL_SECRET.sub(r"\1***", text)
+
+
 def redact_text(text: str, config: Mapping[str, Any]) -> str:
     """驱动在错误信息里回显凭证时也要遮盖。"""
-    text = _URL_AUTH.sub(r"\1***@", text)
-    text = _URL_SECRET.sub(r"\1***", text)
+    text = redact_url_credentials(text)
     secrets: set[str] = set()
     for name in _SETTINGS:
         section = config.get(name)

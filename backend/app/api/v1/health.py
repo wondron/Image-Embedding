@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 from fastapi import APIRouter, Request
-from app.api.services.health import dependency_stubs, model_paths, readiness_info
+from app.api.services.health import dependency_stubs, model_paths, readiness_info, redacted_config
 from app.bootstrap.state import get_application_state
 from app.core import errors
 from app.core.errors import AppError
@@ -65,3 +65,17 @@ def config_info(request: Request) -> dict[str, Any]:
     """显示当前配置来源。"""
     runtime = get_application_state(request)
     return {"ok": True, **runtime.config_info, **runtime.runtime_info()}
+
+
+@router.get("/config")
+def effective_config(request: Request) -> dict[str, Any]:
+    """展示生效配置（本地 YAML 叠加 Nacos 后的结果）和它的来源；密码、密钥按键名遮盖成 ***。"""
+    runtime = get_application_state(request)
+    with runtime.configuration_lock:  # Nacos 重读时两者一起替换，这里也一起取
+        config, config_info = runtime.config, runtime.config_info
+    return {
+        "ok": True,
+        "config_info": config_info,
+        "config": redacted_config(config),
+        **runtime.runtime_info(),
+    }
