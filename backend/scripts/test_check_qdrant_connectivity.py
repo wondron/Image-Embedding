@@ -184,7 +184,8 @@ class QdrantConnectivityTests(unittest.TestCase):
         try:
             config = {"QDRANT_CONFIG": {"url": f"http://127.0.0.1:{server.server_port}", "prefer_grpc": False, "timeout": 2}}
             output = io.StringIO()
-            with contextlib.redirect_stdout(output):
+            # 本机设了系统代理（Windows 注册表）时 httpx 会把 127.0.0.1 也转给代理
+            with contextlib.redirect_stdout(output), patch.dict(os.environ, {"NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1"}):
                 result = probe.check_connection(probe.parse_connection(config), config, None)
             self.assertEqual(result, probe.EXIT_OK, output.getvalue())
             self.assertEqual(paths, ["/collections"])
