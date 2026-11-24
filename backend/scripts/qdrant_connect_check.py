@@ -13,8 +13,8 @@ except ImportError:
 
 
 # ==================== 直接修改这里 ====================
-QDRANT_URL = "https://robam-ai-qdrant-test.myroki.com:443"
-QDRANT_API_KEY = "1bcd6ced46b62e3d869a81b6d5bed3210ddb965b92f41bd400a332c6a0db499e"
+QDRANT_URL = "https://robam-ai-qdrant.myroki.com"
+QDRANT_API_KEY = "27hp6qjQRRqCo7-GZMMymeDJu6FRZmSDukEHqJxt7gqrgZupOtsMTqcvDuyFI2Nd"
 TIMEOUT_SECONDS = 10
 # =====================================================
 
