@@ -37,8 +37,8 @@ services:
     environment:
       <<: *nacos-test  # 测试机改成 *nacos-test
       # 远程地址都在 Nacos 里，必须开着。改用下面挂载的 config.yaml 时设为 "false"
-      NACOS_ENABLED: "true"
-      NACOS_SERVER_ADDR: http://ai-nacos-internal.myroki.com:8848
+      NACOS_ENABLED: "false"
+      NACOS_SERVER_ADDR: http://ai-nacos.myroki.com:8848
       NACOS_GROUP: ROKI_AI_GROUP
       # 可选：NACOS_POLL_INTERVAL_SECONDS 等轮询、超时参数，见 backend/.env.example
     volumes:
@@ -62,7 +62,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ["${GPU_ID:-0}"]  # 宿主机上的 GPU 编号；容器里总是 0，和 TOTAL_CONFIG.device_id 对应
+              device_ids: ["${GPU_ID:-5}"]  # 宿主机上的 GPU 编号；容器里总是 0，和 TOTAL_CONFIG.device_id 对应
               capabilities: ["gpu"]
     restart: unless-stopped
     <<: *logging
