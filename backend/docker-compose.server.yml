@@ -32,7 +32,7 @@ x-nacos-test: &nacos-test
 
 services:
   api:
-    image: ${IMAGE:-roki-ai-image-embedding:local}
+    image: aliyun-docker-harbor-registry.cn-hangzhou.cr.aliyuncs.com/roki-ai/roki-ai-image-embedding:2026112401
     container_name: roki-imageembedding
     environment:
       <<: *nacos-test  # 测试机改成 *nacos-test
