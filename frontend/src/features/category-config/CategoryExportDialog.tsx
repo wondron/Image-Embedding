@@ -102,7 +102,7 @@ export function CategoryExportDialog({ tree, rootCodes, heatingGroups, onClose }
   return <Dialog title="下载类别树" size="lg" onClose={onClose} dismissDisabled={busy !== null}>
     <div className="cx-dialog">
       <p className="cx-note">
-        共 {stats.total} 个类别（停用 {stats.inactive} 个），最深 {stats.depth} 层。下载的是完整的类别树，包含停用类别，不受页面上的搜索、筛选和折叠影响。
+        共 {stats.total} 个类别（叶子类别 {stats.leaves} 个，停用 {stats.inactive} 个），最深 {stats.levels} 层。下载的是完整的类别树，包含停用类别，不受页面上的搜索、筛选和折叠影响。
       </p>
       <ul className="cx-downloads">
         <li className="cx-download is-primary">

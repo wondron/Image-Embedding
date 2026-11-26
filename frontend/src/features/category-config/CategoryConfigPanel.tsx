@@ -22,7 +22,9 @@ import { ImportDialog, importCategoryTree } from '../config-transfer'
 import { CategoryDeleteDialog } from './CategoryDeleteDialog'
 import { CategoryEditorDialog, type CategoryEditorTarget, type CategorySaveRequest } from './CategoryEditorDialog'
 import { CategoryExportDialog } from './CategoryExportDialog'
+import { CategoryStatsBar } from './CategoryStatsBar'
 import { CategoryTable, rowElementId } from './CategoryTable'
+import { categoryStats, scopeEntries } from './stats'
 import { NO_CATEGORY_FILTER, categoryScopeOptions, categoryTableView, type CategoryStatusFilter, type CategoryTableFilter } from './tableModel'
 import { deleteFailureText, loadFailureText, saveFailureText, savedNotice } from './messages'
 import '../../components/ManagementViews.css'
@@ -101,7 +103,9 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
   const counts = useMemo(() => subtreeImageCounts(tree), [tree])
   const scopeOptions = useMemo(() => categoryScopeOptions(tree), [tree])
   const domainName = useCallback((code: string) => enumValueLabel(catalog, DOMAIN_ENUM, code.toLowerCase()), [catalog])
-  const inactiveCount = useMemo(() => nodes.filter(node => !node.isActive).length, [nodes])
+  /** The footer's counts: the scope the table is narrowed to, else the whole tree. */
+  const stats = useMemo(() => categoryStats(scopeEntries(tree, filter.scopeId)), [tree, filter.scopeId])
+  const scopeNode = filter.scopeId === null ? null : tree.byId.get(filter.scopeId)?.node ?? null
   const busy = Boolean(removing?.submitting)
   const failedEmpty = Boolean(listFailure) && nodes.length === 0
   const exportDisabled = !loadedOnce || loading || Boolean(listFailure) || nodes.length === 0 || busy
@@ -459,10 +463,16 @@ export function CategoryConfigPanel({ apiBase = '' }: { apiBase?: string }) {
           <button type="button" className="mg-btn mg-secondary" onClick={() => setFilter(NO_CATEGORY_FILTER)}>清空筛选</button>
         </EmptyState>)}
       {nodes.length > 0 && <div className="mg-pagination ct-footer">
-        <span>{view.filtering
-          ? `匹配 ${view.matched} 个 · 共 ${view.total} 个类别`
-          : `共 ${view.total} 个类别${filter.scopeId === null && inactiveCount > 0 ? ` · 停用 ${inactiveCount} 个` : ''}`}</span>
-        <div>
+        <CategoryStatsBar
+          stats={stats}
+          scopeName={scopeNode ? categoryLabel(scopeNode) : null}
+          matched={view.filtering ? view.matched : null}
+          focus={filter.focus}
+          onFocus={focus => setFilter(current => ({ ...current, focus }))}
+          inactiveOnly={filter.status === 'inactive'}
+          onInactiveOnly={on => setFilter(current => ({ ...current, status: on ? 'inactive' : 'all' }))}
+        />
+        <div className="ct-footer-actions">
           <button type="button" className="mg-text-button" disabled={view.filtering} onClick={() => setExpanded(new Set(nodes.map(node => node.id)))}>全部展开</button>
           <button type="button" className="mg-text-button" disabled={view.filtering} onClick={() => setExpanded(new Set())}>全部收起</button>
           <button type="button" className="mg-text-button" disabled={loading} onClick={() => setReloadKey(key => key + 1)}>{loading && loadedOnce ? '正在刷新…' : '刷新'}</button>

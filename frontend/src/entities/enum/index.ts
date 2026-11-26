@@ -18,6 +18,7 @@ export {
   type AppendDraft,
   type AppendPayload,
   charLength,
+  enumValueProblem,
   validateAppendDraft,
   type PrePostDecision,
   decidePrePost,

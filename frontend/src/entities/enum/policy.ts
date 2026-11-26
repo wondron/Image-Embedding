@@ -26,6 +26,15 @@ export function charLength(value: string): number {
   return Array.from(value).length
 }
 
+/** What is wrong with a value as typed (it is trimmed first); null when it is a valid value. */
+export function enumValueProblem(raw: string): string | null {
+  const value = raw.trim()
+  if (!value) return '请填写取值。'
+  if (charLength(value) > ENUM_VALUE_MAX_LEN) return '取值长度需为 1–32 个字符。'
+  if (!ENUM_VALUE_PATTERN.test(value)) return '取值需以小写字母开头，并且只包含小写字母、数字或下划线。'
+  return null
+}
+
 export function validateAppendDraft(draft: AppendDraft): {
   ok: true
   body: AppendPayload
@@ -38,9 +47,8 @@ export function validateAppendDraft(draft: AppendDraft): {
   const description = typeof draft.description === 'string' ? draft.description : ''
   const fieldErrors: Partial<Record<EnumFieldName, string>> = {}
 
-  if (!value) fieldErrors.value = '请填写取值。'
-  else if (charLength(value) > ENUM_VALUE_MAX_LEN) fieldErrors.value = '取值长度需为 1–32 个字符。'
-  else if (!ENUM_VALUE_PATTERN.test(value)) fieldErrors.value = '取值需以小写字母开头，并且只包含小写字母、数字或下划线。'
+  const valueProblem = enumValueProblem(value)
+  if (valueProblem) fieldErrors.value = valueProblem
 
   if (!label) fieldErrors.label = '请填写名称。'
   else if (charLength(label) > ENUM_LABEL_MAX_LEN) fieldErrors.label = '名称长度需为 1–64 个字符。'

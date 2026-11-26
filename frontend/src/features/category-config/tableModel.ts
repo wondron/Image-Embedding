@@ -1,4 +1,5 @@
 import { categoryLabel, type CategoryName, type CategoryTree, type CategoryTreeNode } from '../../entities/category'
+import { matchesFocus, type CategoryFocus } from './stats'
 
 export type CategoryStatusFilter = 'all' | 'active' | 'inactive'
 
@@ -8,9 +9,11 @@ export interface CategoryTableFilter {
   /** A node's id: only that node and what is below it (a domain, or a group inside one); null: the whole tree. */
   scopeId: number | null
   status: CategoryStatusFilter
+  /** Only the categories one of the footer's counts is about (e.g. leaves without images); null: no such limit. */
+  focus: CategoryFocus | null
 }
 
-export const NO_CATEGORY_FILTER: CategoryTableFilter = { query: '', scopeId: null, status: 'all' }
+export const NO_CATEGORY_FILTER: CategoryTableFilter = { query: '', scopeId: null, status: 'all', focus: null }
 
 export interface CategoryTableRow {
   entry: CategoryTreeNode
@@ -26,9 +29,9 @@ export interface CategoryTableView {
   rows: CategoryTableRow[]
   /** Nodes in scope: the chosen node's subtree, else the whole tree. */
   total: number
-  /** Nodes the search and the status filter match; total when neither is set. */
+  /** Nodes the search, the status filter and the focus match; total when none is set. */
   matched: number
-  /** A search or a status filter is set: matches are shown with their ancestors, all opened. */
+  /** A search, a status filter or a focus is set: matches are shown with their ancestors, all opened. */
   filtering: boolean
 }
 
@@ -37,7 +40,7 @@ function searchText({ node }: CategoryTreeNode): string {
 }
 
 /**
- * The rows the table lists, in tree order. Without a search or status filter, a node's children
+ * The rows the table lists, in tree order. Without a search, status filter or focus, a node's children
  * follow it only when it is expanded. With one, every match is listed together with its
  * ancestors (marked as context), and nothing else; the ancestors are shown open. A scope makes
  * its node the only top row (depth 0): the nodes above it are not listed.
@@ -50,7 +53,8 @@ export function categoryTableView(
   const scope = filter.scopeId === null ? undefined : tree.byId.get(filter.scopeId)
   const roots = filter.scopeId === null ? tree.roots : scope ? [scope] : []
   const words = filter.query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
-  const filtering = words.length > 0 || filter.status !== 'all'
+  const focus = filter.focus ?? null
+  const filtering = words.length > 0 || filter.status !== 'all' || focus !== null
   const matches = new Set<number>()
   const keep = new Set<number>()
   let total = 0
@@ -58,7 +62,8 @@ export function categoryTableView(
   const scan = (entry: CategoryTreeNode): boolean => {
     total += 1
     const statusOk = filter.status === 'all' || (filter.status === 'active') === entry.node.isActive
-    const self = statusOk && (words.length === 0 || words.every(word => searchText(entry).includes(word)))
+    const focusOk = focus === null || matchesFocus(entry, focus)
+    const self = statusOk && focusOk && (words.length === 0 || words.every(word => searchText(entry).includes(word)))
     if (self) matches.add(entry.node.id)
     let below = false
     for (const child of entry.children) if (scan(child)) below = true

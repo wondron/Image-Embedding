@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { AlertTriangle, ListTree, LoaderCircle, RefreshCw } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { AlertTriangle, ListTree, LoaderCircle, Plus, RefreshCw } from 'lucide-react'
 import { Dialog } from '../../components/Dialog'
 import {
+  ENUM_DESCRIPTION_MAX_LEN,
   ENUM_MAX_VALUES,
   addEnumValue,
+  charLength,
   decidePrePost,
+  enumValueProblem,
   getEnum,
   listEnums,
   resolveUncertainProbe,
@@ -24,6 +27,11 @@ import '../../components/ManagementViews.css'
 import './enum-config.css'
 
 const REQUEST_TIMEOUT_MS = 20_000
+/** How long a value just appended stays highlighted in the table. */
+const RECENT_MS = 4_000
+/** Wide enough for list and detail side by side (enum-config.css stacks them below this). */
+const SIDE_BY_SIDE = '(min-width: 761px)'
+const EMPTY_DRAFT: AppendDraft = { value: '', label: '', description: '' }
 
 type BlockReason = 'written' | 'unconfirmed'
 /** error: the append failed; status: a caution to read before trying again; success: done. */
@@ -120,6 +128,26 @@ function failureAlert(failure: EnumFailureView): FileAlert {
   }
 }
 
+/** The table row of one value, for scrolling a value just appended into view. */
+function valueRowId(name: string, value: string): string {
+  return `enum-value-${name}-${value}`
+}
+
+interface EnumGroup {
+  key: 'editable' | 'readonly'
+  title: string
+  items: EnumItem[]
+}
+
+/** The list in two groups, the enums that take new values first; file order inside each. */
+function groupEnums(items: readonly EnumItem[]): EnumGroup[] {
+  const groups: EnumGroup[] = [
+    { key: 'editable', title: '可追加', items: items.filter(item => item.editable) },
+    { key: 'readonly', title: '只读', items: items.filter(item => !item.editable) },
+  ]
+  return groups.filter(group => group.items.length > 0)
+}
+
 export function EnumConfigPanel({ apiBase = '' }: { apiBase?: string }) {
   // Labels shown on the other pages (EnumCatalogProvider): reloaded once a value is written.
   const { refresh: refreshCatalog } = useEnumCatalog()
@@ -137,7 +165,11 @@ export function EnumConfigPanel({ apiBase = '' }: { apiBase?: string }) {
   const [reloadKey, setReloadKey] = useState(0)
   const [appendOpen, setAppendOpen] = useState(false)
   const [appendTarget, setAppendTarget] = useState<string | null>(null)
-  const [draft, setDraft] = useState<AppendDraft>({ value: '', label: '', description: '' })
+  const [draft, setDraft] = useState<AppendDraft>(EMPTY_DRAFT)
+  /** Values appended with 「追加并继续」 while the dialog stayed open. */
+  const [appendedCount, setAppendedCount] = useState(0)
+  /** The value appended last: highlighted in the table for a moment. */
+  const [recent, setRecent] = useState<{ name: string; value: string } | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<EnumFieldName, string>>>({})
   const [focusField, setFocusField] = useState<EnumFieldName | null>(null)
   const [phase, setPhase] = useState<Phase>('idle')
@@ -310,9 +342,53 @@ export function EnumConfigPanel({ apiBase = '' }: { apiBase?: string }) {
     wasOpen.current = appendOpen
   }, [appendOpen])
 
+  const groups = useMemo(() => groupEnums(items), [items])
+
+  // Side by side, an empty detail pane has nothing to say: show the first enum of the list.
+  // Stacked (narrow screens), the list stays in front until one is picked.
+  useEffect(() => {
+    if (selectedName !== null || groups.length === 0) return
+    if (typeof window.matchMedia !== 'function' || !window.matchMedia(SIDE_BY_SIDE).matches) return
+    setSelectedName(groups[0].items[0].name)
+  }, [groups, selectedName])
+
+  // A value just appended: bring its row into view, then let the highlight go.
+  useEffect(() => {
+    if (!recent) return
+    document.getElementById(valueRowId(recent.name, recent.value))?.scrollIntoView({ block: 'nearest' })
+    const timer = window.setTimeout(() => setRecent(null), RECENT_MS)
+    return () => window.clearTimeout(timer)
+  }, [recent])
+
   function selectName(name: string) {
     setSelectedName(name)
     setMobilePane('detail')
+  }
+
+  /** ↑ ↓ Home End move through the list, and the detail follows. */
+  function moveInList(event: KeyboardEvent<HTMLElement>) {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Home' && event.key !== 'End') return
+    const options = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button[data-enum]'))
+    const current = options.findIndex(option => option === document.activeElement)
+    if (current < 0) return
+    event.preventDefault()
+    const next = event.key === 'Home' ? 0
+      : event.key === 'End' ? options.length - 1
+        : Math.min(options.length - 1, Math.max(0, current + (event.key === 'ArrowDown' ? 1 : -1)))
+    options[next].focus()
+    const name = options[next].dataset.enum
+    if (name) setSelectedName(name)
+  }
+
+  /** Typing in a field clears the error the last submit left on it. */
+  function editDraft(field: EnumFieldName, value: string) {
+    setDraft(current => ({ ...current, [field]: value }))
+    setFieldErrors(current => {
+      if (!current[field]) return current
+      const next = { ...current }
+      delete next[field]
+      return next
+    })
   }
 
   function openAppend() {
@@ -321,8 +397,9 @@ export function EnumConfigPanel({ apiBase = '' }: { apiBase?: string }) {
     if (!item || item.editable !== true || item.values.length >= ENUM_MAX_VALUES || writesBlockedRef.current) return
     appendTargetRef.current = item.name
     setAppendTarget(item.name)
-    setDraft({ value: '', label: '', description: '' })
+    setDraft(EMPTY_DRAFT)
     setFieldErrors({})
+    setAppendedCount(0)
     setNotice(null)
     setAppendOpen(true)
   }
@@ -393,8 +470,8 @@ export function EnumConfigPanel({ apiBase = '' }: { apiBase?: string }) {
     setNotice(`${failure.detail}${code}${trace}`)
   }
 
-  async function submit(event: FormEvent) {
-    event.preventDefault()
+  /** keepOpen (「追加并继续」): once appended, stay open with blank fields for the next value. */
+  async function submit(keepOpen: boolean) {
     if (submitLock.current) return
     const target = appendTargetRef.current
     if (!target) return
@@ -472,6 +549,9 @@ export function EnumConfigPanel({ apiBase = '' }: { apiBase?: string }) {
       refreshCatalog()
       if (created.outcome === 'created') setItems(previous => replaceItem(previous, created.item))
       blockValue(target, validated.body.value, 'written')
+      setRecent({ name: target, value: validated.body.value })
+      setAppendedCount(count => count + 1)
+      setNotice(`已追加「${validated.body.label}」（${validated.body.value}）。`, 'success')
       const refreshGen = ++detailGen.current
       const refreshClock = clock.current
       try {
@@ -481,7 +561,13 @@ export function EnumConfigPanel({ apiBase = '' }: { apiBase?: string }) {
           setItems(previous => replaceItem(previous, detail.item))
         }
         setRefreshPending(false)
-        setAppendOpen(false)
+        if (keepOpen) {
+          setDraft(EMPTY_DRAFT)
+          setFieldErrors({})
+          setFocusField('value')
+        } else {
+          setAppendOpen(false)
+        }
       } catch (error) {
         if (!mounted.current || refreshGen !== detailGen.current) return
         const failure = toEnumFailure(error)
@@ -525,6 +611,22 @@ export function EnumConfigPanel({ apiBase = '' }: { apiBase?: string }) {
   const submitDisabled = phase !== 'idle' || writesBlocked || Boolean(draftBlock)
   const submitLabel = phase === 'checking' ? '正在校验…' : phase === 'submitting' ? '提交中…' : phase === 'verifying' ? '正在核查…' : '追加'
   const alertTrace = fileAlert?.traceId ?? writeHold?.traceId ?? null
+  const appendDisabled = !selected || !selected.editable || selected.values.length >= ENUM_MAX_VALUES || writesBlocked
+  /** Why 追加值 is off, under the enum's name (null while it is on). */
+  const appendReason = !selected ? null
+    : writesBlocked ? '枚举文件异常，暂时不能追加。'
+      : !selected.editable ? '只读：系统按这些取值运行，不能追加。'
+        : selected.values.length >= ENUM_MAX_VALUES ? '已达上限，不能继续追加。'
+          : null
+  const target = appendTarget ? items.find(item => item.name === appendTarget) ?? null : null
+  /** Checked while typing: the format, a value the enum already has, a value that must not be sent again. */
+  const liveValueError = !trimmedDraft ? null
+    : enumValueProblem(trimmedDraft)
+      ?? (target?.values.some(row => row.value === trimmedDraft) ? '该取值已存在。' : null)
+      ?? (draftBlock === 'written' ? '该取值已写入，不能再次追加。'
+        : draftBlock === 'unconfirmed' ? '还不能确认该取值是否已经写入，不能再次提交。' : null)
+  const valueError = fieldErrors.value ?? liveValueError
+  const descriptionLength = charLength(draft.description)
 
   return <div className="enum-page">
     {(fileAlert || writeHold) && <div className="mg-errors enum-alert" role="alert">
@@ -558,26 +660,29 @@ export function EnumConfigPanel({ apiBase = '' }: { apiBase?: string }) {
           <div className="skeleton-row" aria-hidden="true"><div className="skeleton-card" /><div className="skeleton-card" /><div className="skeleton-card" /></div>
         </div>}
         {!loading && loadedOnce && items.length === 0 && !listFailure && <EmptyState icon={ListTree} title="暂无枚举" description="枚举列表为空，因此不能追加取值。" />}
-        {items.length > 0 && <ul className="enum-list-items">
-          {items.map(item => <li key={item.name}><button
-            type="button"
-            className="enum-option"
-            aria-current={item.name === selectedName ? 'true' : undefined}
-            onClick={() => selectName(item.name)}
-          >
-            <strong>{item.label || item.name}</strong>
-            <code>{item.name}</code>
-            <span className="enum-option-meta">
-              <span className="enum-count">{item.values.length} 个值</span>
-              <span className={`enum-badge ${item.editable ? 'enum-badge-editable' : ''}`}>{item.editable ? '可追加' : '只读'}</span>
-            </span>
-          </button></li>)}
-        </ul>}
+        {items.length > 0 && <div className="enum-list-scroll" onKeyDown={moveInList}>
+          {groups.map(group => <div key={group.key} className="enum-group">
+            <h3 className="enum-group-title" id={`enum-group-${group.key}`}>{group.title}<span>{group.items.length}</span></h3>
+            <ul className="enum-list-items" aria-labelledby={`enum-group-${group.key}`}>
+              {group.items.map(item => <li key={item.name}><button
+                type="button"
+                className="enum-option"
+                data-enum={item.name}
+                aria-current={item.name === selectedName ? 'true' : undefined}
+                onClick={() => selectName(item.name)}
+              >
+                <strong>{item.label || item.name}</strong>
+                <code>{item.name}</code>
+                <span className="enum-count">{item.values.length} 个取值</span>
+              </button></li>)}
+            </ul>
+          </div>)}
+        </div>}
       </section>
 
       <section className="mg-panel enum-pane enum-detail" aria-label="枚举详情">
         <button type="button" className="mg-btn mg-secondary enum-back" onClick={() => setMobilePane('list')}>返回列表</button>
-        {!selectedName && <EmptyState icon={ListTree} title="请选择左侧枚举" description="选中后可以查看取值。只有服务端标记为可追加、文件正常且未满 100 个值时，才能追加新值。" />}
+        {!selectedName && <EmptyState icon={ListTree} title="请选择左侧枚举" description="选中一个枚举，查看它的取值；可追加的枚举还能在这里追加新取值。" />}
         {selectedName && !selected && detailLoading && <div className="loading-state" role="status"><LoaderCircle size={22} className="spin" /><h3>正在读取枚举…</h3></div>}
         {selectedName && !selected && !detailLoading && <div className="enum-detail-body">
           {detailFailure
@@ -585,12 +690,26 @@ export function EnumConfigPanel({ apiBase = '' }: { apiBase?: string }) {
             : <p className="enum-note">当前列表没有「{selectedName}」。</p>}
         </div>}
         {selected && <div className="enum-detail-body">
-          <dl className="enum-meta">
-            <dt>name</dt><dd><code>{selected.name}</code></dd>
-            <dt>label</dt><dd>{selected.label || '—'}</dd>
-            <dt>description</dt><dd>{selected.description || '—'}</dd>
-            <dt>editable</dt><dd>{selected.editable ? '可追加' : '只读'}</dd>
-          </dl>
+          <div className="enum-detail-head">
+            <div className="enum-detail-heading">
+              <div className="enum-detail-title">
+                <h2>{selected.label || selected.name}</h2>
+                <code>{selected.name}</code>
+                <span className={`enum-badge${selected.editable ? ' enum-badge-editable' : ''}`}>{selected.editable ? '可追加' : '只读'}</span>
+              </div>
+              {selected.description && <p className="enum-description">{selected.description}</p>}
+              <p className="enum-capacity">
+                {selected.values.length} 个取值，最多 {ENUM_MAX_VALUES} 个{appendReason && <span className="enum-capacity-reason">{appendReason}</span>}
+              </p>
+            </div>
+            <button
+              ref={appendButtonRef}
+              type="button"
+              className="mg-btn mg-primary enum-append"
+              disabled={appendDisabled}
+              onClick={openAppend}
+            ><Plus size={16} />追加值</button>
+          </div>
           {detailFailure && <div className="mg-errors enum-alert" role="alert">
             <strong>详情刷新失败，仍显示已有内容</strong>
             <p>错误码：{detailFailure.code ?? '未知'}</p>
@@ -601,63 +720,82 @@ export function EnumConfigPanel({ apiBase = '' }: { apiBase?: string }) {
           {detailLoading && <p className="enum-note" role="status">正在核对详情…</p>}
           <div className="enum-table-scroll">
             <table className="enum-table">
-              <thead><tr><th>value</th><th>label</th><th>description</th></tr></thead>
+              <colgroup><col className="enum-col-value" /><col className="enum-col-label" /><col /></colgroup>
+              <thead><tr><th scope="col">取值</th><th scope="col">名称</th><th scope="col">说明</th></tr></thead>
               <tbody>
                 {selected.values.length === 0
                   ? <tr><td className="enum-empty-values" colSpan={3}>暂无枚举值</td></tr>
-                  : selected.values.map(row => <tr key={row.value}>
+                  : selected.values.map(row => <tr
+                    key={row.value}
+                    id={valueRowId(selected.name, row.value)}
+                    className={recent?.name === selected.name && recent.value === row.value ? 'is-new' : undefined}
+                  >
                     <td><code>{row.value}</code></td>
                     <td>{row.label || '—'}</td>
-                    <td>{row.description || '—'}</td>
+                    <td className={row.description ? undefined : 'enum-none'}>{row.description || '—'}</td>
                   </tr>)}
               </tbody>
             </table>
-          </div>
-          <div className="enum-detail-status">
-            <button
-              ref={appendButtonRef}
-              type="button"
-              className="mg-btn mg-primary"
-              disabled={!selected.editable || selected.values.length >= ENUM_MAX_VALUES || writesBlocked}
-              onClick={openAppend}
-            >追加值</button>
-            {writesBlocked && <span className="enum-note">枚举文件异常，禁止修改。</span>}
-            {!writesBlocked && !selected.editable && <span className="enum-note">该枚举为只读，不能追加。</span>}
-            {!writesBlocked && selected.editable && selected.values.length >= ENUM_MAX_VALUES && <span className="enum-note">已达 100 个取值上限，不能继续追加。</span>}
           </div>
         </div>}
       </section>
     </div>
 
-    <div className="mg-info"><AlertTriangle size={17} /><p>已有取值只能查看，不能编辑、删除、排序或停用。这里追加的新值不会自动出现在上传页的选项中。本页不管理类别、场景或加热组。</p></div>
+    <div className="mg-info"><AlertTriangle size={17} /><p>已有取值只能查看，不能修改、删除或调整顺序。追加的新取值会马上出现在上传、图片编辑和批量编辑的选项里。类别、场景和加热组不在本页管理。</p></div>
 
     {appendOpen && <Dialog title="追加枚举值" size="sm" dismissDisabled={phase !== 'idle'} onClose={closeAppend}>
-      <form className="mg-editor enum-form" onSubmit={event => void submit(event)} aria-busy={phase !== 'idle'}>
+      <form
+        className="mg-editor enum-form"
+        onSubmit={event => {
+          event.preventDefault()
+          void submit(false)
+        }}
+        aria-busy={phase !== 'idle'}
+      >
         <div className="mg-editor-body">
-          <p className="mg-editor-note">追加到 <code>{appendTarget}</code>。提交前会重新检查枚举文件。</p>
+          {/* One span: .mg-editor-note is a flex row and would space out every piece of text */}
+          <p className="mg-editor-note"><span>追加到「{target?.label || appendTarget}」（<code>{appendTarget}</code>）。提交前会再检查一次枚举文件。</span></p>
           {refreshPending && <p className="enum-refresh-warning" role="status">已写入，刷新未完成，请手动刷新。请勿再次追加同一取值。</p>}
+          {target && target.values.length > 0 && <div className="mg-field enum-existing">
+            <span className="mg-field-label" id="enum-append-existing">已有的值</span>
+            {/* What is taken, and the naming style to follow; the one typed below is marked when it is taken */}
+            <ul className="enum-existing-list" aria-labelledby="enum-append-existing">
+              {target.values.map(row => <li key={row.value} className={row.value === trimmedDraft ? 'is-match' : undefined}>
+                <code>{row.value}</code>{row.label && <span>{row.label}</span>}
+              </li>)}
+            </ul>
+          </div>}
           <label className="mg-field" htmlFor="enum-append-value"><span className="mg-field-label">取值</span>
             <input
               id="enum-append-value"
               data-dialog-initial-focus
               value={draft.value}
               disabled={phase !== 'idle'}
-              aria-invalid={Boolean(fieldErrors.value)}
-              aria-describedby={fieldErrors.value ? 'enum-append-value-error' : 'enum-append-value-hint'}
-              onChange={event => setDraft(current => ({ ...current, value: event.target.value }))}
+              autoComplete="off"
+              spellCheck={false}
+              aria-invalid={Boolean(valueError)}
+              aria-describedby={valueError ? 'enum-append-value-hint enum-append-value-error' : 'enum-append-value-hint'}
+              onChange={event => editDraft('value', event.target.value)}
             />
-            <small id="enum-append-value-hint">去掉首尾空白后为 1–32 个字符，以小写字母开头，只含小写字母、数字或下划线。</small>
-            {fieldErrors.value && <p className="enum-field-error" id="enum-append-value-error" role="alert">{fieldErrors.value}</p>}
+            <small id="enum-append-value-hint">1–32 个字符，小写字母开头，只用小写字母、数字和下划线。追加后不能修改。</small>
+            {valueError && <p
+              className="enum-field-error"
+              id="enum-append-value-error"
+              role={fieldErrors.value ? 'alert' : undefined}
+              aria-live={fieldErrors.value ? undefined : 'polite'}
+            >{valueError}</p>}
           </label>
           <label className="mg-field" htmlFor="enum-append-label"><span className="mg-field-label">名称</span>
             <input
               id="enum-append-label"
               value={draft.label}
               disabled={phase !== 'idle'}
+              autoComplete="off"
               aria-invalid={Boolean(fieldErrors.label)}
-              aria-describedby={fieldErrors.label ? 'enum-append-label-error' : undefined}
-              onChange={event => setDraft(current => ({ ...current, label: event.target.value }))}
+              aria-describedby={fieldErrors.label ? 'enum-append-label-hint enum-append-label-error' : 'enum-append-label-hint'}
+              onChange={event => editDraft('label', event.target.value)}
             />
+            <small id="enum-append-label-hint">选项和结果里显示的名称，最长 64 个字符。</small>
             {fieldErrors.label && <p className="enum-field-error" id="enum-append-label-error" role="alert">{fieldErrors.label}</p>}
           </label>
           <label className="mg-field" htmlFor="enum-append-description"><span className="mg-field-label">说明</span>
@@ -667,16 +805,28 @@ export function EnumConfigPanel({ apiBase = '' }: { apiBase?: string }) {
               value={draft.description}
               disabled={phase !== 'idle'}
               aria-invalid={Boolean(fieldErrors.description)}
-              aria-describedby={fieldErrors.description ? 'enum-append-description-error' : 'enum-append-description-hint'}
-              onChange={event => setDraft(current => ({ ...current, description: event.target.value }))}
+              aria-describedby={fieldErrors.description ? 'enum-append-description-hint enum-append-description-error' : 'enum-append-description-hint'}
+              onChange={event => editDraft('description', event.target.value)}
             />
-            <small id="enum-append-description-hint">可留空。留空时提交空字符串，最长 256 个字符。</small>
+            <small id="enum-append-description-hint" className="enum-hint-row">
+              <span>可留空。</span>
+              <span className={descriptionLength > ENUM_DESCRIPTION_MAX_LEN ? 'enum-counter is-over' : 'enum-counter'}>{descriptionLength} / {ENUM_DESCRIPTION_MAX_LEN}</span>
+            </small>
             {fieldErrors.description && <p className="enum-field-error" id="enum-append-description-error" role="alert">{fieldErrors.description}</p>}
           </label>
         </div>
         <div className="mg-editor-actions">
-          <button type="button" className="mg-btn mg-secondary" onClick={closeAppend} disabled={phase !== 'idle'}>取消</button>
+          {appendedCount > 0 && <span className="enum-appended" role="status">本次已追加 {appendedCount} 个</span>}
+          <button type="button" className="mg-btn mg-secondary" onClick={closeAppend} disabled={phase !== 'idle'}>{appendedCount > 0 ? '完成' : '取消'}</button>
           {refreshPending && <button type="button" className="mg-btn mg-secondary" onClick={() => void refreshManually()} disabled={phase !== 'idle'}><RefreshCw size={14} />手动刷新</button>}
+          {/* Several values for one enum: no need to reopen the dialog for each */}
+          <button
+            type="button"
+            className="mg-btn mg-secondary"
+            disabled={submitDisabled}
+            title="追加后留在这里，接着追加下一个"
+            onClick={() => void submit(true)}
+          >追加并继续</button>
           <button type="submit" className="mg-btn mg-primary" disabled={submitDisabled}>{phase !== 'idle' && <LoaderCircle size={14} className="spin" />}{submitLabel}</button>
         </div>
       </form>

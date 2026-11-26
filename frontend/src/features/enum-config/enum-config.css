@@ -7,7 +7,7 @@
 
 .enum-split {
   display: grid;
-  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
   gap: 14px;
   align-items: start;
 }
@@ -25,14 +25,33 @@
 
 .enum-back { display: none; }
 
-.enum-list-items { max-height: min(70vh, 720px); margin: 0; padding: 0; overflow: auto; list-style: none; }
+/* -- list: the enums that take new values, then the read-only ones ------------------------ */
+.enum-list-scroll { max-height: min(72vh, 760px); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.enum-group-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 14px 6px;
+  border-bottom: 1px solid var(--border);
+  background: #f7f8fa;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+}
+.enum-group-title span { padding: 0 6px; border-radius: 999px; background: #e9eef5; color: #64748b; font-size: 11px; font-weight: 500; line-height: 17px; }
+.enum-list-items { margin: 0; padding: 0; list-style: none; }
 .enum-list-items li { margin: 0; padding: 0; }
 .enum-option {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 2px 10px;
+  align-items: center;
+  gap: 1px 10px;
   width: 100%;
-  padding: 10px 14px;
+  padding: 9px 14px;
   border: 0;
   border-bottom: 1px solid var(--border);
   background: transparent;
@@ -42,51 +61,85 @@
   cursor: pointer;
 }
 .enum-option:hover { background: var(--hover); }
-.enum-option[aria-current='true'] { background: var(--active); }
+.enum-option[aria-current='true'] { background: var(--active); box-shadow: inset 3px 0 0 var(--primary); }
 .enum-option:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.enum-option strong { font-size: 14px; font-weight: 600; }
-.enum-option code { grid-column: 1; color: var(--muted); font-size: 12px; }
-.enum-option-meta { grid-column: 2; grid-row: 1 / span 2; align-self: center; text-align: right; }
-.enum-count { display: block; color: var(--muted); font-size: 12px; }
+.enum-option strong { overflow: hidden; color: var(--text); font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.enum-option code { grid-column: 1; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.enum-count { grid-column: 2; grid-row: 1 / span 2; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .enum-badge {
   display: inline-flex;
   align-items: center;
-  margin-top: 4px;
-  padding: 1px 6px;
+  padding: 1px 7px;
   border-radius: 999px;
   background: #eef2f6;
   color: #64748b;
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
 }
 .enum-badge-editable { background: var(--primary-soft); color: var(--primary); }
 
-.enum-detail-body { padding: 14px; }
-.enum-meta { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 8px 12px; margin: 0 0 14px; font-size: 14px; }
-.enum-meta dt { color: var(--muted); }
-.enum-meta dd { margin: 0; overflow-wrap: anywhere; }
-.enum-detail-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+/* -- detail: who it is and what it allows, then its values --------------------------------- */
+.enum-detail-body { padding: 16px 18px 18px; }
+.enum-detail-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 20px; margin-bottom: 14px; }
+.enum-detail-heading { flex: 1 1 260px; min-width: 0; }
+.enum-detail-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.enum-detail-title h2 { margin: 0; color: var(--text); font-size: 19px; font-weight: 700; line-height: 1.4; }
+.enum-detail-title code { color: var(--muted); font-size: 13px; }
+.enum-description { margin: 4px 0 0; color: #475569; font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.enum-capacity { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.7; font-variant-numeric: tabular-nums; }
+.enum-capacity-reason { margin-left: 10px; color: #8a6d3b; }
+.enum-append { flex-shrink: 0; }
 .enum-note { margin: 8px 0 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.enum-detail-body > .enum-alert { margin-bottom: 12px; }
 
 .enum-table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
-.enum-table { width: 100%; min-width: 520px; border-collapse: collapse; font-size: 13px; }
-.enum-table th, .enum-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.enum-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; }
+.enum-col-value { width: 30%; }
+.enum-col-label { width: 24%; }
+.enum-table th, .enum-table td { padding: 9px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
 .enum-table th { background: #f6f7f8; color: #334155; font-weight: 700; }
+.enum-table td code { color: #1f2a3a; font-size: 13px; }
 .enum-table tr:last-child td { border-bottom: 0; }
+.enum-table td.enum-none { color: #a8b2bf; }
 .enum-empty-values { color: var(--muted); text-align: center; }
+/* The value just appended: lit, then fading back (no motion when that is asked for: lit while it lasts) */
+.enum-table tr.is-new td { animation: enum-new-value 4s ease-out both; }
+@keyframes enum-new-value {
+  0%, 35% { background: #e3edff; }
+  100% { background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .enum-table tr.is-new td { animation: none; background: #e3edff; }
+}
 
+/* -- append dialog ------------------------------------------------------------------------- */
+.enum-form .mg-editor-note code { color: #475569; }
+.enum-existing-list { display: flex; flex-wrap: wrap; gap: 4px 6px; max-height: 108px; margin: 0; padding: 7px 0 0; overflow: auto; list-style: none; }
+.enum-existing-list li { display: inline-flex; align-items: baseline; gap: 5px; padding: 0 7px; border: 1px solid #e5eaf2; border-radius: 6px; background: #fff; color: #64748b; font-size: 12px; line-height: 22px; }
+.enum-existing-list code { color: #334155; font-size: 12px; }
+.enum-existing-list li.is-match { border-color: #e2b4b4; background: #fff8f7; color: #b16464; }
+.enum-existing-list li.is-match code { color: #b16464; }
+.enum-form .mg-field > small.enum-hint-row { display: flex; justify-content: space-between; gap: 12px; }
+.enum-counter { font-variant-numeric: tabular-nums; }
+.enum-counter.is-over { color: #b16464; }
 .enum-field-error { margin: 6px 0 0; color: #b16464; font-size: 13px; }
 .enum-form input[aria-invalid='true'],
 .enum-form textarea[aria-invalid='true'] { border-color: #e2b4b4; background: #fff8f7; }
-.enum-form .mg-field > .enum-field-error { grid-column: 2; }
+.enum-form .mg-field > .enum-field-error { grid-column: 2; margin-top: 0; }
 .enum-refresh-warning { margin: 0 0 12px; padding: 10px 12px; border: 1px solid #dcebe4; border-radius: 5px; background: #f5faf8; color: #3f6b5c; font-size: 13px; line-height: 1.7; }
+.enum-appended { margin-right: auto; align-self: center; color: #4b8b63; font-size: 13px; }
 
 @media (max-width: 760px) {
   .enum-split { display: block; }
   .enum-split.is-list .enum-detail { display: none; }
   .enum-split.is-detail .enum-list { display: none; }
   .enum-back { display: inline-flex; margin: 12px 14px 0; }
-  .enum-list-items { max-height: none; }
+  .enum-list-scroll { max-height: none; }
   .enum-option { min-height: 44px; }
+  .enum-detail-body { padding: 14px; }
+  .enum-col-value { width: 34%; }
+  .enum-col-label { width: 26%; }
 }
 @media (max-width: 580px) {
   .enum-form .mg-field > .enum-field-error { grid-column: 1; }

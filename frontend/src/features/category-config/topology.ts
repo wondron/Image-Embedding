@@ -1,4 +1,5 @@
 import { categoryLabel, flattenCategoryTree, type CategoryTree, type CategoryTreeNode } from '../../entities/category'
+import { FEW_IMAGES, categoryStats, type CategoryStats } from './stats'
 
 /**
  * The category tree as a topology diagram, for people: a text version (box-drawing characters, opens
@@ -7,31 +8,25 @@ import { categoryLabel, flattenCategoryTree, type CategoryTree, type CategoryTre
  * dialog saves what they return, and turns the SVG into a PNG.
  */
 
-export interface TopologyStats {
-  total: number
-  inactive: number
-  /** Categories without children. */
-  leaves: number
-  /** Levels of the deepest branch (a tree of only domains has 1). */
-  depth: number
-  /** Images labelled with any category. */
-  images: number
+/** The whole tree's counts (see ./stats): domains, groups, leaves, and where the images are. */
+export function topologyStats(tree: CategoryTree): CategoryStats {
+  return categoryStats(flattenCategoryTree(tree))
 }
 
-export function topologyStats(tree: CategoryTree): TopologyStats {
-  const stats: TopologyStats = { total: 0, inactive: 0, leaves: 0, depth: 0, images: 0 }
-  for (const { node, depth, children } of flattenCategoryTree(tree)) {
-    stats.total += 1
-    if (!node.isActive) stats.inactive += 1
-    if (children.length === 0) stats.leaves += 1
-    stats.depth = Math.max(stats.depth, depth + 1)
-    stats.images += node.imageCount
-  }
-  return stats
+/** One line for the picture's header. */
+function statsLine(stats: CategoryStats): string {
+  return `类别 ${stats.total} 个（叶子类别 ${stats.leaves} 个，停用 ${stats.inactive} 个） · 最深 ${stats.levels} 层 · 已标注图片 ${stats.images} 张`
 }
 
-function statsLine(stats: TopologyStats): string {
-  return `类别 ${stats.total} 个（停用 ${stats.inactive} 个） · 末级类别 ${stats.leaves} 个 · 最深 ${stats.depth} 层 · 已标注图片 ${stats.images} 张`
+/** The text file's header: the tree's make-up, then where the images are labelled. */
+function statsLines(stats: CategoryStats): string[] {
+  return [
+    `类别 ${stats.total} 个：类别域 ${stats.domains} 个，中间类别 ${stats.groups} 个，叶子类别 ${stats.leaves} 个；`
+    + `停用 ${stats.inactive} 个；最深 ${stats.levels} 层`,
+    `已标注图片 ${stats.images} 张：标在叶子类别上 ${stats.leafImages} 张，`
+    + `标在非叶子类别上 ${stats.coarseImages} 张（${stats.coarseCategories} 个类别）；`
+    + `无图的叶子类别 ${stats.emptyLeaves} 个，1–${FEW_IMAGES - 1} 张图的叶子类别 ${stats.fewImageLeaves} 个`,
+  ]
 }
 
 // -- text ----------------------------------------------------------------------------------
@@ -57,7 +52,7 @@ export function buildCategoryTopologyText(tree: CategoryTree, exportedAt = new D
   const lines = [
     '食物类别拓扑图',
     `导出时间：${exportedAt.toISOString()}`,
-    statsLine(topologyStats(tree)),
+    ...statsLines(topologyStats(tree)),
     '图例：名称 [编码]；「停用」为已停用；菜系、加热组是节点自己设置的（没写的沿用上级）；图 N 为直接标在该类别上的图片数',
     '',
   ]

@@ -86,10 +86,29 @@
   .ct-page > .mg-info { margin-top: 8px; }
 }
 
+.ct-footer { flex-wrap: wrap; align-items: flex-start; gap: 8px 28px; }
 .ct-footer > div { gap: 14px; }
 /* .mg-pagination styles its buttons as page arrows; these are text buttons */
 .ct-footer .mg-text-button { display: inline-flex; padding: 3px 0; border: 0; border-radius: 0; background: none; color: var(--primary); }
 .ct-footer .mg-text-button:disabled { color: var(--muted); cursor: not-allowed; text-decoration: none; }
+.ct-footer > .ct-footer-actions { min-height: 26px; margin-left: auto; }
+
+/* The counts: two lines (the tree's make-up, then where its images are), each wrapping on its own */
+.ct-footer > .ct-stats { display: flex; flex: 1 1 520px; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+.ct-stats-row { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 18px; }
+.ct-stat { display: inline-flex; align-items: baseline; gap: 4px; color: var(--muted); font-size: 13px; line-height: 26px; white-space: nowrap; }
+.ct-stat b { color: #334155; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ct-stat.is-matched b { color: var(--primary); }
+.ct-stats-scope { padding: 0 8px; border-radius: 6px; background: #e9eef5; color: #334155; font-size: 12px; font-weight: 600; line-height: 22px; }
+/* A count that filters the table: its number reads as a link; pressed while the table shows only those */
+.ct-footer .ct-stat-filter { display: inline-flex; margin: 0 -8px; padding: 0 7px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--muted); font-family: inherit; font-size: 13px; line-height: 24px; cursor: pointer; }
+.ct-footer .ct-stat-filter b { color: var(--primary); text-decoration: underline dotted rgba(44, 86, 160, .5); text-underline-offset: 3px; }
+.ct-footer .ct-stat-filter:hover:not(:disabled) { background: var(--hover); }
+.ct-footer .ct-stat-filter:hover:not(:disabled) b { text-decoration-style: solid; }
+.ct-footer .ct-stat-filter[aria-pressed='true'] { border-color: #c9dafa; background: var(--primary-soft); color: var(--primary); }
+.ct-footer .ct-stat-filter[aria-pressed='true'] b { text-decoration: none; }
+.ct-footer .ct-stat-filter:disabled { opacity: 1; cursor: default; }
+.ct-footer .ct-stat-filter:disabled b { color: #334155; text-decoration: none; }
 .ct-panel > .mg-empty { padding-top: 44px; }
 
 /* -- delete dialog ------------------------------------------------------------------ */

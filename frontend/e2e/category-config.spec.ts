@@ -580,7 +580,8 @@ test('搜索名称、别名或编码时保留上级作为上下文；可按类�
   await page.getByLabel('搜索类别').fill('馅饼') // an alias
   await expect(table(page).getByRole('button', { name: /^(卡尔佐内|披萨|菜品)/ })).toHaveCount(3)
   await expect(nodeButton(page, '面条', 'dish.noodle')).toHaveCount(0)
-  await expect(footer).toContainText('匹配 1 个 · 共 6 个类别')
+  await expect(footer.locator('[data-stat="matched"]')).toHaveText('匹配 1 个')
+  await expect(footer.locator('[data-stat="total"]')).toHaveText('类别 6 个')
 
   await page.getByLabel('搜索类别').fill('')
   await page.getByLabel('状态筛选').selectOption('inactive')
@@ -594,7 +595,7 @@ test('搜索名称、别名或编码时保留上级作为上下文；可按类�
   await page.getByLabel('范围筛选').selectOption({ label: '食材' })
   await expect(nodeButton(page, '食材', 'ingredient')).toBeVisible()
   await expect(nodeButton(page, '菜品', 'dish')).toHaveCount(0)
-  await expect(footer).toContainText('共 1 个类别')
+  await expect(footer.locator('[data-stat="total"]')).toHaveText('类别 1 个')
 })
 
 test('目录大了：缩小到一个分组，在它下面连续新建；名称和已有类别（含别名）相同会提示', async ({ page }) => {
@@ -608,7 +609,7 @@ test('目录大了：缩小到一个分组，在它下面连续新建；名称�
   await expect(nodeButton(page, '披萨', 'dish.pizza')).toBeVisible()
   await expect(nodeButton(page, '披萨切片', 'dish.pizza.slice')).toBeVisible()  // opened to show what is in it
   await expect(nodeButton(page, '面条', 'dish.noodle')).toHaveCount(0)
-  await expect(footer).toContainText('共 2 个类别')
+  await expect(footer.locator('[data-stat="total"]')).toHaveText('类别 2 个')
 
   // 新建类别 starts under the group the table shows
   await createButton(page).click()
@@ -640,7 +641,7 @@ test('目录大了：缩小到一个分组，在它下面连续新建；名称�
   ])
   await expect(nodeButton(page, '玛格丽特', 'dish.pizza.margherita')).toBeVisible()
   await expect(nodeButton(page, '水手', 'dish.pizza.marinara')).toHaveAttribute('aria-current', 'true')
-  await expect(footer).toContainText('共 4 个类别')
+  await expect(footer.locator('[data-stat="total"]')).toHaveText('类别 4 个')
 })
 
 test('分组行给出下级类别上的图片合计；行高一行，长编码只截掉前面的上级部分', async ({ page }) => {
@@ -700,4 +701,46 @@ test('窄屏：只留名称、停用标记和操作，没有横向滚动', async
   await page.getByRole('button', { name: '编辑「面条」' }).click()
   await expect(page.getByRole('dialog', { name: '编辑类别' })).toBeVisible()
   expect(await noHorizontalOverflow(page)).toBe(true)
+})
+
+test('底部统计分类别域、中间类别和叶子类别，并说明图片标在哪一层；点数字只看这些类别', async ({ page }) => {
+  // 菜品(1) > 披萨(2, 4 images of its own) > 披萨切片(4, none); 菜品 > 面条(3, 2 images); 食材(5): a domain with nothing below
+  const rows = seededRows()
+  rows.find(item => item.id === 2)!.image_count = 4
+  rows.find(item => item.id === 3)!.image_count = 2
+  await open(page, rows)
+  const footer = table(page).locator('.ct-footer')
+  const stat = (name: string) => footer.locator(`[data-stat="${name}"]`)
+  await expect(stat('total')).toHaveText('类别 5 个')
+  await expect(stat('domains')).toHaveText('类别域 2 个')
+  await expect(stat('groups')).toHaveText('中间类别 1 个')
+  await expect(stat('leaves')).toHaveText('叶子类别 2 个')
+  await expect(stat('levels')).toHaveText('最深 3 层')
+  await expect(stat('images')).toHaveText('已标注图片 6 张')
+  await expect(stat('leaf-images')).toHaveText('标在叶子类别上 2 张')
+  await expect(stat('coarse-images')).toHaveText('标在非叶子类别上 4 张（1 个类别）')
+  await expect(stat('empty-leaves')).toHaveText('无图的叶子类别 1 个')
+  await expect(stat('few-image-leaves')).toHaveText('1–4 张图的叶子类别 1 个')
+  await expect(stat('inactive')).toBeDisabled() // nothing is disabled: nothing to show
+  await expect(stat('matched')).toHaveCount(0)
+
+  // A count that points at work to do narrows the table to those categories, their parents shown as context
+  await stat('empty-leaves').click()
+  await expect(stat('empty-leaves')).toHaveAttribute('aria-pressed', 'true')
+  await expect(stat('matched')).toHaveText('匹配 1 个')
+  await expect(nodeButton(page, '披萨切片', 'dish.pizza.slice')).toBeVisible()
+  await expect(nodeButton(page, '面条', 'dish.noodle')).toHaveCount(0)
+  await stat('coarse-images').click() // another count takes over
+  await expect(stat('empty-leaves')).toHaveAttribute('aria-pressed', 'false')
+  await expect(nodeButton(page, '披萨', 'dish.pizza')).toBeVisible()
+  await expect(nodeButton(page, '披萨切片', 'dish.pizza.slice')).toHaveCount(0)
+  await stat('coarse-images').click() // pressed again: off
+  await expect(stat('matched')).toHaveCount(0)
+  await expect(nodeButton(page, '面条', 'dish.noodle')).toBeVisible()
+
+  // Narrowed to one domain, the counts are about it and what is below it
+  await page.getByLabel('范围筛选').selectOption({ label: '菜品' })
+  await expect(footer.locator('.ct-stats-scope')).toHaveText('菜品')
+  await expect(stat('total')).toHaveText('类别 4 个')
+  await expect(stat('domains')).toHaveText('类别域 1 个')
 })

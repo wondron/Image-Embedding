@@ -75,6 +75,16 @@ describe('categoryTableView', () => {
     // A scope that is gone lists nothing (the page then goes back to the whole tree)
     expect(categoryTableView(tree, { ...NO_CATEGORY_FILTER, scopeId: 99 }, new Set()).rows).toEqual([])
   })
+
+  it('a focus lists only what a footer count is about, with ancestors as context, and combines with the other filters', () => {
+    // No node of this tree has images: every leaf is a leaf without images, and nothing is labelled above the leaves
+    const view = categoryTableView(tree, { ...NO_CATEGORY_FILTER, focus: 'empty_leaves' }, new Set())
+    expect(view).toMatchObject({ filtering: true, matched: 4, total: 8 })
+    expect(view.rows.filter(row => !row.context).map(row => row.entry.node.id)).toEqual([3, 4, 6, 8])
+    expect(ids({ focus: 'empty_leaves', status: 'inactive' })).toEqual([1, 2, 4])
+    expect(ids({ focus: 'empty_leaves', scopeId: 7 })).toEqual([7, 8])
+    expect(ids({ focus: 'coarse_images' })).toEqual([])
+  })
 })
 
 describe('categoryScopeOptions', () => {

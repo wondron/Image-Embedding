@@ -4,7 +4,7 @@ import { addEnumValue, getEnum, listEnums } from './api'
 import { EMPTY_ENUM_CATALOG, enumOptions, enumValueLabel, enumValueText, toEnumCatalog } from './catalog'
 import { toEnumFailure } from './errors'
 import { toEnumDetail, toEnumList } from './model'
-import { decidePrePost, resolveUncertainProbe, validateAppendDraft } from './policy'
+import { decidePrePost, enumValueProblem, resolveUncertainProbe, validateAppendDraft } from './policy'
 
 const labels = { service: '枚举服务', endpoint: '枚举接口', action: '枚举配置' }
 const json = (body: unknown, status = 200, trace = 'trace-h') => new Response(JSON.stringify(body), {
@@ -105,6 +105,20 @@ describe('validateAppendDraft', () => {
     const longDescription = validateAppendDraft({ value: 'ab', label: '名称', description: '说'.repeat(257) })
     expect(longDescription.ok).toBe(false)
     if (!longDescription.ok) expect(longDescription.fieldErrors.description).toBeTruthy()
+  })
+})
+
+describe('enumValueProblem (checked while typing)', () => {
+  it('says what is wrong with a value, after trimming it, with the same messages as the submit check', () => {
+    expect(enumValueProblem(' half_cooked ')).toBeNull()
+    expect(enumValueProblem('a'.repeat(32))).toBeNull()
+    expect(enumValueProblem('  ')).toBe('请填写取值。')
+    expect(enumValueProblem('a'.repeat(33))).toBe('取值长度需为 1–32 个字符。')
+    for (const value of ['Half', '1abc', 'a-b', '中文']) {
+      expect(enumValueProblem(value)).toBe('取值需以小写字母开头，并且只包含小写字母、数字或下划线。')
+      const result = validateAppendDraft({ value, label: '名称', description: '' })
+      expect(result.ok ? null : result.fieldErrors.value).toBe(enumValueProblem(value))
+    }
   })
 })
 
