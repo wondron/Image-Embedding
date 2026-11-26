@@ -103,6 +103,19 @@ class EmbedderSharingTests(unittest.TestCase):
         self.assertEqual(len(self.created), 2)  # 回到检索仍在使用的模型
         self.assertIs(self.runtime.food_service.embeddingTool, original)
 
+    def test_moving_postgres_or_qdrant_in_nacos_warns_that_a_restart_is_needed(self):
+        self.start()
+        changed = copy.deepcopy(CONFIG)
+        changed["GLOBAL_FILTER"]["threshold"] = 0.9
+        with self.assertNoLogs("lifespan", level="WARNING"):
+            self.assertTrue(self.reload(changed))
+        moved = copy.deepcopy(changed)
+        moved["QDRANT_CONFIG"] = {"url": "https://new-qdrant:6333"}
+        with self.assertLogs("lifespan", level="WARNING") as logs:
+            self.assertTrue(self.reload(moved))
+        self.assertIn("QDRANT_CONFIG", "\n".join(logs.output))
+        self.assertNotIn("POSTGRES_CONFIG", "\n".join(logs.output))
+
     def test_model_load_failure_disables_both_with_reasons(self):
         lifespan.create_embedder.side_effect = FileNotFoundError("no onnx")
         self.start()

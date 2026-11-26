@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 
 from app.api.v1 import embedding_models as model_routes
 from app.bootstrap import model_registry as registry_module
+from app.bootstrap import retrieval_stack
 from app.bootstrap.model_registry import ModelRegistry
 from app.bootstrap.state import ApplicationState
 from app.core import errors as err
@@ -517,6 +518,16 @@ class ModelVersionsTests(unittest.TestCase):
         collection = self.store.models[model_id]["collection"]
         self.qdrant[collection][image_id] = {"vector": [1.0, 0, 0, 0], "payload": {}}
         self.store.ledger[(model_id, image_id)] = 1
+
+    def test_versions_stay_on_the_qdrant_the_process_started_with(self):
+        """QDRANT_CONFIG 只在启动时读取：Nacos 热更新换了地址后，核对、构建和切换仍和检索连同一个 Qdrant，
+        不会在新地址上建 collection、清掉共用的台账。"""
+        new_id = self.built_new_version()
+        self.runtime.config = {"QDRANT_CONFIG": {"url": "http://elsewhere:6333"}}  # Nacos 热更新
+        self.assertEqual(self.registry._connection().url, "http://q:6333")
+        self.ok(self.client.post(f"/api/embedding-models/{new_id}/activate", json={}))
+        config = retrieval_stack.build_retrieval_stack.call_args.args[0]  # 切换后的检索服务
+        self.assertEqual(config["QDRANT_CONFIG"], {"url": "http://q:6333"})
 
     def test_a_switch_tops_up_what_was_indexed_after_the_build(self):
         new_id = self.built_new_version()

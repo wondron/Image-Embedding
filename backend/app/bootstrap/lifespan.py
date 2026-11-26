@@ -18,6 +18,10 @@ from app.core.observability.logging import setup_logger
 
 logger = logging.getLogger("lifespan")
 
+# 只在启动时读取的配置段：Nacos 热更新会换掉 runtime.config，但检索、入库、模型版本仍用启动时
+# 建好的连接，要重启才按新配置连接
+RESTART_ONLY_SECTIONS = ("POSTGRES_CONFIG", "QDRANT_CONFIG")
+
 def create_http_client(app_settings: Settings = settings) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         timeout=app_settings.predict.http_timeout,
@@ -415,7 +419,7 @@ def apply_nacos_config_update(runtime: ApplicationState, provider: NacosConfigPr
     新模型可通过 /api/embedding-models 登记版本并生成向量。
     GroundingDINO、分割模型和菜谱识别模型的配置和设备未变时复用实例；需要替换时，先加载并预热
     新实例，全部准备成功后再发布新配置和服务实例。任何一步失败，这次更新整体不生效，原来的配置、
-    服务和模型继续使用。
+    服务和模型继续使用。RESTART_ONLY_SECTIONS 改了只记一条警告：连接要重启才换。
     """
     if runtime.stopping:
         return False
@@ -443,11 +447,16 @@ def apply_nacos_config_update(runtime: ApplicationState, provider: NacosConfigPr
         "loaded": True,
         **provider.source_info(snapshot),
     }
+    previous = runtime.config
     runtime.replace_configuration(
         snapshot.config, config_info, service, embedder,
         detector=detector, segmentor=segmentor, recipe_classifier=recipe_classifier,
     )
     logger.info("Nacos配置重读成功 | data_ids=%s", list(snapshot.data_ids))
+    changed = [name for name in RESTART_ONLY_SECTIONS if previous.get(name) != snapshot.config.get(name)]
+    if changed:
+        logger.warning("Nacos 里的 %s 改了：检索、入库和模型版本仍用启动时的连接，重启后才按新配置连接",
+                       " / ".join(changed))
     return True
 
 

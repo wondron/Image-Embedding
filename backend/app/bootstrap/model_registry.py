@@ -29,6 +29,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 import threading
 from dataclasses import asdict, dataclass, field
@@ -118,6 +119,10 @@ class ModelRegistry:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._timers: list[threading.Timer] = []
+        # 启动时的 QDRANT_CONFIG（本对象和检索服务在启动时用同一份配置创建）。和检索、入库一样，
+        # 只在启动时读取：Nacos 热更新只替换 runtime.config，跟着它走的话，改了地址又没重启时，
+        # 构建、核对会落到另一个 Qdrant，在那里新建 collection、清掉共用的写入台账
+        self._qdrant_config = copy.deepcopy(runtime.config.get("QDRANT_CONFIG"))
 
     # -- 它用到的东西 ---------------------------------------------------------------
 
@@ -127,10 +132,14 @@ class ModelRegistry:
     def _configured(self) -> Any:
         return self._runtime.embedder
 
+    def _infra_config(self) -> dict[str, Any]:
+        """运行中的配置，QDRANT_CONFIG 换成启动时的那份。"""
+        return {**self._runtime.config, "QDRANT_CONFIG": self._qdrant_config}
+
     def _connection(self) -> Any:
         from app.bootstrap.retrieval_stack import _qdrant_connection
 
-        return _qdrant_connection(self._runtime.config)
+        return _qdrant_connection(self._infra_config())
 
     def _vectors(self, row: dict[str, Any]) -> QdrantVectorStore:
         """基于本版本登记自己的客户端的版本 collection（它比检索服务的替换活得更久）。"""
@@ -514,7 +523,7 @@ class ModelRegistry:
             candidates = [stack.embedding] if stack is not None else []
             try:
                 new_stack = build_retrieval_stack(
-                    self._runtime.config, self._runtime.settings, embedder=configured, metadata=store,
+                    self._infra_config(), self._runtime.settings, embedder=configured, metadata=store,
                     model=ActiveModel.from_row(row), candidates=candidates,
                 )
             except err.AppError as exc:

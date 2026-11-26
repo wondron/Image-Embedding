@@ -23,6 +23,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import require_catalog, require_retrieval
 from app.api.uploads import form_upload, read_upload
+from app.bootstrap.dependency_logging import redact_text
 from app.bootstrap.state import ApplicationState
 from app.clients.image_fetch import read_url_bytes
 from app.core.middleware import bind_trace_id
@@ -340,6 +341,16 @@ def _attach_vector_status(runtime: ApplicationState, items: List[Dict[str, Any]]
 _FLYB_DISABLED = {"ok": False, "optional": True, "disabled": True, "detail": "out of scope"}
 
 
+def _configured_qdrant_url(config: Dict[str, Any]) -> Optional[str]:
+    """现在的配置（含 Nacos 热更新）里 QDRANT_CONFIG 指向的地址；没有配或配错了时为 None。"""
+    from app.bootstrap.retrieval_stack import _qdrant_connection
+
+    try:
+        return _qdrant_connection(config).url
+    except (TypeError, ValueError):
+        return None
+
+
 def mvp_health(runtime: ApplicationState) -> JSONResponse:
     """GET /api/health：检索服务的 embedding / qdrant / metadata 状态。
 
@@ -367,12 +378,19 @@ def mvp_health(runtime: ApplicationState) -> JSONResponse:
     model = stack.model
     pings = stack.infra.ping()
     q, pg = pings["qdrant"], pings["postgres"]
+    connected = q.get("url")
     qdrant: Dict[str, Any] = {
         "ok": bool(q.get("ok")),
+        "url": redact_text(str(connected), runtime.config) if connected else None,  # 检索、入库实际连着的
         "collection": q.get("collection") or model.collection,
         "points_count": q.get("points_count"),
         "embedding_space_id": model.space_id,
     }
+    configured = _configured_qdrant_url(runtime.config)
+    if connected and configured and configured != connected:
+        # QDRANT_CONFIG 只在启动时读取：Nacos 里改了地址，这个进程要重启才会改连过去
+        qdrant["configured_url"] = redact_text(configured, runtime.config)
+        qdrant["restart_required"] = True
     if not qdrant["ok"]:
         qdrant["detail"] = q.get("detail")
     metadata: Dict[str, Any] = {

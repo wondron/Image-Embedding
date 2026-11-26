@@ -56,7 +56,7 @@ class RetrievalHttpTests(unittest.TestCase):
         infra = MagicMock()
         infra.ping.return_value = {
             "postgres": {"ok": True, "host": "h", "database": "db"},
-            "qdrant": {"ok": True, "collection": "c1", "points_count": 3},
+            "qdrant": {"ok": True, "url": "http://q:6333", "collection": "c1", "points_count": 3},
             "storage": {"ok": True},
         }
         self.stack = SimpleNamespace(
@@ -245,8 +245,24 @@ class RetrievalHttpTests(unittest.TestCase):
         self.assertEqual(body["components"]["embedding"]["vector_dim"], 1024)
         self.assertEqual(body["components"]["embedding"]["embedding_space_id"], "dino:v1")
         self.assertEqual(body["components"]["qdrant"]["points_count"], 3)
+        self.assertEqual(body["components"]["qdrant"]["url"], "http://q:6333")  # 实际连着的
+        self.assertNotIn("restart_required", body["components"]["qdrant"])
         self.assertTrue(body["components"]["postgres"]["ok"])
         self.assertTrue(body["components"]["flyb"]["disabled"])
+
+    def test_health_says_a_restart_is_needed_when_qdrant_config_moved(self):
+        """QDRANT_CONFIG 只在启动时读取：Nacos 改了地址时，检索仍连着旧库，要能看出来。"""
+        self.runtime.config = {"QDRANT_CONFIG": {"url": "http://q:6333/"}}  # 同一个地址
+        qdrant = self.client.get("/api/health").json()["components"]["qdrant"]
+        self.assertNotIn("restart_required", qdrant)
+
+        self.runtime.config = {"QDRANT_CONFIG": {"url": "https://new-qdrant:6333"}}  # Nacos 热更新
+        response = self.client.get("/api/health")
+        self.assertEqual(response.status_code, 200)  # 旧库还连得上，不算故障
+        qdrant = response.json()["components"]["qdrant"]
+        self.assertEqual(qdrant["url"], "http://q:6333")
+        self.assertEqual(qdrant["configured_url"], "https://new-qdrant:6333")
+        self.assertTrue(qdrant["restart_required"])
 
     def test_health_without_stack_is_503_with_reason(self):
         self.runtime.retrieval = None
