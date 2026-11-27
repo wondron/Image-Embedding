@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Layers3, ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUpRight, Check, ChefHat,
+  Layers3, ArrowDownToLine, ArrowLeft, ArrowRight, Check, ChefHat,
   CircleHelp, Cpu, Database, FolderOpen, ImageIcon, Images, LayoutGrid, List, Link2, PanelLeftClose, PanelLeftOpen,
   ListFilter, ListTree, LoaderCircle, Menu, ScanLine, Search, Settings2, ShieldCheck, SlidersHorizontal,
   Tags, Upload, UploadCloud, Workflow, Wrench, X,
@@ -17,15 +17,19 @@ import { DownloadDialog } from './components/DownloadDialog'
 import { ImageFilePicker } from './components/ImageFilePicker'
 import { downloadImage } from './lib/downloads'
 import { EnumCatalogProvider } from './entities/enum'
-import { ProgressiveImage, storedImageSources, useImageCascade } from './entities/image'
+import { storedImageSources, useImageCascade, type ImageDeleteResult, type ImageDetail } from './entities/image'
 import { DEFAULT_SCENE, unknownScene, sceneError } from './entities/scene'
 import { SceneApiContext, useSceneSelection } from './features/scene-catalog'
 import { SceneConfigPage } from './pages/scenes/SceneConfigPage'
-import { SceneMembershipPanel } from './features/scene-memberships/SceneMembershipPanel'
+import { useCategoryTree } from './features/category-picker'
+import {
+  NO_RESULT_EDITS, ResultDetailDialog, applyResultEdits, isEditableResult, savedAnnotation, savedSceneLabel, withDeleted, withSaved,
+  type ResultEdits,
+} from './features/search-detail'
 import {
   AUTO_TOP_K_DEFAULT, AUTO_TOP_K_MAX, AUTO_TOP_K_MIN,
   SourceBadge, getThumbnailSources, hasImage, searchAutoImages, searchGlobalImages, searchLocalImages,
-  type SearchChannel, type SearchImage, type SearchRegion, type SearchResponse,
+  type SearchImage, type SearchResponse,
 } from './entities/search-result'
 import { pingApi, useApiBase } from './shared/api'
 import { safeHttpUrl } from './shared/lib'
@@ -36,7 +40,10 @@ import {
   SCORE_DEFAULT,
   clampScoreThreshold,
 } from './features/score-threshold'
-import { HeatingFields, QueryRegionPreview, ResultMetadata, ResultSceneLabel, ResultTags, SearchNeverEmpty, SearchNoMatch, SearchFilteredEmpty, isLibraryHit } from './features/search'
+import {
+  HeatingFields, ImageUnavailable, RecipeMark, ResultEditedMark, ResultMetadata, ResultSceneLabel, ResultTags,
+  SearchNeverEmpty, SearchNoMatch, SearchFilteredEmpty, isLibraryHit,
+} from './features/search'
 import { SearchNumControl, SEARCH_NUM_DEFAULT, type CountRange } from './features/search-num'
 
 /** 'tools': 模型工具, the backend's diagnostic model tools (POST /api/tools/gdino, /api/tools/segment, /api/tools/recipe). */
@@ -59,17 +66,6 @@ const BATCH_TARGET_NOTES: Readonly<Record<SearchTarget, string>> = {
   auto: '批量 · 业务搜图：逐张请求，先用整图查自建库；整图没有结果时用检测到的区域查、识别菜名（服务端开启时），都没有结果时按下面的开关用现网 Global 兜底。',
 }
 
-/** What the detail view calls a result's channel. */
-function channelText(source?: SearchChannel, region?: SearchRegion): string {
-  switch (source) {
-    case 'self': return region ? '自建 · 区域搜索（整图没有达到阈值的结果）' : '自建'
-    case 'recipe': return '菜谱识别（查询图里识别出的菜名）'
-    case 'global': return '现网 Global（业务搜图兜底）'
-    case 'empty': return '无结果'
-    case 'flyb': return 'FlyB 兜底'
-    default: return '未提供'
-  }
-}
 const navigation = [
   { key: 'search' as const, name: '图搜图', icon: ScanLine, description: '全网发现，相似检索' },
   // GroundingDINO detection, segmentation and 业务搜图's 菜谱识别 on one image (?view=tools&tool=gdino|segment|recipe)
@@ -99,15 +95,6 @@ function loadBaseUrl() {
   catch { return import.meta.env.VITE_API_BASE_URL ?? '' }
 }
 
-function ImageUnavailable({ className = '' }: { className?: string }) {
-  return <div className={`image-unavailable ${className}`}><ImageIcon size={32} strokeWidth={1.3} /><span>图片暂不可用</span></div>
-}
-
-/** Where an image would be, for 菜谱识别's card: it is dish names, not an image. */
-function RecipeMark({ className = '' }: { className?: string }) {
-  return <div className={`recipe-mark ${className}`}><ChefHat size={32} strokeWidth={1.3} /><span>菜谱识别 · 没有图片</span></div>
-}
-
 /**
  * A result in the grid or the table: its thumbnail only (a self-built hit's 512 px WebP, read back
  * through the API when its URL cannot be loaded). The original is loaded when the detail opens.
@@ -121,18 +108,6 @@ function ResultThumbnail({ item, className = '' }: { item: SearchImage; classNam
   return image.src
     ? <img key={image.src} className={className} src={image.src} alt={item.title} loading="lazy" decoding="async" referrerPolicy="no-referrer" onLoad={image.onLoad} onError={image.onError} />
     : <ImageUnavailable className={className} />
-}
-
-/** The detail's image: the thumbnail the list already loaded at once, the original over it once loaded. */
-function ResultPreview({ item }: { item: SearchImage }) {
-  const apiBase = useApiBase()
-  const self = item.source === 'self'
-  return <ProgressiveImage
-    previewSources={self ? storedImageSources([item.thumbnailUrl], item.id, 'thumb', apiBase) : getThumbnailSources(item)}
-    fullSources={self ? storedImageSources([item.imageUrl], item.id, 'original', apiBase) : item.imageUrl ? [item.imageUrl] : []}
-    alt={item.title}
-    placeholder={<ImageUnavailable />}
-  />
 }
 
 function QueryPreview({ src }: { src: string }) {
@@ -151,10 +126,12 @@ function Score({ value }: { value: number | null }) {
   </span>
 }
 
-function ResultTable({ items, onDetail, onDownload, downloading, selected, onToggle, outputsHeating }: {
+function ResultTable({ items, onDetail, onDownload, downloading, selected, onToggle, outputsHeating, edited }: {
   items: SearchImage[]; onDetail: (item: SearchImage) => void;
   onDownload: (item: SearchImage) => void; downloading: string | null;
   selected: Set<string>; onToggle: (id: string) => void; outputsHeating?: boolean
+  /** Results whose annotation was changed after the search. */
+  edited: ReadonlySet<string>
 }) {
   return <div className="result-table-scroll"><table className="result-table">
     <thead><tr><th>选择</th><th>图片</th><th>类别 / 标题</th><th>场景标签</th><th>标签</th><th>相似度</th><th>来源</th><th>通道</th><th>操作</th></tr></thead>
@@ -167,7 +144,7 @@ function ResultTable({ items, onDetail, onDownload, downloading, selected, onTog
       return <tr key={item.id} className={selected.has(item.id) ? 'result-row-selected' : ''}>
         <td>{image ? <input type="checkbox" className="result-checkbox" aria-label={`选择图片：${item.title}`} checked={selected.has(item.id)} onChange={() => onToggle(item.id)} /> : <span className="result-field-empty" title="菜谱识别结果没有图片，不能选来下载">—</span>}</td>
         <td><button className="table-image" onClick={() => onDetail(item)} aria-label={`查看图片详情：${item.title}`}><ResultThumbnail item={item} /></button></td>
-        <th scope="row"><button className="table-title" title={heading} onClick={() => onDetail(item)}>{heading}</button></th>
+        <th scope="row"><button className="table-title" title={heading} onClick={() => onDetail(item)}>{heading}</button>{edited.has(item.id) && <ResultEditedMark />}</th>
         <td>{library ? <ResultSceneLabel value={item.sceneLabel} /> : <span className="result-field-empty">—</span>}{image && (item.outputsHeating || outputsHeating) && <div className="result-table-heating"><HeatingFields show compact heatingGroup={item.heatingGroup} foodState={item.foodState} /></div>}</td>
         <td className="result-table-tags">{library ? <ResultTags value={item.tags} /> : <span className="result-field-empty">—</span>}</td>
         <td>{image ? <Score value={item.similarity} /> : <span className="result-field-empty">—</span>}</td><td>{item.siteName ?? '—'}</td><td><SourceBadge source={item.source} region={item.region} /></td>
@@ -221,6 +198,10 @@ export default function App() {
   const [resultLayout, setResultLayout] = useState<'grid' | 'list'>('grid')
   const [page, setPage] = useState(1)
   const [detail, setDetail] = useState<SearchImage | null>(null)
+  /** Annotation saved (or images deleted) from the detail since these results came in; see features/search-detail. */
+  const [edits, setEdits] = useState<ResultEdits>(NO_RESULT_EDITS)
+  /** The category tree is read once a stored image's detail opens (its path; the editor's picker). */
+  const [treeWanted, setTreeWanted] = useState(false)
   const [downloading, setDownloading] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [downloadItems, setDownloadItems] = useState<SearchImage[] | null>(null)
@@ -230,6 +211,7 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false)
   const [connection, setConnection] = useState<'checking' | 'online' | 'offline'>('checking')
   const sceneCatalog = useSceneSelection(scene, setScene, apiBase)
+  const searchCategories = useCategoryTree(apiBase, treeWanted)
   const activeRequest = useRef<AbortController | null>(null)
 
   const checkConnection = useCallback(async () => {
@@ -246,13 +228,14 @@ export default function App() {
   }, [file])
   useEffect(() => () => activeRequest.current?.abort(), [])
   useEffect(() => { setPage(1) }, [keyword, category, sort])
+  useEffect(() => { if (detail && isEditableResult(detail)) setTreeWanted(true) }, [detail])
 
   const resetResults = useCallback(() => {
     activeRequest.current?.abort()
     activeRequest.current = null
     setBusy(false); setResponse(null); setSearched(false)
     setPage(1); setCategory('all'); setKeyword(''); setElapsed(null)
-    setSelected(new Set()); setActiveQueryName(''); setActiveQueryImage(null); setDetail(null)
+    setSelected(new Set()); setActiveQueryName(''); setActiveQueryImage(null); setDetail(null); setEdits(NO_RESULT_EDITS)
   }, [])
   // Another scene makes a single search's results stale. A batch keeps what each image already
   // got (its queue says where from) until the images are searched again (「全部重新搜索」).
@@ -292,7 +275,7 @@ export default function App() {
     if (mode === 'url' && !safeHttpUrl(url.trim())) { notify.warn('请输入有效的 HTTP 或 HTTPS 图片链接。', { title: '暂时不能搜索' }); return }
     const controller = new AbortController()
     activeRequest.current?.abort(); activeRequest.current = controller
-    setBusy(true); setResponse(null); setSearched(false)
+    setBusy(true); setResponse(null); setSearched(false); setEdits(NO_RESULT_EDITS)
     setCategory('all'); setKeyword(''); setPage(1); setElapsed(null)
     setSelected(new Set()); setActiveQueryName(mode === 'file' ? file!.name : url.trim())
     setActiveQueryImage(mode === 'file' ? file! : url.trim())
@@ -372,6 +355,34 @@ export default function App() {
       window.history.replaceState(null, '', `${next.pathname}${next.search}${next.hash}`)
     } catch { /* the tools open on their default tool */ }
   }
+  /** ← / → in the detail: another result of the list, with the results page following it. */
+  function showResult(item: SearchImage) {
+    setDetail(item)
+    const index = sorted.findIndex(entry => entry.id === item.id)
+    if (index >= 0) setPage(Math.floor(index / pageSize) + 1)
+  }
+  /**
+   * The detail's editor wrote a stored image: its card shows what is stored now. The scene label
+   * is worked out for a new category (the server sends it only with search results).
+   */
+  function resultStored(card: SearchImage, image: ImageDetail) {
+    const searched = sceneCatalog.data?.scenes.find(entry => entry.code === response?.scene)
+    const sceneLabel = savedSceneLabel(card, image, searched, searchCategories.tree)
+    setEdits(current => withSaved(current, card.id, savedAnnotation(image, sceneLabel)))
+  }
+  /** The detail's editor deleted the image (null: it was gone already): it leaves the results. */
+  function resultDeleted(card: SearchImage, result: ImageDeleteResult | null) {
+    setDetail(null)
+    setEdits(current => withDeleted(current, card.id))
+    setSelected(current => {
+      if (!current.has(card.id)) return current
+      const next = new Set(current)
+      next.delete(card.id)
+      return next
+    })
+    if (result === null) notify.info('这张图片已经被删除了。')
+    else notify.success(result.cleanup === 'done' ? '已删除图片，向量和原图、缩略图已清理。' : '已删除图片；向量和图片文件稍后由清理任务删除。')
+  }
   function saveSettings() {
     const next = apiDraft.trim().replace(/\/+$/, '')
     if (next && !safeHttpUrl(next)) { return }
@@ -380,13 +391,19 @@ export default function App() {
     setSettingsOpen(false)
   }
 
-  const items = response?.items ?? []
+  // The search's results as they are now: annotation saved from the detail since, deleted images left out
+  const { items, edited } = useMemo(() => applyResultEdits(response?.items ?? [], edits), [response, edits])
   const categories = [...new Set(items.flatMap(item => item.category ? [item.category] : []))]
   const filtered = items.filter(item => (category === 'all' || item.category === category) && (!keyword || `${item.title} ${item.tags} ${item.category ?? ''} ${item.sceneLabel ?? ''} ${item.siteName ?? ''}`.toLocaleLowerCase().includes(keyword.toLocaleLowerCase())))
   const sorted = sort === 'similarity' ? [...filtered].sort((a, b) => (b.similarity ?? -Infinity) - (a.similarity ?? -Infinity)) : filtered
   const pages = Math.max(1, Math.ceil(sorted.length / pageSize))
   const currentPage = Math.min(page, pages)
   const visible = sorted.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+  /** The result in the detail as it is now (an edit since may have changed its card). */
+  const shownDetail = detail ? items.find(item => item.id === detail.id) ?? null : null
+  const searchedScene = response?.scene
+    ? { code: response.scene, name: sceneCatalog.data?.scenes.find(entry => entry.code === response.scene)?.name ?? response.scene }
+    : null
   const pageInfo = navigation.find(item => item.key === view)!
   const inputReady = mode === 'file' ? Boolean(file) : Boolean(safeHttpUrl(url.trim()))
   const queryImageUrl = mode === 'url' ? safeHttpUrl(url.trim()) : null
@@ -575,7 +592,7 @@ export default function App() {
                     // only 业务搜图 answers carry `fallback`: it detected regions and dishes that came to nothing
                     action={response?.fallback ? recipeToolButton : undefined}
                   />)
-              : resultLayout === 'list' ? <ResultTable items={visible} outputsHeating={response?.outputsHeating} onDetail={setDetail} onDownload={item => void saveImage(item)} downloading={downloading} selected={selected} onToggle={toggleSelected} />
+              : resultLayout === 'list' ? <ResultTable items={visible} outputsHeating={response?.outputsHeating} edited={edited} onDetail={setDetail} onDownload={item => void saveImage(item)} downloading={downloading} selected={selected} onToggle={toggleSelected} />
               : <div className="result-grid">{visible.map(item => <article className={`result-card ${selected.has(item.id) ? 'result-selected' : ''}`} key={item.id}>
                   {/* 菜谱识别's card has no image: nothing to select, score or download */}
                   {hasImage(item) && <label className="image-select"><input className="result-checkbox" type="checkbox" aria-label={`选择图片：${item.title}`} checked={selected.has(item.id)} onChange={() => toggleSelected(item.id)} /></label>}
@@ -585,6 +602,7 @@ export default function App() {
                   <div className="result-card-body">
                     <ResultMetadata
                       item={item}
+                      edited={edited.has(item.id)}
                       onDetail={() => setDetail(item)}
                       action={hasImage(item) ? <button className="icon-button download-button" title="下载图片" aria-label={`下载图片：${item.title}`} disabled={Boolean(downloading)} onClick={() => void saveImage(item)}>{downloading === item.id ? <LoaderCircle size={16} className="spin" /> : <ArrowDownToLine size={16} />}</button> : undefined}
                       footer={hasImage(item) && (item.outputsHeating || response?.outputsHeating) ? <HeatingFields show compact heatingGroup={item.heatingGroup} foodState={item.foodState} /> : undefined}
@@ -599,34 +617,27 @@ export default function App() {
       </div>
     </main></div>
 
-    {detail && <Dialog title={hasImage(detail) ? '图片详情' : '菜谱识别结果'} onClose={() => setDetail(null)} wide footer={<footer className="detail-footer"><p>{hasImage(detail) ? '图片来自外部来源，请根据来源授权使用。' : '这是菜谱识别在查询图里识别出的菜名，不是图库里的图片，没有可下载的图片。'}</p><div className="detail-actions">{hasImage(detail) && <button className="btn btn-secondary" onClick={() => setDownloadItems([detail])}><FolderOpen size={14} />保存选项</button>}<button className="btn btn-secondary" onClick={() => setDetail(null)}>关闭</button>{detail.pageUrl && <a className="btn btn-secondary" href={detail.pageUrl} target="_blank" rel="noreferrer">来源网页 <ArrowUpRight size={13} /></a>}{hasImage(detail) && <button className="btn btn-primary" disabled={Boolean(downloading)} onClick={() => void saveImage(detail)}>{downloading === detail.id ? <LoaderCircle size={14} className="spin" /> : <ArrowDownToLine size={14} />}下载图片</button>}</div></footer>}>
-      <div className="detail-content">
-        <section className="detail-section"><h3>检索信息</h3>
-          <div className="detail-summary"><h4>{detail.title}</h4>{hasImage(detail) && <Score value={detail.similarity} />}</div>
-          <dl className="detail-fields">{hasImage(detail) && <><div><dt>类别</dt><dd>{detail.category ?? '未分类'}</dd></div><div><dt>场景标签</dt><dd><ResultSceneLabel value={detail.sceneLabel} /></dd></div></>}<div><dt>{hasImage(detail) ? '标签' : '菜名'}</dt><dd>{detail.tags || '无标签'}</dd></div>
-          {hasImage(detail) && (detail.outputsHeating || response?.outputsHeating) && (
-            <div className="detail-heating"><dt>加热信息</dt><dd><HeatingFields show heatingGroup={detail.heatingGroup} foodState={detail.foodState} /></dd></div>
-          )}{hasImage(detail) && <><div><dt>图片尺寸</dt><dd>{detail.width && detail.height ? `${detail.width} × ${detail.height} px` : '未提供'}</dd></div><div><dt>图片来源</dt><dd>{detail.siteName ?? '未提供'}</dd></div></>}<div><dt>检索通道</dt><dd>{channelText(detail.source, detail.region)}</dd></div><div><dt>结果编号</dt><dd className="monospace">{detail.id}</dd></div></dl>
-          {detail.description.trim() && <div className="detail-description"><span>描述</span><div><p>{detail.description}</p></div></div>}
-        </section>
-        {/* 业务搜图's region search: which box of the query image found this hit */}
-        {detail.region && <section className="detail-section"><h3>命中区域</h3>
-          <p className="detail-note">整图没有达到阈值的结果，这张图是用查询图里检测到的「{detail.region.label || '目标'}」区域搜到的（检测置信度 {detail.region.score.toFixed(2)}，位置 {detail.region.box.join(', ')}，{detail.region.box[2] - detail.region.box[0]} × {detail.region.box[3] - detail.region.box[1]} 像素）。</p>
-          {activeQueryImage && <QueryRegionPreview source={activeQueryImage} region={detail.region} />}
-        </section>}
-        {/* 菜谱识别's card: how the names came about, and where to see it box by box */}
-        {detail.source === 'recipe' && <section className="detail-section"><h3>识别方式</h3>
-          <p className="detail-note">GroundingDINO 在查询图里找到的每个框裁出来交给菜谱识别模型，和底库最相近的菜相似度高于 RECIPE_DETECT_CONFIG.threshold 才算识别出来；每个框最多一个菜名，同名只留一个，按相似度从高到低。整图搜索有结果时不会有这张卡。</p>
-          <div className="detail-tool-link">{recipeToolButton}</div>
-        </section>}
-        {/* 菜谱识别's card has no image: no preview, no links */}
-        {hasImage(detail) && <section className="detail-section"><h3>图片预览</h3><div className="detail-image"><ResultPreview key={detail.id} item={detail} /></div></section>}
-        {hasImage(detail) && <section className="detail-section"><h3>来源信息</h3><dl className="detail-links"><div><dt>来源网页</dt><dd>{detail.pageUrl ? <a href={detail.pageUrl} target="_blank" rel="noreferrer">{detail.pageUrl}<ArrowUpRight size={12} /></a> : '—'}</dd></div><div><dt>图片地址</dt><dd>{(detail.imageUrl || detail.thumbnailUrl) ? <a className="original-link" href={detail.imageUrl ?? detail.thumbnailUrl!} target="_blank" rel="noreferrer">打开原图 / 另存为 <ArrowUpRight size={12} /></a> : '—'}</dd></div></dl>
-        </section>}
-        {detail.source === 'self' && <SceneMembershipPanel imageId={detail.id} apiBase={apiBase} onManage={() => { setDetail(null); navigate('scenes'); const u = new URL(window.location.href); u.searchParams.set('sceneTab', 'sync'); window.history.replaceState(null, '', u.toString()) }} />}
-      </div>
-
-    </Dialog>}
+    {shownDetail && <ResultDetailDialog
+      item={shownDetail}
+      list={sorted}
+      onShow={showResult}
+      edited={edited.has(shownDetail.id)}
+      outputsHeating={Boolean(response?.outputsHeating)}
+      scene={searchedScene}
+      queryImage={activeQueryImage}
+      apiBase={apiBase}
+      categories={searchCategories}
+      downloading={downloading}
+      onDownload={item => void saveImage(item)}
+      onSaveOptions={item => setDownloadItems([item])}
+      recipeTool={recipeToolButton}
+      onEditStart={searchCategories.refresh}
+      onStored={resultStored}
+      onDeleted={resultDeleted}
+      onManageScenes={() => { setDetail(null); openFromCheck('scenes', { sceneTab: 'sync' }) }}
+      onUpload={() => { setDetail(null); navigate('import') }}
+      onClose={() => setDetail(null)}
+    />}
     {downloadItems && <DownloadDialog items={downloadItems} apiBase={apiBase} onClose={() => setDownloadItems(null)} />}
     {settingsOpen && <Dialog title="搜索服务连接" onClose={() => setSettingsOpen(false)}><div className="settings-content"><p>连接现有的图像搜索服务。留空时使用当前站点的接口。</p><label htmlFor="api-base">服务地址</label><input className="input" id="api-base" type="url" placeholder="默认使用站点 /api" value={apiDraft} onChange={event => setApiDraft(event.target.value)} /><small>例如 http://127.0.0.1:8320，不包含 /api 路径。跨域连接需服务端允许访问。</small>{apiDraft.trim() && !safeHttpUrl(apiDraft.trim()) && <p className="inline-error">请输入 HTTP 或 HTTPS 地址。</p>}<div className="connection-info"><span className={`status-dot ${connection}`} />{connection === 'online' ? '接口可连接' : connection === 'checking' ? '正在检查连接…' : '当前未连接，请检查服务地址与后端运行状态'}<button className="text-button" onClick={() => void checkConnection()}>重新检查</button></div><div className="dialog-actions"><button className="btn btn-secondary" onClick={() => setSettingsOpen(false)}>取消</button><button className="btn btn-primary" disabled={Boolean(apiDraft.trim() && !safeHttpUrl(apiDraft.trim()))} onClick={saveSettings}><Check size={16} />保存连接</button></div></div></Dialog>}
     {helpOpen && <Dialog title="开始使用食图" onClose={() => setHelpOpen(false)}><div className="help-content"><div><Search size={21} /><section><h3>以图搜图</h3><p>上传图片或输入可公开访问的图片直链，在自建库中检索。默认场景为「通用」（general）；可切换场景与拒识阈值后点「开始搜索」。切到「现网 Global」时可设置返回数量（1–20 条）。「批量搜索」对队列里的每张图使用所选的搜索目标：自建库走多图搜索接口（一次请求多张，共用场景和阈值），改了目标、场景或阈值后可「全部重新搜索」。「业务搜图」走给业务方的接口：先用整图查自建库；整图没有达到阈值的结果时，用 GroundingDINO 在查询图里检测到的区域分别查自建库（结果卡标「自建 · 区域」，详情里能看到是哪个区域），服务端开启菜谱识别时同时识别这些区域里的菜名（作为一条标「菜谱识别」的结果卡排在后面，没有图片）；都没有结果时可用现网 Global 兜底（结果卡标「Global」），返回数量对自建库和 Global 都生效。想看一张图的每个检测框识别成了什么、阈值该设多少，用「模型工具 · 菜谱识别」。空库时请先去「上传与导入」入库（PG + S3），不以 FlyB 外搜兜底为完成标准。</p></section></div><div><ArrowDownToLine size={21} /><section><h3>查看与下载</h3><p>点击结果打开详情，勾选图片后可「批量下载」。一体机场景下结果会展示加热组与食物状态（缺字段显示「—」）。</p></section></div><div><FolderOpen size={21} /><section><h3>图库与入库</h3><p>图库按场景筛选（默认 general），缩略图使用 S3 https 地址。入库时可设置类别（取自「食材管理」的类别树）、标签、描述、食物标注、来源与许可；场景按所选类别的规则预览，和规则不同的勾选入库后写成人工纳入 / 排除。单张图片可单独标注。</p></section></div><div className="help-note">相似度仅在服务返回分数时展示；结果分别显示原始类别、场景标签和图片标签。场景标签未配置时显示「未映射」。</div></div></Dialog>}

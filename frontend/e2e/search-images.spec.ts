@@ -171,14 +171,14 @@ test('两个通道的结果卡一样：详情里都显示标签和描述，结�
     await page.locator('.result-card').getByRole('button', { name: `查看图片详情：${name}` }).click()
     return page.getByRole('dialog', { name: '图片详情' })
   }
-  const field = (dialog: Locator, name: string) => dialog.locator('.detail-fields > div').filter({ has: page.locator('dt').getByText(name, { exact: true }) }).locator('dd')
+  const field = (dialog: Locator, name: string) => dialog.locator('.rd-fields > div').filter({ has: page.locator('dt').getByText(name, { exact: true }) }).locator('dd')
 
   await searchByUrl(page)
   await page.getByLabel('搜索结果标题或来源').fill('带皮')
   await expect(page.locator('.result-card')).toHaveCount(1)
   let dialog = await detailOf('食材1')
   await expect(field(dialog, '标签')).toHaveText('红薯叶、带皮')
-  await expect(dialog.locator('.detail-description')).toHaveText(/清炒前的红薯叶/)
+  await expect(field(dialog, '描述')).toHaveText(/清炒前的红薯叶/)
   await dialog.getByRole('button', { name: '关闭', exact: true }).click()
 
   await page.getByRole('button', { name: '现网 Global', exact: true }).click()
@@ -186,6 +186,7 @@ test('两个通道的结果卡一样：详情里都显示标签和描述，结�
   await page.getByLabel('图片地址').fill('https://cdn.test/query.png')
   await page.getByRole('button', { name: '开始搜索', exact: true }).click()
   dialog = await detailOf('清蒸鲈鱼的做法')
-  await expect(field(dialog, '标签')).toHaveText('清蒸鲈鱼的做法')
-  await expect(dialog.locator('.detail-description')).toHaveText(/鲈鱼一条 清蒸十分钟/)
+  // A FlyB result's tags are its title: the detail is headed by them
+  await expect(dialog.getByRole('heading', { level: 3 })).toHaveText('清蒸鲈鱼的做法')
+  await expect(field(dialog, '描述')).toHaveText(/鲈鱼一条 清蒸十分钟/)
 })

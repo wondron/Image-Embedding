@@ -13,6 +13,11 @@ export function ResultTags({ value }: { value: string }) {
     : <span className="result-field-empty">无标签</span>
 }
 
+/** A result whose annotation was changed after the search (its card shows the saved values). */
+export function ResultEditedMark() {
+  return <span className="result-edited" title="搜索之后修改过标注，这里显示的是保存后的内容；相似度仍是搜索时的分数">已修改</span>
+}
+
 /**
  * A hit of the self-built library carries the library's own annotation (category, the scene's
  * label, tags); a result of the global search only has a title and the site it came from.
@@ -28,6 +33,8 @@ export interface ResultMetadataProps {
   action?: ReactNode
   /** A last row under a rule (the heating information of scenes that output it). */
   footer?: ReactNode
+  /** Its annotation was changed after the search. */
+  edited?: boolean
 }
 
 /**
@@ -36,7 +43,7 @@ export interface ResultMetadataProps {
  * and carries the action; rows that do not apply to a channel are left out, not shown empty.
  * 菜谱识别's card (业务搜图) is headed by the dish names it recognised in the query image.
  */
-export function ResultMetadata({ item, onDetail, action, footer }: ResultMetadataProps) {
+export function ResultMetadata({ item, onDetail, action, footer, edited = false }: ResultMetadataProps) {
   const library = isLibraryHit(item)
   const recipe = item.source === 'recipe'
   const heading = library ? item.category ?? '未分类' : item.title
@@ -46,6 +53,7 @@ export function ResultMetadata({ item, onDetail, action, footer }: ResultMetadat
         <dt>{library ? '类别' : recipe ? '菜名' : '标题'}</dt>
         <dd>
           <h3><button type="button" className={library && !item.category ? 'is-empty' : ''} onClick={onDetail} title={heading}>{heading}</button></h3>
+          {edited && <ResultEditedMark />}
           {action}
         </dd>
       </div>

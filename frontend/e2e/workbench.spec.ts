@@ -302,6 +302,8 @@ test('查看详情并从缩略图下载失败原图的图片', async ({ page }, 
   await expect(dialog.getByText('640 × 480 px')).toBeVisible()
   await expect(dialog.getByText('测试来源说明 1', { exact: true })).toBeVisible()
   await expect(dialog.getByRole('link', { name: '来源网页' })).toHaveAttribute('href', 'https://source.test/food/1')
+  // A Global result is not in the library: nothing to edit
+  await expect(dialog.getByRole('button', { name: '编辑标注' })).toHaveCount(0)
   await screenshot(page, info, 'desktop-detail')
   const downloadPromise = page.waitForEvent('download')
   await dialog.getByRole('button', { name: '下载图片', exact: true }).click()
@@ -419,12 +421,14 @@ test('矮屏详情正文独立滚动且关闭下载按钮始终可见', async ({
   await search(page)
   await page.getByRole('button', { name: '查看图片详情：测试食材01', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '图片详情' })
-  const body = dialog.locator('.dialog-body')
+  // The photo stays; the column of what the result says scrolls by itself
+  const body = dialog.locator('.rd-info')
   const close = dialog.getByRole('button', { name: '关闭弹窗', exact: true })
   const download = dialog.getByRole('button', { name: '下载图片', exact: true })
   await expect(close).toBeInViewport()
   await expect(download).toBeInViewport()
-  const before = { close: await close.boundingBox(), download: await download.boundingBox() }
+  const photo = dialog.locator('.rd-stage')
+  const before = { close: await close.boundingBox(), download: await download.boundingBox(), photo: await photo.boundingBox() }
   await body.hover()
   await page.mouse.wheel(0, 2000)
   await expect.poll(() => body.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
@@ -432,6 +436,7 @@ test('矮屏详情正文独立滚动且关闭下载按钮始终可见', async ({
   await expect(download).toBeInViewport()
   expect(await close.boundingBox()).toEqual(before.close)
   expect(await download.boundingBox()).toEqual(before.download)
+  expect(await photo.boundingBox()).toEqual(before.photo)
   await screenshot(page, info, 'desktop-short-detail')
   await close.click()
   await expect(dialog).not.toBeVisible()

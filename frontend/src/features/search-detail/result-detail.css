@@ -1,0 +1,114 @@
+/* A search result in detail (ResultDetailDialog): the photo on the left, the result on the right.
+   One frame for viewing and editing, so stepping through results or opening the editor never
+   resizes it. dialog.… outranks the gallery editor's .dialog.dialog-wide:has(.ie) sizing, which
+   also matches here while the editor is open. */
+dialog.dialog.dialog-wide.result-detail {
+  width: min(1120px, calc(100vw - 32px));
+  block-size: min(780px, calc(100dvh - 32px));
+  max-height: none;
+  border: 1px solid rgba(15, 23, 42, .14);
+  border-radius: 12px;
+  background: #fff;
+}
+.result-detail .dialog-heading { min-height: 46px; padding: 6px 10px 6px 18px; background: #fff; border-bottom-color: #e8edf4; }
+.result-detail .dialog-heading h2 { font-size: 16px; font-weight: 700; letter-spacing: .01em; color: #0f172a; }
+.result-detail .dialog-heading .icon-button { width: 30px; height: 30px; border-radius: 8px; }
+.result-detail .dialog-body:has(> .rd) { display: flex; overflow: hidden; }
+.result-detail .dialog-body:has(> .rd-edit) { display: flex; flex-direction: column; overflow: hidden; }
+
+/* -- view ------------------------------------------------------------------------------------ */
+.rd { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) clamp(340px, 38%, 430px); min-width: 0; min-height: 0; }
+
+/* The photo at its own proportions on a quiet ground; the original replaces the thumbnail in place */
+.rd-stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid #e4e9f0; background: #f1f4f8; }
+.rd-photo { position: relative; flex: 1; display: grid; min-width: 0; min-height: 0; padding: 18px; }
+.rd-photo > * { grid-area: 1 / 1; min-width: 0; min-height: 0; }
+.rd-photo > .image-unavailable, .rd-photo > .recipe-mark { border-radius: 10px; }
+/* ← / → over the photo, like a gallery */
+.rd-step { position: absolute; top: 50%; z-index: 2; display: grid; place-items: center; width: 38px; height: 38px; margin-top: -19px; border: 1px solid rgba(15, 23, 42, .08); border-radius: 50%; background: rgba(255, 255, 255, .94); box-shadow: 0 4px 14px rgba(15, 23, 42, .16); color: #334155; opacity: .8; transition: opacity .15s, color .15s, box-shadow .15s; }
+.rd-step.is-previous { left: 14px; }
+.rd-step.is-next { right: 14px; }
+.rd-step:hover, .rd-step:focus-visible { opacity: 1; color: var(--primary); box-shadow: 0 6px 18px rgba(15, 23, 42, .22); }
+.rd-stage-bar { display: flex; flex-shrink: 0; align-items: center; gap: 14px; min-height: 38px; padding: 6px 14px; border-top: 1px solid #e4e9f0; background: #f8fafc; color: #64748b; font-size: 12px; font-variant-numeric: tabular-nums; }
+.rd-stage-bar a { display: inline-flex; align-items: center; gap: 3px; color: var(--primary); }
+.rd-stage-bar a:hover { text-decoration: underline; }
+.rd-position { margin-left: auto; padding: 1px 9px; border-radius: 999px; background: #e8edf4; color: #475569; white-space: nowrap; }
+
+/* What the result says, top to bottom: what it is, how close, its annotation, how it was found */
+.rd-info { display: flex; flex-direction: column; gap: 20px; min-width: 0; min-height: 0; padding: 20px 22px 24px; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #d5dde8 transparent; }
+.rd-head { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.rd-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.rd-badges:empty { display: none; }
+.rd-title { margin: 0; color: #0f172a; font-size: 22px; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere; }
+.rd-title.is-empty { color: #94a3b8; font-weight: 500; }
+.rd-sub { color: #64748b; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.rd-status { display: inline-flex; align-items: center; padding: 2px 8px; border: 1px solid transparent; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 1.4; white-space: nowrap; }
+.rd-status.is-verified { border-color: #cfe8d8; background: #eaf5ee; color: #2f7d4a; }
+.rd-status.is-auto { border-color: #d9e0fb; background: #eef2ff; color: #3949ab; }
+.rd-status.is-unlabeled { border-color: #e5e7eb; background: #f3f4f6; color: #6b7280; }
+
+.rd-score { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 8px 10px; padding: 12px 14px 13px; border: 1px solid #e1e9f5; border-radius: 12px; background: linear-gradient(180deg, #f8fbff, #f2f6fc); }
+.rd-score > span:first-child { color: #64748b; font-size: 12px; }
+.rd-score > b { justify-self: end; color: var(--primary); font-size: 24px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.rd-score-track { grid-column: 1 / -1; display: block; height: 6px; overflow: hidden; border-radius: 999px; background: #e2e8f0; }
+.rd-score-track > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #8fb3ec, var(--primary)); }
+.rd-score.is-unknown { background: #f8fafc; border-color: #e5e9f0; }
+.rd-score.is-unknown > b { color: #94a3b8; font-size: 14px; font-weight: 500; }
+
+.rd-section { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.rd-section > h4 { display: flex; align-items: center; gap: 10px; margin: 0; color: #475569; font-size: 12px; font-weight: 700; letter-spacing: .06em; }
+.rd-section > h4::after { content: ''; flex: 1; height: 1px; background: #e9eef5; }
+.rd-fields { display: flex; flex-direction: column; gap: 10px; margin: 0; }
+.rd-fields > div { display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 12px; align-items: baseline; min-width: 0; }
+.rd-fields dt { color: #7b8899; font-size: 13px; line-height: 1.6; }
+.rd-fields dd { min-width: 0; margin: 0; color: #1e293b; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.rd-empty { color: #a0abbb; font-size: 13px; }
+/* Full length: the info column itself scrolls, so the description gets no scroller of its own */
+.rd-description { margin: 0; padding: 6px 10px; border: 1px solid #edf1f7; border-radius: 8px; background: #f8fafc; color: #334155; font-size: 13px; line-height: 1.75; white-space: pre-line; }
+.rd-chips { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+.rd-chip { display: inline-block; padding: 0 8px; border-radius: 999px; background: #eef2f7; color: #475569; font-size: 12px; line-height: 22px; white-space: nowrap; }
+.rd-link { color: var(--primary); word-break: break-all; }
+.rd-link:hover { text-decoration: underline; }
+.rd-id { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.rd-id code { min-width: 0; overflow: hidden; color: #475569; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.rd-copy { display: inline-grid; flex-shrink: 0; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: #7b8899; }
+.rd-copy:hover, .rd-copy:focus-visible { background: #eef2f7; color: var(--primary); }
+.rd-note { margin: 0; color: #475569; font-size: 13px; line-height: 1.75; overflow-wrap: anywhere; }
+.rd-warning { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 8px 10px; border: 1px solid #f3d9a4; border-radius: 8px; background: #fffaf0; color: #8a5a00; font-size: 13px; line-height: 1.6; }
+.rd-warning > svg { flex-shrink: 0; margin-top: 3px; }
+.rd-tool { display: flex; flex-wrap: wrap; gap: 8px; }
+.rd-tool .btn { height: auto; white-space: normal; text-align: left; }
+.rd-section .query-region { margin: 0; }
+
+.rd-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 10px 14px 10px 18px; border-top: 1px solid #e6ebf3; background: #fbfcfe; }
+.rd-footnote { flex: 1 1 260px; min-width: 0; color: #8a97a8; font-size: 12px; line-height: 1.6; }
+.rd-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.rd-actions .btn { min-height: 34px; padding: 6px 14px; border-radius: 8px; font-size: 14px; }
+.rd-actions .btn-primary { border-color: var(--primary); background: var(--primary); color: #fff; }
+.rd-actions .btn-primary:hover:not(:disabled) { border-color: var(--primary-hover); background: var(--primary-hover); color: #fff; }
+
+/* -- edit: the gallery editor (features/image-edit) in the same frame ------------------------ */
+.rd-edit { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.rd-edit-bar { display: flex; flex-shrink: 0; flex-wrap: wrap; align-items: center; gap: 2px 14px; padding: 6px 18px; border-bottom: 1px solid #e6ebf3; background: #f8fafc; color: #64748b; font-size: 12px; line-height: 1.6; }
+.rd-back { display: inline-flex; align-items: center; gap: 4px; padding: 3px 0; font-size: 13px; font-weight: 600; }
+.rd-back:disabled { color: #94a3b8; }
+.rd-edit > .ie { flex: 1; min-height: 0; }
+
+@media (max-width: 960px) {
+  .rd { grid-template-columns: minmax(0, 1fr) 320px; }
+  .rd-info { padding: 18px; }
+}
+/* One column: the photo on top, then the result; the body scrolls as a whole, the actions stay */
+@media (max-width: 760px) {
+  dialog.dialog.dialog-wide.result-detail { width: calc(100vw - 20px); block-size: calc(100dvh - 20px); }
+  .result-detail .dialog-body:has(> .rd) { display: block; overflow: auto; overscroll-behavior: contain; }
+  .rd { display: block; }
+  .rd-stage { height: min(50dvh, 420px); border-right: 0; border-bottom: 1px solid #e4e9f0; }
+  .rd-photo { padding: 10px; }
+  .rd-info { overflow: visible; padding: 16px; }
+  .rd-title { font-size: 19px; }
+  .rd-footer { padding: 8px 10px; }
+  .rd-footnote { display: none; }
+  .rd-actions { width: 100%; }
+  .rd-actions .btn { flex: 1 1 auto; padding-inline: 10px; font-size: 13px; }
+}

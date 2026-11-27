@@ -2,7 +2,7 @@ import { useLayoutEffect, useId, useRef, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 
 export function Dialog({
-  title, children, onClose, wide = false, size, footer, dismissDisabled = false,
+  title, children, onClose, wide = false, size, footer, dismissDisabled = false, className = '',
 }: {
   title: string
   children: ReactNode
@@ -14,6 +14,8 @@ export function Dialog({
   footer?: ReactNode
   /** Keeps the dialog open while a non-idempotent submit is in flight. */
   dismissDisabled?: boolean
+  /** Extra classes on the <dialog>, for a dialog with a layout of its own. */
+  className?: string
 }) {
   const ref = useRef<HTMLDialogElement>(null)
   const titleId = useId()
@@ -67,7 +69,7 @@ export function Dialog({
   }, [])
   return <dialog
     ref={ref}
-    className={`dialog ${large ? 'dialog-wide' : ''}`}
+    className={['dialog', large ? 'dialog-wide' : '', className].filter(Boolean).join(' ')}
     onCancel={event => {
       if (dismissDisabled) event.preventDefault()
       else onClose()

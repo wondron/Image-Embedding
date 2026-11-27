@@ -20,6 +20,7 @@ import {
   storedImageSources,
   updateImage,
   type ImageDeleteResult,
+  type ImageDetail,
   type ImageDetailResult,
   type LabelStatus,
   type LibraryImageItem,
@@ -97,6 +98,12 @@ export interface ImageEditPanelProps {
   onUpload?: () => void
   /** Unsaved edits: the parent keeps the dialog open until they are saved or undone. */
   onDirtyChange?: (dirty: boolean) => void
+  /**
+   * The image as stored after a write from this panel may have changed it: a save, a scene
+   * membership change, or a save whose outcome is unknown (then read back). For a view that shows
+   * the image elsewhere, such as a search result card.
+   */
+  onStored?: (image: ImageDetail) => void
 }
 
 /**
@@ -104,7 +111,7 @@ export interface ImageEditPanelProps {
  * re-push, the editable fields (PATCH, only what changed), the scene membership panel, and delete.
  */
 export function ImageEditPanel({
-  item, apiBase = '', categories, onChanged, onDeleted, onManage, onUpload, onDirtyChange,
+  item, apiBase = '', categories, onChanged, onDeleted, onManage, onUpload, onDirtyChange, onStored,
 }: ImageEditPanelProps) {
   const base = useId()
   const { catalog } = useEnumCatalog()
@@ -123,8 +130,10 @@ export function ImageEditPanel({
   // The parent's callbacks may change on every render: reading them through refs keeps load stable
   const onChangedRef = useRef(onChanged)
   const onDeletedRef = useRef(onDeleted)
+  const onStoredRef = useRef(onStored)
   onChangedRef.current = onChanged
   onDeletedRef.current = onDeleted
+  onStoredRef.current = onStored
   const gone = useCallback((result: ImageDeleteResult | null) => {
     onChangedRef.current()
     onDeletedRef.current(result)
@@ -164,8 +173,8 @@ export function ImageEditPanel({
     return () => { observer.disconnect(); cancelAnimationFrame(frame) }
   }, [draft?.description, item.id])
 
-  /** reset: also start the draft over from what is stored. */
-  const load = useCallback(async (reset: boolean) => {
+  /** reset: also start the draft over from what is stored. written: read back after a write (onStored). */
+  const load = useCallback(async (reset: boolean, written = false) => {
     const current = ++generation.current
     setLoading(true)
     try {
@@ -173,6 +182,7 @@ export function ImageEditPanel({
       if (current !== generation.current) return
       setDetail(result)
       setLoadError(null)
+      if (written) onStoredRef.current?.(result.image)
       if (reset) {
         setDraft(draftFromImage(result.image))
         setFoodOpen(foodFieldsFilled(draftFromImage(result.image)) > 0)
@@ -212,12 +222,13 @@ export function ImageEditPanel({
       writeOutcome(result.vectorSync, result.vectorSync ? SAVED[result.vectorSync] : '已保存到数据库。', '已保存，检索还没更新')
       setMembershipKey(key => key + 1)  // a new category may move rule memberships
       onChangedRef.current()
+      onStoredRef.current?.(result.image)
       if (!result.vector) void load(false)
     } catch (cause) {
       if (notFound(cause)) { gone(null); return }
       notify.error(failure(cause), { title: '保存失败' })
       // A timeout or a 5xx may still have saved: show what is stored, keep the edits
-      if (!(cause instanceof ApiError) || cause.status === null || cause.status >= 500) void load(false)
+      if (!(cause instanceof ApiError) || cause.status === null || cause.status >= 500) void load(false, true)
     } finally {
       setBusy(null)
     }
@@ -426,7 +437,7 @@ export function ImageEditPanel({
         </form>}
 
         <div className="ie-memberships">
-          <SceneMembershipPanel key={membershipKey} imageId={item.id} apiBase={apiBase} onSaved={() => { onChangedRef.current(); void load(false) }} onManage={onManage} />
+          <SceneMembershipPanel key={membershipKey} imageId={item.id} apiBase={apiBase} onSaved={() => { onChangedRef.current(); void load(false, true) }} onManage={onManage} />
         </div>
       </div>
     </div>

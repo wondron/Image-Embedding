@@ -1,6 +1,7 @@
 /* Gallery image editor (inside the 「图片标注」 dialog). Field styles: features/annotation-fields. */
-/* Only LibraryPage's ImageEditPanel uses .ie in a Dialog. Do not reuse this root
-   for other dialogs: the explicit border-box block-size is gallery-specific. */
+/* The size of LibraryPage's 「图片标注」 dialog. The search result detail (features/search-detail)
+   embeds the same editor in a dialog with a frame of its own and outranks this rule; any other
+   dialog that hosts .ie gets this explicit border-box block-size. */
 .dialog.dialog-wide:has(.ie) {
   width: min(840px, calc(100vw - 30px));
   block-size: min(720px, 90dvh);
@@ -22,12 +23,14 @@
 .ie-scroll { display: flex; flex-direction: column; gap: 10px; min-inline-size: 0; min-block-size: auto; overflow: visible; padding: 12px 16px 16px; container: ie-editor / inline-size; }
 /* The photo at its own proportions (inline aspect-ratio from its width / height; 4:3 until
    known), never taller than the cap: no grey bars around a landscape photo. */
-.ie-figure { position: relative; display: grid; place-items: center; margin: 0; inline-size: 100%; aspect-ratio: 4 / 3; max-block-size: min(34dvh, 260px); min-block-size: 120px; min-inline-size: 0; overflow: hidden; border: 1px solid #e5e9f0; border-radius: 10px; background: #f2f4f8; }
+.ie-figure { position: relative; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); place-items: center; margin: 0; inline-size: 100%; aspect-ratio: 4 / 3; max-block-size: min(34dvh, 260px); min-block-size: 120px; min-inline-size: 0; overflow: hidden; border: 1px solid #e5e9f0; border-radius: 10px; background: #f2f4f8; }
 .ie-figure img { width: 100%; height: 100%; object-fit: contain; }
 .ie-figure > .progressive-image { width: 100%; height: 100%; }
 .ie-noimage { color: #94a3b8; font-size: 13px; }
-/* The thumbnail is a button: a click opens the large view (the original loads only there) */
-.ie-figure-open { position: relative; display: grid; place-items: center; inline-size: 100%; block-size: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: zoom-in; }
+/* The thumbnail is a button: a click opens the large view (the original loads only there).
+   Tracks that can shrink (here and on the figure): an auto row would grow to the loaded photo's
+   own height, past the capped frame, and the frame would cut off the photo's bottom and the hint. */
+.ie-figure-open { position: relative; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); place-items: center; inline-size: 100%; block-size: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: zoom-in; }
 .ie-figure-open:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; border-radius: 10px; }
 .ie-zoom-hint { position: absolute; inset-block-end: 8px; inset-inline-end: 8px; display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 999px; background: rgba(15, 23, 42, .58); color: #fff; font-size: 12px; line-height: 20px; opacity: .88; transition: opacity .15s, background .15s; pointer-events: none; }
 .ie-figure-open:hover .ie-zoom-hint, .ie-figure-open:focus-visible .ie-zoom-hint { background: rgba(15, 23, 42, .78); opacity: 1; }
