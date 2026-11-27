@@ -570,6 +570,36 @@ class PgLiveTests(unittest.TestCase):
         store.complete_deletion(image)
         self.assertIsNone(store.get_image_file_urls(image))
 
+    def test_consistency_reads_images_with_their_ledger_files_and_the_deletion_queue(self):
+        from app.core.rules.image_ids import uuid_from_sha256
+
+        store = self.store()
+        by_n = {n: self.insert(store, n) for n in range(1, 4)}
+        images = sorted(by_n.values())
+        current = self.current_model("c_check")
+        store.record_embeddings(model_id=current, versions={images[0]: 1})
+        rows = store.scan_images(limit=2)
+        self.assertEqual([row["id"] for row in rows], images[:2])
+        self.assertEqual((rows[0]["ledger"], rows[1]["ledger"]), ({current: 1}, {}))
+        first_n = next(n for n, iid in by_n.items() if iid == images[0])
+        self.assertEqual(rows[0]["sha256"], _sha(first_n).hex())
+        self.assertEqual(str(uuid_from_sha256(bytes.fromhex(rows[0]["sha256"]))), images[0])
+        self.assertEqual((rows[0]["scenes"], rows[0]["label_status"], rows[0]["payload_version"]), (["general"], "unlabeled", 1))
+        self.assertEqual(rows[0]["original_url"], f"https://cdn/o/{first_n}.jpg")
+        self.assertEqual([row["id"] for row in store.scan_images(after=images[1])], images[2:])
+        stranger = "00000000-0000-4000-8000-000000000999"
+        self.assertEqual(store.existing_image_ids(images + [stranger]), set(images))
+        self.assertEqual(store.existing_image_ids([]), set())
+        store.enqueue_image_deletion(images[2])
+        self.assertEqual(store.queued_deletion_ids(images + [stranger]), {images[2]})
+        refs = store.file_refs(images + [stranger])
+        self.assertEqual(set(refs), set(images))
+        self.assertEqual([ref["deleted"] for ref in refs[images[2]]], [True])
+        self.assertEqual([ref["deleted"] for ref in refs[images[0]]], [False])
+        counts = store.consistency_counts()
+        self.assertEqual((counts["images"], counts["pending_deletions"], counts["current_models"]), (2, 1, 1))
+        self.assertIsNotNone(counts["oldest_deletion_at"])
+
     def test_a_maintenance_lock_lets_one_process_in_at_a_time(self):
         first, second = self.store(), self.store()  # 两个连接池：两个会话，相当于两个进程
         with first.try_maintenance_lock(42) as held:

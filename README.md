@@ -113,6 +113,10 @@ GroundingDINO 在启动时按 `GROUNDINGDINO_CONFIG` 加载，`model_path` 指�
 
 同一个模型的判断看预处理、权重文件 hash 和固定测试图输出，挪目录、改名不算换模型。重启时如果当前版本的权重已经不在镜像里（或被覆盖），检索会暂停并报 `EMBEDDING_MODEL_MISMATCH`，同样在这个页面登记、生成、切换即可恢复。升级到这一版先执行 `alembic upgrade head`（迁移 `0009` 加 `embedding_models.fingerprint`），首次启动会核对并记录当前版本的编码器指纹。细节见契约 §6.5。
 
+### 数据核对
+
+前端「数据核对」页（`?view=consistency`，或 `GET /api/consistency`、`POST /api/consistency/check`、`/check/stop`）在服务端后台只读地核对一遍：数据库里的每张图在每个在用模型版本的 Qdrant collection 里有没有向量、写入记录和过滤信息对不对、向量库里有没有数据库不认识的点；原图和缩略图在对象存储里还在不在（可选下载核对 SHA-256）、存储里有没有没人引用的文件；各版本和当前版本差多少张、collection 的维度和距离、用已加载的编码器抽查几张确认向量是这个版本写的。报告先写本进程实际连着的 PostgreSQL、Qdrant（启动时的地址；Nacos 里改了没重启会标出来）和对象存储——两台服务器共用一个库时在两边各跑一次对比。每项问题都说明去哪里修（后台对账、「模型版本」生成向量、「场景管理」全量同步、重新上传），核对本身不改任何数据。结果只在内存里，重启后清空。细节见[数据契约 §6.9](docs/image-search-pg-v01-data-contract.md)。没有数据库迁移，需要重启包含新路由的后端；对象存储密钥要有 HeadObject、GetObject（找多余文件还要 ListBucket）。
+
 Alembic 和 workers 也按同一套 `NACOS_*` 环境变量取库（本机读 `backend/.env`）。执行 `alembic upgrade head` 前
 确认 `.env` 指向要迁移的环境，或临时 `$env:NACOS_ENABLED='false'` 只读本地 YAML。Alembic 会在日志里打印目标库（密码已隐去）。
 

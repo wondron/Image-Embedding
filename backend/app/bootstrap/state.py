@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from app.services.predict.food_service import FoodService
     from app.services.predict.pipeline.a_onnx_segment import OnnxSegmentPy
     from app.bootstrap.catalog import CatalogServices
+    from app.bootstrap.consistency import ConsistencyChecker
     from app.bootstrap.model_registry import ModelRegistry
     from app.bootstrap.reconciler import BackgroundReconciler
     from app.bootstrap.retrieval_stack import RetrievalStack
@@ -68,6 +69,8 @@ class ApplicationState:
     reconciler: Optional["BackgroundReconciler"] = None
     # /api/embedding-models 使用的模型版本管理：登记、生成向量、切换和下线
     models: Optional["ModelRegistry"] = None
+    # /api/consistency 使用的数据核对：PostgreSQL、Qdrant、对象存储和模型版本之间是否一致（只读）
+    consistency: Optional["ConsistencyChecker"] = None
     # 写入新向量时持有共享锁，切换模型版本时持有独占锁
     vector_writes: VectorWriteGate = field(default_factory=VectorWriteGate, repr=False)
     stopping: bool = False
@@ -205,6 +208,9 @@ class ApplicationState:
         models, self.models = self.models, None
         if models is not None:  # 正在执行的向量构建任务会在下一批次前停止
             await asyncio.to_thread(models.close)
+        consistency, self.consistency = self.consistency, None
+        if consistency is not None:  # 正在跑的核对在下一批之前停下
+            await asyncio.to_thread(consistency.close)
         if self.config_provider is not None:
             self.config_provider.close()
         service = self.food_service

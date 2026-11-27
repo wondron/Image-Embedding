@@ -29,6 +29,7 @@ from app.db.common import (  # noqa: F401
 )
 from app.db.session import PgConnectionMixin
 from app.repositories.categories import PgCategoriesMixin
+from app.repositories.consistency import PgConsistencyMixin
 from app.repositories.deletions import PgDeletionsMixin
 from app.repositories.embeddings import PgEmbeddingsMixin
 from app.repositories.images import PgImagesMixin
@@ -49,6 +50,7 @@ class PgMetadataStore(
     PgCategoriesMixin,
     PgSceneConfigMixin,
     PgMaintenanceMixin,
+    PgConsistencyMixin,
     MetadataStorePort,
     CatalogStorePort,
     EmbeddingModelStorePort,

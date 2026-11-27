@@ -9,6 +9,7 @@ IMAGE_STORAGE_CONFIG.use_boto3 为 true：S3ImageStorage 通过 boto3 上传，�
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -18,6 +19,7 @@ from app.core.config.settings import ImageStorageSettings
 from app.core import errors as err
 from app.repositories.ports import ImageStoragePort
 from app.utils.storage_keys import (
+    apply_key_prefix,
     original_key,
     public_url,
     staging_key,
@@ -41,6 +43,16 @@ def _key_from_url_or_key(url_or_key: str, public_base_url: str) -> str:
                 return "/".join(parts[i:])
         raise err.validation_error(f"cannot derive object key from url: {raw!r}")
     return raw.lstrip("/")
+
+
+def _not_found(exc: Exception) -> bool:
+    """botocore 的 ClientError 是不是"没有这个对象"（HEAD 没有响应体，错误码就是 404）。"""
+    response = getattr(exc, "response", None)
+    if not isinstance(response, dict):
+        return False
+    code = str((response.get("Error") or {}).get("Code") or "")
+    status = (response.get("ResponseMetadata") or {}).get("HTTPStatusCode")
+    return code in {"404", "NoSuchKey", "NotFound"} or status == 404
 
 
 def _readable_key(url_or_key: str, public_base_url: str) -> str:
@@ -166,6 +178,44 @@ class MockImageStorage(ImageStoragePort):
                 logger.warning("mock mirror unlink failed key=%s: %s", key, exc)
         logger.info("mock delete key=%s", key)
 
+    def inventory_unavailable(self) -> str | None:
+        if self._mirror is None:
+            return "mock storage keeps the bytes in memory only; set IMAGE_STORAGE_CONFIG.mock_mirror_dir to check files"
+        return None
+
+    def head(self, url_or_key: str) -> int | None:
+        key = _readable_key(url_or_key, self.public_base_url)
+        if key in self._objects:
+            return len(self._objects[key])
+        if self._mirror is None:
+            raise err.image_file_unavailable(f"mock storage keeps no bytes for {key!r} (set mock_mirror_dir to keep them)")
+        path = self._mirror / key
+        try:
+            return path.stat().st_size if path.is_file() else None
+        except OSError as exc:
+            raise err.image_file_unavailable(f"mock storage: stat {key!r} failed: {exc}") from exc
+
+    def list_keys(self, directory: str) -> Iterator[tuple[str, int]]:
+        prefix = apply_key_prefix(self.settings.key_prefix, directory.strip("/") + "/")
+        seen: set[str] = set()
+        for key, data in sorted(self._objects.items()):
+            if key.startswith(prefix):
+                seen.add(key)
+                yield key, len(data)
+        if self._mirror is None:
+            return
+        root = self._mirror / prefix
+        if not root.is_dir():
+            return
+        try:
+            for path in sorted(root.rglob("*")):
+                if path.is_file():
+                    key = path.relative_to(self._mirror).as_posix()
+                    if key not in seen:
+                        yield key, path.stat().st_size
+        except OSError as exc:
+            raise err.image_file_unavailable(f"mock storage: listing {prefix!r} failed: {exc}") from exc
+
     def ping(self) -> dict[str, Any]:
         return {
             "ok": True,
@@ -256,6 +306,30 @@ class S3ImageStorage(ImageStoragePort):
     def delete_by_url_or_key(self, url_or_key: str) -> None:
         key = _key_from_url_or_key(url_or_key, self.public_base_url)
         self._client.delete_object(Bucket=self.bucket, Key=key)
+
+    def inventory_unavailable(self) -> str | None:
+        return None
+
+    def head(self, url_or_key: str) -> int | None:
+        key = _readable_key(url_or_key, self.public_base_url)
+        try:
+            response = self._client.head_object(Bucket=self.bucket, Key=key)
+        except Exception as exc:
+            if _not_found(exc):
+                return None
+            # 403 也在这里：没有 ListBucket 权限时 S3 对不存在的 key 回 403，说不清在不在
+            raise err.image_file_unavailable(f"head_object {self.bucket}/{key}: {type(exc).__name__}: {exc}") from exc
+        return int(response.get("ContentLength") or 0)
+
+    def list_keys(self, directory: str) -> Iterator[tuple[str, int]]:
+        prefix = apply_key_prefix(self.settings.key_prefix, directory.strip("/") + "/")
+        try:
+            # ListObjects（v1）：兼容 S3 的服务（含阿里云 OSS）都支持；分页器按最后一个 key 续页
+            for page in self._client.get_paginator("list_objects").paginate(Bucket=self.bucket, Prefix=prefix):
+                for item in page.get("Contents") or []:
+                    yield str(item["Key"]), int(item.get("Size") or 0)
+        except Exception as exc:
+            raise err.image_file_unavailable(f"list_objects {self.bucket}/{prefix}: {type(exc).__name__}: {exc}") from exc
 
     def ping(self) -> dict[str, Any]:
         try:

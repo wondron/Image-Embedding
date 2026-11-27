@@ -73,6 +73,27 @@ class QdrantVectorStore(VectorStorePort):
         except Exception as exc:
             raise err.search_qdrant_failed(f"existing_ids: {type(exc).__name__}: {exc}") from exc
 
+    def list_collections(self) -> list[str]:
+        """这个 Qdrant 上全部 collection 的名字。"""
+        try:
+            return self._store.list_collections()
+        except Exception as exc:
+            raise err.search_qdrant_failed(f"list_collections: {type(exc).__name__}: {exc}") from exc
+
+    def describe(self) -> dict[str, Any] | None:
+        """collection 实际的 {size, distance, points_count}；不存在时为 None（不会创建它）。"""
+        try:
+            return self._store.describe()
+        except Exception as exc:
+            raise err.search_qdrant_failed(f"describe: {type(exc).__name__}: {exc}") from exc
+
+    def scroll_ids(self, *, offset: Any = None, limit: int = 1000) -> tuple[list[str], Any]:
+        """一页向量点 id 和下一页的 offset（None：已经到头）。"""
+        try:
+            return self._store.scroll_ids(offset=offset, limit=limit)
+        except Exception as exc:
+            raise err.search_qdrant_failed(f"scroll_ids: {type(exc).__name__}: {exc}") from exc
+
     def point_count(self) -> int:
         """collection 里有多少个向量点（精确值）。"""
         try:

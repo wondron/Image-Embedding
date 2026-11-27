@@ -401,6 +401,15 @@ def initialize_models(runtime: ApplicationState) -> None:
     runtime.models = ModelRegistry(runtime)
 
 
+def initialize_consistency(runtime: ApplicationState) -> None:
+    """创建数据核对（/api/consistency）。只要有 PostgreSQL 就能用：Qdrant 或对象存储连不上时，
+    核对照样跑，并在报告里说明哪边查不了。
+    """
+    from app.bootstrap.consistency import ConsistencyChecker
+
+    runtime.consistency = ConsistencyChecker(runtime)
+
+
 def initialize_food_service(runtime: ApplicationState, embedder) -> None:
     if embedder is None:
         return  # initialization_error 已记录编码器不可用的原因
@@ -485,6 +494,7 @@ async def lifespan(app: FastAPI):
     initialize_catalog(runtime)
     initialize_retrieval(runtime, embedder)
     initialize_models(runtime)
+    initialize_consistency(runtime)
     runtime.reconciler = start_reconciler(runtime)
     config_provider.start_polling(lambda snapshot: apply_nacos_config_update(runtime, config_provider, snapshot))
     try:

@@ -97,6 +97,8 @@ ERROR_CODES: dict[str, ErrorSpec] = {
     "EMBEDDING_ENCODER_UNAVAILABLE": ErrorSpec(409),
     "EMBEDDING_BUILD_RUNNING": ErrorSpec(409),
     "EMBEDDING_MODEL_MISMATCH": ErrorSpec(503),
+    # 数据核对（/api/consistency）
+    "CONSISTENCY_CHECK_RUNNING": ErrorSpec(409),
 }
 
 _UNREGISTERED_5XX = ERROR_CODES["INTERNAL_ERROR"].public_detail or "internal server error"
@@ -398,6 +400,11 @@ def embedding_build_running(detail: str) -> AppError:
 def embedding_model_mismatch(detail: str) -> AppError:
     """编码器会写入或查询另一个模型建的 collection：检索拒绝这样配对。"""
     return AppError("EMBEDDING_MODEL_MISMATCH", detail)
+
+
+def consistency_check_running(detail: str) -> AppError:
+    """本进程已经在跑一次数据核对。"""
+    return AppError("CONSISTENCY_CHECK_RUNNING", detail)
 
 
 # 框架自身抛出的 HTTPException 对应的错误码（404 路由不存在、405 方法不允许等）

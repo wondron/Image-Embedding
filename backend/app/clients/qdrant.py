@@ -145,6 +145,25 @@ class QdrantStore:
     def collection_exists(self) -> bool:
         return self.collection in {c.name for c in self.client.get_collections().collections}
 
+    def list_collections(self) -> List[str]:
+        """这个 Qdrant 上全部 collection 的名字（排好序），不只是本存储的。"""
+        return sorted(c.name for c in self.client.get_collections().collections)
+
+    def describe(self) -> Optional[Dict[str, Any]]:
+        """collection 实际的结构：{size, distance, points_count}；没有命名向量 ``global`` 时 size、
+        distance 为 None；collection 不存在时整个为 None。只读，不校验也不创建。
+        """
+        if not self.collection_exists():
+            return None
+        info = self.client.get_collection(self.collection)
+        vectors = getattr(getattr(info.config, "params", None), "vectors", None)
+        params = vectors.get(NAMED_VECTOR) if isinstance(vectors, dict) else None
+        return {
+            "size": int(params.size) if params is not None else None,
+            "distance": str(getattr(params.distance, "value", params.distance)).lower() if params is not None else None,
+            "points_count": getattr(info, "points_count", None),
+        }
+
     def drop_collection(self) -> bool:
         """删除 collection 及其所有向量点；不存在时返回 False。"""
         if not self.collection_exists():
@@ -350,6 +369,19 @@ class QdrantStore:
             if vector is not None:
                 out[_point_id(record.id)] = [float(v) for v in vector]
         return out
+
+    def scroll_ids(self, *, offset: Any = None, limit: int = 1000) -> tuple[List[str], Any]:
+        """按 Qdrant 的顺序翻一页向量点 id（不读 payload 和向量）-> (ids, 下一页的 offset)；
+        offset 为 None 表示没有下一页。uuid 是规范的文本形式，整数 id 原样转成文本。
+        """
+        records, next_offset = self.client.scroll(
+            collection_name=self.collection,
+            offset=offset,
+            limit=int(limit),
+            with_payload=False,
+            with_vectors=False,
+        )
+        return [str(_point_id(record.id)) for record in records], next_offset
 
     def set_payloads(self, payloads: Mapping[PointId, Mapping[str, Any]]) -> int:
         """在一个请求里逐个向量点设置 payload 字段（其他字段和向量保持不变）。

@@ -14,6 +14,7 @@ VECTOR_DIM 只是兜底的默认值（食物 ONNX = 1024）。
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
@@ -621,5 +622,23 @@ class ImageStoragePort(ABC):
     @abstractmethod
     def ping(self) -> dict[str, Any]:
         """{ok, driver, bucket, ...}；从不抛出。"""
+        raise NotImplementedError
+
+    # -- 数据核对（app.services.retrieval.consistency）用；不是每种存储都支持 --------------
+
+    def inventory_unavailable(self) -> str | None:
+        """这个存储里的文件为什么查不了（head / list_keys 用不了）；查得了时为 None。"""
+        return "this storage driver cannot stat or list its objects"
+
+    def head(self, url_or_key: str) -> int | None:
+        """对象的字节数；对象不存在时为 None。说不清在不在（无权访问、网络出错、不是本存储的
+        URL）时抛出 IMAGE_FILE_UNAVAILABLE。不读内容。
+        """
+        raise NotImplementedError
+
+    def list_keys(self, directory: str) -> Iterator[tuple[str, int]]:
+        """key_prefix 下 `directory/`（original / thumb）里的每个对象：(完整的 key, 字节数)。
+        列不了时抛出 IMAGE_FILE_UNAVAILABLE。
+        """
         raise NotImplementedError
 

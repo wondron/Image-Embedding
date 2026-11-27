@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Layers3, ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUpRight, Check, ChefHat,
   CircleHelp, Cpu, Database, FolderOpen, ImageIcon, Images, LayoutGrid, List, Link2, PanelLeftClose, PanelLeftOpen,
-  ListFilter, ListTree, LoaderCircle, Menu, ScanLine, Search, Settings2, SlidersHorizontal,
+  ListFilter, ListTree, LoaderCircle, Menu, ScanLine, Search, Settings2, ShieldCheck, SlidersHorizontal,
   Tags, Upload, UploadCloud, Workflow, Wrench, X,
 } from 'lucide-react'
 import { ManagementViews, type ManagementView } from './components/ManagementViews'
@@ -10,6 +10,7 @@ import { EnumConfigPage } from './pages/enums'
 import { ToolsPage } from './pages/tools'
 import { CategoryConfigPage } from './pages/categories'
 import { ModelVersionsPage } from './pages/models'
+import { ConsistencyPage } from './pages/consistency'
 import { Dialog } from './components/Dialog'
 import { BatchSearchPanel, type BatchSearchRequest, type BatchSearchResult } from './components/BatchSearchPanel'
 import { DownloadDialog } from './components/DownloadDialog'
@@ -82,9 +83,14 @@ const navigation = [
   { key: 'enums' as const, name: '枚举配置', icon: ListTree, description: '查看取值并追加' },
   // Embedding model versions: register the configured model, build its vectors, switch, roll back (?view=models)
   { key: 'models' as const, name: '模型版本', icon: Cpu, description: '换模型：生成向量、切换与回滚' },
+  // Whether PostgreSQL, Qdrant, the object storage and the model versions agree (?view=consistency)
+  { key: 'consistency' as const, name: '数据核对', icon: ShieldCheck, description: 'PostgreSQL、Qdrant、对象存储与模型版本是否一致' },
 ]
-/** Views that are wired to the API and can be opened by URL (?view=<key>) → the parameter that selects an item in them. */
-const linkedViews: Readonly<Record<string, string>> = { tools: 'tool', enums: 'enum', categories: 'category', scenes: 'scene', models: 'model' }
+/**
+ * Views that are wired to the API and can be opened by URL (?view=<key>) → the parameter that selects
+ * an item in them (数据核对 has none; its entry only keeps ?view=consistency).
+ */
+const linkedViews: Readonly<Record<string, string>> = { tools: 'tool', enums: 'enum', categories: 'category', scenes: 'scene', models: 'model', consistency: 'check' }
 const pageSize = 12
 const maxBytes = 15 * 1024 * 1024
 
@@ -174,7 +180,7 @@ function ResultTable({ items, onDetail, onDownload, downloading, selected, onTog
 function initialView(): View {
   try {
     const requested = new URLSearchParams(window.location.search).get('view')
-    if (requested === 'tools' || requested === 'enums' || requested === 'categories' || requested === 'scenes' || requested === 'models') return requested // the keys of linkedViews
+    if (requested === 'tools' || requested === 'enums' || requested === 'categories' || requested === 'scenes' || requested === 'models' || requested === 'consistency') return requested // the keys of linkedViews
   } catch { /* keep the default view */ }
   return 'search'
 }
@@ -342,6 +348,16 @@ export default function App() {
       window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
     } catch { /* the in-app view still changes when the URL cannot be updated */ }
   }
+  /** 数据核对 → the page where an issue gets fixed, with that page's own parameters (?sceneTab=sync). */
+  function openFromCheck(next: View, params?: Readonly<Record<string, string>>) {
+    navigate(next)
+    if (!params) return
+    try {
+      const url = new URL(window.location.href)
+      for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value)
+      window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
+    } catch { /* the page opens without them */ }
+  }
   /**
    * 模型工具 · 菜谱识别 with the query of these results (业务搜图): GroundingDINO's boxes, each box's
    * closest dishes and the threshold. A link query cannot be handed over: the tool opens empty.
@@ -472,10 +488,11 @@ export default function App() {
 
     <div className="main-shell"><header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" aria-label="展开导航" onClick={() => setMobileNav(true)}><Menu size={20} /></button><div className="topbar-title"><h1>{pageInfo.name}</h1><span>食材图像管理 / {pageInfo.description}</span></div></div><div className="topbar-actions"><button className="icon-button" title="使用说明" aria-label="使用说明" onClick={() => setHelpOpen(true)}><CircleHelp size={17} /></button><button className="icon-button" title="连接设置" aria-label="连接设置" disabled={batchRunning} onClick={() => { setApiDraft(apiBase); setSettingsOpen(true) }}><Settings2 size={17} /></button></div></header>
     <main className={view === 'search' ? 'search-page' : view === 'library' ? 'management-page library-page' : view === 'import' ? 'management-page import-page' : 'management-page'}>
-      {view !== 'search' && view !== 'tools' && view !== 'enums' && view !== 'categories' && view !== 'scenes' && view !== 'models' && <ManagementViews view={view} onNavigate={navigate} apiBase={apiBase} />}
+      {view !== 'search' && view !== 'tools' && view !== 'enums' && view !== 'categories' && view !== 'scenes' && view !== 'models' && view !== 'consistency' && <ManagementViews view={view} onNavigate={navigate} apiBase={apiBase} />}
       {view === 'tools' && <ToolsPage apiBase={apiBase} initialFile={toolsFile} />}
       {view === 'enums' && <EnumConfigPage apiBase={apiBase} />}
       {view === 'models' && <ModelVersionsPage apiBase={apiBase} />}
+      {view === 'consistency' && <ConsistencyPage apiBase={apiBase} onOpen={openFromCheck} />}
       {view === 'categories' && <CategoryConfigPage apiBase={apiBase} />}
       {view === 'scenes' && <SceneConfigPage apiBase={apiBase} />}
       <div className="search-view" hidden={view !== 'search'}>

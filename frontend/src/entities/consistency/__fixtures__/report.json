@@ -1,0 +1,518 @@
+{
+  "ok": true,
+  "check": {
+    "state": "done",
+    "started_at": "2026-11-26T15:00:00+08:00",
+    "finished_at": "2026-11-26T15:00:01+08:00",
+    "options": {
+      "vectors": true,
+      "files": true,
+      "orphans": true,
+      "content": true,
+      "encoders": true
+    },
+    "progress": {
+      "phase": "encoders",
+      "done": 0,
+      "total": 5,
+      "label": "dino:v2"
+    },
+    "error": null,
+    "report": {
+      "status": "error",
+      "complete": true,
+      "options": {
+        "vectors": true,
+        "files": true,
+        "orphans": true,
+        "content": true,
+        "encoders": true
+      },
+      "duration_ms": 14,
+      "connections": {
+        "postgres": {
+          "ok": true,
+          "host": "pg",
+          "database": "image_embedding",
+          "detail": null
+        },
+        "qdrant": {
+          "ok": true,
+          "url": ":memory:",
+          "configured_url": null,
+          "restart_required": false,
+          "collections": 5,
+          "detail": null
+        },
+        "storage": {
+          "ok": true,
+          "driver": "fake",
+          "bucket": "b",
+          "endpoint_url": null,
+          "public_base_url": "https://cdn",
+          "key_prefix": "",
+          "detail": null
+        },
+        "serving": {
+          "model_id": 1,
+          "label": "dino:v1",
+          "detail": null
+        }
+      },
+      "database": {
+        "images": 7,
+        "pending_deletions": 1,
+        "oldest_deletion_at": "2026-11-26T08:00:00+00:00",
+        "current_models": 1
+      },
+      "versions": [
+        {
+          "id": 1,
+          "label": "dino:v1",
+          "status": "current",
+          "collection": "c_cur",
+          "dim": 4,
+          "distance": "cosine",
+          "serving": true,
+          "weights": null,
+          "qdrant": {
+            "exists": true,
+            "dim": 4,
+            "distance": "cosine",
+            "points": 8,
+            "matches": true
+          },
+          "error": null,
+          "scanned": 6,
+          "ledger": 4,
+          "with_vector": 4,
+          "findings": {
+            "missing": {
+              "count": 1,
+              "samples": [
+                "00000000-0000-0000-0000-000000000006"
+              ]
+            },
+            "lost": {
+              "count": 1,
+              "samples": [
+                "00000000-0000-0000-0000-000000000002"
+              ]
+            },
+            "unrecorded": {
+              "count": 1,
+              "samples": [
+                "00000000-0000-0000-0000-000000000003"
+              ]
+            },
+            "ledger_behind": {
+              "count": 1,
+              "samples": [
+                "00000000-0000-0000-0000-000000000004"
+              ]
+            },
+            "stale_payload": {
+              "count": 1,
+              "samples": [
+                "00000000-0000-0000-0000-000000000005"
+              ]
+            },
+            "orphan_points": {
+              "count": 2,
+              "samples": [
+                "42",
+                "00000000-0000-0000-0000-00000000005a"
+              ]
+            },
+            "pending_points": {
+              "count": 1,
+              "samples": [
+                "00000000-0000-0000-0000-00000000005b"
+              ]
+            }
+          },
+          "vs_current": null,
+          "encoder": {
+            "status": "ok",
+            "source": "serving",
+            "checked": 2,
+            "min_similarity": 1.0,
+            "detail": null
+          }
+        },
+        {
+          "id": 2,
+          "label": "dino:v2",
+          "status": "ready",
+          "collection": "c_ready",
+          "dim": 4,
+          "distance": "cosine",
+          "serving": false,
+          "weights": null,
+          "qdrant": {
+            "exists": true,
+            "dim": 4,
+            "distance": "cosine",
+            "points": 1,
+            "matches": true
+          },
+          "error": null,
+          "scanned": 6,
+          "ledger": 1,
+          "with_vector": 1,
+          "findings": {
+            "missing": {
+              "count": 5,
+              "samples": [
+                "00000000-0000-0000-0000-000000000002",
+                "00000000-0000-0000-0000-000000000003",
+                "00000000-0000-0000-0000-000000000004",
+                "00000000-0000-0000-0000-000000000005",
+                "00000000-0000-0000-0000-000000000006"
+              ]
+            },
+            "lost": {
+              "count": 0,
+              "samples": []
+            },
+            "unrecorded": {
+              "count": 0,
+              "samples": []
+            },
+            "ledger_behind": {
+              "count": 0,
+              "samples": []
+            },
+            "stale_payload": {
+              "count": 0,
+              "samples": []
+            },
+            "orphan_points": {
+              "count": 0,
+              "samples": []
+            },
+            "pending_points": {
+              "count": 0,
+              "samples": []
+            }
+          },
+          "vs_current": {
+            "only_current": {
+              "count": 3,
+              "samples": [
+                "00000000-0000-0000-0000-000000000003",
+                "00000000-0000-0000-0000-000000000004",
+                "00000000-0000-0000-0000-000000000005"
+              ]
+            },
+            "only_this": {
+              "count": 0,
+              "samples": []
+            }
+          },
+          "encoder": {
+            "status": "unchecked",
+            "source": "configured",
+            "checked": 0,
+            "min_similarity": null,
+            "detail": "no stored image could be embedded again"
+          }
+        },
+        {
+          "id": 3,
+          "label": "dino:v3",
+          "status": "building",
+          "collection": "c_build",
+          "dim": 4,
+          "distance": "cosine",
+          "serving": false,
+          "weights": null,
+          "qdrant": {
+            "exists": true,
+            "dim": 4,
+            "distance": "cosine",
+            "points": 0,
+            "matches": true
+          },
+          "error": null,
+          "scanned": 6,
+          "ledger": 0,
+          "with_vector": 0,
+          "findings": {
+            "missing": {
+              "count": 6,
+              "samples": [
+                "00000000-0000-0000-0000-000000000001",
+                "00000000-0000-0000-0000-000000000002",
+                "00000000-0000-0000-0000-000000000003",
+                "00000000-0000-0000-0000-000000000004",
+                "00000000-0000-0000-0000-000000000005",
+                "00000000-0000-0000-0000-000000000006"
+              ]
+            },
+            "lost": {
+              "count": 0,
+              "samples": []
+            },
+            "unrecorded": {
+              "count": 0,
+              "samples": []
+            },
+            "ledger_behind": {
+              "count": 0,
+              "samples": []
+            },
+            "stale_payload": {
+              "count": 0,
+              "samples": []
+            },
+            "orphan_points": {
+              "count": 0,
+              "samples": []
+            },
+            "pending_points": {
+              "count": 0,
+              "samples": []
+            }
+          },
+          "vs_current": {
+            "only_current": {
+              "count": 4,
+              "samples": [
+                "00000000-0000-0000-0000-000000000001",
+                "00000000-0000-0000-0000-000000000003",
+                "00000000-0000-0000-0000-000000000004",
+                "00000000-0000-0000-0000-000000000005"
+              ]
+            },
+            "only_this": {
+              "count": 0,
+              "samples": []
+            }
+          },
+          "encoder": {
+            "status": "not_loaded",
+            "source": null,
+            "checked": 0,
+            "min_similarity": null,
+            "detail": null
+          }
+        }
+      ],
+      "stray_collections": [
+        {
+          "name": "c_retired",
+          "model_id": 4,
+          "label": "dino:v0",
+          "status": "retired"
+        },
+        {
+          "name": "other_app",
+          "model_id": null,
+          "label": null,
+          "status": null
+        }
+      ],
+      "stray_error": null,
+      "files": {
+        "skipped": null,
+        "checked": 6,
+        "first_error": "IMAGE_FILE_UNAVAILABLE: head_object bucket/thumb/00/00000000-0000-0000-0000-000000000002.webp: ClientError: 403 Forbidden",
+        "listed": 15,
+        "referenced": 13,
+        "truncated": false,
+        "list_error": null,
+        "findings": {
+          "missing_original": {
+            "count": 1,
+            "samples": [
+              "00000000-0000-0000-0000-000000000001"
+            ]
+          },
+          "missing_thumb": {
+            "count": 0,
+            "samples": []
+          },
+          "unreadable": {
+            "count": 1,
+            "samples": [
+              "00000000-0000-0000-0000-000000000002"
+            ]
+          },
+          "content_mismatch": {
+            "count": 1,
+            "samples": [
+              "00000000-0000-0000-0000-000000000003"
+            ]
+          },
+          "orphan_files": {
+            "count": 1,
+            "samples": [
+              "original/ab/00000000-0000-0000-0000-000000000063.jpg"
+            ]
+          },
+          "pending_files": {
+            "count": 1,
+            "samples": [
+              "thumb/00/00000000-0000-0000-0000-00000000005b.webp"
+            ]
+          }
+        }
+      },
+      "issues": [
+        {
+          "level": "error",
+          "code": "missing_original",
+          "count": 1,
+          "version_id": null,
+          "label": null,
+          "detail": null
+        },
+        {
+          "level": "error",
+          "code": "files_unreadable",
+          "count": 1,
+          "version_id": null,
+          "label": null,
+          "detail": "IMAGE_FILE_UNAVAILABLE: head_object bucket/thumb/00/00000000-0000-0000-0000-000000000002.webp: ClientError: 403 Forbidden"
+        },
+        {
+          "level": "error",
+          "code": "content_mismatch",
+          "count": 1,
+          "version_id": null,
+          "label": null,
+          "detail": null
+        },
+        {
+          "level": "warn",
+          "code": "deletion_queue",
+          "count": 1,
+          "version_id": null,
+          "label": null,
+          "detail": null
+        },
+        {
+          "level": "warn",
+          "code": "missing_vectors",
+          "count": 1,
+          "version_id": 1,
+          "label": "dino:v1",
+          "detail": null
+        },
+        {
+          "level": "warn",
+          "code": "lost_vectors",
+          "count": 1,
+          "version_id": 1,
+          "label": "dino:v1",
+          "detail": null
+        },
+        {
+          "level": "warn",
+          "code": "unrecorded_vectors",
+          "count": 1,
+          "version_id": 1,
+          "label": "dino:v1",
+          "detail": null
+        },
+        {
+          "level": "warn",
+          "code": "stale_payloads",
+          "count": 1,
+          "version_id": 1,
+          "label": "dino:v1",
+          "detail": null
+        },
+        {
+          "level": "warn",
+          "code": "orphan_points",
+          "count": 2,
+          "version_id": 1,
+          "label": "dino:v1",
+          "detail": null
+        },
+        {
+          "level": "warn",
+          "code": "missing_vectors",
+          "count": 5,
+          "version_id": 2,
+          "label": "dino:v2",
+          "detail": null
+        },
+        {
+          "level": "warn",
+          "code": "versions_differ",
+          "count": 3,
+          "version_id": 2,
+          "label": "dino:v2",
+          "detail": null
+        },
+        {
+          "level": "warn",
+          "code": "retired_collection_left",
+          "count": 1,
+          "version_id": null,
+          "label": null,
+          "detail": "c_retired"
+        },
+        {
+          "level": "info",
+          "code": "ledger_behind",
+          "count": 1,
+          "version_id": 1,
+          "label": "dino:v1",
+          "detail": null
+        },
+        {
+          "level": "info",
+          "code": "pending_points",
+          "count": 1,
+          "version_id": 1,
+          "label": "dino:v1",
+          "detail": null
+        },
+        {
+          "level": "info",
+          "code": "missing_vectors",
+          "count": 6,
+          "version_id": 3,
+          "label": "dino:v3",
+          "detail": null
+        },
+        {
+          "level": "info",
+          "code": "versions_differ",
+          "count": 4,
+          "version_id": 3,
+          "label": "dino:v3",
+          "detail": null
+        },
+        {
+          "level": "info",
+          "code": "stray_collections",
+          "count": 1,
+          "version_id": null,
+          "label": null,
+          "detail": "other_app"
+        },
+        {
+          "level": "info",
+          "code": "orphan_files",
+          "count": 1,
+          "version_id": null,
+          "label": null,
+          "detail": null
+        },
+        {
+          "level": "info",
+          "code": "pending_files",
+          "count": 1,
+          "version_id": null,
+          "label": null,
+          "detail": null
+        }
+      ]
+    }
+  }
+}

@@ -1013,3 +1013,114 @@ export interface PingResponseWire {
   timeout_s: number
   max_image_bytes: number
 }
+
+// -- /api/consistency ---------------------------------------------------------------------
+
+/** schemas/consistency.py: one kind of difference, its total and the first 20 ids (or object keys). */
+export interface ConsistencyFindingWire {
+  count: number
+  samples: string[]
+}
+
+export type ConsistencyCheckStateWire = 'running' | 'stopping' | 'done' | 'stopped' | 'failed'
+export type ConsistencyIssueLevelWire = 'error' | 'warn' | 'info'
+export type ConsistencyEncoderStatusWire = 'ok' | 'mismatch' | 'unchecked' | 'not_loaded' | 'off'
+
+export interface ConsistencyOptionsWire {
+  vectors: boolean
+  files: boolean
+  orphans: boolean
+  content: boolean
+  encoders: boolean
+}
+
+export interface ConsistencyProgressWire {
+  phase: string
+  done: number
+  total: number | null
+  label: string | null
+}
+
+export interface ConsistencyConnectionsWire {
+  postgres: { ok: boolean; host: string | null; database: string | null; detail: string | null }
+  /** url: the Qdrant this process is connected to (startup QDRANT_CONFIG); configured_url only when the config now says otherwise. */
+  qdrant: { ok: boolean; url: string | null; configured_url: string | null; restart_required: boolean; collections: number | null; detail: string | null }
+  storage: { ok: boolean; driver: string | null; bucket: string | null; endpoint_url: string | null; public_base_url: string | null; key_prefix: string | null; detail: string | null }
+  serving: { model_id: number | null; label: string | null; detail: string | null }
+}
+
+export interface ConsistencyDatabaseWire {
+  images: number
+  pending_deletions: number
+  oldest_deletion_at: string | null
+  current_models: number
+}
+
+export interface ConsistencyVersionWire {
+  id: number
+  label: string
+  status: string
+  collection: string
+  dim: number
+  distance: string
+  serving: boolean
+  weights: 'ok' | 'missing' | 'changed' | null
+  qdrant: { exists: boolean | null; dim: number | null; distance: string | null; points: number | null; matches: boolean | null }
+  error: string | null
+  scanned: number
+  ledger: number
+  with_vector: number
+  findings: Record<'missing' | 'lost' | 'unrecorded' | 'ledger_behind' | 'stale_payload' | 'orphan_points' | 'pending_points', ConsistencyFindingWire>
+  vs_current: { only_current: ConsistencyFindingWire; only_this: ConsistencyFindingWire } | null
+  encoder: { status: ConsistencyEncoderStatusWire; source: 'configured' | 'serving' | null; checked: number; min_similarity: number | null; detail: string | null }
+}
+
+export interface ConsistencyFilesWire {
+  skipped: string | null
+  checked: number
+  first_error: string | null
+  listed: number | null
+  referenced: number | null
+  truncated: boolean
+  list_error: string | null
+  findings: Record<'missing_original' | 'missing_thumb' | 'unreadable' | 'content_mismatch' | 'orphan_files' | 'pending_files', ConsistencyFindingWire>
+}
+
+export interface ConsistencyIssueWire {
+  level: ConsistencyIssueLevelWire
+  code: string
+  count: number | null
+  version_id: number | null
+  label: string | null
+  detail: string | null
+}
+
+export interface ConsistencyReportWire {
+  status: 'ok' | 'warn' | 'error'
+  complete: boolean
+  options: ConsistencyOptionsWire
+  duration_ms: number
+  connections: ConsistencyConnectionsWire
+  database: ConsistencyDatabaseWire
+  versions: ConsistencyVersionWire[]
+  stray_collections: { name: string; model_id: number | null; label: string | null; status: string | null }[] | null
+  stray_error: string | null
+  files: ConsistencyFilesWire | null
+  issues: ConsistencyIssueWire[]
+}
+
+export interface ConsistencyRunWire {
+  state: ConsistencyCheckStateWire
+  started_at: string
+  finished_at: string | null
+  options: ConsistencyOptionsWire
+  progress: ConsistencyProgressWire
+  error: string | null
+  report: ConsistencyReportWire | null
+}
+
+/** GET /api/consistency, POST /api/consistency/check(/stop). */
+export interface ConsistencyResponseWire {
+  ok: boolean
+  check: ConsistencyRunWire | null
+}

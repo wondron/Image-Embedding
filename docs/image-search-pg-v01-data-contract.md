@@ -1412,6 +1412,47 @@ curl -X POST "http://<host>:8320/api/scenes/import?dry_run=false&prune=false" -H
 ```
 
 
+## 6.9 数据核对：PostgreSQL、Qdrant、对象存储与模型版本是否一致（2026-11-26 · 本地实现）
+
+只读：只报告，不修复；报告里每一项都说明去哪里修（后台对账、「模型版本」生成向量、「场景管理」全量同步、重新上传）。核对在 API 进程的后台线程里跑，一个进程同一时间只跑一次，结果（最近一次）只在内存里，重启后清空。运行时 `app/bootstrap/consistency.py`，规则 `app/services/retrieval/consistency.py`，wire `app/schemas/consistency.py`，SQL `app/repositories/consistency.py`。
+
+**连的是本进程实际在用的**：PostgreSQL 用目录的存储；Qdrant 用**启动时**的 `QDRANT_CONFIG`（和检索、入库、模型版本一样只在启动时读取；配置里——含 Nacos 热更新——的地址不同时报告 `restart_required`）；对象存储用检索服务的。两台服务器共用一个 PG 时，在两边各核对一次，对比 `connections.qdrant.url`。
+
+| 接口 | 说明 |
+|---|---|
+| `GET /api/consistency` | `{ok, check}`：`check` 为 null（还没核对过）或 `{state: running\|stopping\|done\|stopped\|failed, started_at, finished_at, options, progress: {phase, done, total, label}, error, report}`；`report` 在结束（done / stopped）后才有 |
+| `POST /api/consistency/check` `{vectors?, files?, orphans?, content?, encoders?}` | 默认 `vectors / files / orphans / encoders` 为 true、`content` 为 false。正在跑时 `CONSISTENCY_CHECK_RUNNING` 409；没有 PostgreSQL `NOT_READY` 503；`content` 不带 `files`、或三项（vectors / files / encoders）全关：`VALIDATION_ERROR` 422 |
+| `POST /api/consistency/check/stop` | 当前这一批之后停下，已核对的部分照样出报告（`complete=false`）；没有在跑时原样返回 |
+
+**核对什么**（每个在用版本：building / ready / current，各自的 collection）：
+
+| 方向 | 结果 | 含义 |
+|---|---|---|
+| PG → Qdrant（按 id 每 500 张一段，每个 collection 读一次 payload） | `missing` | 没有点，也没有写入记录 |
+| | `lost` | 有写入记录（`image_embeddings`），没有点 |
+| | `unrecorded` | 有点，没有写入记录 |
+| | `ledger_behind` | 写入记录的 `synced_version` < `payload_version`：对账 / 生成向量会补推 |
+| | `stale_payload` | 写入记录说是最新的，点的 payload 却和 PG 算出的（`build_qdrant_payload`）不同：不会自动补推 |
+| | `vs_current.only_current / only_this` | 和当前版本比，只有一边有点的图片 |
+| Qdrant → PG（`orphans`：翻遍 collection 的点 id） | `orphan_points` | 点对应的图片不在 `images` 也不在 `image_deletions`（含非 uuid 的点） |
+| | `pending_points` | 图片在删除队列里 |
+| PG → 对象存储（`files`：原图、缩略图各一次 HEAD，16 个并发） | `missing_original / missing_thumb` | 对象不在（或 0 字节） |
+| | `unreadable` | 说不清在不在（403、网络）；`first_error` 是第一个原因 |
+| | `content_mismatch` | `content` 时下载原图，SHA-256 和 `images.sha256` 不同 |
+| 对象存储 → PG（`orphans`：ListObjects `{key_prefix}/original/`、`thumb/`，每个目录最多 100 万个） | `orphan_files` | 没有图片行或删除队列引用的对象 |
+| | `pending_files` | 只有删除队列引用 |
+| 编码器（`encoders`） | `encoder.status` | 版本的编码器已在内存里（配置的或检索在用的）时，重算最近写入的 5 张已存原图，最低余弦 ≥ 0.9999 为 `ok`，否则 `mismatch`；没加载 `not_loaded`，原图读不到 `unchecked` |
+| collection | `qdrant.exists / dim / distance / points / matches`、`stray_collections` | 和 `embedding_models` 登记的维度、距离对比；这个 Qdrant 上不属于在用版本的 collection（已下线版本留下的标出版本） |
+
+每类结果给总数和前 20 个 id（文件给对象 key）。**并发**：入库先传文件，再在一个事务里写 PG 和 Qdrant 后提交，所以核对可能看到还没提交的点或文件；最后对 `orphan_points` / `orphan_files` 再查一次 PG（最多各 5 万个），期间提交了的不算。
+
+**`report.issues`**（最严重的在前，前端按 `code` 给说明和去哪里修）：`error`——`postgres_unreachable`、`qdrant_unreachable`、`storage_unreachable`、`qdrant_restart_required`、`no_current_model`、`version_unreadable`、`collection_missing`、`collection_mismatch`、`encoder_mismatch`、`missing_original`、`files_unreadable`、`content_mismatch`；`warn`——`retrieval_not_ready`、`serving_not_current`、`deletion_queue`（最早一条超过 1 小时）、`missing_vectors`（building 为 info）、`lost_vectors`、`unrecorded_vectors`、`stale_payloads`、`orphan_points`、`versions_differ`（building 为 info）、`weights_unavailable`、`retired_collection_left`、`collections_unlisted`、`missing_thumb`、`file_list_failed`、`check_incomplete`；`info`——`ledger_behind`、`pending_points`、`stray_collections`、`files_unchecked`（mock 驱动没有 `mock_mirror_dir`）、`orphan_files`、`pending_files`、`file_list_truncated`。`report.status`：有 error 为 `error`，否则有 warn 为 `warn`，否则 `ok`。错误信息遮盖配置里的密码和 api_key、截到 300 字。新错误码 `CONSISTENCY_CHECK_RUNNING` 409。
+
+**前端**：数据管理「数据核对」页（`?view=consistency`）：选核对项 → 开始（每 1.5 秒刷新进度，可停止）→ 总结、本进程连着的 PG / Qdrant / 对象存储 / 检索在用版本、要处理的事（可展开前 20 个 id 并复制，按钮跳到修复的页面）、各版本向量库对照表、文件计数、其他 collection。
+
+**部署**：没有数据库迁移；需要重启包含新路由的后端。`files` 对每张图发两次 HEAD，一万张图约几十秒；`content` 会把每张原图下载一次，图多时很慢。对象存储的密钥需要 HeadObject、GetObject，列多余文件还要 ListBucket。
+
+
 ## 7. 明确不作本刀范围（含 M0 OUT OF SCOPE）
 
 | 项 | 归属 |
@@ -1462,6 +1503,7 @@ curl -X POST "http://<host>:8320/api/scenes/import?dry_run=false&prune=false" -H
 
 | 日期 | 说明 |
 |---|---|
+| 2026-11-26 | **数据核对 §6.9（本地实现）**：新增 `GET /api/consistency`、`POST /api/consistency/check`、`/check/stop`：后台只读核对 PG ↔ 每个在用版本的 Qdrant collection（缺失、丢失、无记录、payload 不一致或待补推、多余的点、和当前版本的差别、编码器抽查、collection 结构）、PG ↔ 对象存储（原图 / 缩略图是否还在、可选 SHA-256、多余文件），报告本进程实际连着的 PG / Qdrant / 对象存储；新错误码 `CONSISTENCY_CHECK_RUNNING` 409；前端「数据核对」页 |
 | 2026-11-15 | **多图搜索 §6.7、配置的下载与上传 §6.8（本地实现，已做自动化与真实环境联调）**：新增 `POST /api/search/batch/files`、`/urls`（一次请求 1–30 张查询图查自建库，逐张给结果或错误；`SearchImageUseCase.check` 先校验整批共用的场景 / `top_k` / 阈值）；新增 `POST /api/categories/import`、`POST /api/scenes/import`（按编码 upsert，`dry_run` 默认 `true`，逐项报告；类别不移动 / 不改编码 / 不删除，场景可 `prune` 规则和场景类别）。前端：批量搜索按所选目标搜索（自建库走多图搜索接口，默认目标为自建库）；「食材管理」下载类别树改为对话框（JSON 数据文件 + 文字 / SVG / PNG 拓扑图 + ZIP）并新增「上传类别树」；「场景管理」新增「下载配置」「上传配置」；类别树导出文件新增 `kind: "category_tree"`。同时调整搜索结果卡和图库卡片布局；严格校验显式文件元数据，修复同图分数浮点微超 1 的显示。测试对象已清理，URL fake-IP 配置条件与 Global 上游超时详见[验收记录](image-search-batch-config-verification-2026-11-15.md) |
 | 2026-11-11 | **可选 OSS 对象键前缀 `key_prefix` 本地实现（America/Denver）**：按共享规格落地 `IMAGE_STORAGE_CONFIG.key_prefix`；空则键与现网一致，非空规范化后前缀于相对键。启动期非法值 `ValueError`。S3 与 mock 共用 `storage_keys`。已落盘 URL/对象不迁移；读删/reembed 走存库 URL。不改 FE、不加签名 URL、不改业务 DB、不迁移。`config.yaml` 仅补注释式示例，未把本地调试配置改为生产 OSS。实现核对单测不是验收；独立测试按共享规格 §8。未 commit。 |
 | 2026-11-11 | **可选 OSS 对象键前缀 `key_prefix`（America/Denver）**：§5 / A8 增补实施规范（待开发）：`IMAGE_STORAGE_CONFIG` 顶层可选字符串；空则键不变，非空规范化后前缀于 original/thumb/staging（如 `ImageEmbedding/original/{id}.jpg`）。`public_base_url` 仍为桶/CDN URL 根，不与 `key_prefix` 重复书写。已落盘 URL 与对象不迁移；读写删走存库 URL。不改 FE、不加签名 URL、不改运行配置。细字见共享规格，本刀只改文档、未测试、未 commit。 |

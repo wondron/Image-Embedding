@@ -6,6 +6,7 @@ from fastapi.responses import RedirectResponse
 from app.api.v1.auto_search import router as auto_search_router
 from app.api.v1.batch_search import router as batch_search_router
 from app.api.v1.categories import router as categories_router
+from app.api.v1.consistency import router as consistency_router
 from app.api.v1.embedding_models import router as embedding_models_router
 from app.api.v1.enums import router as enums_router
 from app.api.v1.health import router as health_router
@@ -36,6 +37,7 @@ for sub_router in (
     images_router,  # 放在 image_download_router 之后：/api/images/{image_id} 不能吃掉 /download
     tasks_router,
     embedding_models_router,
+    consistency_router,  # /api/consistency：PG / Qdrant / 对象存储 / 模型版本是否一致
 ):
     router.include_router(sub_router, responses=ERROR_RESPONSES)
 
